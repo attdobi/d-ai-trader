@@ -97,32 +97,60 @@ def update_holdings(decisions):
                     print(f"Skipping buy for {ticker}, would breach minimum buffer.")
                     continue
 
-                conn.execute(text("""
-                    INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                    VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        shares = EXCLUDED.shares,
-                        purchase_price = EXCLUDED.purchase_price,
-                        current_price = EXCLUDED.current_price,
-                        purchase_timestamp = EXCLUDED.purchase_timestamp,
-                        current_price_timestamp = EXCLUDED.current_price_timestamp,
-                        total_value = EXCLUDED.total_value,
-                        current_value = EXCLUDED.current_value,
-                        gain_loss = EXCLUDED.gain_loss,
-                        reason = EXCLUDED.reason,
-                        is_active = TRUE
-                """), {
-                    "ticker": ticker,
-                    "shares": float(shares),
-                    "purchase_price": float(price),
-                    "current_price": float(price),
-                    "purchase_timestamp": timestamp,
-                    "current_price_timestamp": timestamp,
-                    "total_value": float(shares * price),
-                    "current_value": float(shares * price),
-                    "gain_loss": 0.0,
-                    "reason": reason
-                })
+                # Check if we already have this ticker
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                
+                if existing:
+                    # Accumulate shares and total investment (cost basis)
+                    new_shares = float(existing.shares) + shares
+                    new_total_value = float(existing.total_value) + actual_spent
+                    new_current_value = new_shares * price
+                    # Preserve any existing unrealized gains/losses and add this purchase at cost
+                    new_gain_loss = new_current_value - new_total_value
+                    new_avg_price = new_total_value / new_shares
+                    
+                    conn.execute(text("""
+                        UPDATE holdings SET
+                            shares = :shares,
+                            purchase_price = :avg_price,
+                            current_price = :current_price,
+                            purchase_timestamp = :timestamp,
+                            current_price_timestamp = :timestamp,
+                            total_value = :total_value,
+                            current_value = :current_value,
+                            gain_loss = :gain_loss,
+                            reason = :reason
+                        WHERE ticker = :ticker
+                    """), {
+                        "ticker": ticker,
+                        "shares": new_shares,
+                        "avg_price": new_avg_price,
+                        "current_price": float(price),
+                        "timestamp": timestamp,
+                        "total_value": new_total_value,
+                        "current_value": new_current_value,
+                        "gain_loss": new_gain_loss,
+                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                    })
+                    print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                else:
+                    # First purchase of this ticker
+                    conn.execute(text("""
+                        INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                        VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                    """), {
+                        "ticker": ticker,
+                        "shares": float(shares),
+                        "purchase_price": float(price),
+                        "current_price": float(price),
+                        "purchase_timestamp": timestamp,
+                        "current_price_timestamp": timestamp,
+                        "total_value": float(shares * price),
+                        "current_value": float(shares * price),
+                        "gain_loss": 0.0,
+                        "reason": reason
+                    })
+                    print(f"First purchase: {shares} shares of {ticker} at ${price:.2f}")
 
                 cash -= actual_spent
 
@@ -163,6 +191,60 @@ def update_holdings(decisions):
                 current_price_timestamp = :timestamp
             WHERE ticker = 'CASH'
         """), {"cash": cash, "timestamp": timestamp})
+
+def record_portfolio_snapshot():
+    """Record current portfolio state for historical tracking - same as dashboard_server"""
+    with engine.begin() as conn:
+        # Ensure portfolio_history table exists
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS portfolio_history (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_portfolio_value FLOAT,
+                cash_balance FLOAT,
+                total_invested FLOAT,
+                total_profit_loss FLOAT,
+                percentage_gain FLOAT,
+                holdings_snapshot JSONB
+            )
+        """))
+        
+        # Get current holdings
+        result = conn.execute(text("""
+            SELECT ticker, shares, purchase_price, current_price, 
+                   total_value, current_value, gain_loss
+            FROM holdings
+            WHERE is_active = TRUE
+        """)).fetchall()
+        
+        holdings = [dict(row._mapping) for row in result]
+        
+        # Calculate portfolio metrics
+        cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
+        stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
+        
+        total_current_value = sum(h["current_value"] for h in stock_holdings)
+        total_invested = sum(h["total_value"] for h in stock_holdings)
+        total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+        total_portfolio_value = total_current_value + cash_balance
+        
+        percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
+        
+        # Record snapshot
+        conn.execute(text("""
+            INSERT INTO portfolio_history 
+            (total_portfolio_value, cash_balance, total_invested, 
+             total_profit_loss, percentage_gain, holdings_snapshot)
+            VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot)
+        """), {
+            "total_portfolio_value": total_portfolio_value,
+            "cash_balance": cash_balance,
+            "total_invested": total_invested,
+            "total_profit_loss": total_profit_loss,
+            "percentage_gain": percentage_gain,
+            "holdings_snapshot": json.dumps(holdings)
+        })
 
 def ask_decision_agent(summaries, run_id, holdings):
     parsed_summaries = []
@@ -233,10 +315,22 @@ if __name__ == "__main__":
     run_id = get_latest_run_id()
     if not run_id:
         print("No summaries found.")
+        # Still record initial portfolio snapshot
+        try:
+            record_portfolio_snapshot()
+            print("Initial portfolio snapshot recorded")
+        except Exception as e:
+            print(f"Failed to record initial snapshot: {e}")
     else:
         summaries = fetch_summaries(run_id)
         holdings = fetch_holdings()
         decisions = ask_decision_agent(summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
         update_holdings(decisions)
+        # Record portfolio snapshot after trades
+        try:
+            record_portfolio_snapshot()
+            print("Portfolio snapshot recorded after trades")
+        except Exception as e:
+            print(f"Failed to record portfolio snapshot: {e}")
         print(f"Stored decisions and updated holdings for run {run_id}")
