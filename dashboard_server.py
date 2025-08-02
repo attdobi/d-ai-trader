@@ -80,31 +80,28 @@ def get_current_price_with_validation(ticker):
         # First, try to get the stock info to validate the symbol
         stock = yf.Ticker(ticker)
         
-        # Try multiple methods to get price data
+        # Try multiple methods to get price data in order of reliability
         methods = [
+            ("info currentPrice", lambda: stock.info.get('currentPrice')),
+            ("info regularMarketPrice", lambda: stock.info.get('regularMarketPrice')),
             ("1d history", lambda: stock.history(period="1d")),
             ("5d history", lambda: stock.history(period="5d")), 
             ("1mo history", lambda: stock.history(period="1mo")),
-            ("info data", lambda: stock.info)
         ]
         
         for method_name, method_func in methods:
             try:
                 if "history" in method_name:
                     hist = method_func()
-                    if not hist.empty and len(hist) > 0:
-                        price = float(hist.iloc[-1].Close)
+                    if hist is not None and not hist.empty and len(hist) > 0:
+                        price = float(hist.iloc[-1]['Close'])
                         print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
                         return price
                 else:
                     # Try getting price from info
-                    info = method_func()
-                    if info and 'currentPrice' in info and info['currentPrice']:
-                        price = float(info['currentPrice'])
-                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
-                        return price
-                    elif info and 'regularMarketPrice' in info and info['regularMarketPrice']:
-                        price = float(info['regularMarketPrice'])
+                    price = method_func()
+                    if price is not None and price > 0:
+                        price = float(price)
                         print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
                         return price
             except Exception as e:
