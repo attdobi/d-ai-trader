@@ -215,7 +215,7 @@ def update_holdings(decisions):
                     continue
 
                 # Check if we already have this ticker
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss, reason FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
                 
                 if existing:
                     # Accumulate shares and total investment (cost basis)
