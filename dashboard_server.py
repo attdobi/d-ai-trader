@@ -71,6 +71,53 @@ def record_portfolio_snapshot():
 # Initialize portfolio history table
 create_portfolio_history_table()
 
+def get_current_price_with_validation(ticker):
+    """Enhanced price lookup with validation for dashboard updates"""
+    try:
+        # Clean the ticker symbol
+        ticker = ticker.strip().upper()
+        
+        # First, try to get the stock info to validate the symbol
+        stock = yf.Ticker(ticker)
+        
+        # Try multiple methods to get price data
+        methods = [
+            ("1d history", lambda: stock.history(period="1d")),
+            ("5d history", lambda: stock.history(period="5d")), 
+            ("1mo history", lambda: stock.history(period="1mo")),
+            ("info data", lambda: stock.info)
+        ]
+        
+        for method_name, method_func in methods:
+            try:
+                if "history" in method_name:
+                    hist = method_func()
+                    if not hist.empty and len(hist) > 0:
+                        price = float(hist.iloc[-1].Close)
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+                else:
+                    # Try getting price from info
+                    info = method_func()
+                    if info and 'currentPrice' in info and info['currentPrice']:
+                        price = float(info['currentPrice'])
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+                    elif info and 'regularMarketPrice' in info and info['regularMarketPrice']:
+                        price = float(info['regularMarketPrice'])
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+            except Exception as e:
+                print(f"  - {ticker}: {method_name} failed: {e}")
+                continue
+        
+        print(f"❌ {ticker}: No price data available from any source")
+        return None
+        
+    except Exception as e:
+        print(f"❌ {ticker}: Critical error during price lookup - {e}")
+        return None
+
 
 @app.route("/")
 def dashboard():
@@ -215,13 +262,11 @@ def update_prices():
             tickers = [row.ticker for row in result]
             for ticker in tickers:
                 try:
-                    stock = yf.Ticker(ticker)
-                    hist = stock.history(period="1d")
-                    if hist.empty:
-                        print(f"{ticker}: No data found for this date range, symbol may be delisted")
+                    price = get_current_price_with_validation(ticker)
+                    if not price:
+                        print(f"❌ {ticker}: Skipping price update due to symbol lookup failure")
                         continue
 
-                    price = float(hist.iloc[-1].Close)
                     now = datetime.utcnow()
 
                     conn.execute(text("""

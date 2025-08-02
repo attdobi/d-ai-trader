@@ -62,12 +62,131 @@ def fetch_holdings():
         return [row._mapping for row in result]
 
 def get_current_price(ticker):
+    """Get current price with enhanced symbol validation and error handling"""
     try:
+        # First, try to get the stock info to validate the symbol
         stock = yf.Ticker(ticker)
-        return float(stock.history(period="1d").iloc[-1].Close)
-    except Exception as e:
-        print(f"Failed to fetch price for {ticker}: {e}")
+        
+        # Try multiple methods to get price data
+        methods = [
+            ("1d history", lambda: stock.history(period="1d")),
+            ("5d history", lambda: stock.history(period="5d")), 
+            ("1mo history", lambda: stock.history(period="1mo")),
+            ("info data", lambda: stock.info)
+        ]
+        
+        for method_name, method_func in methods:
+            try:
+                if "history" in method_name:
+                    hist = method_func()
+                    if not hist.empty and len(hist) > 0:
+                        price = float(hist.iloc[-1].Close)
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+                else:
+                    # Try getting price from info
+                    info = method_func()
+                    if info and 'currentPrice' in info and info['currentPrice']:
+                        price = float(info['currentPrice'])
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+                    elif info and 'regularMarketPrice' in info and info['regularMarketPrice']:
+                        price = float(info['regularMarketPrice'])
+                        print(f"✓ {ticker}: Found price ${price:.2f} using {method_name}")
+                        return price
+            except Exception as e:
+                print(f"  - {ticker}: {method_name} failed: {e}")
+                continue
+        
+        # If all methods fail, try to suggest alternative symbols
+        print(f"❌ {ticker}: Could not fetch price data")
+        suggested_symbol = suggest_alternative_symbol(ticker)
+        if suggested_symbol and suggested_symbol != ticker:
+            print(f"💡 Suggestion: Try '{suggested_symbol}' instead of '{ticker}'")
+            return get_current_price(suggested_symbol)
+        
         return None
+        
+    except Exception as e:
+        print(f"❌ {ticker}: Critical error - {e}")
+        return None
+
+def suggest_alternative_symbol(ticker):
+    """Suggest alternative symbol formats for common issues"""
+    # Common symbol variations and corrections
+    symbol_corrections = {
+        'PLTR': 'PLTR',  # Palantir - should be correct
+        'MSFT': 'MSFT',  # Microsoft - should be correct  
+        'GOOGL': 'GOOGL',
+        'GOOG': 'GOOGL',  # Alphabet Class A
+        'TSLA': 'TSLA',   # Tesla
+        'AAPL': 'AAPL',   # Apple
+        'AMZN': 'AMZN',   # Amazon
+        'META': 'META',   # Meta (formerly FB)
+        'FB': 'META',     # Old Facebook symbol
+        'NVDA': 'NVDA',   # Nvidia
+        'AMD': 'AMD',     # AMD
+        'INTC': 'INTC',   # Intel
+        'NFLX': 'NFLX',   # Netflix
+        'CRM': 'CRM',     # Salesforce
+        'ORCL': 'ORCL',   # Oracle
+        'IBM': 'IBM',     # IBM
+        'ADBE': 'ADBE',   # Adobe
+        'PYPL': 'PYPL',   # PayPal
+        'UBER': 'UBER',   # Uber
+        'LYFT': 'LYFT',   # Lyft
+        'SNAP': 'SNAP',   # Snapchat
+        'TWTR': 'X',      # Twitter became X
+        'SPOT': 'SPOT',   # Spotify
+        'SQ': 'BLOCK',    # Square became Block
+        'V': 'V',         # Visa
+        'MA': 'MA',       # Mastercard
+        'JPM': 'JPM',     # JP Morgan Chase
+        'BAC': 'BAC',     # Bank of America
+        'WFC': 'WFC',     # Wells Fargo
+        'GS': 'GS',       # Goldman Sachs
+        'MS': 'MS',       # Morgan Stanley
+        'C': 'C',         # Citigroup
+        'SPY': 'SPY',     # S&P 500 ETF
+        'QQQ': 'QQQ',     # Nasdaq ETF
+        'IWM': 'IWM',     # Russell 2000 ETF
+        'VTI': 'VTI',     # Total Stock Market ETF
+        'VOO': 'VOO',     # S&P 500 ETF
+        'BTC-USD': 'BTC-USD',  # Bitcoin
+        'ETH-USD': 'ETH-USD',  # Ethereum
+    }
+    
+    # Try exact match first
+    if ticker.upper() in symbol_corrections:
+        return symbol_corrections[ticker.upper()]
+    
+    # Try adding common suffixes for international stocks
+    international_suffixes = ['.TO', '.L', '.PA', '.DE', '.HK']
+    for suffix in international_suffixes:
+        if ticker.endswith(suffix):
+            base_symbol = ticker[:-len(suffix)]
+            if base_symbol in symbol_corrections:
+                return symbol_corrections[base_symbol]
+    
+    return ticker  # Return original if no correction found
+
+def validate_and_get_price(ticker):
+    """Validate ticker symbol and get price with comprehensive error handling"""
+    if not ticker or len(ticker.strip()) == 0:
+        print(f"❌ Invalid ticker: empty or None")
+        return None
+    
+    # Clean the ticker symbol
+    ticker = ticker.strip().upper()
+    
+    # Check for obviously invalid symbols
+    invalid_patterns = ['N/A', 'NULL', 'NONE', 'UNKNOWN', '']
+    if ticker in invalid_patterns:
+        print(f"❌ Invalid ticker pattern: {ticker}")
+        return None
+    
+    print(f"🔍 Looking up price for: {ticker}")
+    return get_current_price(ticker)
 
 def update_holdings(decisions):
     timestamp = datetime.utcnow()
@@ -82,7 +201,7 @@ def update_holdings(decisions):
             amount = float(decision.get("amount_usd", 0))
             reason = decision.get("reason", "")
 
-            price = get_current_price(ticker)
+            price = validate_and_get_price(ticker)
             if not price:
                 print(f"Skipping {action} for {ticker} due to missing price.")
                 continue
