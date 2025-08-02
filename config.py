@@ -11,7 +11,7 @@ import openai
 load_dotenv()
 
 # Database connection
-DATABASE_URI = 'postgresql://adobi@localhost/adobi'
+DATABASE_URI = 'postgresql://adobi:adobi123@localhost/adobi'
 engine = create_engine(DATABASE_URI)
 Session = sessionmaker(bind=engine)
 session = Session()
