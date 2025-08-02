@@ -215,7 +215,12 @@ def update_holdings(decisions):
                     continue
 
                 # Check if we already have this ticker
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss, reason FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                try:
+                    existing = conn.execute(text("SELECT shares, total_value, gain_loss, reason FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                except Exception as e:
+                    # Fallback if reason column doesn't exist
+                    print(f"Warning: reason column might not exist, falling back: {e}")
+                    existing = conn.execute(text("SELECT shares, total_value, gain_loss FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
                 
                 if existing:
                     # Accumulate shares and total investment (cost basis)
@@ -247,7 +252,7 @@ def update_holdings(decisions):
                         "total_value": new_total_value,
                         "current_value": new_current_value,
                         "gain_loss": new_gain_loss,
-                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                        "reason": f"{getattr(existing, 'reason', 'Previous purchase') or 'Previous purchase'} + {reason}"
                     })
                     print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
                 else:
