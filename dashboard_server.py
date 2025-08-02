@@ -6,10 +6,70 @@ import pandas as pd
 import threading
 import time
 import yfinance as yf
+from datetime import datetime
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
+
+def create_portfolio_history_table():
+    """Create portfolio_history table to track portfolio value over time"""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS portfolio_history (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_portfolio_value FLOAT,
+                cash_balance FLOAT,
+                total_invested FLOAT,
+                total_profit_loss FLOAT,
+                percentage_gain FLOAT,
+                holdings_snapshot JSONB
+            )
+        """))
+
+def record_portfolio_snapshot():
+    """Record current portfolio state for historical tracking"""
+    with engine.begin() as conn:
+        # Get current holdings
+        result = conn.execute(text("""
+            SELECT ticker, shares, purchase_price, current_price, 
+                   total_value, current_value, gain_loss
+            FROM holdings
+            WHERE is_active = TRUE
+        """)).fetchall()
+        
+        holdings = [dict(row._mapping) for row in result]
+        
+        # Calculate portfolio metrics
+        cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
+        stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
+        
+        total_current_value = sum(h["current_value"] for h in stock_holdings)
+        total_invested = sum(h["total_value"] for h in stock_holdings)
+        total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+        total_portfolio_value = total_current_value + cash_balance
+        
+        percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
+        
+        # Record snapshot
+        conn.execute(text("""
+            INSERT INTO portfolio_history 
+            (total_portfolio_value, cash_balance, total_invested, 
+             total_profit_loss, percentage_gain, holdings_snapshot)
+            VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot)
+        """), {
+            "total_portfolio_value": total_portfolio_value,
+            "cash_balance": cash_balance,
+            "total_invested": total_invested,
+            "total_profit_loss": total_profit_loss,
+            "percentage_gain": percentage_gain,
+            "holdings_snapshot": json.dumps(holdings)
+        })
+
+# Initialize portfolio history table
+create_portfolio_history_table()
 
 
 @app.route("/")
@@ -25,13 +85,21 @@ def dashboard():
 
         holdings = [dict(row._mapping) for row in result]
 
-        total_portfolio_value = sum(h["current_value"] for h in holdings if h["ticker"] != "CASH")
+        # Calculate portfolio metrics
         cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
-        total_value = total_portfolio_value + cash_balance
+        stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
+        
+        total_current_value = sum(h["current_value"] for h in stock_holdings)
+        total_invested = sum(h["total_value"] for h in stock_holdings)
+        total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+        total_portfolio_value = total_current_value + cash_balance
+        
+        percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
 
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
-                               total_value=total_value, cash_balance=cash_balance,
-                               portfolio_value=total_portfolio_value)
+                               total_value=total_portfolio_value, cash_balance=cash_balance,
+                               portfolio_value=total_current_value, total_invested=total_invested,
+                               total_profit_loss=total_profit_loss, percentage_gain=percentage_gain)
 
 @app.template_filter('from_json')
 def from_json_filter(s):
@@ -108,6 +176,37 @@ def api_history():
 
         return jsonify([dict(row._mapping) for row in result])
 
+@app.route("/api/portfolio-history")
+def api_portfolio_history():
+    """Get portfolio performance over time"""
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT timestamp, total_portfolio_value, total_invested, 
+                   total_profit_loss, percentage_gain
+            FROM portfolio_history 
+            ORDER BY timestamp ASC
+        """)).fetchall()
+        
+        return jsonify([dict(row._mapping) for row in result])
+
+@app.route("/api/profit-loss")
+def api_profit_loss():
+    """Get current profit/loss breakdown by holding"""
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT ticker, shares, purchase_price, current_price,
+                   total_value, current_value, gain_loss,
+                   CASE 
+                       WHEN total_value > 0 THEN (gain_loss / total_value * 100)
+                       ELSE 0 
+                   END as percentage_gain
+            FROM holdings
+            WHERE is_active = TRUE AND ticker != 'CASH'
+            ORDER BY gain_loss DESC
+        """)).fetchall()
+        
+        return jsonify([dict(row._mapping) for row in result])
+
 def update_prices():
     while True:
         time.sleep(REFRESH_INTERVAL_MINUTES * 60)
@@ -129,7 +228,7 @@ def update_prices():
                         UPDATE holdings
                         SET current_price = :price,
                             current_value = shares * :price,
-                            gain_loss = (shares * :price) - total_value ## This is wrong.
+                            gain_loss = (shares * :price) - total_value,
                             current_price_timestamp = :current_price_timestamp
                         WHERE ticker = :ticker"""), {
                             "price": price,
@@ -138,6 +237,13 @@ def update_prices():
                         })
                 except Exception as e:
                     print(f"Failed to update {ticker}: {e}")
+            
+            # Record portfolio snapshot after price updates
+            try:
+                record_portfolio_snapshot()
+                print("Portfolio snapshot recorded")
+            except Exception as e:
+                print(f"Failed to record portfolio snapshot: {e}")
 
 def start_price_updater():
     thread = threading.Thread(target=update_prices, daemon=True)
