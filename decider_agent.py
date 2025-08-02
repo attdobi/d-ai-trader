@@ -97,32 +97,60 @@ def update_holdings(decisions):
                     print(f"Skipping buy for {ticker}, would breach minimum buffer.")
                     continue
 
-                conn.execute(text("""
-                    INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                    VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
-                    ON CONFLICT (ticker) DO UPDATE SET
-                        shares = EXCLUDED.shares,
-                        purchase_price = EXCLUDED.purchase_price,
-                        current_price = EXCLUDED.current_price,
-                        purchase_timestamp = EXCLUDED.purchase_timestamp,
-                        current_price_timestamp = EXCLUDED.current_price_timestamp,
-                        total_value = EXCLUDED.total_value,
-                        current_value = EXCLUDED.current_value,
-                        gain_loss = EXCLUDED.gain_loss,
-                        reason = EXCLUDED.reason,
-                        is_active = TRUE
-                """), {
-                    "ticker": ticker,
-                    "shares": float(shares),
-                    "purchase_price": float(price),
-                    "current_price": float(price),
-                    "purchase_timestamp": timestamp,
-                    "current_price_timestamp": timestamp,
-                    "total_value": float(shares * price),
-                    "current_value": float(shares * price),
-                    "gain_loss": 0.0,
-                    "reason": reason
-                })
+                # Check if we already have this ticker
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                
+                if existing:
+                    # Accumulate shares and total investment (cost basis)
+                    new_shares = float(existing.shares) + shares
+                    new_total_value = float(existing.total_value) + actual_spent
+                    new_current_value = new_shares * price
+                    # Preserve any existing unrealized gains/losses and add this purchase at cost
+                    new_gain_loss = new_current_value - new_total_value
+                    new_avg_price = new_total_value / new_shares
+                    
+                    conn.execute(text("""
+                        UPDATE holdings SET
+                            shares = :shares,
+                            purchase_price = :avg_price,
+                            current_price = :current_price,
+                            purchase_timestamp = :timestamp,
+                            current_price_timestamp = :timestamp,
+                            total_value = :total_value,
+                            current_value = :current_value,
+                            gain_loss = :gain_loss,
+                            reason = :reason
+                        WHERE ticker = :ticker
+                    """), {
+                        "ticker": ticker,
+                        "shares": new_shares,
+                        "avg_price": new_avg_price,
+                        "current_price": float(price),
+                        "timestamp": timestamp,
+                        "total_value": new_total_value,
+                        "current_value": new_current_value,
+                        "gain_loss": new_gain_loss,
+                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                    })
+                    print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                else:
+                    # First purchase of this ticker
+                    conn.execute(text("""
+                        INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                        VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                    """), {
+                        "ticker": ticker,
+                        "shares": float(shares),
+                        "purchase_price": float(price),
+                        "current_price": float(price),
+                        "purchase_timestamp": timestamp,
+                        "current_price_timestamp": timestamp,
+                        "total_value": float(shares * price),
+                        "current_value": float(shares * price),
+                        "gain_loss": 0.0,
+                        "reason": reason
+                    })
+                    print(f"First purchase: {shares} shares of {ticker} at ${price:.2f}")
 
                 cash -= actual_spent
 
