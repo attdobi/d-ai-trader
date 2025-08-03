@@ -757,12 +757,31 @@
                             <div style="margin: 15px 0; padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px;">
                                 <strong>💡 Related Feedback:</strong>
                                 <ul style="margin-top: 10px;">
-                                    ${relatedFeedback.map(feedback => `
-                                        <li style="margin-bottom: 10px;">
-                                            <strong>${new Date(feedback.timestamp).toLocaleString()}</strong><br>
-                                            <span style="font-size: 12px;">${feedback.ai_response.substring(0, 200)}...</span>
-                                        </li>
-                                    `).join('')}
+                                    ${relatedFeedback.map((feedback, index) => {
+                                        const isLong = feedback.ai_response.length > 200;
+                                        const shortText = feedback.ai_response.substring(0, 200);
+                                        const fullText = feedback.ai_response;
+                                        
+                                        return `
+                                            <li style="margin-bottom: 15px;">
+                                                <strong>${new Date(feedback.timestamp).toLocaleString()}</strong><br>
+                                                <div style="font-size: 12px; margin-top: 5px;">
+                                                    ${isLong ? `
+                                                        <div id="short-feedback-${index}" style="display: block;">
+                                                            ${shortText}...
+                                                            <button onclick="toggleFeedbackDisplay(${index})" style="background: #17a2b8; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 10px;">Show More</button>
+                                                        </div>
+                                                        <div id="full-feedback-${index}" style="display: none;">
+                                                            <div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 5px 0;">${fullText}</div>
+                                                            <button onclick="toggleFeedbackDisplay(${index})" style="background: #17a2b8; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px;">Show Less</button>
+                                                        </div>
+                                                    ` : `
+                                                        <div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 5px 0;">${fullText}</div>
+                                                    `}
+                                                </div>
+                                            </li>
+                                        `;
+                                    }).join('')}
                                 </ul>
                             </div>
                         `;
@@ -776,6 +795,19 @@
             } catch (error) {
                 console.error('Error generating prompt evolution HTML:', error);
                 evolutionDiv.innerHTML = `<p style="color: red;">Error generating display: ${error.message}</p>`;
+            }
+        }
+
+        function toggleFeedbackDisplay(index) {
+            const shortDiv = document.getElementById(`short-feedback-${index}`);
+            const fullDiv = document.getElementById(`full-feedback-${index}`);
+            
+            if (shortDiv.style.display === 'none') {
+                shortDiv.style.display = 'block';
+                fullDiv.style.display = 'none';
+            } else {
+                shortDiv.style.display = 'none';
+                fullDiv.style.display = 'block';
             }
         }
 
