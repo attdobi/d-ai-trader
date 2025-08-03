@@ -8,6 +8,9 @@ import time
 import yfinance as yf
 from datetime import datetime
 from feedback_agent import TradeOutcomeTracker
+import subprocess
+import sys
+import os
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
@@ -454,6 +457,113 @@ def save_prompt(agent_type):
 def feedback_dashboard():
     """Feedback analysis dashboard page"""
     return render_template('feedback_dashboard.html')
+
+# Manual trigger endpoints for testing
+@app.route('/api/trigger/summarizer', methods=['POST'])
+def trigger_summarizer():
+    """Manually trigger summarizer agents"""
+    try:
+        # Import the orchestrator to run summarizer
+        from d_ai_trader import DAITraderOrchestrator
+        orchestrator = DAITraderOrchestrator()
+        
+        # Run summarizer in a separate thread to avoid blocking
+        def run_summarizer():
+            try:
+                orchestrator.run_summarizer_agents()
+            except Exception as e:
+                print(f"Error in manual summarizer run: {e}")
+        
+        thread = threading.Thread(target=run_summarizer, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Summarizer agents triggered successfully'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/trigger/decider', methods=['POST'])
+def trigger_decider():
+    """Manually trigger decider agent"""
+    try:
+        # Import the orchestrator to run decider
+        from d_ai_trader import DAITraderOrchestrator
+        orchestrator = DAITraderOrchestrator()
+        
+        # Run decider in a separate thread to avoid blocking
+        def run_decider():
+            try:
+                orchestrator.run_decider_agent()
+            except Exception as e:
+                print(f"Error in manual decider run: {e}")
+        
+        thread = threading.Thread(target=run_decider, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Decider agent triggered successfully'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/trigger/feedback', methods=['POST'])
+def trigger_feedback():
+    """Manually trigger feedback agent"""
+    try:
+        # Import the orchestrator to run feedback
+        from d_ai_trader import DAITraderOrchestrator
+        orchestrator = DAITraderOrchestrator()
+        
+        # Run feedback in a separate thread to avoid blocking
+        def run_feedback():
+            try:
+                orchestrator.run_feedback_agent()
+            except Exception as e:
+                print(f"Error in manual feedback run: {e}")
+        
+        thread = threading.Thread(target=run_feedback, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Feedback agent triggered successfully'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/trigger/all', methods=['POST'])
+def trigger_all():
+    """Manually trigger all agents in sequence"""
+    try:
+        # Import the orchestrator to run all agents
+        from d_ai_trader import DAITraderOrchestrator
+        orchestrator = DAITraderOrchestrator()
+        
+        # Run all agents in sequence in a separate thread
+        def run_all():
+            try:
+                print("Starting manual run of all agents...")
+                orchestrator.run_summarizer_agents()
+                print("Summarizer completed, running decider...")
+                orchestrator.run_decider_agent()
+                print("Decider completed, running feedback...")
+                orchestrator.run_feedback_agent()
+                print("All agents completed successfully")
+            except Exception as e:
+                print(f"Error in manual all agents run: {e}")
+        
+        thread = threading.Thread(target=run_all, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'All agents triggered successfully (running in background)'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def update_prices():
     while True:
