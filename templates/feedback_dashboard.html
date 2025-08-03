@@ -148,13 +148,24 @@
             <div id="promptHistory" style="margin-top: 10px;"></div>
         </div>
 
-<!-- AI Agent Feedback -->
-<div class="feedback-section">
-    <h2>🧠 AI Agent Feedback</h2>
-    <div id="feedbackContent">
-        <p>Loading feedback analysis...</p>
-    </div>
-</div>
+        <!-- AI Agent Feedback -->
+        <div class="feedback-section">
+            <h2>🧠 AI Agent Feedback</h2>
+            <div id="feedbackContent">
+                <p>Loading feedback analysis...</p>
+            </div>
+        </div>
+
+        <!-- Prompt Evolution -->
+        <div class="feedback-section">
+            <h2>🔄 Prompt Evolution</h2>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                <button class="refresh-btn" onclick="loadPromptEvolution('summarizer')">📊 Summarizer Evolution</button>
+                <button class="refresh-btn" onclick="loadPromptEvolution('decider')">🎯 Decider Evolution</button>
+                <button class="refresh-btn" onclick="loadPromptEvolution('feedback_analyzer')">🔍 System Evolution</button>
+            </div>
+            <div id="promptEvolution" style="margin-top: 10px;"></div>
+        </div>
 
 <!-- Performance Chart -->
 <div class="chart-container">
@@ -608,6 +619,138 @@
             });
             
             historyDiv.innerHTML = html;
+        }
+
+        async function loadPromptEvolution(agentType) {
+            const evolutionDiv = document.getElementById('promptEvolution');
+            evolutionDiv.innerHTML = `<p style="color: blue;">🔄 Loading ${agentType} prompt evolution...</p>`;
+            
+            try {
+                // Get prompt history
+                const promptResponse = await fetch(`/api/prompts/${agentType}`);
+                const prompts = await promptResponse.json();
+                
+                // Get recent feedback responses for this agent
+                const feedbackResponse = await fetch('/api/ai_feedback_responses');
+                const feedbackResponses = await feedbackResponse.json();
+                
+                if (Array.isArray(prompts) && Array.isArray(feedbackResponses)) {
+                    displayPromptEvolution(agentType, prompts, feedbackResponses);
+                } else {
+                    evolutionDiv.innerHTML = `<p style="color: red;">Error: Failed to load data</p>`;
+                }
+            } catch (error) {
+                console.error('Error loading prompt evolution:', error);
+                evolutionDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        function displayPromptEvolution(agentType, prompts, feedbackResponses) {
+            const evolutionDiv = document.getElementById('promptEvolution');
+            
+            if (prompts.length === 0) {
+                evolutionDiv.innerHTML = `<p>No prompt history found for ${agentType}</p>`;
+                return;
+            }
+            
+            // Filter feedback responses for this agent type
+            const agentFeedback = feedbackResponses.filter(f => f.agent_type === agentType);
+            
+            let html = `<h3>${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Prompt Evolution</h3>`;
+            
+            // Show the evolution timeline
+            for (let i = 0; i < prompts.length; i++) {
+                const prompt = prompts[i];
+                const timestamp = new Date(prompt.timestamp).toLocaleString();
+                const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
+                
+                html += `
+                    <div class="feedback-content" style="margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <strong>Version ${prompt.prompt_version} - ${status}</strong>
+                            <span style="font-size: 12px; color: #666;">${timestamp}</span>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Description:</strong> ${prompt.description || 'No description'}
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Created by:</strong> ${prompt.created_by}
+                        </div>
+                `;
+                
+                // If this is not the first version, show the "before" prompt
+                if (i > 0) {
+                    const previousPrompt = prompts[i - 1];
+                    html += `
+                        <div style="margin: 15px 0; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                            <strong>📝 Previous Prompt (v${previousPrompt.prompt_version}):</strong>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #856404;">View Previous System Prompt</summary>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${previousPrompt.system_prompt}</pre>
+                            </details>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #856404;">View Previous User Prompt</summary>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${previousPrompt.user_prompt}</pre>
+                            </details>
+                        </div>
+                    `;
+                }
+                
+                // Show the current prompt
+                html += `
+                        <div style="margin: 15px 0; padding: 10px; background: #d4edda; border-left: 4px solid #28a745; border-radius: 4px;">
+                            <strong>🆕 Current Prompt (v${prompt.prompt_version}):</strong>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #155724;">View Current System Prompt</summary>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${prompt.system_prompt}</pre>
+                            </details>
+                            <details style="margin-top: 10px;">
+                                <summary style="cursor: pointer; color: #155724;">View Current User Prompt</summary>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${prompt.user_prompt}</pre>
+                            </details>
+                        </div>
+                `;
+                
+                // Show the feedback that triggered this prompt change
+                if (prompt.triggered_by_feedback_id && prompt.feedback_response) {
+                    html += `
+                        <div style="margin: 15px 0; padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px;">
+                            <strong>💡 Triggering Feedback (ID: ${prompt.triggered_by_feedback_id}):</strong>
+                            <div style="margin-top: 10px; font-size: 12px;">
+                                ${prompt.feedback_response.substring(0, 300)}...
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Show related feedback if available (fallback for older prompts)
+                    const relatedFeedback = agentFeedback.filter(f => {
+                        const feedbackTime = new Date(f.timestamp);
+                        const promptTime = new Date(prompt.timestamp);
+                        // Show feedback that was generated around the same time as this prompt
+                        return Math.abs(feedbackTime - promptTime) < 24 * 60 * 60 * 1000; // Within 24 hours
+                    });
+                    
+                    if (relatedFeedback.length > 0) {
+                        html += `
+                            <div style="margin: 15px 0; padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px;">
+                                <strong>💡 Related Feedback:</strong>
+                                <ul style="margin-top: 10px;">
+                                    ${relatedFeedback.map(feedback => `
+                                        <li style="margin-bottom: 10px;">
+                                            <strong>${new Date(feedback.timestamp).toLocaleString()}</strong><br>
+                                            <span style="font-size: 12px;">${feedback.ai_response.substring(0, 200)}...</span>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        `;
+                    }
+                }
+                
+                html += `</div>`;
+            }
+            
+            evolutionDiv.innerHTML = html;
         }
 
     function refreshData() {
