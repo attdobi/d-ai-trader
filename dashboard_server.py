@@ -391,6 +391,65 @@ def get_ai_feedback_responses():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/prompts/<agent_type>')
+def get_prompts(agent_type):
+    """Get prompt history for an agent type"""
+    try:
+        from feedback_agent import TradeOutcomeTracker
+        feedback_tracker = TradeOutcomeTracker()
+        
+        limit = request.args.get('limit', 10, type=int)
+        prompts = feedback_tracker.get_prompt_history(agent_type, limit=limit)
+        
+        return jsonify(prompts)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prompts/<agent_type>/active')
+def get_active_prompt(agent_type):
+    """Get the currently active prompt for an agent type"""
+    try:
+        from feedback_agent import TradeOutcomeTracker
+        feedback_tracker = TradeOutcomeTracker()
+        
+        prompt = feedback_tracker.get_active_prompt(agent_type)
+        
+        return jsonify(prompt if prompt else {'error': 'No active prompt found'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prompts/<agent_type>', methods=['POST'])
+def save_prompt(agent_type):
+    """Save a new prompt version for an agent type"""
+    try:
+        from feedback_agent import TradeOutcomeTracker
+        feedback_tracker = TradeOutcomeTracker()
+        
+        data = request.get_json()
+        user_prompt = data.get('user_prompt')
+        system_prompt = data.get('system_prompt')
+        description = data.get('description', '')
+        created_by = data.get('created_by', 'system')
+        
+        if not user_prompt or not system_prompt:
+            return jsonify({'error': 'user_prompt and system_prompt are required'}), 400
+        
+        version = feedback_tracker.save_prompt_version(
+            agent_type=agent_type,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            description=description,
+            created_by=created_by
+        )
+        
+        return jsonify({
+            'success': True,
+            'version': version,
+            'message': f'Prompt version {version} saved successfully'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/feedback')
 def feedback_dashboard():
     """Feedback analysis dashboard page"""

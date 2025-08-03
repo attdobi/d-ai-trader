@@ -87,6 +87,21 @@ class TradeOutcomeTracker:
                     is_manual_request BOOLEAN DEFAULT FALSE
                 )
             """))
+            
+            # AI Agent Prompts table for version control
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ai_agent_prompts (
+                    id SERIAL PRIMARY KEY,
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    prompt_version INTEGER NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    user_prompt TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    description TEXT,
+                    is_active BOOLEAN DEFAULT FALSE,
+                    created_by TEXT DEFAULT 'system'
+                )
+            """))
     
     def record_sell_outcome(self, ticker, sell_price, holding_data, sell_reason="Manual sell"):
         """Record the outcome of a sell transaction"""
@@ -266,11 +281,45 @@ Focus on actionable improvements that can be incorporated into agent prompts and
 """
 
         system_prompt = """You are a trading performance analyst providing feedback to improve AI trading agents. 
-Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help agents make better decisions."""
+Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help agents make better decisions.
+
+Please provide your response in the following JSON format:
+{
+    "summarizer_feedback": "Specific recommendations for the summarizer agent",
+    "decider_feedback": "Specific recommendations for the decider agent", 
+    "key_insights": ["insight 1", "insight 2", "insight 3"]
+}"""
         
         try:
-            feedback = prompt_manager.ask_openai(prompt, system_prompt, agent_name="FeedbackAgent")
-            return feedback
+            # Get the AI response using the same method as the new feedback system
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = prompt_manager.client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+                max_tokens=2000,
+                temperature=0.3,
+            )
+            ai_response = response.choices[0].message.content.strip()
+            
+            # Parse the response to extract summarizer and decider feedback
+            # The AI should provide structured feedback, but we'll handle it gracefully
+            try:
+                # Try to parse as JSON first
+                feedback_data = json.loads(ai_response)
+                return feedback_data
+            except json.JSONDecodeError:
+                # If not JSON, create a structured response from the text
+                return {
+                    "summarizer_feedback": ai_response,
+                    "decider_feedback": ai_response,
+                    "key_insights": [ai_response],
+                    "raw_response": ai_response
+                }
+                
         except Exception as e:
             print(f"Failed to generate AI feedback: {e}")
             return {
@@ -346,12 +395,27 @@ Your analysis should be data-driven, specific, and actionable. Focus on patterns
     def generate_ai_feedback_response(self, agent_type, context_data=None, performance_metrics=None, is_manual_request=False):
         """Generate AI feedback response for a specific agent and store it"""
         
-        if agent_type == "summarizer":
-            user_prompt = f"""
+        # Try to get active prompt from database first
+        active_prompt = self.get_active_prompt(agent_type)
+        
+        if active_prompt:
+            # Use stored prompts
+            user_prompt_template = active_prompt["user_prompt"]
+            system_prompt = active_prompt["system_prompt"]
+            
+            # Format the user prompt with context data
+            user_prompt = user_prompt_template.format(
+                context_data=json.dumps(context_data, indent=2) if context_data else "No specific context provided",
+                performance_metrics=json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"
+            )
+        else:
+            # Fallback to hardcoded prompts (for backward compatibility)
+            if agent_type == "summarizer":
+                user_prompt_template = """
 You are a financial summary agent helping a trading system. Analyze the current market conditions and provide feedback on how to improve news analysis and summarization.
 
-Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
-Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+Context Data: {context_data}
+Performance Metrics: {performance_metrics}
 
 Please provide:
 1. Analysis of current summarization effectiveness
@@ -362,15 +426,15 @@ Please provide:
 
 Focus on actionable improvements that can be incorporated into the summarizer's analysis approach.
 """
-            system_prompt = """You are an expert financial analyst providing feedback to improve AI news summarization for trading decisions. 
+                system_prompt = """You are an expert financial analyst providing feedback to improve AI news summarization for trading decisions. 
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the summarizer agent make better decisions."""
-            
-        elif agent_type == "decider":
-            user_prompt = f"""
+                
+            elif agent_type == "decider":
+                user_prompt_template = """
 You are a trading decision-making AI. Analyze the current trading performance and provide feedback on how to improve trading strategy and decision-making.
 
-Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
-Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+Context Data: {context_data}
+Performance Metrics: {performance_metrics}
 
 Please provide:
 1. Analysis of current trading strategy effectiveness
@@ -381,15 +445,15 @@ Please provide:
 
 Focus on actionable improvements that can be incorporated into the decider's trading logic.
 """
-            system_prompt = """You are an expert trading strategist providing feedback to improve AI trading decisions. 
+                system_prompt = """You are an expert trading strategist providing feedback to improve AI trading decisions. 
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the decider agent make better decisions."""
-            
-        elif agent_type == "feedback_analyzer":
-            user_prompt = f"""
+                
+            elif agent_type == "feedback_analyzer":
+                user_prompt_template = """
 You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
 
-Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
-Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+Context Data: {context_data}
+Performance Metrics: {performance_metrics}
 
 Please provide:
 1. Overall system performance analysis
@@ -400,15 +464,32 @@ Please provide:
 
 Focus on comprehensive insights that can guide the entire trading system's evolution.
 """
-            system_prompt = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
+                system_prompt = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
 Your analysis should be thorough, data-driven, and provide actionable insights for all system components."""
-        
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
+            
+            else:
+                raise ValueError(f"Unknown agent type: {agent_type}")
+            
+            # Format the user prompt
+            user_prompt = user_prompt_template.format(
+                context_data=json.dumps(context_data, indent=2) if context_data else "No specific context provided",
+                performance_metrics=json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"
+            )
         
         try:
-            # Get the AI response
-            ai_response = prompt_manager.ask_openai(user_prompt, system_prompt, agent_name=f"{agent_type.capitalize()}FeedbackAgent")
+            # Get the AI response using the same method as summarizer/decider
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+
+            response = prompt_manager.client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+                max_tokens=2000,
+                temperature=0.3,
+            )
+            ai_response = response.choices[0].message.content.strip()
             
             # Store the response in the database
             feedback_id = self._store_ai_feedback_response(
@@ -480,6 +561,89 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 })
             
             return responses
+    
+    def get_active_prompt(self, agent_type):
+        """Get the currently active prompt for an agent type"""
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT user_prompt, system_prompt, prompt_version, description
+                FROM ai_agent_prompts 
+                WHERE agent_type = :agent_type AND is_active = TRUE
+                ORDER BY prompt_version DESC
+                LIMIT 1
+            """), {"agent_type": agent_type})
+            
+            row = result.fetchone()
+            if row:
+                return {
+                    "user_prompt": row.user_prompt,
+                    "system_prompt": row.system_prompt,
+                    "prompt_version": row.prompt_version,
+                    "description": row.description
+                }
+            return None
+    
+    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system"):
+        """Save a new version of prompts for an agent type"""
+        with engine.begin() as conn:
+            # Get the next version number
+            result = conn.execute(text("""
+                SELECT COALESCE(MAX(prompt_version), 0) + 1 as next_version
+                FROM ai_agent_prompts 
+                WHERE agent_type = :agent_type
+            """), {"agent_type": agent_type})
+            
+            next_version = result.fetchone().next_version
+            
+            # Deactivate all existing prompts for this agent
+            conn.execute(text("""
+                UPDATE ai_agent_prompts 
+                SET is_active = FALSE 
+                WHERE agent_type = :agent_type
+            """), {"agent_type": agent_type})
+            
+            # Insert new prompt version
+            conn.execute(text("""
+                INSERT INTO ai_agent_prompts 
+                (agent_type, prompt_version, user_prompt, system_prompt, description, is_active, created_by)
+                VALUES (:agent_type, :prompt_version, :user_prompt, :system_prompt, :description, TRUE, :created_by)
+            """), {
+                "agent_type": agent_type,
+                "prompt_version": next_version,
+                "user_prompt": user_prompt,
+                "system_prompt": system_prompt,
+                "description": description,
+                "created_by": created_by
+            })
+            
+            return next_version
+    
+    def get_prompt_history(self, agent_type, limit=10):
+        """Get prompt history for an agent type"""
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT id, prompt_version, timestamp, user_prompt, system_prompt, 
+                       description, is_active, created_by
+                FROM ai_agent_prompts 
+                WHERE agent_type = :agent_type
+                ORDER BY prompt_version DESC 
+                LIMIT :limit
+            """), {"agent_type": agent_type, "limit": limit})
+            
+            prompts = []
+            for row in result:
+                prompts.append({
+                    "id": row.id,
+                    "prompt_version": row.prompt_version,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "user_prompt": row.user_prompt,
+                    "system_prompt": row.system_prompt,
+                    "description": row.description,
+                    "is_active": row.is_active,
+                    "created_by": row.created_by
+                })
+            
+            return prompts
 
 def main():
     """Run feedback analysis on recent trades"""

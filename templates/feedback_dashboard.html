@@ -126,16 +126,27 @@
 }
 </style>
 
-<!-- AI Feedback Generation -->
-<div class="feedback-section">
-    <h2>🤖 Generate AI Feedback</h2>
-    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
-        <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
-        <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
-        <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
-    </div>
-    <div id="generationStatus" style="margin-top: 10px;"></div>
-</div>
+        <!-- AI Feedback Generation -->
+        <div class="feedback-section">
+            <h2>🤖 Generate AI Feedback</h2>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
+                <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
+                <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
+            </div>
+            <div id="generationStatus" style="margin-top: 10px;"></div>
+        </div>
+
+        <!-- Prompt Management -->
+        <div class="feedback-section">
+            <h2>⚙️ Prompt Management</h2>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                <button class="refresh-btn" onclick="loadPromptHistory('summarizer')">📊 Summarizer Prompts</button>
+                <button class="refresh-btn" onclick="loadPromptHistory('decider')">🎯 Decider Prompts</button>
+                <button class="refresh-btn" onclick="loadPromptHistory('feedback_analyzer')">🔍 System Prompts</button>
+            </div>
+            <div id="promptHistory" style="margin-top: 10px;"></div>
+        </div>
 
 <!-- AI Agent Feedback -->
 <div class="feedback-section">
@@ -361,6 +372,18 @@
             </div>
         `;
         
+        // Add key insights if available
+        if (latestFeedback.key_insights && Array.isArray(latestFeedback.key_insights) && latestFeedback.key_insights.length > 0) {
+            content += `
+                <div class="feedback-content">
+                    <strong>📊 Key Insights:</strong><br>
+                    <ul>
+                        ${latestFeedback.key_insights.map(insight => `<li>${insight}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+        
         container.innerHTML = content;
     }
 
@@ -521,10 +544,71 @@
         }).join('');
     }
 
-    function showFullResponse(responseId) {
-        // This could open a modal or navigate to a detailed view
-        alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
-    }
+            function showFullResponse(responseId) {
+            // This could open a modal or navigate to a detailed view
+            alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
+        }
+
+        async function loadPromptHistory(agentType) {
+            const historyDiv = document.getElementById('promptHistory');
+            historyDiv.innerHTML = `<p style="color: blue;">🔄 Loading ${agentType} prompt history...</p>`;
+            
+            try {
+                const response = await fetch(`/api/prompts/${agentType}`);
+                const prompts = await response.json();
+                
+                if (Array.isArray(prompts)) {
+                    displayPromptHistory(agentType, prompts);
+                } else {
+                    historyDiv.innerHTML = `<p style="color: red;">Error: ${prompts.error || 'Failed to load prompts'}</p>`;
+                }
+            } catch (error) {
+                console.error('Error loading prompt history:', error);
+                historyDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        function displayPromptHistory(agentType, prompts) {
+            const historyDiv = document.getElementById('promptHistory');
+            
+            if (prompts.length === 0) {
+                historyDiv.innerHTML = `<p>No prompt history found for ${agentType}</p>`;
+                return;
+            }
+            
+            let html = `<h3>${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Prompt History</h3>`;
+            
+            prompts.forEach(prompt => {
+                const timestamp = new Date(prompt.timestamp).toLocaleString();
+                const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
+                
+                html += `
+                    <div class="feedback-content" style="margin-bottom: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <strong>Version ${prompt.prompt_version} - ${status}</strong>
+                            <span style="font-size: 12px; color: #666;">${timestamp}</span>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Description:</strong> ${prompt.description || 'No description'}
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Created by:</strong> ${prompt.created_by}
+                        </div>
+                        <details style="margin-top: 10px;">
+                            <summary style="cursor: pointer; color: #007bff;">View Prompts</summary>
+                            <div style="margin-top: 10px;">
+                                <strong>System Prompt:</strong>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">${prompt.system_prompt}</pre>
+                                <strong>User Prompt Template:</strong>
+                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">${prompt.user_prompt}</pre>
+                            </div>
+                        </details>
+                    </div>
+                `;
+            });
+            
+            historyDiv.innerHTML = html;
+        }
 
     function refreshData() {
         loadFeedbackData();
