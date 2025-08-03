@@ -549,6 +549,28 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             
             responses = []
             for row in result:
+                # Handle context_data - it might be a dict or JSON string
+                context_data = None
+                if row.context_data:
+                    if isinstance(row.context_data, dict):
+                        context_data = row.context_data
+                    else:
+                        try:
+                            context_data = json.loads(row.context_data)
+                        except (json.JSONDecodeError, TypeError):
+                            context_data = str(row.context_data)
+                
+                # Handle performance_metrics - it might be a dict or JSON string
+                performance_metrics = None
+                if row.performance_metrics:
+                    if isinstance(row.performance_metrics, dict):
+                        performance_metrics = row.performance_metrics
+                    else:
+                        try:
+                            performance_metrics = json.loads(row.performance_metrics)
+                        except (json.JSONDecodeError, TypeError):
+                            performance_metrics = str(row.performance_metrics)
+                
                 responses.append({
                     "id": row.id,
                     "agent_type": row.agent_type,
@@ -556,8 +578,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                     "user_prompt": row.user_prompt,
                     "system_prompt": row.system_prompt,
                     "ai_response": row.ai_response,
-                    "context_data": json.loads(row.context_data) if row.context_data else None,
-                    "performance_metrics": json.loads(row.performance_metrics) if row.performance_metrics else None,
+                    "context_data": context_data,
+                    "performance_metrics": performance_metrics,
                     "is_manual_request": row.is_manual_request
                 })
             

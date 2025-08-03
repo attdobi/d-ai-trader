@@ -627,17 +627,27 @@
             
             try {
                 // Get prompt history
+                console.log(`Fetching prompts for ${agentType}...`);
                 const promptResponse = await fetch(`/api/prompts/${agentType}`);
+                if (!promptResponse.ok) {
+                    throw new Error(`Prompt API failed: ${promptResponse.status} ${promptResponse.statusText}`);
+                }
                 const prompts = await promptResponse.json();
+                console.log(`Loaded ${prompts.length} prompts:`, prompts);
                 
                 // Get recent feedback responses for this agent
+                console.log('Fetching feedback responses...');
                 const feedbackResponse = await fetch('/api/ai_feedback_responses');
+                if (!feedbackResponse.ok) {
+                    throw new Error(`Feedback API failed: ${feedbackResponse.status} ${feedbackResponse.statusText}`);
+                }
                 const feedbackResponses = await feedbackResponse.json();
+                console.log(`Loaded ${feedbackResponses.length} feedback responses:`, feedbackResponses);
                 
                 if (Array.isArray(prompts) && Array.isArray(feedbackResponses)) {
                     displayPromptEvolution(agentType, prompts, feedbackResponses);
                 } else {
-                    evolutionDiv.innerHTML = `<p style="color: red;">Error: Failed to load data</p>`;
+                    evolutionDiv.innerHTML = `<p style="color: red;">Error: Invalid data format - prompts: ${typeof prompts}, feedback: ${typeof feedbackResponses}</p>`;
                 }
             } catch (error) {
                 console.error('Error loading prompt evolution:', error);
@@ -648,6 +658,8 @@
         function displayPromptEvolution(agentType, prompts, feedbackResponses) {
             const evolutionDiv = document.getElementById('promptEvolution');
             
+            console.log('Displaying prompt evolution:', { agentType, prompts, feedbackResponses });
+            
             if (prompts.length === 0) {
                 evolutionDiv.innerHTML = `<p>No prompt history found for ${agentType}</p>`;
                 return;
@@ -655,14 +667,16 @@
             
             // Filter feedback responses for this agent type
             const agentFeedback = feedbackResponses.filter(f => f.agent_type === agentType);
+            console.log(`Filtered ${agentFeedback.length} feedback responses for ${agentType}`);
             
             let html = `<h3>${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Prompt Evolution</h3>`;
             
             // Show the evolution timeline
-            for (let i = 0; i < prompts.length; i++) {
-                const prompt = prompts[i];
-                const timestamp = new Date(prompt.timestamp).toLocaleString();
-                const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
+            try {
+                for (let i = 0; i < prompts.length; i++) {
+                    const prompt = prompts[i];
+                    const timestamp = new Date(prompt.timestamp).toLocaleString();
+                    const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
                 
                 html += `
                     <div class="feedback-content" style="margin-bottom: 20px;">
@@ -751,6 +765,10 @@
             }
             
             evolutionDiv.innerHTML = html;
+            } catch (error) {
+                console.error('Error generating prompt evolution HTML:', error);
+                evolutionDiv.innerHTML = `<p style="color: red;">Error generating display: ${error.message}</p>`;
+            }
         }
 
     function refreshData() {
