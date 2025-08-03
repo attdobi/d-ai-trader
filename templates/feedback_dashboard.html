@@ -783,44 +783,76 @@
             const updatesDiv = document.getElementById('recentAIUpdates');
             
             try {
-                const response = await fetch('/api/ai_feedback_responses');
+                const response = await fetch('/api/feedback_log');
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch AI updates: ${response.status}`);
+                    throw new Error(`Failed to fetch feedback log: ${response.status}`);
                 }
                 
-                const feedbackResponses = await response.json();
+                const feedbackLog = await response.json();
                 
-                if (!Array.isArray(feedbackResponses) || feedbackResponses.length === 0) {
-                    updatesDiv.innerHTML = '<p>No AI updates found</p>';
+                if (!Array.isArray(feedbackLog) || feedbackLog.length === 0) {
+                    updatesDiv.innerHTML = '<p>No guidance updates found</p>';
                     return;
                 }
                 
-                // Get the last 5 AI updates
-                const recentUpdates = feedbackResponses.slice(0, 5);
+                // Extract guidance sections from feedback data
+                let allGuidance = [];
+                
+                feedbackLog.forEach(entry => {
+                    if (entry.feedback_data) {
+                        const feedback = entry.feedback_data;
+                        
+                        // Extract Summarizer Guidance
+                        if (feedback.summarizer_feedback) {
+                            allGuidance.push({
+                                type: 'Summarizer Guidance',
+                                content: feedback.summarizer_feedback,
+                                timestamp: entry.timestamp,
+                                feedback_id: entry.feedback_id
+                            });
+                        }
+                        
+                        // Extract Decider Guidance
+                        if (feedback.decider_feedback) {
+                            allGuidance.push({
+                                type: 'Decider Guidance',
+                                content: feedback.decider_feedback,
+                                timestamp: entry.timestamp,
+                                feedback_id: entry.feedback_id
+                            });
+                        }
+                    }
+                });
+                
+                // Sort by timestamp (newest first) and take last 5
+                allGuidance.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const recentGuidance = allGuidance.slice(0, 5);
+                
+                if (recentGuidance.length === 0) {
+                    updatesDiv.innerHTML = '<p>No guidance found in recent feedback</p>';
+                    return;
+                }
                 
                 let html = '';
-                recentUpdates.forEach(update => {
-                    const timestamp = new Date(update.timestamp).toLocaleString();
-                    const agentType = update.agent_type.charAt(0).toUpperCase() + update.agent_type.slice(1);
-                    const responsePreview = update.ai_response.length > 150 
-                        ? update.ai_response.substring(0, 150) + '...' 
-                        : update.ai_response;
+                recentGuidance.forEach(guidance => {
+                    const timestamp = new Date(guidance.timestamp).toLocaleString();
+                    const contentPreview = guidance.content.length > 200 
+                        ? guidance.content.substring(0, 200) + '...' 
+                        : guidance.content;
                     
                     html += `
                         <div class="feedback-content" style="margin-bottom: 15px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <strong>${agentType} Agent</strong>
+                                <strong>${guidance.type}</strong>
                                 <span style="font-size: 12px; color: #666;">${timestamp}</span>
                             </div>
                             <div style="margin-bottom: 10px;">
-                                <strong>Response:</strong>
                                 <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; white-space: pre-wrap;">
-                                    ${responsePreview}
+                                    ${contentPreview}
                                 </div>
                             </div>
                             <div style="font-size: 11px; color: #666;">
-                                <strong>Type:</strong> ${update.is_manual_request ? 'Manual Request' : 'Automatic'}
-                                ${update.feedback_category ? ` | <strong>Category:</strong> ${update.feedback_category}` : ''}
+                                <strong>Feedback ID:</strong> ${guidance.feedback_id}
                             </div>
                         </div>
                     `;
@@ -829,8 +861,8 @@
                 updatesDiv.innerHTML = html;
                 
             } catch (error) {
-                console.error('Error loading recent AI updates:', error);
-                updatesDiv.innerHTML = `<p style="color: red;">Error loading recent AI updates: ${error.message}</p>`;
+                console.error('Error loading recent guidance updates:', error);
+                updatesDiv.innerHTML = `<p style="color: red;">Error loading recent guidance updates: ${error.message}</p>`;
             }
         }
 
