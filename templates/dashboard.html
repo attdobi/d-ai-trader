@@ -28,6 +28,31 @@
     </div>
 </div>
 
+<!-- Manual Trigger Section -->
+<div class="trigger-section">
+    <h3>Manual System Triggers</h3>
+    <p class="trigger-description">Use these buttons to manually trigger system components for testing:</p>
+    <div class="trigger-buttons">
+        <button class="trigger-btn" onclick="triggerAgent('summarizer')">
+            <span class="btn-icon">📰</span>
+            Run Summarizer Agents
+        </button>
+        <button class="trigger-btn" onclick="triggerAgent('decider')">
+            <span class="btn-icon">🤖</span>
+            Run Decider Agent
+        </button>
+        <button class="trigger-btn" onclick="triggerAgent('feedback')">
+            <span class="btn-icon">📊</span>
+            Run Feedback Agent
+        </button>
+        <button class="trigger-btn trigger-all" onclick="triggerAgent('all')">
+            <span class="btn-icon">🚀</span>
+            Run All Agents
+        </button>
+    </div>
+    <div id="trigger-status" class="trigger-status"></div>
+</div>
+
 <style>
 .portfolio-summary {
     display: flex;
@@ -74,6 +99,106 @@
 }
 .gain { color: #28a745; }
 .loss { color: #dc3545; }
+
+/* Trigger Section Styles */
+.trigger-section {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 30px;
+}
+
+.trigger-section h3 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.trigger-description {
+    margin: 0 0 15px 0;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+.trigger-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+.trigger-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 15px;
+    border: 1px solid #007bff;
+    border-radius: 6px;
+    background: #007bff;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.trigger-btn:hover {
+    background: #0056b3;
+    border-color: #0056b3;
+    transform: translateY(-1px);
+}
+
+.trigger-btn:active {
+    transform: translateY(0);
+}
+
+.trigger-btn:disabled {
+    background: #6c757d;
+    border-color: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.trigger-all {
+    background: #28a745;
+    border-color: #28a745;
+}
+
+.trigger-all:hover {
+    background: #1e7e34;
+    border-color: #1e7e34;
+}
+
+.btn-icon {
+    font-size: 16px;
+}
+
+.trigger-status {
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+.trigger-status.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.trigger-status.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.trigger-status.loading {
+    background: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
 </style>
 
 <table>
@@ -363,6 +488,49 @@
             .then(resp => resp.json())
             .then(data => renderBreakdownChart(data))
             .catch(err => console.error('Failed to load breakdown chart:', err));
+    }
+
+    function triggerAgent(agentType) {
+        const statusDiv = document.getElementById('trigger-status');
+        const buttons = document.querySelectorAll('.trigger-btn');
+        
+        // Show loading state
+        statusDiv.innerHTML = `🔄 Triggering ${agentType} agent...`;
+        statusDiv.className = 'trigger-status loading';
+        
+        // Disable all buttons
+        buttons.forEach(btn => btn.disabled = true);
+        
+        // Make API call
+        fetch(`/api/trigger/${agentType}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusDiv.innerHTML = `✅ ${data.message}`;
+                statusDiv.className = 'trigger-status success';
+                
+                // Refresh the page after a short delay to show updated data
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                statusDiv.innerHTML = `❌ Error: ${data.error}`;
+                statusDiv.className = 'trigger-status error';
+            }
+        })
+        .catch(error => {
+            statusDiv.innerHTML = `❌ Network error: ${error.message}`;
+            statusDiv.className = 'trigger-status error';
+        })
+        .finally(() => {
+            // Re-enable all buttons
+            buttons.forEach(btn => btn.disabled = false);
+        });
     }
 
     window.onload = () => {

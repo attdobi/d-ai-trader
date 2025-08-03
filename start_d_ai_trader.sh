@@ -21,11 +21,12 @@ pip install -r requirements.txt
 
 # Check if database is accessible
 echo "Checking database connection..."
-python3 -c "
+python -c "
 from config import engine
+from sqlalchemy import text
 try:
     with engine.connect() as conn:
-        conn.execute('SELECT 1')
+        conn.execute(text('SELECT 1'))
     print('Database connection successful')
 except Exception as e:
     print(f'Database connection failed: {e}')
@@ -35,4 +36,4 @@ except Exception as e:
 # Start the automation system
 echo "Starting D-AI-Trader automation system..."
 echo "Press Ctrl+C to stop"
-python3 d-ai-trader.py 
+python d_ai_trader.py 
