@@ -13,6 +13,7 @@ from config import engine, api_key, PromptManager, session
 import chromedriver_autoinstaller
 import openai
 import undetected_chromedriver as uc
+from feedback_agent import TradeOutcomeTracker
 
 # Configuration
 URLS = [
@@ -49,6 +50,9 @@ driver = webdriver.Chrome(options=chrome_options)
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session, run_id=RUN_TIMESTAMP)
 
+# Initialize feedback tracker
+feedback_tracker = TradeOutcomeTracker()
+
 def initialize_database():
     with engine.begin() as conn:
         conn.execute(text('''
@@ -62,8 +66,28 @@ def initialize_database():
         '''))
 
 def get_openai_summary(agent_name, html_content, image_paths):
+    # Get feedback context for summarizer
+    feedback_context = ""
+    try:
+        latest_feedback = feedback_tracker.get_latest_feedback()
+        if latest_feedback:
+            summarizer_feedback = latest_feedback.get('summarizer_feedback', '')
+            if summarizer_feedback and summarizer_feedback != 'null':
+                # Parse JSON feedback if it's a string
+                if isinstance(summarizer_feedback, str):
+                    try:
+                        summarizer_feedback = json.loads(summarizer_feedback)
+                    except:
+                        pass
+                
+                feedback_context = f"\nPERFORMANCE FEEDBACK: {summarizer_feedback}\nIncorporate this guidance to improve analysis quality."
+    except Exception as e:
+        print(f"Failed to get summarizer feedback: {e}")
+
     prompt = f"""
 Summarize the financial news from the following content. Focus on actionable information relevant to trading decisions — especially news related to companies, sectors, market movements, and economic indicators.
+
+{feedback_context}
 
 HTML Content:
 
@@ -73,6 +97,7 @@ HTML Content:
         "You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages."
         "Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation"
         "Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively."
+        "Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades."
         "Return a JSON object with 'headlines' (list of strings) and 'insights' (paragraph summary focused on companies, trades, economic indicators, or investor sentiment)."
         "Respond strictly in valid JSON format with keys"
     )

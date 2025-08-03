@@ -21,20 +21,33 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Interactive Charts**: Portfolio value and profit/loss visualization over time
 - **Trade History**: Complete record of all trading decisions and their outcomes
 - **News Summaries**: Display of analyzed financial news that influenced trading decisions
+- **Feedback Dashboard**: AI-powered performance analysis and agent improvement insights
+
+### 🧠 AI Feedback & Learning System
+- **Outcome Tracking**: Automatically records and categorizes trade results (significant profit, moderate profit, break-even, moderate loss, significant loss)
+- **Performance Analysis**: AI-powered analysis of trading patterns and success factors
+- **Agent Improvement**: Dynamic feedback to summarizer and decider agents based on trading performance
+- **Continuous Learning**: System improves over time by learning from both successful and unsuccessful trades
+- **Pattern Recognition**: Identifies what news patterns and trading strategies work best
 
 ## 📁 Project Structure
 
 ```
-├── main.py                 # News scraping and AI analysis
-├── decider_agent.py        # Trading decision engine
-├── dashboard_server.py     # Web dashboard and API endpoints
-├── config.py              # Database configuration and AI setup
-├── templates/             # HTML templates for web interface
-│   ├── dashboard.html     # Main dashboard with profit tracking
-│   ├── trades.html        # Trading history view
-│   ├── summaries.html     # News analysis summaries
-│   └── tabs.html          # Base template
-└── screenshots/           # Captured screenshots from news sites
+├── main.py                    # News scraping and AI analysis
+├── decider_agent.py           # Trading decision engine
+├── feedback_agent.py          # AI feedback and learning system
+├── dashboard_server.py        # Web dashboard and API endpoints
+├── config.py                  # Database configuration and AI setup
+├── run_feedback_analysis.py   # Manual feedback analysis tool
+├── test_feedback_system.py    # Feedback system demonstration
+├── FEEDBACK_SYSTEM.md         # Comprehensive feedback system documentation
+├── templates/                 # HTML templates for web interface
+│   ├── dashboard.html         # Main dashboard with profit tracking
+│   ├── feedback_dashboard.html # AI feedback and performance analysis
+│   ├── trades.html            # Trading history view
+│   ├── summaries.html         # News analysis summaries
+│   └── tabs.html              # Base template
+└── screenshots/               # Captured screenshots from news sites
 ```
 
 ## 🔧 Installation & Setup
@@ -89,10 +102,23 @@ python3 decider_agent.py
 ```bash
 python3 dashboard_server.py
 ```
-- Starts web dashboard at `http://localhost:5000`
+- Starts web dashboard at `http://localhost:8080`
 - View real-time portfolio performance
 - Monitor profit/loss trends
 - Analyze trading history and news impact
+
+### 4. Analyze Feedback & Performance
+```bash
+# Run comprehensive feedback analysis
+python3 run_feedback_analysis.py
+
+# Demonstrate feedback system capabilities
+python3 test_feedback_system.py
+```
+- Analyzes trading outcomes and success patterns
+- Generates AI-powered insights for improvement
+- Access feedback dashboard at `http://localhost:8080/feedback`
+- View performance trends and agent learning progress
 
 ## 📊 Dashboard Features
 
@@ -119,6 +145,16 @@ python3 dashboard_server.py
 - `/api/portfolio-history` - Historical portfolio performance
 - `/api/profit-loss` - Profit/loss breakdown by holding
 - `/api/history` - Account value history
+- `/api/feedback` - Feedback analysis and performance metrics
+- `/api/trade_outcomes` - Recent trade outcomes and categorization
+
+### 🧠 Feedback Dashboard Features
+- **Performance Metrics**: Success rate, average profit, trade count across different time periods (7d, 14d, 30d)
+- **AI Insights**: Generated recommendations for improving trading strategy and news analysis
+- **Trade Outcomes Table**: Color-coded table of recent trades categorized by performance level
+- **Agent Feedback**: Specific guidance for summarizer and decider agents based on trading results
+- **Trend Analysis**: Interactive charts showing performance trends with success rates and profit margins
+- **System Status**: Real-time indicators of feedback system components
 
 ## 🧠 AI Analysis Process
 
