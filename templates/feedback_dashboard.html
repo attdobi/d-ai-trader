@@ -171,6 +171,26 @@
             </div>
         </div>
 
+        <!-- Feedback Log -->
+        <div class="feedback-section">
+            <h2>📝 Feedback Log</h2>
+            <div style="overflow-x: auto;">
+                <table class="outcomes-table" id="feedbackLogTable">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Type</th>
+                            <th>Details</th>
+                            <th>Performance</th>
+                        </tr>
+                    </thead>
+                    <tbody id="feedbackLogBody">
+                        <tr><td colspan="4">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- System Status -->
         <div class="feedback-section">
             <h2>⚙️ System Status</h2>
@@ -214,6 +234,19 @@
                 }
             } catch (error) {
                 console.error('Error loading trade outcomes:', error);
+            }
+        }
+
+        async function loadFeedbackLog() {
+            try {
+                const response = await fetch('/api/feedback_log');
+                const feedbackLog = await response.json();
+                
+                if (Array.isArray(feedbackLog)) {
+                    updateFeedbackLogTable(feedbackLog);
+                }
+            } catch (error) {
+                console.error('Error loading feedback log:', error);
             }
         }
 
@@ -350,9 +383,43 @@
             `).join('');
         }
 
+        function updateFeedbackLogTable(feedbackLog) {
+            const tbody = document.getElementById('feedbackLogBody');
+            
+            if (feedbackLog.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4">No feedback log entries yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = feedbackLog.map(entry => {
+                const timestamp = new Date(entry.timestamp).toLocaleString();
+                let type = entry.type === 'feedback_analysis' ? '📊 Analysis' : '⚙️ Instruction Update';
+                let details = '';
+                let performance = '';
+                
+                if (entry.type === 'feedback_analysis') {
+                    details = `${entry.trades_analyzed} trades analyzed (${entry.lookback_days}d lookback)`;
+                    performance = `${entry.success_rate.toFixed(1)}% success, ${entry.avg_profit.toFixed(2)}% avg profit`;
+                } else {
+                    details = `${entry.agent_type} agent: ${entry.reason}`;
+                    performance = entry.performance_trigger ? 'Triggered by performance' : 'Manual update';
+                }
+                
+                return `
+                    <tr>
+                        <td>${timestamp}</td>
+                        <td>${type}</td>
+                        <td>${details}</td>
+                        <td>${performance}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
         function refreshData() {
             loadFeedbackData();
             loadTradeOutcomes();
+            loadFeedbackLog();
         }
 
         // Load data on page load
