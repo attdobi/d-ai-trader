@@ -97,42 +97,70 @@ def update_holdings(decisions):
                     print(f"Skipping buy for {ticker}, would breach minimum buffer.")
                     continue
 
-                # Check if we already have this ticker
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss FROM holdings WHERE ticker = :ticker AND is_active = TRUE"), {"ticker": ticker}).fetchone()
+                # Check if we already have this ticker (active or inactive)
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
                 
                 if existing:
-                    # Accumulate shares and total investment (cost basis)
-                    new_shares = float(existing.shares) + shares
-                    new_total_value = float(existing.total_value) + actual_spent
-                    new_current_value = new_shares * price
-                    # Preserve any existing unrealized gains/losses and add this purchase at cost
-                    new_gain_loss = new_current_value - new_total_value
-                    new_avg_price = new_total_value / new_shares
-                    
-                    conn.execute(text("""
-                        UPDATE holdings SET
-                            shares = :shares,
-                            purchase_price = :avg_price,
-                            current_price = :current_price,
-                            purchase_timestamp = :timestamp,
-                            current_price_timestamp = :timestamp,
-                            total_value = :total_value,
-                            current_value = :current_value,
-                            gain_loss = :gain_loss,
-                            reason = :reason
-                        WHERE ticker = :ticker
-                    """), {
-                        "ticker": ticker,
-                        "shares": new_shares,
-                        "avg_price": new_avg_price,
-                        "current_price": float(price),
-                        "timestamp": timestamp,
-                        "total_value": new_total_value,
-                        "current_value": new_current_value,
-                        "gain_loss": new_gain_loss,
-                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
-                    })
-                    print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                    if existing.is_active:
+                        # Accumulate shares and total investment (cost basis) for active position
+                        new_shares = float(existing.shares) + shares
+                        new_total_value = float(existing.total_value) + actual_spent
+                        new_current_value = new_shares * price
+                        # Preserve any existing unrealized gains/losses and add this purchase at cost
+                        new_gain_loss = new_current_value - new_total_value
+                        new_avg_price = new_total_value / new_shares
+                        
+                        conn.execute(text("""
+                            UPDATE holdings SET
+                                shares = :shares,
+                                purchase_price = :avg_price,
+                                current_price = :current_price,
+                                purchase_timestamp = :timestamp,
+                                current_price_timestamp = :timestamp,
+                                total_value = :total_value,
+                                current_value = :current_value,
+                                gain_loss = :gain_loss,
+                                reason = :reason
+                            WHERE ticker = :ticker
+                        """), {
+                            "ticker": ticker,
+                            "shares": new_shares,
+                            "avg_price": new_avg_price,
+                            "current_price": float(price),
+                            "timestamp": timestamp,
+                            "total_value": new_total_value,
+                            "current_value": new_current_value,
+                            "gain_loss": new_gain_loss,
+                            "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                        })
+                        print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                    else:
+                        # Reactivate the position with new shares
+                        conn.execute(text("""
+                            UPDATE holdings SET
+                                shares = :shares,
+                                purchase_price = :purchase_price,
+                                current_price = :current_price,
+                                purchase_timestamp = :timestamp,
+                                current_price_timestamp = :timestamp,
+                                total_value = :total_value,
+                                current_value = :current_value,
+                                gain_loss = :gain_loss,
+                                reason = :reason,
+                                is_active = TRUE
+                            WHERE ticker = :ticker
+                        """), {
+                            "ticker": ticker,
+                            "shares": float(shares),
+                            "purchase_price": float(price),
+                            "current_price": float(price),
+                            "timestamp": timestamp,
+                            "total_value": float(shares * price),
+                            "current_value": float(shares * price),
+                            "gain_loss": 0.0,
+                            "reason": reason
+                        })
+                        print(f"Reactivated position: {shares} shares of {ticker} at ${price:.2f}")
                 else:
                     # First purchase of this ticker
                     conn.execute(text("""
@@ -155,8 +183,8 @@ def update_holdings(decisions):
                 cash -= actual_spent
 
             elif action == "sell":
-                holding = conn.execute(text("SELECT shares, purchase_price FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
-                if holding:
+                holding = conn.execute(text("SELECT shares, purchase_price, is_active FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                if holding and holding.is_active:
                     shares = float(holding.shares)
                     purchase_price = float(holding.purchase_price)
                     total_value = shares * price
@@ -181,6 +209,11 @@ def update_holdings(decisions):
                     })
 
                     cash += total_value
+                    print(f"Sold {shares} shares of {ticker} at ${price:.2f}. Gain/Loss: ${gain_loss:.2f}")
+                elif holding and not holding.is_active:
+                    print(f"Cannot sell {ticker} - position is already inactive")
+                else:
+                    print(f"Cannot sell {ticker} - no active position found")
 
         # Update cash balance
         conn.execute(text("""
