@@ -18,7 +18,7 @@
         <p class="value" id="tradeCount">--</p>
     </div>
     <div class="metric-card">
-        <h3>AI Feedback Count</h3>
+        <h3>Feedback Count</h3>
         <p class="value" id="feedbackCount">--</p>
     </div>
 </div>
@@ -64,6 +64,32 @@
     margin: 10px 0;
     border-radius: 4px;
 }
+.feedback-history-item {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+}
+.feedback-history-item h4 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 16px;
+}
+.feedback-history-item .timestamp {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 10px;
+}
+.feedback-history-item .content {
+    background: white;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-size: 13px;
+    max-height: 200px;
+    overflow-y: auto;
+}
 .outcomes-table {
     width: 100%;
     border-collapse: collapse;
@@ -104,99 +130,21 @@
     margin-bottom: 20px;
     height: 400px;
 }
-.status-indicator {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 5px;
-}
-.status-active { background-color: #4CAF50; }
-.status-inactive { background-color: #f44336; }
-.ai-response {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
-    padding: 15px;
-    margin: 10px 0;
-    white-space: pre-wrap;
-    font-family: monospace;
-    max-height: 300px;
-    overflow-y: auto;
-}
 </style>
 
-        <!-- AI Feedback Generation -->
-        <div class="feedback-section">
-            <h2>🤖 Generate AI Feedback</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
-                <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
-                <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
-                <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
-            </div>
-            <div id="generationStatus" style="margin-top: 10px;"></div>
-        </div>
-
-        <!-- Prompt Management -->
-        <div class="feedback-section">
-            <h2>⚙️ Prompt Management</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
-                <button class="refresh-btn" onclick="loadPromptHistory('summarizer')">📊 Summarizer Prompts</button>
-                <button class="refresh-btn" onclick="loadPromptHistory('decider')">🎯 Decider Prompts</button>
-                <button class="refresh-btn" onclick="loadPromptHistory('feedback_analyzer')">🔍 System Prompts</button>
-            </div>
-            <div id="promptHistory" style="margin-top: 10px;"></div>
-        </div>
-
-        <!-- AI Agent Feedback -->
-        <div class="feedback-section">
-            <h2>🧠 AI Agent Feedback</h2>
-            <div id="feedbackContent">
-                <p>Loading feedback analysis...</p>
-            </div>
-            
-            <!-- Last 5 AI Updates -->
-            <div style="margin-top: 20px;">
-                <h3>📋 Last 5 AI Updates</h3>
-                <div id="recentAIUpdates">
-                    <p>Loading recent AI updates...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Prompt Evolution -->
-        <div class="feedback-section">
-            <h2>🔄 Prompt Evolution</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
-                <button class="refresh-btn" onclick="loadPromptEvolution('summarizer')">📊 Summarizer Evolution</button>
-                <button class="refresh-btn" onclick="loadPromptEvolution('decider')">🎯 Decider Evolution</button>
-                <button class="refresh-btn" onclick="loadPromptEvolution('feedback_analyzer')">🔍 System Evolution</button>
-            </div>
-            <div id="promptEvolution" style="margin-top: 10px;"></div>
-        </div>
-
-<!-- Performance Chart -->
-<div class="chart-container">
-    <canvas id="performanceChart"></canvas>
+<!-- Latest Feedback Analysis -->
+<div class="feedback-section">
+    <h2>🧠 Latest Feedback Analysis</h2>
+    <div id="latestFeedback">
+        <p>Loading latest feedback...</p>
+    </div>
 </div>
 
-<!-- AI Feedback Responses -->
+<!-- Feedback History -->
 <div class="feedback-section">
-    <h2>📝 AI Feedback Responses</h2>
-    <div style="overflow-x: auto;">
-        <table class="outcomes-table" id="aiFeedbackTable">
-            <thead>
-                <tr>
-                    <th>Timestamp</th>
-                    <th>Agent</th>
-                    <th>Response Preview</th>
-                    <th>Type</th>
-                </tr>
-            </thead>
-            <tbody id="aiFeedbackBody">
-                <tr><td colspan="4">Loading...</td></tr>
-            </tbody>
-        </table>
+    <h2>📋 Feedback History</h2>
+    <div id="feedbackHistory">
+        <p>Loading feedback history...</p>
     </div>
 </div>
 
@@ -223,205 +171,137 @@
     </div>
 </div>
 
-<!-- Feedback Log -->
-<div class="feedback-section">
-    <h2>📋 Feedback Log</h2>
-    <div style="overflow-x: auto;">
-        <table class="outcomes-table" id="feedbackLogTable">
-            <thead>
-                <tr>
-                    <th>Timestamp</th>
-                    <th>Type</th>
-                    <th>Details</th>
-                    <th>Performance</th>
-                </tr>
-            </thead>
-            <tbody id="feedbackLogBody">
-                <tr><td colspan="4">Loading...</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<!-- System Status -->
-<div class="feedback-section">
-    <h2>⚙️ System Status</h2>
-    <p><span class="status-indicator status-active"></span> Outcome Tracking: Active</p>
-    <p><span class="status-indicator status-active"></span> Performance Analysis: Active</p>
-    <p><span class="status-indicator status-active"></span> Agent Feedback: Active</p>
-    <p><span class="status-indicator status-active"></span> Instruction Updates: Ready</p>
+<!-- Performance Chart -->
+<div class="chart-container">
+    <canvas id="performanceChart"></canvas>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     let performanceChart = null;
 
-    async function loadFeedbackData() {
+    async function loadLatestFeedback() {
+        const feedbackDiv = document.getElementById('latestFeedback');
+        
         try {
             const response = await fetch('/api/feedback');
+            if (!response.ok) {
+                throw new Error(`Failed to fetch feedback: ${response.status}`);
+            }
+            
             const data = await response.json();
             
-            if (data.status === 'success') {
-                updateMetrics(data.period_analysis);
-                updateFeedbackContent(data.latest_feedback);
-                updatePerformanceChart(data.period_analysis);
+            if (data.status === 'success' && data.latest_feedback) {
+                const feedback = data.latest_feedback;
+                const timestamp = new Date().toLocaleString();
+                
+                let html = `
+                    <div class="feedback-history-item">
+                        <h4>📊 Analysis Summary (${feedback.total_trades_analyzed} trades)</h4>
+                        <div class="timestamp">Generated: ${timestamp}</div>
+                        <div style="margin-bottom: 15px;">
+                            <strong>Success Rate:</strong> ${(feedback.success_rate * 100).toFixed(1)}%<br>
+                            <strong>Average Profit:</strong> ${feedback.avg_profit_percentage.toFixed(2)}%
+                        </div>
+                        
+                        <h4>📝 Summarizer Guidance:</h4>
+                        <div class="content">${formatFeedback(feedback.summarizer_feedback)}</div>
+                        
+                        <h4>🎯 Decider Guidance:</h4>
+                        <div class="content">${formatFeedback(feedback.decider_feedback)}</div>
+                        
+                        ${feedback.recommended_adjustments && feedback.recommended_adjustments.key_insights ? `
+                            <h4>💡 Key Insights:</h4>
+                            <ul style="margin-top: 10px;">
+                                ${feedback.recommended_adjustments.key_insights.map(insight => `<li>${insight}</li>`).join('')}
+                            </ul>
+                        ` : ''}
+                    </div>
+                `;
+                
+                feedbackDiv.innerHTML = html;
+                
+                // Update metrics
+                if (data.period_analysis && data.period_analysis['30d']) {
+                    const period30d = data.period_analysis['30d'];
+                    document.getElementById('successRate').textContent = `${(period30d.success_rate * 100).toFixed(1)}%`;
+                    document.getElementById('avgProfit').textContent = `${(period30d.avg_profit * 100).toFixed(2)}%`;
+                    document.getElementById('tradeCount').textContent = period30d.total_trades;
+                }
+                
+                // Update performance chart
+                if (data.period_analysis) {
+                    updatePerformanceChart(data.period_analysis);
+                }
             } else {
-                document.getElementById('feedbackContent').innerHTML = 
-                    `<p style="color: red;">Error: ${data.error}</p>`;
+                feedbackDiv.innerHTML = '<p>No recent feedback analysis available</p>';
             }
         } catch (error) {
-            console.error('Error loading feedback data:', error);
-            document.getElementById('feedbackContent').innerHTML = 
-                '<p style="color: red;">Failed to load feedback data</p>';
+            console.error('Error loading latest feedback:', error);
+            feedbackDiv.innerHTML = `<p style="color: red;">Error loading feedback: ${error.message}</p>`;
         }
     }
 
-    async function loadTradeOutcomes() {
-        try {
-            const response = await fetch('/api/trade_outcomes');
-            const outcomes = await response.json();
-            
-            if (Array.isArray(outcomes)) {
-                updateOutcomesTable(outcomes);
-            }
-        } catch (error) {
-            console.error('Error loading trade outcomes:', error);
-        }
-    }
-
-    async function loadFeedbackLog() {
+    async function loadFeedbackHistory() {
+        const historyDiv = document.getElementById('feedbackHistory');
+        
         try {
             const response = await fetch('/api/feedback_log');
+            if (!response.ok) {
+                throw new Error(`Failed to fetch feedback history: ${response.status}`);
+            }
+            
             const feedbackLog = await response.json();
             
-            if (Array.isArray(feedbackLog)) {
-                updateFeedbackLogTable(feedbackLog);
+            if (!Array.isArray(feedbackLog) || feedbackLog.length === 0) {
+                historyDiv.innerHTML = '<p>No feedback history available</p>';
+                document.getElementById('feedbackCount').textContent = '0';
+                return;
             }
-        } catch (error) {
-            console.error('Error loading feedback log:', error);
-        }
-    }
-
-    async function loadAIFeedbackResponses() {
-        try {
-            const response = await fetch('/api/ai_feedback_responses');
-            const responses = await response.json();
             
-            if (Array.isArray(responses)) {
-                updateAIFeedbackTable(responses);
-                document.getElementById('feedbackCount').textContent = responses.length;
-            }
-        } catch (error) {
-            console.error('Error loading AI feedback responses:', error);
-        }
-    }
-
-    async function generateAIFeedback(agentType) {
-        const statusDiv = document.getElementById('generationStatus');
-        statusDiv.innerHTML = `<p style="color: blue;">🔄 Generating ${agentType} feedback...</p>`;
-        
-        try {
-            // Get current performance metrics
-            const feedbackResponse = await fetch('/api/feedback');
-            const feedbackData = await feedbackResponse.json();
+            document.getElementById('feedbackCount').textContent = feedbackLog.length;
             
-            const contextData = {
-                "current_time": new Date().toISOString(),
-                "agent_type": agentType
-            };
-            
-            const performanceMetrics = feedbackData.period_analysis ? feedbackData.period_analysis['30d'] : null;
-            
-            const response = await fetch('/api/generate_ai_feedback', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    agent_type: agentType,
-                    context_data: contextData,
-                    performance_metrics: performanceMetrics,
-                    is_manual_request: true
-                })
+            let html = '';
+            feedbackLog.forEach((entry, index) => {
+                const timestamp = new Date(entry.timestamp).toLocaleString();
+                
+                html += `
+                    <div class="feedback-history-item">
+                        <h4>📊 Feedback Analysis #${feedbackLog.length - index}</h4>
+                        <div class="timestamp">${timestamp} (${entry.lookback_days} days lookback)</div>
+                        <div style="margin-bottom: 15px;">
+                            <strong>Trades Analyzed:</strong> ${entry.trades_analyzed}<br>
+                            <strong>Success Rate:</strong> ${entry.success_rate.toFixed(1)}%<br>
+                            <strong>Average Profit:</strong> ${entry.avg_profit.toFixed(2)}%
+                        </div>
+                        
+                        <h4>📝 Summarizer Guidance:</h4>
+                        <div class="content">${formatFeedback(entry.summarizer_feedback)}</div>
+                        
+                        <h4>🎯 Decider Guidance:</h4>
+                        <div class="content">${formatFeedback(entry.decider_feedback)}</div>
+                    </div>
+                `;
             });
             
-            const result = await response.json();
+            historyDiv.innerHTML = html;
             
-            if (result.error) {
-                statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${result.error}</p>`;
-            } else {
-                statusDiv.innerHTML = `<p style="color: green;">✅ ${agentType} feedback generated successfully!</p>`;
-                // Refresh the AI feedback responses table
-                loadAIFeedbackResponses();
-            }
         } catch (error) {
-            console.error('Error generating AI feedback:', error);
-            statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+            console.error('Error loading feedback history:', error);
+            historyDiv.innerHTML = `<p style="color: red;">Error loading feedback history: ${error.message}</p>`;
         }
-    }
-
-    function updateMetrics(periodData) {
-        const thirtyDay = periodData['30d'] || {success_rate: 0, avg_profit: 0, total_trades: 0};
-        
-        document.getElementById('successRate').textContent = 
-            (thirtyDay.success_rate * 100).toFixed(1) + '%';
-        document.getElementById('avgProfit').textContent = 
-            (thirtyDay.avg_profit * 100).toFixed(2) + '%';
-        document.getElementById('tradeCount').textContent = 
-            thirtyDay.total_trades;
-    }
-
-    function updateFeedbackContent(latestFeedback) {
-        const container = document.getElementById('feedbackContent');
-        
-        if (!latestFeedback) {
-            container.innerHTML = '<p>No feedback available yet. System needs trading history to generate insights.</p>';
-            return;
-        }
-        
-        let content = `
-            <h3>Latest Analysis (${latestFeedback.total_trades_analyzed} trades)</h3>
-            <div class="feedback-content">
-                <strong>Summarizer Guidance:</strong><br>
-                ${formatFeedback(latestFeedback.summarizer_feedback)}
-            </div>
-            <div class="feedback-content">
-                <strong>Decider Guidance:</strong><br>
-                ${formatFeedback(latestFeedback.decider_feedback)}
-            </div>
-        `;
-        
-        // Add key insights if available
-        if (latestFeedback.key_insights && Array.isArray(latestFeedback.key_insights) && latestFeedback.key_insights.length > 0) {
-            content += `
-                <div class="feedback-content">
-                    <strong>📊 Key Insights:</strong><br>
-                    <ul>
-                        ${latestFeedback.key_insights.map(insight => `<li>${insight}</li>`).join('')}
-                    </ul>
-                </div>
-            `;
-        }
-        
-        container.innerHTML = content;
     }
 
     function formatFeedback(feedback) {
         if (!feedback || feedback === 'null') return 'No specific guidance available';
         
-        // Try to parse JSON feedback
-        try {
-            if (typeof feedback === 'string') {
-                const parsed = JSON.parse(feedback);
-                if (typeof parsed === 'object') {
-                    return JSON.stringify(parsed, null, 2);
-                }
-                return parsed;
-            }
-            return JSON.stringify(feedback, null, 2);
-        } catch {
-            return feedback;
+        // Remove quotes if they exist
+        let cleaned = feedback;
+        if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+            cleaned = cleaned.slice(1, -1);
         }
+        
+        return cleaned;
     }
 
     function updatePerformanceChart(periodData) {
@@ -484,6 +364,19 @@
         });
     }
 
+    async function loadTradeOutcomes() {
+        try {
+            const response = await fetch('/api/trade_outcomes');
+            const outcomes = await response.json();
+            
+            if (Array.isArray(outcomes)) {
+                updateOutcomesTable(outcomes);
+            }
+        } catch (error) {
+            console.error('Error loading trade outcomes:', error);
+        }
+    }
+
     function updateOutcomesTable(outcomes) {
         const tbody = document.getElementById('outcomesBody');
         
@@ -498,412 +391,17 @@
                 <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
                 <td>$${outcome.purchase_price.toFixed(2)}</td>
                 <td>$${outcome.sell_price.toFixed(2)}</td>
-                <td>${(outcome.gain_loss_pct * 100).toFixed(2)}%</td>
-                <td>${outcome.category.replace('_', ' ')}</td>
-                <td>${outcome.hold_days}</td>
+                <td>${outcome.gain_loss_pct.toFixed(2)}%</td>
+                <td>${outcome.category.replace('_', ' ').toUpperCase()}</td>
+                <td>${outcome.hold_days || 'N/A'}</td>
             </tr>
         `).join('');
     }
 
-    function updateFeedbackLogTable(feedbackLog) {
-        const tbody = document.getElementById('feedbackLogBody');
-        
-        if (feedbackLog.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4">No feedback log entries yet</td></tr>';
-            return;
-        }
-        
-        tbody.innerHTML = feedbackLog.map(entry => {
-            const timestamp = new Date(entry.timestamp).toLocaleString();
-            let type = entry.type === 'feedback_analysis' ? '📊 Analysis' : '⚙️ Instruction Update';
-            let details = '';
-            let performance = '';
-            
-            if (entry.type === 'feedback_analysis') {
-                details = `${entry.trades_analyzed} trades analyzed (${entry.lookback_days}d lookback)`;
-                performance = `${entry.success_rate.toFixed(1)}% success, ${entry.avg_profit.toFixed(2)}% avg profit`;
-            } else {
-                details = `${entry.agent_type} agent: ${entry.reason}`;
-                performance = entry.performance_trigger ? 'Triggered by performance' : 'Manual update';
-            }
-            
-            return `
-                <tr>
-                    <td>${timestamp}</td>
-                    <td>${type}</td>
-                    <td>${details}</td>
-                    <td>${performance}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    function updateAIFeedbackTable(responses) {
-        const tbody = document.getElementById('aiFeedbackBody');
-        
-        if (responses.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4">No AI feedback responses yet</td></tr>';
-            return;
-        }
-        
-        tbody.innerHTML = responses.map(response => {
-            const timestamp = new Date(response.timestamp).toLocaleString();
-            const agentType = response.agent_type.charAt(0).toUpperCase() + response.agent_type.slice(1);
-            const responsePreview = response.ai_response.substring(0, 100) + (response.ai_response.length > 100 ? '...' : '');
-            const type = response.is_manual_request ? '🖱️ Manual' : '🤖 Auto';
-            
-            return `
-                <tr onclick="showFullResponse(${response.id})" style="cursor: pointer;">
-                    <td>${timestamp}</td>
-                    <td>${agentType}</td>
-                    <td>${responsePreview}</td>
-                    <td>${type}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-            function showFullResponse(responseId) {
-            // This could open a modal or navigate to a detailed view
-            alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
-        }
-
-        async function loadPromptHistory(agentType) {
-            const historyDiv = document.getElementById('promptHistory');
-            historyDiv.innerHTML = `<p style="color: blue;">🔄 Loading ${agentType} prompt history...</p>`;
-            
-            try {
-                const response = await fetch(`/api/prompts/${agentType}`);
-                const prompts = await response.json();
-                
-                if (Array.isArray(prompts)) {
-                    displayPromptHistory(agentType, prompts);
-                } else {
-                    historyDiv.innerHTML = `<p style="color: red;">Error: ${prompts.error || 'Failed to load prompts'}</p>`;
-                }
-            } catch (error) {
-                console.error('Error loading prompt history:', error);
-                historyDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-            }
-        }
-
-        function displayPromptHistory(agentType, prompts) {
-            const historyDiv = document.getElementById('promptHistory');
-            
-            if (prompts.length === 0) {
-                historyDiv.innerHTML = `<p>No prompt history found for ${agentType}</p>`;
-                return;
-            }
-            
-            let html = `<h3>${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Prompt History</h3>`;
-            
-            prompts.forEach(prompt => {
-                const timestamp = new Date(prompt.timestamp).toLocaleString();
-                const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
-                
-                html += `
-                    <div class="feedback-content" style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <strong>Version ${prompt.prompt_version} - ${status}</strong>
-                            <span style="font-size: 12px; color: #666;">${timestamp}</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Description:</strong> ${prompt.description || 'No description'}
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Created by:</strong> ${prompt.created_by}
-                        </div>
-                        <details style="margin-top: 10px;">
-                            <summary style="cursor: pointer; color: #007bff;">View Prompts</summary>
-                            <div style="margin-top: 10px;">
-                                <strong>System Prompt:</strong>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">${prompt.system_prompt}</pre>
-                                <strong>User Prompt Template:</strong>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px;">${prompt.user_prompt}</pre>
-                            </div>
-                        </details>
-                    </div>
-                `;
-            });
-            
-            historyDiv.innerHTML = html;
-        }
-
-        async function loadPromptEvolution(agentType) {
-            const evolutionDiv = document.getElementById('promptEvolution');
-            evolutionDiv.innerHTML = `<p style="color: blue;">🔄 Loading ${agentType} prompt evolution...</p>`;
-            
-            try {
-                // Get prompt history
-                console.log(`Fetching prompts for ${agentType}...`);
-                const promptResponse = await fetch(`/api/prompts/${agentType}`);
-                if (!promptResponse.ok) {
-                    throw new Error(`Prompt API failed: ${promptResponse.status} ${promptResponse.statusText}`);
-                }
-                const prompts = await promptResponse.json();
-                console.log(`Loaded ${prompts.length} prompts:`, prompts);
-                
-                // Get recent feedback responses for this agent
-                console.log('Fetching feedback responses...');
-                const feedbackResponse = await fetch('/api/ai_feedback_responses');
-                if (!feedbackResponse.ok) {
-                    throw new Error(`Feedback API failed: ${feedbackResponse.status} ${feedbackResponse.statusText}`);
-                }
-                const feedbackResponses = await feedbackResponse.json();
-                console.log(`Loaded ${feedbackResponses.length} feedback responses:`, feedbackResponses);
-                
-                if (Array.isArray(prompts) && Array.isArray(feedbackResponses)) {
-                    displayPromptEvolution(agentType, prompts, feedbackResponses);
-                } else {
-                    evolutionDiv.innerHTML = `<p style="color: red;">Error: Invalid data format - prompts: ${typeof prompts}, feedback: ${typeof feedbackResponses}</p>`;
-                }
-            } catch (error) {
-                console.error('Error loading prompt evolution:', error);
-                evolutionDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
-            }
-        }
-
-        function displayPromptEvolution(agentType, prompts, feedbackResponses) {
-            const evolutionDiv = document.getElementById('promptEvolution');
-            
-            console.log('Displaying prompt evolution:', { agentType, prompts, feedbackResponses });
-            
-            if (prompts.length === 0) {
-                evolutionDiv.innerHTML = `<p>No prompt history found for ${agentType}</p>`;
-                return;
-            }
-            
-            // Filter feedback responses for this agent type
-            const agentFeedback = feedbackResponses.filter(f => f.agent_type === agentType);
-            console.log(`Filtered ${agentFeedback.length} feedback responses for ${agentType}`);
-            
-            let html = `<h3>${agentType.charAt(0).toUpperCase() + agentType.slice(1)} Prompt Evolution</h3>`;
-            
-            // Show the evolution timeline
-            try {
-                for (let i = 0; i < prompts.length; i++) {
-                    const prompt = prompts[i];
-                    const timestamp = new Date(prompt.timestamp).toLocaleString();
-                    const status = prompt.is_active ? '🟢 Active' : '⚪ Inactive';
-                
-                html += `
-                    <div class="feedback-content" style="margin-bottom: 20px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <strong>Version ${prompt.prompt_version} - ${status}</strong>
-                            <span style="font-size: 12px; color: #666;">${timestamp}</span>
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Description:</strong> ${prompt.description || 'No description'}
-                        </div>
-                        <div style="margin-bottom: 10px;">
-                            <strong>Created by:</strong> ${prompt.created_by}
-                        </div>
-                `;
-                
-                // If this is not the first version, show the "before" prompt
-                if (i > 0) {
-                    const previousPrompt = prompts[i - 1];
-                    html += `
-                        <div style="margin: 15px 0; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
-                            <strong>📝 Previous Prompt (v${previousPrompt.prompt_version}):</strong>
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #856404;">View Previous System Prompt</summary>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${previousPrompt.system_prompt}</pre>
-                            </details>
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #856404;">View Previous User Prompt</summary>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${previousPrompt.user_prompt}</pre>
-                            </details>
-                        </div>
-                    `;
-                }
-                
-                // Show the current prompt
-                html += `
-                        <div style="margin: 15px 0; padding: 10px; background: #d4edda; border-left: 4px solid #28a745; border-radius: 4px;">
-                            <strong>🆕 Current Prompt (v${prompt.prompt_version}):</strong>
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #155724;">View Current System Prompt</summary>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${prompt.system_prompt}</pre>
-                            </details>
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #155724;">View Current User Prompt</summary>
-                                <pre style="background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px;">${prompt.user_prompt}</pre>
-                            </details>
-                        </div>
-                `;
-                
-                // Show the feedback that triggered this prompt change
-                if (prompt.triggered_by_feedback_id && prompt.feedback_response) {
-                    html += `
-                        <div style="margin: 15px 0; padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px;">
-                            <strong>💡 Triggering Feedback (ID: ${prompt.triggered_by_feedback_id}):</strong>
-                            <div style="margin-top: 10px; font-size: 12px;">
-                                ${prompt.feedback_response.substring(0, 300)}...
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    // Show related feedback if available (fallback for older prompts)
-                    const relatedFeedback = agentFeedback.filter(f => {
-                        const feedbackTime = new Date(f.timestamp);
-                        const promptTime = new Date(prompt.timestamp);
-                        // Show feedback that was generated around the same time as this prompt
-                        return Math.abs(feedbackTime - promptTime) < 24 * 60 * 60 * 1000; // Within 24 hours
-                    });
-                    
-                    if (relatedFeedback.length > 0) {
-                        html += `
-                            <div style="margin: 15px 0; padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px;">
-                                <strong>💡 Related Feedback:</strong>
-                                <ul style="margin-top: 10px;">
-                                    ${relatedFeedback.map((feedback, index) => {
-                                        const isLong = feedback.ai_response.length > 200;
-                                        const shortText = feedback.ai_response.substring(0, 200);
-                                        const fullText = feedback.ai_response;
-                                        
-                                        return `
-                                            <li style="margin-bottom: 15px;">
-                                                <strong>${new Date(feedback.timestamp).toLocaleString()}</strong><br>
-                                                <div style="font-size: 12px; margin-top: 5px;">
-                                                    ${isLong ? `
-                                                        <div id="short-feedback-${index}" style="display: block;">
-                                                            ${shortText}...
-                                                            <button onclick="toggleFeedbackDisplay(${index})" style="background: #17a2b8; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 10px;">Show More</button>
-                                                        </div>
-                                                        <div id="full-feedback-${index}" style="display: none;">
-                                                            <div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 5px 0;">${fullText}</div>
-                                                            <button onclick="toggleFeedbackDisplay(${index})" style="background: #17a2b8; color: white; border: none; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px;">Show Less</button>
-                                                        </div>
-                                                    ` : `
-                                                        <div style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 5px 0;">${fullText}</div>
-                                                    `}
-                                                </div>
-                                            </li>
-                                        `;
-                                    }).join('')}
-                                </ul>
-                            </div>
-                        `;
-                    }
-                }
-                
-                html += `</div>`;
-            }
-            
-            evolutionDiv.innerHTML = html;
-            } catch (error) {
-                console.error('Error generating prompt evolution HTML:', error);
-                evolutionDiv.innerHTML = `<p style="color: red;">Error generating display: ${error.message}</p>`;
-            }
-        }
-
-        function toggleFeedbackDisplay(index) {
-            const shortDiv = document.getElementById(`short-feedback-${index}`);
-            const fullDiv = document.getElementById(`full-feedback-${index}`);
-            
-            if (shortDiv.style.display === 'none') {
-                shortDiv.style.display = 'block';
-                fullDiv.style.display = 'none';
-            } else {
-                shortDiv.style.display = 'none';
-                fullDiv.style.display = 'block';
-            }
-        }
-
-        async function loadRecentAIUpdates() {
-            const updatesDiv = document.getElementById('recentAIUpdates');
-            
-            try {
-                const response = await fetch('/api/feedback_log');
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch feedback log: ${response.status}`);
-                }
-                
-                const feedbackLog = await response.json();
-                
-                if (!Array.isArray(feedbackLog) || feedbackLog.length === 0) {
-                    updatesDiv.innerHTML = '<p>No guidance updates found</p>';
-                    return;
-                }
-                
-                // Extract guidance sections from feedback data
-                let allGuidance = [];
-                
-                feedbackLog.forEach(entry => {
-                    if (entry.feedback_data) {
-                        const feedback = entry.feedback_data;
-                        
-                        // Extract Summarizer Guidance
-                        if (feedback.summarizer_feedback) {
-                            allGuidance.push({
-                                type: 'Summarizer Guidance',
-                                content: feedback.summarizer_feedback,
-                                timestamp: entry.timestamp,
-                                feedback_id: entry.feedback_id
-                            });
-                        }
-                        
-                        // Extract Decider Guidance
-                        if (feedback.decider_feedback) {
-                            allGuidance.push({
-                                type: 'Decider Guidance',
-                                content: feedback.decider_feedback,
-                                timestamp: entry.timestamp,
-                                feedback_id: entry.feedback_id
-                            });
-                        }
-                    }
-                });
-                
-                // Sort by timestamp (newest first) and take last 5
-                allGuidance.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                const recentGuidance = allGuidance.slice(0, 5);
-                
-                if (recentGuidance.length === 0) {
-                    updatesDiv.innerHTML = '<p>No guidance found in recent feedback</p>';
-                    return;
-                }
-                
-                let html = '';
-                recentGuidance.forEach(guidance => {
-                    const timestamp = new Date(guidance.timestamp).toLocaleString();
-                    const contentPreview = guidance.content.length > 200 
-                        ? guidance.content.substring(0, 200) + '...' 
-                        : guidance.content;
-                    
-                    html += `
-                        <div class="feedback-content" style="margin-bottom: 15px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <strong>${guidance.type}</strong>
-                                <span style="font-size: 12px; color: #666;">${timestamp}</span>
-                            </div>
-                            <div style="margin-bottom: 10px;">
-                                <div style="background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 12px; white-space: pre-wrap;">
-                                    ${contentPreview}
-                                </div>
-                            </div>
-                            <div style="font-size: 11px; color: #666;">
-                                <strong>Feedback ID:</strong> ${guidance.feedback_id}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                updatesDiv.innerHTML = html;
-                
-            } catch (error) {
-                console.error('Error loading recent guidance updates:', error);
-                updatesDiv.innerHTML = `<p style="color: red;">Error loading recent guidance updates: ${error.message}</p>`;
-            }
-        }
-
     function refreshData() {
-        loadFeedbackData();
+        loadLatestFeedback();
+        loadFeedbackHistory();
         loadTradeOutcomes();
-        loadFeedbackLog();
-        loadAIFeedbackResponses();
-        loadRecentAIUpdates();
     }
 
     // Load data on page load
