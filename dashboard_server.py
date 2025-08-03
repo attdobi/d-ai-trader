@@ -94,12 +94,20 @@ def dashboard():
         total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
         total_portfolio_value = total_current_value + cash_balance
         
+        # Calculate metrics relative to initial $10,000 investment
+        initial_investment = 10000.0
+        net_gain_loss = total_portfolio_value - initial_investment
+        net_percentage_gain = (net_gain_loss / initial_investment * 100)
+        
+        # Calculate percentage gain on invested amount (excluding cash)
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
 
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
                                total_value=total_portfolio_value, cash_balance=cash_balance,
                                portfolio_value=total_current_value, total_invested=total_invested,
-                               total_profit_loss=total_profit_loss, percentage_gain=percentage_gain)
+                               total_profit_loss=total_profit_loss, percentage_gain=percentage_gain,
+                               initial_investment=initial_investment, net_gain_loss=net_gain_loss,
+                               net_percentage_gain=net_percentage_gain)
 
 @app.template_filter('from_json')
 def from_json_filter(s):
@@ -182,10 +190,26 @@ def api_portfolio_history():
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, total_invested, 
-                   total_profit_loss, percentage_gain
+                   total_profit_loss, percentage_gain, cash_balance
             FROM portfolio_history 
             ORDER BY timestamp ASC
         """)).fetchall()
+        
+        return jsonify([dict(row._mapping) for row in result])
+
+@app.route("/api/portfolio-performance")
+def api_portfolio_performance():
+    """Get portfolio performance relative to initial $10,000 investment"""
+    initial_investment = 10000.0
+    
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT timestamp, total_portfolio_value, cash_balance,
+                   (total_portfolio_value - :initial_investment) as net_gain_loss,
+                   ((total_portfolio_value - :initial_investment) / :initial_investment * 100) as net_percentage_gain
+            FROM portfolio_history 
+            ORDER BY timestamp ASC
+        """), {"initial_investment": initial_investment}).fetchall()
         
         return jsonify([dict(row._mapping) for row in result])
 
