@@ -99,7 +99,8 @@ class TradeOutcomeTracker:
                     system_prompt TEXT NOT NULL,
                     description TEXT,
                     is_active BOOLEAN DEFAULT FALSE,
-                    created_by TEXT DEFAULT 'system'
+                    created_by TEXT DEFAULT 'system',
+                    triggered_by_feedback_id INTEGER REFERENCES ai_agent_feedback_responses(id)
                 )
             """))
     
@@ -583,7 +584,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 }
             return None
     
-    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system"):
+    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None):
         """Save a new version of prompts for an agent type"""
         with engine.begin() as conn:
             # Get the next version number
@@ -605,15 +606,16 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             # Insert new prompt version
             conn.execute(text("""
                 INSERT INTO ai_agent_prompts 
-                (agent_type, prompt_version, user_prompt, system_prompt, description, is_active, created_by)
-                VALUES (:agent_type, :prompt_version, :user_prompt, :system_prompt, :description, TRUE, :created_by)
+                (agent_type, prompt_version, user_prompt, system_prompt, description, is_active, created_by, triggered_by_feedback_id)
+                VALUES (:agent_type, :prompt_version, :user_prompt, :system_prompt, :description, TRUE, :created_by, :triggered_by_feedback_id)
             """), {
                 "agent_type": agent_type,
                 "prompt_version": next_version,
                 "user_prompt": user_prompt,
                 "system_prompt": system_prompt,
                 "description": description,
-                "created_by": created_by
+                "created_by": created_by,
+                "triggered_by_feedback_id": triggered_by_feedback_id
             })
             
             return next_version
@@ -622,11 +624,13 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         """Get prompt history for an agent type"""
         with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT id, prompt_version, timestamp, user_prompt, system_prompt, 
-                       description, is_active, created_by
-                FROM ai_agent_prompts 
-                WHERE agent_type = :agent_type
-                ORDER BY prompt_version DESC 
+                SELECT p.id, p.prompt_version, p.timestamp, p.user_prompt, p.system_prompt, 
+                       p.description, p.is_active, p.created_by, p.triggered_by_feedback_id,
+                       f.ai_response as feedback_response
+                FROM ai_agent_prompts p
+                LEFT JOIN ai_agent_feedback_responses f ON p.triggered_by_feedback_id = f.id
+                WHERE p.agent_type = :agent_type
+                ORDER BY p.prompt_version DESC 
                 LIMIT :limit
             """), {"agent_type": agent_type, "limit": limit})
             
@@ -640,7 +644,9 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                     "system_prompt": row.system_prompt,
                     "description": row.description,
                     "is_active": row.is_active,
-                    "created_by": row.created_by
+                    "created_by": row.created_by,
+                    "triggered_by_feedback_id": row.triggered_by_feedback_id,
+                    "feedback_response": row.feedback_response
                 })
             
             return prompts
