@@ -71,6 +71,22 @@ class TradeOutcomeTracker:
                     performance_trigger JSONB
                 )
             """))
+            
+            # AI Agent Feedback Responses table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ai_agent_feedback_responses (
+                    id SERIAL PRIMARY KEY,
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    user_prompt TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    ai_response TEXT NOT NULL,
+                    context_data JSONB,
+                    performance_metrics JSONB,
+                    feedback_category TEXT,
+                    is_manual_request BOOLEAN DEFAULT FALSE
+                )
+            """))
     
     def record_sell_outcome(self, ticker, sell_price, holding_data, sell_reason="Manual sell"):
         """Record the outcome of a sell transaction"""
@@ -326,6 +342,144 @@ Your analysis should be data-driven, specific, and actionable. Focus on patterns
         # This would need to be implemented based on where instructions are stored
         # For now, return a placeholder
         return f"Current {agent_type} instructions"
+    
+    def generate_ai_feedback_response(self, agent_type, context_data=None, performance_metrics=None, is_manual_request=False):
+        """Generate AI feedback response for a specific agent and store it"""
+        
+        if agent_type == "summarizer":
+            user_prompt = f"""
+You are a financial summary agent helping a trading system. Analyze the current market conditions and provide feedback on how to improve news analysis and summarization.
+
+Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
+Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+
+Please provide:
+1. Analysis of current summarization effectiveness
+2. Specific recommendations for improving news analysis focus
+3. Suggestions for better pattern recognition in financial news
+4. Areas where the summarizer should pay more or less attention
+5. Tips for identifying market manipulation vs genuine news
+
+Focus on actionable improvements that can be incorporated into the summarizer's analysis approach.
+"""
+            system_prompt = """You are an expert financial analyst providing feedback to improve AI news summarization for trading decisions. 
+Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the summarizer agent make better decisions."""
+            
+        elif agent_type == "decider":
+            user_prompt = f"""
+You are a trading decision-making AI. Analyze the current trading performance and provide feedback on how to improve trading strategy and decision-making.
+
+Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
+Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+
+Please provide:
+1. Analysis of current trading strategy effectiveness
+2. Specific recommendations for improving buy/sell decision timing
+3. Suggestions for better risk management and position sizing
+4. Areas where the decider should be more or less aggressive
+5. Tips for identifying optimal entry and exit points
+
+Focus on actionable improvements that can be incorporated into the decider's trading logic.
+"""
+            system_prompt = """You are an expert trading strategist providing feedback to improve AI trading decisions. 
+Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the decider agent make better decisions."""
+            
+        elif agent_type == "feedback_analyzer":
+            user_prompt = f"""
+You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
+
+Context Data: {json.dumps(context_data, indent=2) if context_data else "No specific context provided"}
+Performance Metrics: {json.dumps(performance_metrics, indent=2) if performance_metrics else "No performance data available"}
+
+Please provide:
+1. Overall system performance analysis
+2. Key strengths and weaknesses identified
+3. Specific recommendations for both summarizer and decider agents
+4. Market condition analysis and adaptation strategies
+5. Long-term improvement suggestions
+
+Focus on comprehensive insights that can guide the entire trading system's evolution.
+"""
+            system_prompt = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
+Your analysis should be thorough, data-driven, and provide actionable insights for all system components."""
+        
+        else:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+        
+        try:
+            # Get the AI response
+            ai_response = prompt_manager.ask_openai(user_prompt, system_prompt, agent_name=f"{agent_type.capitalize()}FeedbackAgent")
+            
+            # Store the response in the database
+            feedback_id = self._store_ai_feedback_response(
+                agent_type=agent_type,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                ai_response=ai_response,
+                context_data=context_data,
+                performance_metrics=performance_metrics,
+                is_manual_request=is_manual_request
+            )
+            
+            return {
+                "feedback_id": feedback_id,
+                "response": ai_response,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"Failed to generate AI feedback for {agent_type}: {e}")
+            return {
+                "error": str(e),
+                "response": f"Unable to generate AI feedback for {agent_type}",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    def _store_ai_feedback_response(self, agent_type, user_prompt, system_prompt, ai_response, context_data=None, performance_metrics=None, is_manual_request=False):
+        """Store AI feedback response in the database"""
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO ai_agent_feedback_responses 
+                (agent_type, user_prompt, system_prompt, ai_response, context_data, performance_metrics, is_manual_request)
+                VALUES (:agent_type, :user_prompt, :system_prompt, :ai_response, :context_data, :performance_metrics, :is_manual_request)
+                RETURNING id
+            """), {
+                "agent_type": agent_type,
+                "user_prompt": user_prompt,
+                "system_prompt": system_prompt,
+                "ai_response": ai_response,
+                "context_data": json.dumps(context_data) if context_data else None,
+                "performance_metrics": json.dumps(performance_metrics) if performance_metrics else None,
+                "is_manual_request": is_manual_request
+            })
+            return result.fetchone()[0]
+    
+    def get_recent_ai_feedback_responses(self, limit=50):
+        """Get recent AI feedback responses"""
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT id, agent_type, timestamp, user_prompt, system_prompt, ai_response, 
+                       context_data, performance_metrics, is_manual_request
+                FROM ai_agent_feedback_responses 
+                ORDER BY timestamp DESC 
+                LIMIT :limit
+            """), {"limit": limit})
+            
+            responses = []
+            for row in result:
+                responses.append({
+                    "id": row.id,
+                    "agent_type": row.agent_type,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "user_prompt": row.user_prompt,
+                    "system_prompt": row.system_prompt,
+                    "ai_response": row.ai_response,
+                    "context_data": json.loads(row.context_data) if row.context_data else None,
+                    "performance_metrics": json.loads(row.performance_metrics) if row.performance_metrics else None,
+                    "is_manual_request": row.is_manual_request
+                })
+            
+            return responses
 
 def main():
     """Run feedback analysis on recent trades"""

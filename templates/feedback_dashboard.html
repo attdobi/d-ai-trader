@@ -146,6 +146,17 @@
             <div id="feedbackContent">
                 <p>Loading feedback analysis...</p>
             </div>
+            
+            <!-- AI Feedback Generation Buttons -->
+            <div style="margin-top: 20px;">
+                <h3>Generate New AI Feedback</h3>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
+                    <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
+                    <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
+                </div>
+                <div id="generationStatus" style="margin-top: 10px;"></div>
+            </div>
         </div>
 
         <!-- Recent Trade Outcomes -->
@@ -166,6 +177,26 @@
                     </thead>
                     <tbody id="outcomesBody">
                         <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- AI Feedback Responses -->
+        <div class="feedback-section">
+            <h2>🤖 AI Feedback Responses</h2>
+            <div style="overflow-x: auto;">
+                <table class="outcomes-table" id="aiFeedbackTable">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Agent</th>
+                            <th>Response Preview</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="aiFeedbackBody">
+                        <tr><td colspan="4">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -247,6 +278,63 @@
                 }
             } catch (error) {
                 console.error('Error loading feedback log:', error);
+            }
+        }
+
+        async function loadAIFeedbackResponses() {
+            try {
+                const response = await fetch('/api/ai_feedback_responses');
+                const responses = await response.json();
+                
+                if (Array.isArray(responses)) {
+                    updateAIFeedbackTable(responses);
+                }
+            } catch (error) {
+                console.error('Error loading AI feedback responses:', error);
+            }
+        }
+
+        async function generateAIFeedback(agentType) {
+            const statusDiv = document.getElementById('generationStatus');
+            statusDiv.innerHTML = `<p style="color: blue;">🔄 Generating ${agentType} feedback...</p>`;
+            
+            try {
+                // Get current performance metrics
+                const feedbackResponse = await fetch('/api/feedback');
+                const feedbackData = await feedbackResponse.json();
+                
+                const contextData = {
+                    "current_time": new Date().toISOString(),
+                    "agent_type": agentType
+                };
+                
+                const performanceMetrics = feedbackData.period_analysis ? feedbackData.period_analysis['30d'] : null;
+                
+                const response = await fetch('/api/generate_ai_feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        agent_type: agentType,
+                        context_data: contextData,
+                        performance_metrics: performanceMetrics,
+                        is_manual_request: true
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${result.error}</p>`;
+                } else {
+                    statusDiv.innerHTML = `<p style="color: green;">✅ ${agentType} feedback generated successfully!</p>`;
+                    // Refresh the AI feedback responses table
+                    loadAIFeedbackResponses();
+                }
+            } catch (error) {
+                console.error('Error generating AI feedback:', error);
+                statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
             }
         }
 
@@ -416,10 +504,41 @@
             }).join('');
         }
 
+        function updateAIFeedbackTable(responses) {
+            const tbody = document.getElementById('aiFeedbackBody');
+            
+            if (responses.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4">No AI feedback responses yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = responses.map(response => {
+                const timestamp = new Date(response.timestamp).toLocaleString();
+                const agentType = response.agent_type.charAt(0).toUpperCase() + response.agent_type.slice(1);
+                const responsePreview = response.ai_response.substring(0, 100) + (response.ai_response.length > 100 ? '...' : '');
+                const type = response.is_manual_request ? '🖱️ Manual' : '🤖 Auto';
+                
+                return `
+                    <tr onclick="showFullResponse(${response.id})" style="cursor: pointer;">
+                        <td>${timestamp}</td>
+                        <td>${agentType}</td>
+                        <td>${responsePreview}</td>
+                        <td>${type}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showFullResponse(responseId) {
+            // This could open a modal or navigate to a detailed view
+            alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
+        }
+
         function refreshData() {
             loadFeedbackData();
             loadTradeOutcomes();
             loadFeedbackLog();
+            loadAIFeedbackResponses();
         }
 
         // Load data on page load
