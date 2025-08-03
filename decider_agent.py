@@ -4,6 +4,7 @@ from math import floor
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai
 import yfinance as yf
+from feedback_agent import TradeOutcomeTracker
 
 # Trading configuration
 MAX_TRADES = 5
@@ -12,6 +13,9 @@ MIN_BUFFER = 100  # Must always have at least this much left
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
+
+# Initialize feedback tracker
+feedback_tracker = TradeOutcomeTracker()
 
 def get_latest_run_id():
     with engine.connect() as conn:
@@ -183,13 +187,28 @@ def update_holdings(decisions):
                 cash -= actual_spent
 
             elif action == "sell":
-                holding = conn.execute(text("SELECT shares, purchase_price FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                holding = conn.execute(text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
                 if holding:
                     shares = float(holding.shares)
                     purchase_price = float(holding.purchase_price)
                     total_value = shares * price
                     purchase_value = shares * purchase_price
                     gain_loss = total_value - purchase_value
+
+                    # Record outcome for feedback system
+                    holding_data = {
+                        'purchase_price': purchase_price,
+                        'shares': shares,
+                        'purchase_timestamp': holding.purchase_timestamp,
+                        'reason': holding.reason
+                    }
+                    try:
+                        outcome_category = feedback_tracker.record_sell_outcome(
+                            ticker, price, holding_data, reason
+                        )
+                        print(f"Sell outcome recorded for {ticker}: {outcome_category}")
+                    except Exception as e:
+                        print(f"Failed to record sell outcome for {ticker}: {e}")
 
                     conn.execute(text("""
                         UPDATE holdings SET
@@ -297,10 +316,35 @@ def ask_decision_agent(summaries, run_id, holdings):
         for h in holdings if h['ticker'] != 'CASH'
     ]) or "No current holdings."
 
+    # Get feedback from recent performance
+    feedback_context = ""
+    try:
+        latest_feedback = feedback_tracker.get_latest_feedback()
+        if latest_feedback:
+            feedback_context = f"""
+PERFORMANCE FEEDBACK (Based on recent trading results):
+- Recent Success Rate: {latest_feedback['success_rate']:.1%}
+- Average Profit: {latest_feedback['avg_profit_percentage']:.2%}
+- Trades Analyzed: {latest_feedback['total_trades_analyzed']}
+
+Key Guidance from Analysis:
+{latest_feedback.get('decider_feedback', 'No specific guidance available')}
+
+Apply these insights to improve decision-making.
+"""
+        else:
+            feedback_context = "No recent performance feedback available yet."
+    except Exception as e:
+        print(f"Failed to get feedback context: {e}")
+        feedback_context = "Feedback system currently unavailable."
+
     prompt = f"""
 You are a financial decision-making AI tasked with determining a set of buy/sell recommendations based on the following summaries and current portfolio.
 Use a one-month outlook, trying to maximize ROI. Do not exceed {MAX_TRADES} total trades, and never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
-Retain at least ${MIN_BUFFER} in funds. Feedback is unavailable for this run.
+Retain at least ${MIN_BUFFER} in funds.
+
+{feedback_context}
+
 Remember in some cases a new story and image could be shown for market manipulation. 
 Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
 
@@ -318,7 +362,7 @@ Return a JSON list of trade decisions. Each decision should include:
 Respond strictly in valid JSON format with keys.
 """
 
-    system_prompt = "You are a trading advisor providing rational investment actions."
+    system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions."
     return prompt_manager.ask_openai(prompt, system_prompt, agent_name="DeciderAgent")
 
 def store_trade_decisions(decisions, run_id):
@@ -355,10 +399,27 @@ if __name__ == "__main__":
         decisions = ask_decision_agent(summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
         update_holdings(decisions)
+        
         # Record portfolio snapshot after trades
         try:
             record_portfolio_snapshot()
             print("Portfolio snapshot recorded after trades")
         except Exception as e:
             print(f"Failed to record portfolio snapshot: {e}")
+        
+        # Run feedback analysis periodically (every few runs)
+        try:
+            # Simple check - run feedback analysis occasionally
+            import random
+            if random.random() < 0.3:  # 30% chance to run feedback analysis
+                print("\n=== Running Performance Feedback Analysis ===")
+                feedback_result = feedback_tracker.analyze_recent_outcomes()
+                if feedback_result:
+                    print(f"Performance feedback generated (ID: {feedback_result['feedback_id']})")
+                    print(f"Recent performance: {feedback_result['success_rate']:.1%} success rate")
+                else:
+                    print("No recent trades to analyze for feedback")
+        except Exception as e:
+            print(f"Feedback analysis failed: {e}")
+        
         print(f"Stored decisions and updated holdings for run {run_id}")

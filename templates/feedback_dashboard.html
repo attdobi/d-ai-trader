@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading - Feedback Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        .success-rate { color: #4CAF50; }
+        .profit-rate { color: #2196F3; }
+        .trade-count { color: #FF9800; }
+        .feedback-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .feedback-content {
+            background: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #007bff;
+            margin: 10px 0;
+        }
+        .outcomes-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+        .outcomes-table th,
+        .outcomes-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .outcomes-table th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .outcome-significant_profit { background-color: #d4edda; }
+        .outcome-moderate_profit { background-color: #d1ecf1; }
+        .outcome-break_even { background-color: #fff3cd; }
+        .outcome-moderate_loss { background-color: #f8d7da; }
+        .outcome-significant_loss { background-color: #f5c6cb; }
+        .refresh-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .refresh-btn:hover {
+            background: #0056b3;
+        }
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            height: 400px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-active { background-color: #4CAF50; }
+        .status-inactive { background-color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 AI Trading Feedback Analysis</h1>
+            <p>Real-time performance monitoring and agent improvement insights</p>
+            <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="metrics-grid" id="metricsGrid">
+            <div class="metric-card">
+                <div class="metric-value success-rate" id="successRate">--</div>
+                <div class="metric-label">Success Rate (30d)</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value profit-rate" id="avgProfit">--</div>
+                <div class="metric-label">Average Profit (30d)</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value trade-count" id="tradeCount">--</div>
+                <div class="metric-label">Total Trades (30d)</div>
+            </div>
+        </div>
+
+        <!-- Performance Chart -->
+        <div class="chart-container">
+            <canvas id="performanceChart"></canvas>
+        </div>
+
+        <!-- AI Feedback Section -->
+        <div class="feedback-section">
+            <h2>🧠 AI Agent Feedback</h2>
+            <div id="feedbackContent">
+                <p>Loading feedback analysis...</p>
+            </div>
+        </div>
+
+        <!-- Recent Trade Outcomes -->
+        <div class="feedback-section">
+            <h2>📊 Recent Trade Outcomes</h2>
+            <div style="overflow-x: auto;">
+                <table class="outcomes-table" id="outcomesTable">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Sell Date</th>
+                            <th>Purchase Price</th>
+                            <th>Sell Price</th>
+                            <th>Gain/Loss %</th>
+                            <th>Category</th>
+                            <th>Hold Days</th>
+                        </tr>
+                    </thead>
+                    <tbody id="outcomesBody">
+                        <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="feedback-section">
+            <h2>⚙️ System Status</h2>
+            <p><span class="status-indicator status-active"></span> Outcome Tracking: Active</p>
+            <p><span class="status-indicator status-active"></span> Performance Analysis: Active</p>
+            <p><span class="status-indicator status-active"></span> Agent Feedback: Active</p>
+            <p><span class="status-indicator status-active"></span> Instruction Updates: Ready</p>
+        </div>
+    </div>
+
+    <script>
+        let performanceChart = null;
+
+        async function loadFeedbackData() {
+            try {
+                const response = await fetch('/api/feedback');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    updateMetrics(data.period_analysis);
+                    updateFeedbackContent(data.latest_feedback);
+                    updatePerformanceChart(data.period_analysis);
+                } else {
+                    document.getElementById('feedbackContent').innerHTML = 
+                        `<p style="color: red;">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                console.error('Error loading feedback data:', error);
+                document.getElementById('feedbackContent').innerHTML = 
+                    '<p style="color: red;">Failed to load feedback data</p>';
+            }
+        }
+
+        async function loadTradeOutcomes() {
+            try {
+                const response = await fetch('/api/trade_outcomes');
+                const outcomes = await response.json();
+                
+                if (Array.isArray(outcomes)) {
+                    updateOutcomesTable(outcomes);
+                }
+            } catch (error) {
+                console.error('Error loading trade outcomes:', error);
+            }
+        }
+
+        function updateMetrics(periodData) {
+            const thirtyDay = periodData['30d'] || {success_rate: 0, avg_profit: 0, total_trades: 0};
+            
+            document.getElementById('successRate').textContent = 
+                (thirtyDay.success_rate * 100).toFixed(1) + '%';
+            document.getElementById('avgProfit').textContent = 
+                (thirtyDay.avg_profit * 100).toFixed(2) + '%';
+            document.getElementById('tradeCount').textContent = 
+                thirtyDay.total_trades;
+        }
+
+        function updateFeedbackContent(latestFeedback) {
+            const container = document.getElementById('feedbackContent');
+            
+            if (!latestFeedback) {
+                container.innerHTML = '<p>No feedback available yet. System needs trading history to generate insights.</p>';
+                return;
+            }
+            
+            let content = `
+                <h3>Latest Analysis (${latestFeedback.total_trades_analyzed} trades)</h3>
+                <div class="feedback-content">
+                    <strong>Summarizer Guidance:</strong><br>
+                    ${formatFeedback(latestFeedback.summarizer_feedback)}
+                </div>
+                <div class="feedback-content">
+                    <strong>Decider Guidance:</strong><br>
+                    ${formatFeedback(latestFeedback.decider_feedback)}
+                </div>
+            `;
+            
+            container.innerHTML = content;
+        }
+
+        function formatFeedback(feedback) {
+            if (!feedback || feedback === 'null') return 'No specific guidance available';
+            
+            // Try to parse JSON feedback
+            try {
+                if (typeof feedback === 'string') {
+                    const parsed = JSON.parse(feedback);
+                    if (typeof parsed === 'object') {
+                        return JSON.stringify(parsed, null, 2);
+                    }
+                    return parsed;
+                }
+                return JSON.stringify(feedback, null, 2);
+            } catch {
+                return feedback;
+            }
+        }
+
+        function updatePerformanceChart(periodData) {
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            
+            if (performanceChart) {
+                performanceChart.destroy();
+            }
+            
+            const periods = ['7d', '14d', '30d'];
+            const successRates = periods.map(p => (periodData[p]?.success_rate || 0) * 100);
+            const avgProfits = periods.map(p => (periodData[p]?.avg_profit || 0) * 100);
+            
+            performanceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['7 Days', '14 Days', '30 Days'],
+                    datasets: [
+                        {
+                            label: 'Success Rate (%)',
+                            data: successRates,
+                            borderColor: '#4CAF50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Average Profit (%)',
+                            data: avgProfits,
+                            borderColor: '#2196F3',
+                            backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Success Rate (%)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'Average Profit (%)' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Performance Trends'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateOutcomesTable(outcomes) {
+            const tbody = document.getElementById('outcomesBody');
+            
+            if (outcomes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7">No trade outcomes recorded yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = outcomes.map(outcome => `
+                <tr class="outcome-${outcome.category}">
+                    <td>${outcome.ticker}</td>
+                    <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
+                    <td>$${outcome.purchase_price.toFixed(2)}</td>
+                    <td>$${outcome.sell_price.toFixed(2)}</td>
+                    <td>${(outcome.gain_loss_pct * 100).toFixed(2)}%</td>
+                    <td>${outcome.category.replace('_', ' ')}</td>
+                    <td>${outcome.hold_days}</td>
+                </tr>
+            `).join('');
+        }
+
+        function refreshData() {
+            loadFeedbackData();
+            loadTradeOutcomes();
+        }
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshData();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(refreshData, 30000);
+        });
+    </script>
+</body>
+</html>
