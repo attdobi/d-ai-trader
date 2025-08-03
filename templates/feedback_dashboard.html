@@ -90,6 +90,28 @@
     max-height: 200px;
     overflow-y: auto;
 }
+.feedback-history-container {
+    max-height: 600px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    background: #f8f9fa;
+}
+.feedback-history-container::-webkit-scrollbar {
+    width: 8px;
+}
+.feedback-history-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+.feedback-history-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+.feedback-history-container::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
 .outcomes-table {
     width: 100%;
     border-collapse: collapse;
@@ -143,8 +165,10 @@
 <!-- Feedback History -->
 <div class="feedback-section">
     <h2>📋 Feedback History (Last 10)</h2>
-    <div id="feedbackHistory">
-        <p>Loading feedback history...</p>
+    <div class="feedback-history-container">
+        <div id="feedbackHistory">
+            <p>Loading feedback history...</p>
+        </div>
     </div>
 </div>
 
