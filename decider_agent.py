@@ -102,7 +102,7 @@ def update_holdings(decisions):
                     continue
 
                 # Check if we already have this ticker (active or inactive)
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
                 
                 if existing:
                     if existing.is_active:
