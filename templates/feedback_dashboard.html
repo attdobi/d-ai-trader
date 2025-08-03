@@ -142,9 +142,17 @@
 
 <!-- Feedback History -->
 <div class="feedback-section">
-    <h2>📋 Feedback History</h2>
+    <h2>📋 Feedback History (Last 10)</h2>
     <div id="feedbackHistory">
         <p>Loading feedback history...</p>
+    </div>
+</div>
+
+<!-- Current vs Previous Prompts -->
+<div class="feedback-section">
+    <h2>🔄 Current vs Previous Prompts</h2>
+    <div id="promptComparison">
+        <p>Loading prompt comparison...</p>
     </div>
 </div>
 
@@ -261,8 +269,11 @@
             
             document.getElementById('feedbackCount').textContent = feedbackLog.length;
             
+            // Limit to last 10 entries
+            const recentFeedback = feedbackLog.slice(0, 10);
+            
             let html = '';
-            feedbackLog.forEach((entry, index) => {
+            recentFeedback.forEach((entry, index) => {
                 const timestamp = new Date(entry.timestamp).toLocaleString();
                 
                 html += `
@@ -398,9 +409,126 @@
         `).join('');
     }
 
+    async function loadPromptComparison() {
+        const comparisonDiv = document.getElementById('promptComparison');
+        
+        try {
+            // Load prompts for both agents
+            const [summarizerResponse, deciderResponse] = await Promise.all([
+                fetch('/api/prompts/summarizer'),
+                fetch('/api/prompts/decider')
+            ]);
+            
+            if (!summarizerResponse.ok || !deciderResponse.ok) {
+                throw new Error('Failed to fetch prompt data');
+            }
+            
+            const summarizerPrompts = await summarizerResponse.json();
+            const deciderPrompts = await deciderResponse.json();
+            
+            let html = '';
+            
+            // Summarizer prompts comparison
+            if (Array.isArray(summarizerPrompts) && summarizerPrompts.length > 0) {
+                html += `
+                    <div class="feedback-history-item">
+                        <h4>📊 Summarizer Agent Prompts</h4>
+                        ${generatePromptComparison(summarizerPrompts, 'summarizer')}
+                    </div>
+                `;
+            }
+            
+            // Decider prompts comparison
+            if (Array.isArray(deciderPrompts) && deciderPrompts.length > 0) {
+                html += `
+                    <div class="feedback-history-item">
+                        <h4>🎯 Decider Agent Prompts</h4>
+                        ${generatePromptComparison(deciderPrompts, 'decider')}
+                    </div>
+                `;
+            }
+            
+            if (!html) {
+                html = '<p>No prompt history available</p>';
+            }
+            
+            comparisonDiv.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Error loading prompt comparison:', error);
+            comparisonDiv.innerHTML = `<p style="color: red;">Error loading prompt comparison: ${error.message}</p>`;
+        }
+    }
+
+    function generatePromptComparison(prompts, agentType) {
+        if (prompts.length === 0) {
+            return '<p>No prompts available</p>';
+        }
+        
+        // Sort by version (newest first)
+        const sortedPrompts = prompts.sort((a, b) => b.prompt_version - a.prompt_version);
+        const currentPrompt = sortedPrompts[0];
+        const previousPrompt = sortedPrompts[1];
+        
+        let html = '';
+        
+        // Current prompt
+        html += `
+            <div style="margin: 15px 0; padding: 15px; background: #d4edda; border-left: 4px solid #28a745; border-radius: 4px;">
+                <h5>🆕 Current Prompt (v${currentPrompt.prompt_version})</h5>
+                <div class="timestamp">${new Date(currentPrompt.timestamp).toLocaleString()}</div>
+                <div style="margin-top: 10px;">
+                    <strong>System Prompt:</strong>
+                    <div class="content">${currentPrompt.system_prompt}</div>
+                </div>
+                <div style="margin-top: 10px;">
+                    <strong>User Prompt Template:</strong>
+                    <div class="content">${currentPrompt.user_prompt}</div>
+                </div>
+                ${currentPrompt.description ? `
+                    <div style="margin-top: 10px;">
+                        <strong>Description:</strong> ${currentPrompt.description}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        // Previous prompt (if exists)
+        if (previousPrompt) {
+            html += `
+                <div style="margin: 15px 0; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                    <h5>📝 Previous Prompt (v${previousPrompt.prompt_version})</h5>
+                    <div class="timestamp">${new Date(previousPrompt.timestamp).toLocaleString()}</div>
+                    <div style="margin-top: 10px;">
+                        <strong>System Prompt:</strong>
+                        <div class="content">${previousPrompt.system_prompt}</div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <strong>User Prompt Template:</strong>
+                        <div class="content">${previousPrompt.user_prompt}</div>
+                    </div>
+                    ${previousPrompt.description ? `
+                        <div style="margin-top: 10px;">
+                            <strong>Description:</strong> ${previousPrompt.description}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        } else {
+            html += `
+                <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-left: 4px solid #6c757d; border-radius: 4px;">
+                    <p><em>No previous prompt version available</em></p>
+                </div>
+            `;
+        }
+        
+        return html;
+    }
+
     function refreshData() {
         loadLatestFeedback();
         loadFeedbackHistory();
+        loadPromptComparison();
         loadTradeOutcomes();
     }
 
