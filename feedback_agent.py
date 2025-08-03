@@ -1,0 +1,357 @@
+import json
+from datetime import datetime, timedelta
+from sqlalchemy import text
+from config import engine, PromptManager, session, openai
+import yfinance as yf
+import pandas as pd
+
+# Performance thresholds
+SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant
+SIGNIFICANT_LOSS_THRESHOLD = -0.10   # 10% loss considered significant
+FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
+
+# PromptManager instance
+prompt_manager = PromptManager(client=openai, session=session)
+
+class TradeOutcomeTracker:
+    """Tracks outcomes of completed trades and provides feedback"""
+    
+    def __init__(self):
+        self.ensure_outcome_tables_exist()
+    
+    def ensure_outcome_tables_exist(self):
+        """Create tables for tracking trade outcomes and feedback"""
+        with engine.begin() as conn:
+            # Trade outcomes table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS trade_outcomes (
+                    id SERIAL PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    sell_timestamp TIMESTAMP NOT NULL,
+                    purchase_price FLOAT NOT NULL,
+                    sell_price FLOAT NOT NULL,
+                    shares FLOAT NOT NULL,
+                    gain_loss_amount FLOAT NOT NULL,
+                    gain_loss_percentage FLOAT NOT NULL,
+                    hold_duration_days INTEGER NOT NULL,
+                    original_reason TEXT,
+                    sell_reason TEXT,
+                    outcome_category TEXT CHECK (outcome_category IN ('significant_profit', 'moderate_profit', 'break_even', 'moderate_loss', 'significant_loss')),
+                    market_context JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Agent feedback table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_feedback (
+                    id SERIAL PRIMARY KEY,
+                    analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    lookback_period_days INTEGER NOT NULL,
+                    total_trades_analyzed INTEGER NOT NULL,
+                    success_rate FLOAT NOT NULL,
+                    avg_profit_percentage FLOAT NOT NULL,
+                    top_performing_patterns JSONB,
+                    underperforming_patterns JSONB,
+                    recommended_adjustments JSONB,
+                    summarizer_feedback TEXT,
+                    decider_feedback TEXT
+                )
+            """))
+            
+            # Agent instruction updates table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS agent_instruction_updates (
+                    id SERIAL PRIMARY KEY,
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider')),
+                    update_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    original_instructions TEXT NOT NULL,
+                    updated_instructions TEXT NOT NULL,
+                    reason_for_update TEXT NOT NULL,
+                    performance_trigger JSONB
+                )
+            """))
+    
+    def record_sell_outcome(self, ticker, sell_price, holding_data, sell_reason="Manual sell"):
+        """Record the outcome of a sell transaction"""
+        purchase_price = float(holding_data['purchase_price'])
+        shares = float(holding_data['shares'])
+        purchase_timestamp = holding_data.get('purchase_timestamp')
+        
+        gain_loss_amount = (sell_price - purchase_price) * shares
+        gain_loss_percentage = (sell_price - purchase_price) / purchase_price
+        
+        # Calculate hold duration
+        if purchase_timestamp:
+            if isinstance(purchase_timestamp, str):
+                purchase_date = datetime.fromisoformat(purchase_timestamp.replace('Z', '+00:00'))
+            else:
+                purchase_date = purchase_timestamp
+            hold_duration = (datetime.utcnow() - purchase_date).days
+        else:
+            hold_duration = 0
+        
+        # Categorize outcome
+        if gain_loss_percentage >= SIGNIFICANT_PROFIT_THRESHOLD:
+            outcome_category = 'significant_profit'
+        elif gain_loss_percentage > 0:
+            outcome_category = 'moderate_profit'
+        elif gain_loss_percentage >= -0.02:  # Within 2% is break even
+            outcome_category = 'break_even'
+        elif gain_loss_percentage >= SIGNIFICANT_LOSS_THRESHOLD:
+            outcome_category = 'moderate_loss'
+        else:
+            outcome_category = 'significant_loss'
+        
+        # Get market context (simplified)
+        market_context = self._get_market_context(ticker)
+        
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO trade_outcomes 
+                (ticker, sell_timestamp, purchase_price, sell_price, shares, 
+                 gain_loss_amount, gain_loss_percentage, hold_duration_days, 
+                 original_reason, sell_reason, outcome_category, market_context)
+                VALUES (:ticker, :sell_timestamp, :purchase_price, :sell_price, :shares,
+                        :gain_loss_amount, :gain_loss_percentage, :hold_duration_days,
+                        :original_reason, :sell_reason, :outcome_category, :market_context)
+            """), {
+                "ticker": ticker,
+                "sell_timestamp": datetime.utcnow(),
+                "purchase_price": purchase_price,
+                "sell_price": sell_price,
+                "shares": shares,
+                "gain_loss_amount": gain_loss_amount,
+                "gain_loss_percentage": gain_loss_percentage,
+                "hold_duration_days": hold_duration,
+                "original_reason": holding_data.get('reason', ''),
+                "sell_reason": sell_reason,
+                "outcome_category": outcome_category,
+                "market_context": json.dumps(market_context)
+            })
+        
+        print(f"Recorded {outcome_category} outcome for {ticker}: {gain_loss_percentage:.2%} gain/loss")
+        return outcome_category
+    
+    def _get_market_context(self, ticker):
+        """Get basic market context at time of sell"""
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
+            if len(hist) > 1:
+                recent_volatility = hist['Close'].pct_change().std()
+                return {
+                    "recent_volatility": float(recent_volatility) if not pd.isna(recent_volatility) else 0,
+                    "volume_trend": "high" if hist['Volume'].iloc[-1] > hist['Volume'].mean() else "normal"
+                }
+        except:
+            pass
+        return {"recent_volatility": 0, "volume_trend": "unknown"}
+    
+    def analyze_recent_outcomes(self, days_back=FEEDBACK_LOOKBACK_DAYS):
+        """Analyze recent trade outcomes and generate feedback"""
+        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+        
+        with engine.connect() as conn:
+            # Get recent outcomes
+            result = conn.execute(text("""
+                SELECT ticker, gain_loss_percentage, outcome_category, 
+                       hold_duration_days, original_reason, sell_reason,
+                       market_context
+                FROM trade_outcomes 
+                WHERE sell_timestamp >= :cutoff_date
+                ORDER BY sell_timestamp DESC
+            """), {"cutoff_date": cutoff_date})
+            
+            outcomes = [dict(row._mapping) for row in result]
+        
+        if not outcomes:
+            print("No recent trades to analyze")
+            return None
+        
+        # Calculate metrics
+        total_trades = len(outcomes)
+        profitable_trades = len([o for o in outcomes if o['gain_loss_percentage'] > 0])
+        success_rate = profitable_trades / total_trades if total_trades > 0 else 0
+        avg_profit = sum(o['gain_loss_percentage'] for o in outcomes) / total_trades
+        
+        # Analyze patterns
+        analysis = self._analyze_patterns(outcomes)
+        
+        # Generate AI feedback
+        feedback = self._generate_ai_feedback(outcomes, success_rate, avg_profit, analysis)
+        
+        # Store feedback
+        feedback_id = self._store_feedback(days_back, total_trades, success_rate, 
+                                         avg_profit, analysis, feedback)
+        
+        return {
+            "feedback_id": feedback_id,
+            "success_rate": success_rate,
+            "avg_profit": avg_profit,
+            "total_trades": total_trades,
+            "feedback": feedback
+        }
+    
+    def _analyze_patterns(self, outcomes):
+        """Analyze patterns in trading outcomes"""
+        # Group by outcome category
+        by_category = {}
+        for outcome in outcomes:
+            category = outcome['outcome_category']
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append(outcome)
+        
+        # Analyze reasons for good vs bad outcomes
+        good_outcomes = [o for o in outcomes if o['gain_loss_percentage'] > SIGNIFICANT_PROFIT_THRESHOLD]
+        bad_outcomes = [o for o in outcomes if o['gain_loss_percentage'] < SIGNIFICANT_LOSS_THRESHOLD]
+        
+        good_reasons = [o['original_reason'] for o in good_outcomes if o['original_reason']]
+        bad_reasons = [o['original_reason'] for o in bad_outcomes if o['original_reason']]
+        
+        return {
+            "outcome_distribution": {k: len(v) for k, v in by_category.items()},
+            "successful_reasons": good_reasons,
+            "unsuccessful_reasons": bad_reasons,
+            "avg_hold_duration_profitable": sum(o['hold_duration_days'] for o in good_outcomes) / len(good_outcomes) if good_outcomes else 0,
+            "avg_hold_duration_unprofitable": sum(o['hold_duration_days'] for o in bad_outcomes) / len(bad_outcomes) if bad_outcomes else 0
+        }
+    
+    def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis):
+        """Use AI to generate feedback for improving agent performance"""
+        outcomes_summary = json.dumps({
+            "total_trades": len(outcomes),
+            "success_rate": success_rate,
+            "avg_profit_percentage": avg_profit,
+            "outcome_distribution": analysis["outcome_distribution"],
+            "successful_patterns": analysis["successful_reasons"][:5],  # Top 5
+            "unsuccessful_patterns": analysis["unsuccessful_reasons"][:5],
+            "timing_insights": {
+                "profitable_avg_hold_days": analysis["avg_hold_duration_profitable"],
+                "unprofitable_avg_hold_days": analysis["avg_hold_duration_unprofitable"]
+            }
+        }, indent=2)
+        
+        prompt = f"""
+Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
+
+Performance Data:
+{outcomes_summary}
+
+Please provide:
+1. Key insights about what's working well and what isn't
+2. Specific recommendations for the SUMMARIZER agents (how they should adjust their news analysis focus)
+3. Specific recommendations for the DECIDER agent (how it should adjust its trading strategy)
+4. Patterns in successful vs unsuccessful trades
+5. Timing and market context insights
+
+Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic.
+"""
+
+        system_prompt = """You are a trading performance analyst providing feedback to improve AI trading agents. 
+Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help agents make better decisions."""
+        
+        try:
+            feedback = prompt_manager.ask_openai(prompt, system_prompt, agent_name="FeedbackAgent")
+            return feedback
+        except Exception as e:
+            print(f"Failed to generate AI feedback: {e}")
+            return {
+                "summarizer_feedback": "Unable to generate AI feedback",
+                "decider_feedback": "Unable to generate AI feedback",
+                "key_insights": []
+            }
+    
+    def _store_feedback(self, lookback_days, total_trades, success_rate, avg_profit, analysis, feedback):
+        """Store the generated feedback in the database"""
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO agent_feedback 
+                (lookback_period_days, total_trades_analyzed, success_rate, avg_profit_percentage,
+                 top_performing_patterns, underperforming_patterns, recommended_adjustments,
+                 summarizer_feedback, decider_feedback)
+                VALUES (:lookback_days, :total_trades, :success_rate, :avg_profit,
+                        :top_patterns, :under_patterns, :adjustments, :summarizer_fb, :decider_fb)
+                RETURNING id
+            """), {
+                "lookback_days": lookback_days,
+                "total_trades": total_trades,
+                "success_rate": success_rate,
+                "avg_profit": avg_profit,
+                "top_patterns": json.dumps(analysis["successful_reasons"]),
+                "under_patterns": json.dumps(analysis["unsuccessful_reasons"]),
+                "adjustments": json.dumps(feedback),
+                "summarizer_fb": json.dumps(feedback.get("summarizer_feedback", "")),
+                "decider_fb": json.dumps(feedback.get("decider_feedback", ""))
+            })
+            return result.fetchone()[0]
+    
+    def get_latest_feedback(self):
+        """Get the most recent feedback for agent improvement"""
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT summarizer_feedback, decider_feedback, recommended_adjustments,
+                       success_rate, avg_profit_percentage, total_trades_analyzed
+                FROM agent_feedback 
+                ORDER BY analysis_timestamp DESC 
+                LIMIT 1
+            """))
+            row = result.fetchone()
+            if row:
+                return dict(row._mapping)
+            return None
+    
+    def update_agent_instructions(self, agent_type, new_instructions, reason):
+        """Record updates to agent instructions based on feedback"""
+        # Get current instructions (this would need to be implemented based on how instructions are stored)
+        current_instructions = self._get_current_instructions(agent_type)
+        
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO agent_instruction_updates 
+                (agent_type, original_instructions, updated_instructions, reason_for_update)
+                VALUES (:agent_type, :original, :updated, :reason)
+            """), {
+                "agent_type": agent_type,
+                "original": current_instructions,
+                "updated": new_instructions,
+                "reason": reason
+            })
+        
+        print(f"Updated {agent_type} instructions based on feedback")
+    
+    def _get_current_instructions(self, agent_type):
+        """Get current instructions for an agent type"""
+        # This would need to be implemented based on where instructions are stored
+        # For now, return a placeholder
+        return f"Current {agent_type} instructions"
+
+def main():
+    """Run feedback analysis on recent trades"""
+    tracker = TradeOutcomeTracker()
+    
+    # Analyze recent outcomes
+    feedback_result = tracker.analyze_recent_outcomes()
+    
+    if feedback_result:
+        print(f"\n=== FEEDBACK ANALYSIS ===")
+        print(f"Analyzed {feedback_result['total_trades']} recent trades")
+        print(f"Success Rate: {feedback_result['success_rate']:.1%}")
+        print(f"Average Profit: {feedback_result['avg_profit']:.2%}")
+        print(f"\nFeedback stored with ID: {feedback_result['feedback_id']}")
+        
+        # Print key insights
+        feedback = feedback_result['feedback']
+        if isinstance(feedback, dict):
+            if 'key_insights' in feedback:
+                print(f"\nKey Insights: {feedback['key_insights']}")
+            if 'summarizer_feedback' in feedback:
+                print(f"\nSummarizer Feedback: {feedback['summarizer_feedback']}")
+            if 'decider_feedback' in feedback:
+                print(f"\nDecider Feedback: {feedback['decider_feedback']}")
+    else:
+        print("No recent trades found for analysis")
+
+if __name__ == "__main__":
+    main()
