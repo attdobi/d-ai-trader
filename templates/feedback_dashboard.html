@@ -1,553 +1,544 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Trading - Feedback Analysis</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-        }
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        .metric-card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .metric-value {
-            font-size: 2em;
-            font-weight: bold;
-            color: #333;
-        }
-        .metric-label {
-            color: #666;
-            margin-top: 5px;
-        }
-        .success-rate { color: #4CAF50; }
-        .profit-rate { color: #2196F3; }
-        .trade-count { color: #FF9800; }
-        .feedback-section {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        .feedback-content {
-            background: #f8f9fa;
-            padding: 15px;
-            border-left: 4px solid #007bff;
-            margin: 10px 0;
-        }
-        .outcomes-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-        }
-        .outcomes-table th,
-        .outcomes-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        .outcomes-table th {
-            background-color: #f8f9fa;
-            font-weight: bold;
-        }
-        .outcome-significant_profit { background-color: #d4edda; }
-        .outcome-moderate_profit { background-color: #d1ecf1; }
-        .outcome-break_even { background-color: #fff3cd; }
-        .outcome-moderate_loss { background-color: #f8d7da; }
-        .outcome-significant_loss { background-color: #f5c6cb; }
-        .refresh-btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-bottom: 20px;
-        }
-        .refresh-btn:hover {
-            background: #0056b3;
-        }
-        .chart-container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            height: 400px;
-        }
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 5px;
-        }
-        .status-active { background-color: #4CAF50; }
-        .status-inactive { background-color: #f44336; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🤖 AI Trading Feedback Analysis</h1>
-            <p>Real-time performance monitoring and agent improvement insights</p>
-            <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
-        </div>
+{% extends "tabs.html" %}
 
-        <!-- Performance Metrics -->
-        <div class="metrics-grid" id="metricsGrid">
-            <div class="metric-card">
-                <div class="metric-value success-rate" id="successRate">--</div>
-                <div class="metric-label">Success Rate (30d)</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value profit-rate" id="avgProfit">--</div>
-                <div class="metric-label">Average Profit (30d)</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value trade-count" id="tradeCount">--</div>
-                <div class="metric-label">Total Trades (30d)</div>
-            </div>
-        </div>
+{% block content %}
+<h1>AI Trading Feedback Dashboard</h1>
 
-        <!-- Performance Chart -->
-        <div class="chart-container">
-            <canvas id="performanceChart"></canvas>
-        </div>
-
-        <!-- AI Feedback Section -->
-        <div class="feedback-section">
-            <h2>🧠 AI Agent Feedback</h2>
-            <div id="feedbackContent">
-                <p>Loading feedback analysis...</p>
-            </div>
-            
-            <!-- AI Feedback Generation Buttons -->
-            <div style="margin-top: 20px;">
-                <h3>Generate New AI Feedback</h3>
-                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
-                    <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
-                    <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
-                </div>
-                <div id="generationStatus" style="margin-top: 10px;"></div>
-            </div>
-        </div>
-
-        <!-- Recent Trade Outcomes -->
-        <div class="feedback-section">
-            <h2>📊 Recent Trade Outcomes</h2>
-            <div style="overflow-x: auto;">
-                <table class="outcomes-table" id="outcomesTable">
-                    <thead>
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Sell Date</th>
-                            <th>Purchase Price</th>
-                            <th>Sell Price</th>
-                            <th>Gain/Loss %</th>
-                            <th>Category</th>
-                            <th>Hold Days</th>
-                        </tr>
-                    </thead>
-                    <tbody id="outcomesBody">
-                        <tr><td colspan="7">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- AI Feedback Responses -->
-        <div class="feedback-section">
-            <h2>🤖 AI Feedback Responses</h2>
-            <div style="overflow-x: auto;">
-                <table class="outcomes-table" id="aiFeedbackTable">
-                    <thead>
-                        <tr>
-                            <th>Timestamp</th>
-                            <th>Agent</th>
-                            <th>Response Preview</th>
-                            <th>Type</th>
-                        </tr>
-                    </thead>
-                    <tbody id="aiFeedbackBody">
-                        <tr><td colspan="4">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Feedback Log -->
-        <div class="feedback-section">
-            <h2>📝 Feedback Log</h2>
-            <div style="overflow-x: auto;">
-                <table class="outcomes-table" id="feedbackLogTable">
-                    <thead>
-                        <tr>
-                            <th>Timestamp</th>
-                            <th>Type</th>
-                            <th>Details</th>
-                            <th>Performance</th>
-                        </tr>
-                    </thead>
-                    <tbody id="feedbackLogBody">
-                        <tr><td colspan="4">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- System Status -->
-        <div class="feedback-section">
-            <h2>⚙️ System Status</h2>
-            <p><span class="status-indicator status-active"></span> Outcome Tracking: Active</p>
-            <p><span class="status-indicator status-active"></span> Performance Analysis: Active</p>
-            <p><span class="status-indicator status-active"></span> Agent Feedback: Active</p>
-            <p><span class="status-indicator status-active"></span> Instruction Updates: Ready</p>
-        </div>
+<!-- Performance Metrics -->
+<div class="portfolio-summary">
+    <div class="metric-card">
+        <h3>Success Rate (30d)</h3>
+        <p class="value" id="successRate">--</p>
     </div>
+    <div class="metric-card">
+        <h3>Average Profit (30d)</h3>
+        <p class="value" id="avgProfit">--</p>
+    </div>
+    <div class="metric-card">
+        <h3>Total Trades (30d)</h3>
+        <p class="value" id="tradeCount">--</p>
+    </div>
+    <div class="metric-card">
+        <h3>AI Feedback Count</h3>
+        <p class="value" id="feedbackCount">--</p>
+    </div>
+</div>
 
-    <script>
-        let performanceChart = null;
+<style>
+.portfolio-summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+.metric-card {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    min-width: 180px;
+    text-align: center;
+}
+.metric-card h3 {
+    margin: 0 0 10px 0;
+    color: #495057;
+    font-size: 14px;
+    font-weight: 600;
+}
+.metric-card .value {
+    margin: 0;
+    font-size: 24px;
+    font-weight: bold;
+    color: #212529;
+}
+.feedback-section {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+.feedback-content {
+    background: #f8f9fa;
+    padding: 15px;
+    border-left: 4px solid #007bff;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+.outcomes-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+.outcomes-table th,
+.outcomes-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+.outcomes-table th {
+    background-color: #f8f9fa;
+    font-weight: bold;
+}
+.outcome-significant_profit { background-color: #d4edda; }
+.outcome-moderate_profit { background-color: #d1ecf1; }
+.outcome-break_even { background-color: #fff3cd; }
+.outcome-moderate_loss { background-color: #f8d7da; }
+.outcome-significant_loss { background-color: #f5c6cb; }
+.refresh-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-bottom: 20px;
+}
+.refresh-btn:hover {
+    background: #0056b3;
+}
+.chart-container {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    height: 400px;
+}
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+.status-active { background-color: #4CAF50; }
+.status-inactive { background-color: #f44336; }
+.ai-response {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    font-family: monospace;
+    max-height: 300px;
+    overflow-y: auto;
+}
+</style>
 
-        async function loadFeedbackData() {
-            try {
-                const response = await fetch('/api/feedback');
-                const data = await response.json();
-                
-                if (data.status === 'success') {
-                    updateMetrics(data.period_analysis);
-                    updateFeedbackContent(data.latest_feedback);
-                    updatePerformanceChart(data.period_analysis);
-                } else {
-                    document.getElementById('feedbackContent').innerHTML = 
-                        `<p style="color: red;">Error: ${data.error}</p>`;
-                }
-            } catch (error) {
-                console.error('Error loading feedback data:', error);
-                document.getElementById('feedbackContent').innerHTML = 
-                    '<p style="color: red;">Failed to load feedback data</p>';
-            }
-        }
+<!-- AI Feedback Generation -->
+<div class="feedback-section">
+    <h2>🤖 Generate AI Feedback</h2>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+        <button class="refresh-btn" onclick="generateAIFeedback('summarizer')">📊 Summarizer Feedback</button>
+        <button class="refresh-btn" onclick="generateAIFeedback('decider')">🎯 Decider Feedback</button>
+        <button class="refresh-btn" onclick="generateAIFeedback('feedback_analyzer')">🔍 System Analysis</button>
+    </div>
+    <div id="generationStatus" style="margin-top: 10px;"></div>
+</div>
 
-        async function loadTradeOutcomes() {
-            try {
-                const response = await fetch('/api/trade_outcomes');
-                const outcomes = await response.json();
-                
-                if (Array.isArray(outcomes)) {
-                    updateOutcomesTable(outcomes);
-                }
-            } catch (error) {
-                console.error('Error loading trade outcomes:', error);
-            }
-        }
+<!-- AI Agent Feedback -->
+<div class="feedback-section">
+    <h2>🧠 AI Agent Feedback</h2>
+    <div id="feedbackContent">
+        <p>Loading feedback analysis...</p>
+    </div>
+</div>
 
-        async function loadFeedbackLog() {
-            try {
-                const response = await fetch('/api/feedback_log');
-                const feedbackLog = await response.json();
-                
-                if (Array.isArray(feedbackLog)) {
-                    updateFeedbackLogTable(feedbackLog);
-                }
-            } catch (error) {
-                console.error('Error loading feedback log:', error);
-            }
-        }
+<!-- Performance Chart -->
+<div class="chart-container">
+    <canvas id="performanceChart"></canvas>
+</div>
 
-        async function loadAIFeedbackResponses() {
-            try {
-                const response = await fetch('/api/ai_feedback_responses');
-                const responses = await response.json();
-                
-                if (Array.isArray(responses)) {
-                    updateAIFeedbackTable(responses);
-                }
-            } catch (error) {
-                console.error('Error loading AI feedback responses:', error);
-            }
-        }
-
-        async function generateAIFeedback(agentType) {
-            const statusDiv = document.getElementById('generationStatus');
-            statusDiv.innerHTML = `<p style="color: blue;">🔄 Generating ${agentType} feedback...</p>`;
-            
-            try {
-                // Get current performance metrics
-                const feedbackResponse = await fetch('/api/feedback');
-                const feedbackData = await feedbackResponse.json();
-                
-                const contextData = {
-                    "current_time": new Date().toISOString(),
-                    "agent_type": agentType
-                };
-                
-                const performanceMetrics = feedbackData.period_analysis ? feedbackData.period_analysis['30d'] : null;
-                
-                const response = await fetch('/api/generate_ai_feedback', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        agent_type: agentType,
-                        context_data: contextData,
-                        performance_metrics: performanceMetrics,
-                        is_manual_request: true
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.error) {
-                    statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${result.error}</p>`;
-                } else {
-                    statusDiv.innerHTML = `<p style="color: green;">✅ ${agentType} feedback generated successfully!</p>`;
-                    // Refresh the AI feedback responses table
-                    loadAIFeedbackResponses();
-                }
-            } catch (error) {
-                console.error('Error generating AI feedback:', error);
-                statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
-            }
-        }
-
-        function updateMetrics(periodData) {
-            const thirtyDay = periodData['30d'] || {success_rate: 0, avg_profit: 0, total_trades: 0};
-            
-            document.getElementById('successRate').textContent = 
-                (thirtyDay.success_rate * 100).toFixed(1) + '%';
-            document.getElementById('avgProfit').textContent = 
-                (thirtyDay.avg_profit * 100).toFixed(2) + '%';
-            document.getElementById('tradeCount').textContent = 
-                thirtyDay.total_trades;
-        }
-
-        function updateFeedbackContent(latestFeedback) {
-            const container = document.getElementById('feedbackContent');
-            
-            if (!latestFeedback) {
-                container.innerHTML = '<p>No feedback available yet. System needs trading history to generate insights.</p>';
-                return;
-            }
-            
-            let content = `
-                <h3>Latest Analysis (${latestFeedback.total_trades_analyzed} trades)</h3>
-                <div class="feedback-content">
-                    <strong>Summarizer Guidance:</strong><br>
-                    ${formatFeedback(latestFeedback.summarizer_feedback)}
-                </div>
-                <div class="feedback-content">
-                    <strong>Decider Guidance:</strong><br>
-                    ${formatFeedback(latestFeedback.decider_feedback)}
-                </div>
-            `;
-            
-            container.innerHTML = content;
-        }
-
-        function formatFeedback(feedback) {
-            if (!feedback || feedback === 'null') return 'No specific guidance available';
-            
-            // Try to parse JSON feedback
-            try {
-                if (typeof feedback === 'string') {
-                    const parsed = JSON.parse(feedback);
-                    if (typeof parsed === 'object') {
-                        return JSON.stringify(parsed, null, 2);
-                    }
-                    return parsed;
-                }
-                return JSON.stringify(feedback, null, 2);
-            } catch {
-                return feedback;
-            }
-        }
-
-        function updatePerformanceChart(periodData) {
-            const ctx = document.getElementById('performanceChart').getContext('2d');
-            
-            if (performanceChart) {
-                performanceChart.destroy();
-            }
-            
-            const periods = ['7d', '14d', '30d'];
-            const successRates = periods.map(p => (periodData[p]?.success_rate || 0) * 100);
-            const avgProfits = periods.map(p => (periodData[p]?.avg_profit || 0) * 100);
-            
-            performanceChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ['7 Days', '14 Days', '30 Days'],
-                    datasets: [
-                        {
-                            label: 'Success Rate (%)',
-                            data: successRates,
-                            borderColor: '#4CAF50',
-                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'Average Profit (%)',
-                            data: avgProfits,
-                            borderColor: '#2196F3',
-                            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                            yAxisID: 'y1'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            title: { display: true, text: 'Success Rate (%)' }
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            title: { display: true, text: 'Average Profit (%)' },
-                            grid: { drawOnChartArea: false }
-                        }
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'Performance Trends'
-                        }
-                    }
-                }
-            });
-        }
-
-        function updateOutcomesTable(outcomes) {
-            const tbody = document.getElementById('outcomesBody');
-            
-            if (outcomes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7">No trade outcomes recorded yet</td></tr>';
-                return;
-            }
-            
-            tbody.innerHTML = outcomes.map(outcome => `
-                <tr class="outcome-${outcome.category}">
-                    <td>${outcome.ticker}</td>
-                    <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
-                    <td>$${outcome.purchase_price.toFixed(2)}</td>
-                    <td>$${outcome.sell_price.toFixed(2)}</td>
-                    <td>${(outcome.gain_loss_pct * 100).toFixed(2)}%</td>
-                    <td>${outcome.category.replace('_', ' ')}</td>
-                    <td>${outcome.hold_days}</td>
+<!-- AI Feedback Responses -->
+<div class="feedback-section">
+    <h2>📝 AI Feedback Responses</h2>
+    <div style="overflow-x: auto;">
+        <table class="outcomes-table" id="aiFeedbackTable">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Agent</th>
+                    <th>Response Preview</th>
+                    <th>Type</th>
                 </tr>
-            `).join('');
-        }
+            </thead>
+            <tbody id="aiFeedbackBody">
+                <tr><td colspan="4">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
 
-        function updateFeedbackLogTable(feedbackLog) {
-            const tbody = document.getElementById('feedbackLogBody');
+<!-- Recent Trade Outcomes -->
+<div class="feedback-section">
+    <h2>📊 Recent Trade Outcomes</h2>
+    <div style="overflow-x: auto;">
+        <table class="outcomes-table" id="outcomesTable">
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Sell Date</th>
+                    <th>Purchase Price</th>
+                    <th>Sell Price</th>
+                    <th>Gain/Loss %</th>
+                    <th>Category</th>
+                    <th>Hold Days</th>
+                </tr>
+            </thead>
+            <tbody id="outcomesBody">
+                <tr><td colspan="7">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Feedback Log -->
+<div class="feedback-section">
+    <h2>📋 Feedback Log</h2>
+    <div style="overflow-x: auto;">
+        <table class="outcomes-table" id="feedbackLogTable">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Type</th>
+                    <th>Details</th>
+                    <th>Performance</th>
+                </tr>
+            </thead>
+            <tbody id="feedbackLogBody">
+                <tr><td colspan="4">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- System Status -->
+<div class="feedback-section">
+    <h2>⚙️ System Status</h2>
+    <p><span class="status-indicator status-active"></span> Outcome Tracking: Active</p>
+    <p><span class="status-indicator status-active"></span> Performance Analysis: Active</p>
+    <p><span class="status-indicator status-active"></span> Agent Feedback: Active</p>
+    <p><span class="status-indicator status-active"></span> Instruction Updates: Ready</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    let performanceChart = null;
+
+    async function loadFeedbackData() {
+        try {
+            const response = await fetch('/api/feedback');
+            const data = await response.json();
             
-            if (feedbackLog.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4">No feedback log entries yet</td></tr>';
-                return;
+            if (data.status === 'success') {
+                updateMetrics(data.period_analysis);
+                updateFeedbackContent(data.latest_feedback);
+                updatePerformanceChart(data.period_analysis);
+            } else {
+                document.getElementById('feedbackContent').innerHTML = 
+                    `<p style="color: red;">Error: ${data.error}</p>`;
             }
+        } catch (error) {
+            console.error('Error loading feedback data:', error);
+            document.getElementById('feedbackContent').innerHTML = 
+                '<p style="color: red;">Failed to load feedback data</p>';
+        }
+    }
+
+    async function loadTradeOutcomes() {
+        try {
+            const response = await fetch('/api/trade_outcomes');
+            const outcomes = await response.json();
             
-            tbody.innerHTML = feedbackLog.map(entry => {
-                const timestamp = new Date(entry.timestamp).toLocaleString();
-                let type = entry.type === 'feedback_analysis' ? '📊 Analysis' : '⚙️ Instruction Update';
-                let details = '';
-                let performance = '';
-                
-                if (entry.type === 'feedback_analysis') {
-                    details = `${entry.trades_analyzed} trades analyzed (${entry.lookback_days}d lookback)`;
-                    performance = `${entry.success_rate.toFixed(1)}% success, ${entry.avg_profit.toFixed(2)}% avg profit`;
-                } else {
-                    details = `${entry.agent_type} agent: ${entry.reason}`;
-                    performance = entry.performance_trigger ? 'Triggered by performance' : 'Manual update';
+            if (Array.isArray(outcomes)) {
+                updateOutcomesTable(outcomes);
+            }
+        } catch (error) {
+            console.error('Error loading trade outcomes:', error);
+        }
+    }
+
+    async function loadFeedbackLog() {
+        try {
+            const response = await fetch('/api/feedback_log');
+            const feedbackLog = await response.json();
+            
+            if (Array.isArray(feedbackLog)) {
+                updateFeedbackLogTable(feedbackLog);
+            }
+        } catch (error) {
+            console.error('Error loading feedback log:', error);
+        }
+    }
+
+    async function loadAIFeedbackResponses() {
+        try {
+            const response = await fetch('/api/ai_feedback_responses');
+            const responses = await response.json();
+            
+            if (Array.isArray(responses)) {
+                updateAIFeedbackTable(responses);
+                document.getElementById('feedbackCount').textContent = responses.length;
+            }
+        } catch (error) {
+            console.error('Error loading AI feedback responses:', error);
+        }
+    }
+
+    async function generateAIFeedback(agentType) {
+        const statusDiv = document.getElementById('generationStatus');
+        statusDiv.innerHTML = `<p style="color: blue;">🔄 Generating ${agentType} feedback...</p>`;
+        
+        try {
+            // Get current performance metrics
+            const feedbackResponse = await fetch('/api/feedback');
+            const feedbackData = await feedbackResponse.json();
+            
+            const contextData = {
+                "current_time": new Date().toISOString(),
+                "agent_type": agentType
+            };
+            
+            const performanceMetrics = feedbackData.period_analysis ? feedbackData.period_analysis['30d'] : null;
+            
+            const response = await fetch('/api/generate_ai_feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    agent_type: agentType,
+                    context_data: contextData,
+                    performance_metrics: performanceMetrics,
+                    is_manual_request: true
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.error) {
+                statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${result.error}</p>`;
+            } else {
+                statusDiv.innerHTML = `<p style="color: green;">✅ ${agentType} feedback generated successfully!</p>`;
+                // Refresh the AI feedback responses table
+                loadAIFeedbackResponses();
+            }
+        } catch (error) {
+            console.error('Error generating AI feedback:', error);
+            statusDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`;
+        }
+    }
+
+    function updateMetrics(periodData) {
+        const thirtyDay = periodData['30d'] || {success_rate: 0, avg_profit: 0, total_trades: 0};
+        
+        document.getElementById('successRate').textContent = 
+            (thirtyDay.success_rate * 100).toFixed(1) + '%';
+        document.getElementById('avgProfit').textContent = 
+            (thirtyDay.avg_profit * 100).toFixed(2) + '%';
+        document.getElementById('tradeCount').textContent = 
+            thirtyDay.total_trades;
+    }
+
+    function updateFeedbackContent(latestFeedback) {
+        const container = document.getElementById('feedbackContent');
+        
+        if (!latestFeedback) {
+            container.innerHTML = '<p>No feedback available yet. System needs trading history to generate insights.</p>';
+            return;
+        }
+        
+        let content = `
+            <h3>Latest Analysis (${latestFeedback.total_trades_analyzed} trades)</h3>
+            <div class="feedback-content">
+                <strong>Summarizer Guidance:</strong><br>
+                ${formatFeedback(latestFeedback.summarizer_feedback)}
+            </div>
+            <div class="feedback-content">
+                <strong>Decider Guidance:</strong><br>
+                ${formatFeedback(latestFeedback.decider_feedback)}
+            </div>
+        `;
+        
+        container.innerHTML = content;
+    }
+
+    function formatFeedback(feedback) {
+        if (!feedback || feedback === 'null') return 'No specific guidance available';
+        
+        // Try to parse JSON feedback
+        try {
+            if (typeof feedback === 'string') {
+                const parsed = JSON.parse(feedback);
+                if (typeof parsed === 'object') {
+                    return JSON.stringify(parsed, null, 2);
                 }
-                
-                return `
-                    <tr>
-                        <td>${timestamp}</td>
-                        <td>${type}</td>
-                        <td>${details}</td>
-                        <td>${performance}</td>
-                    </tr>
-                `;
-            }).join('');
+                return parsed;
+            }
+            return JSON.stringify(feedback, null, 2);
+        } catch {
+            return feedback;
         }
+    }
 
-        function updateAIFeedbackTable(responses) {
-            const tbody = document.getElementById('aiFeedbackBody');
+    function updatePerformanceChart(periodData) {
+        const ctx = document.getElementById('performanceChart').getContext('2d');
+        
+        if (performanceChart) {
+            performanceChart.destroy();
+        }
+        
+        const periods = ['7d', '14d', '30d'];
+        const successRates = periods.map(p => (periodData[p]?.success_rate || 0) * 100);
+        const avgProfits = periods.map(p => (periodData[p]?.avg_profit || 0) * 100);
+        
+        performanceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['7 Days', '14 Days', '30 Days'],
+                datasets: [
+                    {
+                        label: 'Success Rate (%)',
+                        data: successRates,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Average Profit (%)',
+                        data: avgProfits,
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Success Rate (%)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Average Profit (%)' },
+                        grid: { drawOnChartArea: false }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Performance Trends'
+                    }
+                }
+            }
+        });
+    }
+
+    function updateOutcomesTable(outcomes) {
+        const tbody = document.getElementById('outcomesBody');
+        
+        if (outcomes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7">No trade outcomes recorded yet</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = outcomes.map(outcome => `
+            <tr class="outcome-${outcome.category}">
+                <td>${outcome.ticker}</td>
+                <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
+                <td>$${outcome.purchase_price.toFixed(2)}</td>
+                <td>$${outcome.sell_price.toFixed(2)}</td>
+                <td>${(outcome.gain_loss_pct * 100).toFixed(2)}%</td>
+                <td>${outcome.category.replace('_', ' ')}</td>
+                <td>${outcome.hold_days}</td>
+            </tr>
+        `).join('');
+    }
+
+    function updateFeedbackLogTable(feedbackLog) {
+        const tbody = document.getElementById('feedbackLogBody');
+        
+        if (feedbackLog.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No feedback log entries yet</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = feedbackLog.map(entry => {
+            const timestamp = new Date(entry.timestamp).toLocaleString();
+            let type = entry.type === 'feedback_analysis' ? '📊 Analysis' : '⚙️ Instruction Update';
+            let details = '';
+            let performance = '';
             
-            if (responses.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4">No AI feedback responses yet</td></tr>';
-                return;
+            if (entry.type === 'feedback_analysis') {
+                details = `${entry.trades_analyzed} trades analyzed (${entry.lookback_days}d lookback)`;
+                performance = `${entry.success_rate.toFixed(1)}% success, ${entry.avg_profit.toFixed(2)}% avg profit`;
+            } else {
+                details = `${entry.agent_type} agent: ${entry.reason}`;
+                performance = entry.performance_trigger ? 'Triggered by performance' : 'Manual update';
             }
             
-            tbody.innerHTML = responses.map(response => {
-                const timestamp = new Date(response.timestamp).toLocaleString();
-                const agentType = response.agent_type.charAt(0).toUpperCase() + response.agent_type.slice(1);
-                const responsePreview = response.ai_response.substring(0, 100) + (response.ai_response.length > 100 ? '...' : '');
-                const type = response.is_manual_request ? '🖱️ Manual' : '🤖 Auto';
-                
-                return `
-                    <tr onclick="showFullResponse(${response.id})" style="cursor: pointer;">
-                        <td>${timestamp}</td>
-                        <td>${agentType}</td>
-                        <td>${responsePreview}</td>
-                        <td>${type}</td>
-                    </tr>
-                `;
-            }).join('');
-        }
+            return `
+                <tr>
+                    <td>${timestamp}</td>
+                    <td>${type}</td>
+                    <td>${details}</td>
+                    <td>${performance}</td>
+                </tr>
+            `;
+        }).join('');
+    }
 
-        function showFullResponse(responseId) {
-            // This could open a modal or navigate to a detailed view
-            alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
+    function updateAIFeedbackTable(responses) {
+        const tbody = document.getElementById('aiFeedbackBody');
+        
+        if (responses.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4">No AI feedback responses yet</td></tr>';
+            return;
         }
-
-        function refreshData() {
-            loadFeedbackData();
-            loadTradeOutcomes();
-            loadFeedbackLog();
-            loadAIFeedbackResponses();
-        }
-
-        // Load data on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            refreshData();
+        
+        tbody.innerHTML = responses.map(response => {
+            const timestamp = new Date(response.timestamp).toLocaleString();
+            const agentType = response.agent_type.charAt(0).toUpperCase() + response.agent_type.slice(1);
+            const responsePreview = response.ai_response.substring(0, 100) + (response.ai_response.length > 100 ? '...' : '');
+            const type = response.is_manual_request ? '🖱️ Manual' : '🤖 Auto';
             
-            // Auto-refresh every 30 seconds
-            setInterval(refreshData, 30000);
-        });
-    </script>
-</body>
-</html>
+            return `
+                <tr onclick="showFullResponse(${response.id})" style="cursor: pointer;">
+                    <td>${timestamp}</td>
+                    <td>${agentType}</td>
+                    <td>${responsePreview}</td>
+                    <td>${type}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function showFullResponse(responseId) {
+        // This could open a modal or navigate to a detailed view
+        alert(`Full response view for ID ${responseId} - This could be expanded to show the complete AI response in a modal.`);
+    }
+
+    function refreshData() {
+        loadFeedbackData();
+        loadTradeOutcomes();
+        loadFeedbackLog();
+        loadAIFeedbackResponses();
+    }
+
+    // Load data on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        refreshData();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+    });
+</script>
+{% endblock %}

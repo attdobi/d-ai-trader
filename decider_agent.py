@@ -407,19 +407,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Failed to record portfolio snapshot: {e}")
         
-        # Run feedback analysis periodically (every few runs)
-        try:
-            # Simple check - run feedback analysis occasionally
-            import random
-            if random.random() < 0.3:  # 30% chance to run feedback analysis
-                print("\n=== Running Performance Feedback Analysis ===")
-                feedback_result = feedback_tracker.analyze_recent_outcomes()
-                if feedback_result:
-                    print(f"Performance feedback generated (ID: {feedback_result['feedback_id']})")
-                    print(f"Recent performance: {feedback_result['success_rate']:.1%} success rate")
-                else:
-                    print("No recent trades to analyze for feedback")
-        except Exception as e:
-            print(f"Feedback analysis failed: {e}")
-        
         print(f"Stored decisions and updated holdings for run {run_id}")
