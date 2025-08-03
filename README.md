@@ -1,6 +1,6 @@
-# AI-Powered Trading System with Profit Tracking
+# AI-Powered Trading System with Automated Execution
 
-An intelligent trading system that uses AI agents to analyze financial news from multiple sources, make trading decisions, and track portfolio performance with comprehensive profit/loss monitoring.
+An intelligent trading system that uses AI agents to analyze financial news from multiple sources, make trading decisions, and track portfolio performance with comprehensive profit/loss monitoring. **Now with full automation and intelligent scheduling!**
 
 ## 🚀 Features
 
@@ -9,6 +9,14 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **AI-Powered Decision Making**: Uses OpenAI GPT-4 to analyze news sentiment and generate trading recommendations
 - **Automated Trade Execution**: Executes buy/sell decisions based on AI analysis
 - **Real-Time Price Updates**: Automatically updates stock prices and portfolio values
+
+### 🤖 **NEW: Automated Execution System**
+- **Intelligent Scheduling**: Market-aware automation that respects trading hours and holidays
+- **Summarizer Agents**: Run hourly during market hours (8:25 AM - 5:25 PM ET) and once daily on weekends (3:00 PM ET)
+- **Decider Agent**: Runs every 30 minutes during market hours (9:30 AM - 4:00 PM ET, M-F)
+- **Feedback Agent**: Runs once daily after market close (4:30 PM ET)
+- **Enhanced Data Processing**: Processes ALL unseen summaries, not just the latest batch
+- **Manual Trigger System**: Dashboard buttons for immediate testing and manual execution
 
 ### Advanced Profit Tracking
 - **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
@@ -22,6 +30,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Trade History**: Complete record of all trading decisions and their outcomes
 - **News Summaries**: Display of analyzed financial news that influenced trading decisions
 - **Feedback Dashboard**: AI-powered performance analysis and agent improvement insights
+- **Manual Trigger Controls**: Buttons to manually run summarizer, decider, and feedback agents for testing
 
 ### 🧠 AI Feedback & Learning System
 - **Outcome Tracking**: Automatically records and categorizes trade results (significant profit, moderate profit, break-even, moderate loss, significant loss)
@@ -33,16 +42,21 @@ An intelligent trading system that uses AI agents to analyze financial news from
 ## 📁 Project Structure
 
 ```
+├── d_ai_trader.py             # 🆕 Main automation orchestrator
 ├── main.py                    # News scraping and AI analysis
-├── decider_agent.py           # Trading decision engine
+├── decider_agent.py           # Trading decision engine (enhanced)
 ├── feedback_agent.py          # AI feedback and learning system
-├── dashboard_server.py        # Web dashboard and API endpoints
+├── dashboard_server.py        # Web dashboard and API endpoints (enhanced)
 ├── config.py                  # Database configuration and AI setup
+├── start_d_ai_trader.sh       # 🆕 Easy startup script
+├── test_system.py             # 🆕 System validation script
+├── requirements.txt           # 🆕 All dependencies
 ├── run_feedback_analysis.py   # Manual feedback analysis tool
 ├── test_feedback_system.py    # Feedback system demonstration
 ├── FEEDBACK_SYSTEM.md         # Comprehensive feedback system documentation
+├── AUTOMATION_README.md       # 🆕 Automation system documentation
 ├── templates/                 # HTML templates for web interface
-│   ├── dashboard.html         # Main dashboard with profit tracking
+│   ├── dashboard.html         # Main dashboard with profit tracking (enhanced)
 │   ├── feedback_dashboard.html # AI feedback and performance analysis
 │   ├── trades.html            # Trading history view
 │   ├── summaries.html         # News analysis summaries
@@ -72,7 +86,11 @@ sudo -u postgres createdb adobi
 
 ### Python Dependencies
 ```bash
-pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv openai selenium undetected-chromedriver beautifulsoup4 chromedriver-autoinstaller
+# Install all dependencies at once
+pip install -r requirements.txt
+
+# Or install individually
+pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv openai selenium undetected-chromedriver beautifulsoup4 chromedriver-autoinstaller schedule pytz
 ```
 
 ### Configuration
@@ -81,39 +99,66 @@ pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv opena
 
 ## 🎯 Usage
 
-### 1. Collect Financial News
+### 🚀 **NEW: Automated Execution (Recommended)**
 ```bash
-python3 main.py
+# Start the complete automated system
+./start_d_ai_trader.sh
+
+# Or run manually
+python d_ai_trader.py
+```
+- **Fully automated**: Runs all components on schedule
+- **Market-aware**: Respects trading hours and holidays
+- **Intelligent processing**: Handles all unseen summaries
+- **Comprehensive logging**: Full system monitoring
+
+### 🧪 **Testing & Manual Execution**
+```bash
+# Test system components
+python test_system.py
+
+# Start dashboard with manual triggers
+python dashboard_server.py
+```
+- **Manual triggers**: Use dashboard buttons for immediate testing
+- **End-to-end testing**: Run all agents in sequence
+- **Real-time monitoring**: Watch system execution live
+
+### 📊 **Traditional Manual Usage**
+
+#### 1. Collect Financial News
+```bash
+python main.py
 ```
 - Scrapes financial news from 5 major sources
 - Uses AI to analyze sentiment and extract trading insights
 - Stores analysis in database for decision making
 
-### 2. Make Trading Decisions
+#### 2. Make Trading Decisions
 ```bash
-python3 decider_agent.py
+python decider_agent.py
 ```
 - Analyzes latest news summaries
 - Generates buy/sell recommendations using AI
 - Executes trades and updates portfolio
 - Records portfolio snapshots for performance tracking
 
-### 3. Monitor Performance
+#### 3. Monitor Performance
 ```bash
-python3 dashboard_server.py
+python dashboard_server.py
 ```
 - Starts web dashboard at `http://localhost:8080`
 - View real-time portfolio performance
 - Monitor profit/loss trends
 - Analyze trading history and news impact
 
-### 4. Analyze Feedback & Performance
+#### 4. Analyze Feedback & Performance
 ```bash
 # Run comprehensive feedback analysis
-python3 run_feedback_analysis.py
+python run_feedback_analysis.py
 
 # Demonstrate feedback system capabilities
-python3 test_feedback_system.py
+python test_feedback_system.py
 ```
 - Analyzes trading outcomes and success patterns
 - Generates AI-powered insights for improvement
@@ -147,6 +192,10 @@ python3 test_feedback_system.py
 - `/api/history` - Account value history
 - `/api/feedback` - Feedback analysis and performance metrics
 - `/api/trade_outcomes` - Recent trade outcomes and categorization
+- `/api/trigger/summarizer` - 🆕 Manually trigger summarizer agents
+- `/api/trigger/decider` - 🆕 Manually trigger decider agent
+- `/api/trigger/feedback` - 🆕 Manually trigger feedback agent
+- `/api/trigger/all` - 🆕 Manually trigger all agents in sequence
 
 ### 🧠 Feedback Dashboard Features
 - **Performance Metrics**: Success rate, average profit, trade count across different time periods (7d, 14d, 30d)
@@ -169,6 +218,7 @@ python3 test_feedback_system.py
 2. **Portfolio Context**: Considers current holdings and cash balance
 3. **Risk Management**: Enforces position limits and cash reserves
 4. **Decision Generation**: AI creates specific buy/sell recommendations with reasoning
+5. **🆕 Enhanced Processing**: Processes ALL unseen summaries, not just the latest batch
 
 ## 💰 Profit Tracking Implementation
 
@@ -230,12 +280,15 @@ Portfolio snapshots are automatically recorded:
 - **portfolio_history**: Time-series portfolio snapshots
 - **trade_decisions**: AI trading recommendations and outcomes
 - **summaries**: Financial news analysis and insights
+- **🆕 processed_summaries**: Tracks which summaries have been processed by each agent
+- **🆕 system_runs**: Records all system runs with status and timing information
 
 ### Technology Stack
 - **Backend**: Python, SQLAlchemy, PostgreSQL
 - **Frontend**: Flask, Chart.js, HTML/CSS/JavaScript
 - **AI**: OpenAI GPT-4 for analysis and decision making
 - **Data**: yfinance for market data, Selenium for web scraping
+- **🆕 Automation**: schedule, pytz for intelligent scheduling and timezone handling
 
 ### Security & Authentication
 - PostgreSQL peer authentication
@@ -256,13 +309,29 @@ MIN_BUFFER = 100        # Minimum cash reserve
 REFRESH_INTERVAL_MINUTES = 10  # Price update frequency
 ```
 
+### 🆕 **Automation Schedule**
+```python
+# Summarizer Agents
+WEEKDAY_SUMMARIZER_HOURS = "8:25-17:25"  # Every hour at :25
+WEEKEND_SUMMARIZER_TIME = "15:00"        # Once daily at 3pm ET
+
+# Decider Agent  
+MARKET_HOURS = "9:30-16:00"              # Every 30 minutes during market hours
+WEEKDAYS_ONLY = "Monday-Friday"
+
+# Feedback Agent
+FEEDBACK_TIME = "16:30"                  # Once daily after market close
+```
+
 ## 🚨 Important Notes
 
 1. **Educational Purpose**: This system is for educational and research purposes
 2. **Risk Warning**: Trading involves financial risk - use with caution
 3. **API Costs**: Monitor OpenAI API usage to control costs
-4. **Market Hours**: Consider market hours for price updates
+4. **Market Hours**: System automatically respects market hours and holidays
 5. **Demo Mode**: Test with small amounts before full deployment
+6. **🆕 Automation**: System runs continuously - monitor logs and performance
+7. **🆕 Testing**: Use manual triggers for immediate testing without waiting for scheduled runs
 
 ## 🤝 Contributing
 
@@ -285,7 +354,18 @@ This project is for educational purposes. Please ensure compliance with relevant
 - **Selenium**: Web scraping
 - **Chart.js**: Data visualization
 - **PostgreSQL**: Database storage
+- **🆕 schedule**: Python job scheduling
+- **🆕 pytz**: Timezone handling
+- **🆕 undetected-chromedriver**: Enhanced web scraping
+- **🆕 chromedriver-autoinstaller**: Automatic Chrome driver management
 
 ---
 
 **⚠️ Disclaimer**: This software is for educational purposes only. Trading involves significant financial risk. Always do your own research and consider consulting with financial professionals before making investment decisions.
+
+---
+
+## 📚 **Additional Documentation**
+
+- **[AUTOMATION_README.md](AUTOMATION_README.md)**: Comprehensive guide to the automation system
+- **[FEEDBACK_SYSTEM.md](FEEDBACK_SYSTEM.md)**: Detailed feedback system documentation

@@ -152,8 +152,10 @@ class DAITraderOrchestrator:
     
     def run_summarizer_agents(self):
         """Run the summarizer agents"""
-        run_id = f"summarizer_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        logger.info(f"Starting summarizer agents run: {run_id}")
+        # Create both the internal run_id and the timestamp for main.py
+        internal_run_id = f"summarizer_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+        timestamp = datetime.now().strftime('%Y%m%dT%H%M%S')
+        logger.info(f"Starting summarizer agents run: {internal_run_id}")
         
         try:
             # Record run start
@@ -162,14 +164,16 @@ class DAITraderOrchestrator:
                     INSERT INTO system_runs (run_type, details)
                     VALUES ('summarizer', :details)
                 """), {
-                    "details": json.dumps({"run_id": run_id, "timestamp": datetime.now().isoformat()})
+                    "details": json.dumps({"run_id": internal_run_id, "timestamp": datetime.now().isoformat()})
                 })
             
-            # Run the summarizer agents
-            summarizer_main.RUN_TIMESTAMP = run_id
+            # Run the summarizer agents with the correct timestamp format
+            summarizer_main.RUN_TIMESTAMP = timestamp
+            summarizer_main.RUN_DIR = os.path.join(summarizer_main.SCREENSHOT_DIR, timestamp)
+            os.makedirs(summarizer_main.RUN_DIR, exist_ok=True)
             summarizer_main.run_summary_agents()
             
-            logger.info(f"Summarizer agents completed successfully: {run_id}")
+            logger.info(f"Summarizer agents completed successfully: {internal_run_id}")
             
             # Update run status
             with engine.begin() as conn:
@@ -177,7 +181,7 @@ class DAITraderOrchestrator:
                     UPDATE system_runs 
                     SET end_time = CURRENT_TIMESTAMP, status = 'completed'
                     WHERE run_type = 'summarizer' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
+                """), {"run_id": internal_run_id})
                 
         except Exception as e:
             logger.error(f"Error running summarizer agents: {e}")
@@ -187,7 +191,7 @@ class DAITraderOrchestrator:
                     UPDATE system_runs 
                     SET end_time = CURRENT_TIMESTAMP, status = 'failed'
                     WHERE run_type = 'summarizer' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
+                """), {"run_id": internal_run_id})
     
     def run_decider_agent(self):
         """Run the decider agent with all unprocessed summaries"""
