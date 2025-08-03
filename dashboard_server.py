@@ -565,6 +565,67 @@ def trigger_all():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/reset-portfolio', methods=['POST'])
+def reset_portfolio():
+    """Reset portfolio to initial state with $10,000 cash"""
+    try:
+        with engine.begin() as conn:
+            # Get current holdings to record them as sold for history
+            current_holdings = conn.execute(text("""
+                SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss
+                FROM holdings
+                WHERE is_active = TRUE AND ticker != 'CASH'
+            """)).fetchall()
+            
+            # Record current holdings as sold for historical tracking
+            for holding in current_holdings:
+                if holding.shares > 0:
+                    # Record as a sell transaction
+                    conn.execute(text("""
+                        INSERT INTO trade_outcomes (
+                            ticker, sell_timestamp, purchase_price, sell_price, 
+                            shares, gain_loss_amount, gain_loss_percentage, 
+                            hold_duration_days, original_reason, sell_reason, outcome_category
+                        ) VALUES (
+                            :ticker, CURRENT_TIMESTAMP, :purchase_price, :current_price,
+                            :shares, :gain_loss, 
+                            CASE WHEN :total_value > 0 THEN (:gain_loss / :total_value * 100) ELSE 0 END,
+                            0, 'Portfolio reset', 'Portfolio reset', 'break_even'
+                        )
+                    """), {
+                        "ticker": holding.ticker,
+                        "purchase_price": float(holding.purchase_price),
+                        "current_price": float(holding.current_price),
+                        "shares": float(holding.shares),
+                        "gain_loss": float(holding.gain_loss),
+                        "total_value": float(holding.total_value)
+                    })
+            
+            # Deactivate all current holdings
+            conn.execute(text("""
+                UPDATE holdings 
+                SET is_active = FALSE, shares = 0, current_value = 0, gain_loss = 0
+                WHERE ticker != 'CASH'
+            """))
+            
+            # Reset cash to $10,000
+            conn.execute(text("""
+                UPDATE holdings 
+                SET current_value = 10000, total_value = 10000, current_price = 10000
+                WHERE ticker = 'CASH'
+            """))
+            
+            # Record portfolio snapshot after reset
+            record_portfolio_snapshot()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Portfolio reset successfully. Cash balance set to $10,000.'
+            })
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 def update_prices():
     while True:
         time.sleep(REFRESH_INTERVAL_MINUTES * 60)
