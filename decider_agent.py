@@ -33,6 +33,31 @@ def fetch_summaries(run_id):
         """), {"run_id": run_id})
         return [row._mapping for row in result]
 
+def get_unprocessed_summaries():
+    """Get all summaries that haven't been processed by the decider yet"""
+    with engine.connect() as conn:
+        # Get all summaries that haven't been processed
+        result = conn.execute(text("""
+            SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
+            FROM summaries s
+            LEFT JOIN processed_summaries ps ON s.id = ps.summary_id AND ps.processed_by = 'decider'
+            WHERE ps.summary_id IS NULL
+            ORDER BY s.timestamp ASC
+        """))
+        return [row._mapping for row in result]
+
+def mark_summaries_processed(summary_ids):
+    """Mark summaries as processed by the decider"""
+    with engine.begin() as conn:
+        for summary_id in summary_ids:
+            conn.execute(text("""
+                INSERT INTO processed_summaries (summary_id, processed_by, run_id)
+                VALUES (:summary_id, 'decider', :run_id)
+            """), {
+                "summary_id": summary_id,
+                "run_id": datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            })
+
 def fetch_holdings():
     with engine.begin() as conn:
         conn.execute(text("""
@@ -384,9 +409,11 @@ def store_trade_decisions(decisions, run_id):
         })
 
 if __name__ == "__main__":
-    run_id = get_latest_run_id()
-    if not run_id:
-        print("No summaries found.")
+    # Get unprocessed summaries instead of just the latest run
+    unprocessed_summaries = get_unprocessed_summaries()
+    
+    if not unprocessed_summaries:
+        print("No unprocessed summaries found.")
         # Still record initial portfolio snapshot
         try:
             record_portfolio_snapshot()
@@ -394,11 +421,20 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Failed to record initial snapshot: {e}")
     else:
-        summaries = fetch_summaries(run_id)
+        print(f"Found {len(unprocessed_summaries)} unprocessed summaries")
+        
+        # Create a run_id based on the latest timestamp
+        latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
+        run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
+        
         holdings = fetch_holdings()
-        decisions = ask_decision_agent(summaries, run_id, holdings)
+        decisions = ask_decision_agent(unprocessed_summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
         update_holdings(decisions)
+        
+        # Mark summaries as processed
+        summary_ids = [s['id'] for s in unprocessed_summaries]
+        mark_summaries_processed(summary_ids)
         
         # Record portfolio snapshot after trades
         try:
@@ -408,3 +444,4 @@ if __name__ == "__main__":
             print(f"Failed to record portfolio snapshot: {e}")
         
         print(f"Stored decisions and updated holdings for run {run_id}")
+        print(f"Marked {len(summary_ids)} summaries as processed")
