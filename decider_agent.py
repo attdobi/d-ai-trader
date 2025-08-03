@@ -102,7 +102,7 @@ def update_holdings(decisions):
                 
                 if existing:
                     if existing.is_active:
-                        # Accumulate shares and total investment (cost basis) for active position
+                        # Accumulate shares and total investment (cost basis)
                         new_shares = float(existing.shares) + shares
                         new_total_value = float(existing.total_value) + actual_spent
                         new_current_value = new_shares * price
@@ -135,7 +135,7 @@ def update_holdings(decisions):
                         })
                         print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
                     else:
-                        # Reactivate the position with new shares
+                        # Reactivate the holding with new shares
                         conn.execute(text("""
                             UPDATE holdings SET
                                 shares = :shares,
@@ -160,7 +160,7 @@ def update_holdings(decisions):
                             "gain_loss": 0.0,
                             "reason": reason
                         })
-                        print(f"Reactivated position: {shares} shares of {ticker} at ${price:.2f}")
+                        print(f"Reactivated {ticker}: {shares} shares at ${price:.2f}")
                 else:
                     # First purchase of this ticker
                     conn.execute(text("""
@@ -183,8 +183,8 @@ def update_holdings(decisions):
                 cash -= actual_spent
 
             elif action == "sell":
-                holding = conn.execute(text("SELECT shares, purchase_price, is_active FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
-                if holding and holding.is_active:
+                holding = conn.execute(text("SELECT shares, purchase_price FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                if holding:
                     shares = float(holding.shares)
                     purchase_price = float(holding.purchase_price)
                     total_value = shares * price
@@ -209,11 +209,6 @@ def update_holdings(decisions):
                     })
 
                     cash += total_value
-                    print(f"Sold {shares} shares of {ticker} at ${price:.2f}. Gain/Loss: ${gain_loss:.2f}")
-                elif holding and not holding.is_active:
-                    print(f"Cannot sell {ticker} - position is already inactive")
-                else:
-                    print(f"Cannot sell {ticker} - no active position found")
 
         # Update cash balance
         conn.execute(text("""
