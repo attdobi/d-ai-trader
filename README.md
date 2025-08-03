@@ -50,6 +50,13 @@ An intelligent trading system that uses AI agents to analyze financial news from
 └── screenshots/               # Captured screenshots from news sites
 ```
 
+## ⚡ Quick Start
+
+Want to see the feedback system in action? Run this demo (no setup required):
+```bash
+python3 test_feedback_system.py
+```
+
 ## 🔧 Installation & Setup
 
 ### Prerequisites
@@ -81,44 +88,97 @@ pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv opena
 
 ## 🎯 Usage
 
-### 1. Collect Financial News
+### Complete Trading Workflow
+
+#### Step 1: Collect Financial News
 ```bash
 python3 main.py
 ```
-- Scrapes financial news from 5 major sources
+- Scrapes financial news from 5 major sources (CNN, CNBC, Bloomberg, Fox Business, Yahoo Finance)
 - Uses AI to analyze sentiment and extract trading insights
 - Stores analysis in database for decision making
 
-### 2. Make Trading Decisions
+#### Step 2: Make Trading Decisions 
 ```bash
 python3 decider_agent.py
 ```
 - Analyzes latest news summaries
+- **Uses previous feedback** to improve decisions automatically
 - Generates buy/sell recommendations using AI
 - Executes trades and updates portfolio
+- **Automatically records sell outcomes** for feedback system
 - Records portfolio snapshots for performance tracking
 
-### 3. Monitor Performance
+#### Step 3: Start Dashboard (One Time Setup)
 ```bash
 python3 dashboard_server.py
 ```
 - Starts web dashboard at `http://localhost:8080`
-- View real-time portfolio performance
-- Monitor profit/loss trends
-- Analyze trading history and news impact
+- Access main dashboard at: `http://localhost:8080`
+- Access feedback analysis at: `http://localhost:8080/feedback`
 
-### 4. Analyze Feedback & Performance
+#### Repeat Steps 1-2 for Continuous Trading
+The system automatically:
+- ✅ Records trade outcomes
+- ✅ Analyzes performance patterns  
+- ✅ Generates AI feedback
+- ✅ Improves future decisions
+
+### 4. View Feedback & Performance Analysis
+
+#### Option A: Web Dashboard (Recommended)
 ```bash
-# Run comprehensive feedback analysis
+# Start the dashboard server (if not already running)
+python3 dashboard_server.py
+
+# Then visit: http://localhost:8080/feedback
+```
+
+#### Option B: Command Line Analysis
+```bash
+# Run comprehensive feedback analysis in terminal
 python3 run_feedback_analysis.py
 
-# Demonstrate feedback system capabilities
+# Demonstrate feedback system with sample data
 python3 test_feedback_system.py
 ```
-- Analyzes trading outcomes and success patterns
-- Generates AI-powered insights for improvement
-- Access feedback dashboard at `http://localhost:8080/feedback`
-- View performance trends and agent learning progress
+
+#### What the Feedback System Provides:
+- 📊 **Success Rate Analysis**: Percentage of profitable trades over different time periods
+- 📈 **Performance Trends**: Charts showing improvement over time
+- 🎯 **AI Insights**: Specific recommendations for improving trading strategy
+- 🔍 **Pattern Recognition**: What news patterns lead to successful trades
+- 📝 **Agent Guidance**: Automatic feedback to improve future decisions
+
+> **Note**: The feedback system works automatically! Every time you run trading decisions (`decider_agent.py`), outcomes are recorded and analyzed. The agents automatically learn and improve from this data.
+
+## 🔄 How to Generate and View Feedback
+
+### Automatic Feedback (Recommended)
+The feedback system runs automatically when you execute normal trading:
+
+1. **Generate Trading Data**: Run `python3 main.py` then `python3 decider_agent.py` multiple times
+2. **View Feedback**: Visit `http://localhost:8080/feedback` in your browser
+
+### Manual Feedback Analysis
+Force feedback analysis at any time:
+```bash
+# Analyze recent trading performance
+python3 run_feedback_analysis.py
+```
+
+### Demo Mode (No Database Required)
+See how the feedback system works with sample data:
+```bash
+# Run interactive demonstration
+python3 test_feedback_system.py
+```
+
+### What Triggers Feedback Generation?
+- ✅ **Sell Transactions**: Every sell automatically records outcome
+- ✅ **Periodic Analysis**: 30% chance of running analysis each trading cycle
+- ✅ **Manual Analysis**: Run `run_feedback_analysis.py` anytime
+- ✅ **Dashboard Access**: Real-time feedback available at `/feedback` endpoint
 
 ## 📊 Dashboard Features
 
