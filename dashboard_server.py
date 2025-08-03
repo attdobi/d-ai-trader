@@ -275,4 +275,4 @@ def start_price_updater():
 
 if __name__ == "__main__":
     start_price_updater()
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)
