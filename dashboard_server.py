@@ -297,6 +297,57 @@ def get_trade_outcomes():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+@app.route('/api/feedback_log')
+def get_feedback_log():
+    """Get feedback log with timestamps"""
+    try:
+        with engine.connect() as conn:
+            # Get agent feedback entries
+            feedback_result = conn.execute(text("""
+                SELECT analysis_timestamp, lookback_period_days, total_trades_analyzed,
+                       success_rate, avg_profit_percentage, summarizer_feedback, decider_feedback
+                FROM agent_feedback 
+                ORDER BY analysis_timestamp DESC 
+                LIMIT 100
+            """)).fetchall()
+            
+            # Get instruction updates
+            instruction_result = conn.execute(text("""
+                SELECT agent_type, update_timestamp, reason_for_update, performance_trigger
+                FROM agent_instruction_updates 
+                ORDER BY update_timestamp DESC 
+                LIMIT 50
+            """)).fetchall()
+            
+            feedback_log = []
+            for row in feedback_result:
+                feedback_log.append({
+                    'type': 'feedback_analysis',
+                    'timestamp': row.analysis_timestamp.isoformat() if row.analysis_timestamp else None,
+                    'lookback_days': row.lookback_period_days,
+                    'trades_analyzed': row.total_trades_analyzed,
+                    'success_rate': float(row.success_rate) * 100,
+                    'avg_profit': float(row.avg_profit_percentage) * 100,
+                    'summarizer_feedback': row.summarizer_feedback,
+                    'decider_feedback': row.decider_feedback
+                })
+            
+            for row in instruction_result:
+                feedback_log.append({
+                    'type': 'instruction_update',
+                    'timestamp': row.update_timestamp.isoformat() if row.update_timestamp else None,
+                    'agent_type': row.agent_type,
+                    'reason': row.reason_for_update,
+                    'performance_trigger': row.performance_trigger
+                })
+            
+            # Sort by timestamp descending
+            feedback_log.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            return jsonify(feedback_log)
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
 @app.route('/feedback')
 def feedback_dashboard():
     """Feedback analysis dashboard page"""
