@@ -348,6 +348,49 @@ def get_feedback_log():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+@app.route('/api/generate_ai_feedback', methods=['POST'])
+def generate_ai_feedback():
+    """Generate AI feedback for a specific agent"""
+    try:
+        data = request.get_json()
+        agent_type = data.get('agent_type')
+        context_data = data.get('context_data')
+        performance_metrics = data.get('performance_metrics')
+        is_manual_request = data.get('is_manual_request', True)
+        
+        if not agent_type:
+            return jsonify({'error': 'agent_type is required'}), 400
+        
+        # Initialize feedback tracker
+        from feedback_agent import TradeOutcomeTracker
+        feedback_tracker = TradeOutcomeTracker()
+        
+        # Generate AI feedback
+        result = feedback_tracker.generate_ai_feedback_response(
+            agent_type=agent_type,
+            context_data=context_data,
+            performance_metrics=performance_metrics,
+            is_manual_request=is_manual_request
+        )
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai_feedback_responses')
+def get_ai_feedback_responses():
+    """Get recent AI feedback responses"""
+    try:
+        from feedback_agent import TradeOutcomeTracker
+        feedback_tracker = TradeOutcomeTracker()
+        
+        limit = request.args.get('limit', 50, type=int)
+        responses = feedback_tracker.get_recent_ai_feedback_responses(limit=limit)
+        
+        return jsonify(responses)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/feedback')
 def feedback_dashboard():
     """Feedback analysis dashboard page"""
