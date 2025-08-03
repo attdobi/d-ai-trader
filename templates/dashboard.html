@@ -20,6 +20,12 @@
         <p class="value">${{ '%.2f'|format(total_profit_loss) }}</p>
         <p class="percentage">({{ '%.2f'|format(percentage_gain) }}%)</p>
     </div>
+    <div class="metric-card {% if net_gain_loss >= 0 %}gain{% else %}loss{% endif %}">
+        <h3>Net Gain/Loss</h3>
+        <p class="value">${{ '%.2f'|format(net_gain_loss) }}</p>
+        <p class="percentage">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
+        <p class="subtitle">on ${{ '%.0f'|format(initial_investment) }} initial</p>
+    </div>
 </div>
 
 <style>
@@ -53,6 +59,12 @@
     margin: 5px 0 0 0;
     font-size: 14px;
     font-weight: 600;
+}
+.metric-card .subtitle {
+    margin: 2px 0 0 0;
+    font-size: 11px;
+    color: #6c757d;
+    font-weight: normal;
 }
 .metric-card.gain .value, .metric-card.gain .percentage {
     color: #28a745;
@@ -95,12 +107,16 @@
 
 <div class="charts-container">
     <div class="chart-section">
-        <h2 id="chart-title">Account Value Over Time</h2>
+        <h2 id="chart-title">Portfolio Value Over Time</h2>
         <canvas id="historyChart"></canvas>
     </div>
     <div class="chart-section">
-        <h2>Portfolio Performance Over Time</h2>
-        <canvas id="profitChart"></canvas>
+        <h2>Net Performance vs Initial $10,000</h2>
+        <canvas id="performanceChart"></canvas>
+    </div>
+    <div class="chart-section">
+        <h2>Portfolio Breakdown</h2>
+        <canvas id="breakdownChart"></canvas>
     </div>
 </div>
 
@@ -123,13 +139,15 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     const ctx = document.getElementById('historyChart').getContext('2d');
-    const profitCtx = document.getElementById('profitChart').getContext('2d');
+    const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+    const breakdownCtx = document.getElementById('breakdownChart').getContext('2d');
     let chart;
-    let profitChart;
+    let performanceChart;
+    let breakdownChart;
 
-    function renderChart(data, label = 'Total Account Value') {
-        const labels = data.map(row => row.current_timestamp);
-        const values = data.map(row => row.total_value || row.current_value);
+    function renderChart(data, label = 'Portfolio Value') {
+        const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
+        const values = data.map(row => row.total_portfolio_value);
 
         if (chart) chart.destroy();
 
@@ -141,33 +159,53 @@
                     label: label,
                     data: values,
                     borderColor: '#007bff',
-                    fill: false,
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    fill: true,
                     tension: 0.1
                 }]
             },
             options: {
                 responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
                 scales: {
-                    y: { beginAtZero: false }
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Portfolio Value ($)'
+                        },
+                        beginAtZero: false
+                    }
                 }
             }
         });
     }
 
-    function renderProfitChart(data) {
+    function renderPerformanceChart(data) {
         const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
-        const profitLoss = data.map(row => row.total_profit_loss);
-        const percentageGain = data.map(row => row.percentage_gain);
+        const netGainLoss = data.map(row => row.net_gain_loss);
+        const netPercentageGain = data.map(row => row.net_percentage_gain);
+        const portfolioValue = data.map(row => row.total_portfolio_value);
 
-        if (profitChart) profitChart.destroy();
+        if (performanceChart) performanceChart.destroy();
 
-        profitChart = new Chart(profitCtx, {
+        performanceChart = new Chart(performanceCtx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Profit/Loss ($)',
-                    data: profitLoss,
+                    label: 'Net Gain/Loss ($)',
+                    data: netGainLoss,
                     borderColor: function(context) {
                         const value = context.parsed.y;
                         return value >= 0 ? '#28a745' : '#dc3545';
@@ -180,12 +218,19 @@
                     tension: 0.1,
                     yAxisID: 'y'
                 }, {
-                    label: 'Percentage Gain (%)',
-                    data: percentageGain,
+                    label: 'Net Percentage Gain (%)',
+                    data: netPercentageGain,
                     borderColor: '#17a2b8',
                     fill: false,
                     tension: 0.1,
                     yAxisID: 'y1'
+                }, {
+                    label: 'Portfolio Value ($)',
+                    data: portfolioValue,
+                    borderColor: '#6f42c1',
+                    fill: false,
+                    tension: 0.1,
+                    yAxisID: 'y2'
                 }]
             },
             options: {
@@ -208,7 +253,7 @@
                         position: 'left',
                         title: {
                             display: true,
-                            text: 'Profit/Loss ($)'
+                            text: 'Net Gain/Loss ($)'
                         }
                     },
                     y1: {
@@ -217,8 +262,16 @@
                         position: 'right',
                         title: {
                             display: true,
-                            text: 'Percentage Gain (%)'
+                            text: 'Net Percentage Gain (%)'
                         },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                    },
+                    y2: {
+                        type: 'linear',
+                        display: false,
+                        position: 'right',
                         grid: {
                             drawOnChartArea: false,
                         },
@@ -228,26 +281,94 @@
         });
     }
 
-    function loadChart(ticker = null) {
-        const url = ticker ? `/api/history?ticker=${ticker}` : '/api/history';
-        document.getElementById('chart-title').innerText = ticker ? `History for ${ticker}` : 'Account Value Over Time';
+    function renderBreakdownChart(data) {
+        const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
+        const cashBalance = data.map(row => row.cash_balance);
+        const totalInvested = data.map(row => row.total_invested);
 
-        fetch(url)
-            .then(resp => resp.json())
-            .then(data => renderChart(data, ticker || 'Total Account Value'))
-            .catch(err => console.error('Failed to load chart:', err));
+        if (breakdownChart) breakdownChart.destroy();
+
+        breakdownChart = new Chart(breakdownCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Cash Balance',
+                    data: cashBalance,
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    fill: true,
+                    tension: 0.1
+                }, {
+                    label: 'Invested Amount',
+                    data: totalInvested,
+                    borderColor: '#007bff',
+                    backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Amount ($)'
+                        }
+                    }
+                }
+            }
+        });
     }
 
-    function loadProfitChart() {
+    function loadChart(ticker = null) {
+        if (ticker) {
+            const url = `/api/history?ticker=${ticker}`;
+            document.getElementById('chart-title').innerText = `History for ${ticker}`;
+            fetch(url)
+                .then(resp => resp.json())
+                .then(data => renderChart(data, ticker))
+                .catch(err => console.error('Failed to load chart:', err));
+        } else {
+            document.getElementById('chart-title').innerText = 'Portfolio Value Over Time';
+            fetch('/api/portfolio-history')
+                .then(resp => resp.json())
+                .then(data => renderChart(data, 'Portfolio Value'))
+                .catch(err => console.error('Failed to load chart:', err));
+        }
+    }
+
+    function loadPerformanceChart() {
+        fetch('/api/portfolio-performance')
+            .then(resp => resp.json())
+            .then(data => renderPerformanceChart(data))
+            .catch(err => console.error('Failed to load performance chart:', err));
+    }
+
+    function loadBreakdownChart() {
         fetch('/api/portfolio-history')
             .then(resp => resp.json())
-            .then(data => renderProfitChart(data))
-            .catch(err => console.error('Failed to load profit chart:', err));
+            .then(data => renderBreakdownChart(data))
+            .catch(err => console.error('Failed to load breakdown chart:', err));
     }
 
     window.onload = () => {
         loadChart();
-        loadProfitChart();
+        loadPerformanceChart();
+        loadBreakdownChart();
     };
 </script>
 {% endblock %}
