@@ -7,6 +7,7 @@ import threading
 import time
 import yfinance as yf
 from datetime import datetime
+from feedback_agent import TradeOutcomeTracker
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
@@ -230,6 +231,76 @@ def api_profit_loss():
         """)).fetchall()
         
         return jsonify([dict(row._mapping) for row in result])
+
+@app.route('/api/feedback')
+def get_feedback_data():
+    """Get feedback analysis data"""
+    try:
+        tracker = TradeOutcomeTracker()
+        
+        # Get recent feedback
+        latest_feedback = tracker.get_latest_feedback()
+        
+        # Get trade outcomes for different periods
+        periods = [7, 14, 30]
+        period_data = {}
+        
+        for days in periods:
+            result = tracker.analyze_recent_outcomes(days_back=days)
+            if result:
+                period_data[f'{days}d'] = {
+                    'total_trades': result['total_trades'],
+                    'success_rate': result['success_rate'],
+                    'avg_profit': result['avg_profit']
+                }
+            else:
+                period_data[f'{days}d'] = {
+                    'total_trades': 0,
+                    'success_rate': 0,
+                    'avg_profit': 0
+                }
+        
+        return jsonify({
+            'latest_feedback': latest_feedback,
+            'period_analysis': period_data,
+            'status': 'success'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'status': 'error'})
+
+@app.route('/api/trade_outcomes')
+def get_trade_outcomes():
+    """Get recent trade outcomes"""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT ticker, sell_timestamp, purchase_price, sell_price, 
+                       gain_loss_percentage, outcome_category, hold_duration_days
+                FROM trade_outcomes 
+                ORDER BY sell_timestamp DESC 
+                LIMIT 50
+            """)).fetchall()
+            
+            outcomes = []
+            for row in result:
+                outcomes.append({
+                    'ticker': row.ticker,
+                    'sell_date': row.sell_timestamp.isoformat() if row.sell_timestamp else None,
+                    'purchase_price': float(row.purchase_price),
+                    'sell_price': float(row.sell_price),
+                    'gain_loss_pct': float(row.gain_loss_percentage),
+                    'category': row.outcome_category,
+                    'hold_days': row.hold_duration_days
+                })
+            
+            return jsonify(outcomes)
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/feedback')
+def feedback_dashboard():
+    """Feedback analysis dashboard page"""
+    return render_template('feedback_dashboard.html')
 
 def update_prices():
     while True:
