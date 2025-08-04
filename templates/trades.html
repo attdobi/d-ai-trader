@@ -16,10 +16,10 @@
         {% for trade in trades %}
             {% for decision in trade.data %}
             <tr>
-                <td>{{ decision.ticker }}</td>
-                <td>{{ decision.action }}</td>
-                <td>${{ '%.2f'|format(decision.amount_usd) }}</td>
-                <td>{{ decision.reason }}</td>
+                <td>{{ decision.get('ticker', 'N/A') }}</td>
+                <td>{{ decision.get('action', 'N/A') }}</td>
+                <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
+                <td>{{ decision.get('reason', 'N/A') }}</td>
                 <td>{{ trade.timestamp }}</td>
             </tr>
             {% endfor %}
