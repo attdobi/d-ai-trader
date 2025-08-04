@@ -206,8 +206,40 @@ def try_click_popup(driver, agent_name):
         print(f"Unexpected error in try_click_popup for {agent_name}: {e}")
 
 def summarize_page(agent_name, url):
-    driver.get(url)
-    time.sleep(5)
+    # Special handling for Yahoo Finance which can be slow
+    if "yahoo.com" in url.lower():
+        print(f"Loading {agent_name} (Yahoo Finance - extended timeout)")
+        try:
+            # Set page load timeout for Yahoo Finance
+            driver.set_page_load_timeout(180)  # 3 minutes
+            driver.get(url)
+            time.sleep(8)  # Extra wait for Yahoo Finance
+        except Exception as e:
+            print(f"Timeout loading {agent_name}, retrying with shorter timeout: {e}")
+            try:
+                driver.set_page_load_timeout(60)  # Fallback to 1 minute
+                driver.get(url)
+                time.sleep(5)
+            except Exception as e2:
+                print(f"Failed to load {agent_name} after retry: {e2}")
+                # Return empty summary if we can't load the page
+                return {
+                    "agent": agent_name,
+                    "timestamp": RUN_TIMESTAMP,
+                    "summary": {"error": f"Failed to load page: {e2}"},
+                    "screenshot_paths": [],
+                    "run_id": RUN_TIMESTAMP
+                }
+    else:
+        # Normal handling for other sites
+        driver.get(url)
+        time.sleep(5)
+
+    # Reset timeout to default after successful page load
+    try:
+        driver.set_page_load_timeout(30)  # Reset to 30 seconds default
+    except:
+        pass
 
     try_click_popup(driver, agent_name)
 
@@ -323,8 +355,12 @@ def run_summary_agents():
                 summary = summarize_page(agent_name, url)
                 store_summary(summary)
                 print(f"Stored summary for {agent_name}")
+                # Small delay between agents to prevent overwhelming the system
+                time.sleep(2)
             except Exception as e:
                 print(f"Error processing {agent_name} ({url}): {e}")
+                # Continue with next agent even if one fails
+                continue
                 
     except Exception as e:
         print(f"Failed to create Chrome driver: {e}")
