@@ -302,15 +302,40 @@ def store_summary(summary):
         })
 
 def run_summary_agents():
+    global driver
     initialize_database()
-    for agent_name, url in URLS:
+    
+    # Create a fresh Chrome driver for this run
+    try:
+        # Close existing driver if it exists
+        if 'driver' in globals() and driver:
+            try:
+                driver.quit()
+            except:
+                pass
+        
+        # Create new driver
+        driver = webdriver.Chrome(options=chrome_options)
+        print("Created new Chrome driver for summarizer run")
+        
+        for agent_name, url in URLS:
+            try:
+                summary = summarize_page(agent_name, url)
+                store_summary(summary)
+                print(f"Stored summary for {agent_name}")
+            except Exception as e:
+                print(f"Error processing {agent_name} ({url}): {e}")
+                
+    except Exception as e:
+        print(f"Failed to create Chrome driver: {e}")
+    finally:
+        # Always cleanup the driver
         try:
-            summary = summarize_page(agent_name, url)
-            store_summary(summary)
-            print(f"Stored summary for {agent_name}")
-        except Exception as e:
-            print(f"Error processing {agent_name} ({url}): {e}")
+            if 'driver' in globals() and driver:
+                driver.quit()
+                print("Chrome driver cleaned up")
+        except:
+            pass
 
 if __name__ == "__main__":
     run_summary_agents()
-    driver.quit()
