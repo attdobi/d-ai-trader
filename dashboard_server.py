@@ -130,7 +130,37 @@ def trade_decisions():
               AND data::text NOT LIKE '%%API error, no response%%'
             ORDER BY id DESC LIMIT 20
         """)).fetchall()
-        trades = [dict(row._mapping) for row in result]
+        
+        trades = []
+        for row in result:
+            try:
+                # Parse the JSON data
+                trade_data = json.loads(row.data)
+                
+                # Ensure each decision has all required fields
+                if isinstance(trade_data, list):
+                    for decision in trade_data:
+                        if isinstance(decision, dict):
+                            # Add default values for missing fields
+                            decision.setdefault('ticker', 'N/A')
+                            decision.setdefault('action', 'N/A')
+                            decision.setdefault('amount_usd', 0)
+                            decision.setdefault('reason', 'N/A')
+                
+                trades.append({
+                    'id': row.id,
+                    'timestamp': row.timestamp,
+                    'data': trade_data
+                })
+            except Exception as e:
+                print(f"Failed to parse trade decision {row.id}: {e}")
+                # Add a fallback entry with empty data
+                trades.append({
+                    'id': row.id,
+                    'timestamp': row.timestamp,
+                    'data': []
+                })
+        
         return render_template("trades.html", active_tab="trades", trades=trades)
 
 @app.route("/summaries")
