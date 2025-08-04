@@ -14,23 +14,15 @@
     </thead>
     <tbody>
         {% for trade in trades %}
-            {% if trade.data and trade.data is iterable %}
-                {% for decision in trade.data %}
-                    {% if decision is mapping %}
-                    <tr>
-                        <td>{{ decision.get('ticker', 'N/A') }}</td>
-                        <td>{{ decision.get('action', 'N/A') }}</td>
-                        <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
-                        <td>{{ decision.get('reason', 'N/A') }}</td>
-                        <td>{{ trade.timestamp }}</td>
-                    </tr>
-                    {% endif %}
-                {% endfor %}
-            {% else %}
-                <tr>
-                    <td colspan="5">No trade data available</td>
-                </tr>
-            {% endif %}
+            {% for decision in trade.data %}
+            <tr>
+                <td>{{ decision.get('ticker', 'N/A') }}</td>
+                <td>{{ decision.get('action', 'N/A') }}</td>
+                <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
+                <td>{{ decision.get('reason', 'N/A') }}</td>
+                <td>{{ trade.timestamp }}</td>
+            </tr>
+            {% endfor %}
         {% endfor %}
     </tbody>
 </table>
