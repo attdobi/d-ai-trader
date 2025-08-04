@@ -21,7 +21,7 @@ from bs4 import BeautifulSoup
 URLS = [
     ("Agent_CNBC", "https://www.cnbc.com"),
     ("Agent_CNN_Money", "https://money.cnn.com"),
-    ("Agent_MarketWatch", "https://www.marketwatch.com"),
+    ("Agent_SeekingAlpha", "https://seekingalpha.com"),
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com")
 ]
