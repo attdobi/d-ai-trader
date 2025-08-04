@@ -145,10 +145,19 @@ def summaries():
         summaries = []
         for row in result:
             try:
+                # Parse the outer JSON structure
                 outer = json.loads(row.data)
-                summary_data = outer.get("summary")
+                summary_data = outer.get("summary", {})
+                
+                # Handle case where summary_data might be a string or dict
                 if isinstance(summary_data, str):
-                    summary_data = json.loads(summary_data)
+                    try:
+                        summary_data = json.loads(summary_data)
+                    except json.JSONDecodeError:
+                        # If it's not JSON, treat it as plain text
+                        summary_data = {"headlines": [], "insights": summary_data}
+                elif not isinstance(summary_data, dict):
+                    summary_data = {"headlines": [], "insights": str(summary_data)}
 
                 summaries.append({
                     "agent": row.agent,
@@ -158,6 +167,7 @@ def summaries():
                 })
             except Exception as e:
                 print(f"Failed to parse summary row {row.id}: {e}")
+                print(f"Raw data: {row.data[:200]}...")
                 continue
 
         return render_template("summaries.html", summaries=summaries)

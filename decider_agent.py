@@ -320,58 +320,89 @@ def record_portfolio_snapshot():
 
 def ask_decision_agent(summaries, run_id, holdings):
     parsed_summaries = []
+    
+    # Limit the number of summaries to process to avoid rate limiting
+    # Process only the most recent summaries
+    max_summaries = 10
+    if len(summaries) > max_summaries:
+        summaries = summaries[-max_summaries:]  # Take the most recent ones
+        print(f"Processing only the {max_summaries} most recent summaries to avoid rate limiting")
+    
     for s in summaries:
         try:
-            parsed = json.loads(s['data']) if isinstance(s['data'], str) else s['data']
+            # The data is already stored as a JSON string in the database
+            # We need to parse it to get the actual summary content
+            if isinstance(s['data'], str):
+                parsed = json.loads(s['data'])
+            else:
+                parsed = s['data']
+            
+            # Extract the summary from the parsed data
+            summary_content = parsed.get('summary', {})
+            if isinstance(summary_content, str):
+                # If summary is a string, try to parse it as JSON
+                try:
+                    summary_content = json.loads(summary_content)
+                except:
+                    # If it's not JSON, treat it as plain text
+                    summary_content = {'headlines': [], 'insights': summary_content}
+            
+            # Truncate long insights to reduce token usage
+            insights = summary_content.get('insights', '')
+            if len(insights) > 500:  # Limit insights to 500 characters
+                insights = insights[:500] + "... [truncated]"
+            
+            # Limit headlines to reduce token usage
+            headlines = summary_content.get('headlines', [])
+            if len(headlines) > 5:  # Limit to 5 headlines
+                headlines = headlines[:5]
+            
             parsed_summaries.append({
                 "agent": s['agent'],
-                "headlines": parsed.get('summary', {}).get('headlines', []),
-                "insights": parsed.get('summary', {}).get('insights', '')
+                "headlines": headlines,
+                "insights": insights
             })
         except Exception as e:
             print(f"Failed to parse summary for agent {s['agent']}: {e}")
+            # Add a fallback entry with basic info
+            parsed_summaries.append({
+                "agent": s['agent'],
+                "headlines": [],
+                "insights": f"Error parsing summary: {e}"
+            })
 
-    summarized_text = "\n\n".join([
-        f"Agent: {s['agent']}\nHeadlines: {', '.join(s['headlines'])}\nInsights: {s['insights']}"
-        for s in parsed_summaries
-    ])
+    # Create a more concise summary text
+    summary_parts = []
+    for s in parsed_summaries:
+        headlines_text = ', '.join(s['headlines'][:3])  # Limit to 3 headlines per agent
+        insights_text = s['insights'][:200] if len(s['insights']) > 200 else s['insights']  # Limit insights
+        summary_parts.append(f"{s['agent']}: {headlines_text} | {insights_text}")
+    
+    summarized_text = "\n".join(summary_parts)
 
     holdings_text = "\n".join([
         f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']} (Reason: {h['reason']})"
         for h in holdings if h['ticker'] != 'CASH'
     ]) or "No current holdings."
 
-    # Get feedback from recent performance
+    # Get feedback from recent performance (simplified to reduce tokens)
     feedback_context = ""
     try:
         latest_feedback = feedback_tracker.get_latest_feedback()
         if latest_feedback:
-            feedback_context = f"""
-PERFORMANCE FEEDBACK (Based on recent trading results):
-- Recent Success Rate: {latest_feedback['success_rate']:.1%}
-- Average Profit: {latest_feedback['avg_profit_percentage']:.2%}
-- Trades Analyzed: {latest_feedback['total_trades_analyzed']}
-
-Key Guidance from Analysis:
-{latest_feedback.get('decider_feedback', 'No specific guidance available')}
-
-Apply these insights to improve decision-making.
-"""
+            feedback_context = f"Recent Success Rate: {latest_feedback['success_rate']:.1%}, Avg Profit: {latest_feedback['avg_profit_percentage']:.2%}"
         else:
-            feedback_context = "No recent performance feedback available yet."
+            feedback_context = "No recent performance data available."
     except Exception as e:
         print(f"Failed to get feedback context: {e}")
-        feedback_context = "Feedback system currently unavailable."
+        feedback_context = "Feedback system unavailable."
 
     prompt = f"""
-You are a financial decision-making AI tasked with determining a set of buy/sell recommendations based on the following summaries and current portfolio.
-Use a one-month outlook, trying to maximize ROI. Do not exceed {MAX_TRADES} total trades, and never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+You are a financial decision-making AI. Make buy/sell recommendations based on the summaries and current portfolio.
+Use a one-month outlook, maximize ROI. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
 Retain at least ${MIN_BUFFER} in funds.
 
-{feedback_context}
-
-Remember in some cases a new story and image could be shown for market manipulation. 
-Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
+Performance Context: {feedback_context}
 
 Summaries:
 {summarized_text}
