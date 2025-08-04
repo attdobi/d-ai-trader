@@ -90,12 +90,74 @@ def fetch_holdings():
         """))
         return [row._mapping for row in result]
 
+def clean_ticker_symbol(ticker):
+    """Clean up ticker symbol to extract just the symbol"""
+    if not ticker:
+        return None
+    
+    # Remove common prefixes/suffixes and extract just the symbol
+    ticker = str(ticker).strip()
+    
+    # Handle cases like "S&P500 ETF (SPY)" -> "SPY"
+    if '(' in ticker and ')' in ticker:
+        # Extract text between parentheses
+        start = ticker.rfind('(') + 1
+        end = ticker.rfind(')')
+        if start > 0 and end > start:
+            ticker = ticker[start:end]
+    
+    # Remove common words that might be added by AI
+    ticker = ticker.replace('ETF', '').replace('Stock', '').replace('Shares', '').strip()
+    
+    # Remove any remaining parentheses and clean up
+    ticker = ticker.replace('(', '').replace(')', '').strip()
+    
+    return ticker
+
 def get_current_price(ticker):
+    # Clean the ticker symbol first
+    clean_ticker = clean_ticker_symbol(ticker)
+    if not clean_ticker:
+        print(f"Invalid ticker symbol: {ticker}")
+        return None
+    
     try:
-        stock = yf.Ticker(ticker)
-        return float(stock.history(period="1d").iloc[-1].Close)
+        stock = yf.Ticker(clean_ticker)
+        
+        # Try multiple approaches to get price data
+        # First try: 1 day period
+        try:
+            hist = stock.history(period="1d")
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # Second try: 5 day period
+        try:
+            hist = stock.history(period="5d")
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # Third try: specific date range (last 7 days)
+        try:
+            from datetime import datetime, timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+            hist = stock.history(start=start_date, end=end_date)
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # If all attempts fail, return None
+        print(f"No price data available for {clean_ticker} (original: {ticker})")
+        return None
+        
     except Exception as e:
-        print(f"Failed to fetch price for {ticker}: {e}")
+        print(f"Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None
 
 def update_holdings(decisions):
@@ -112,6 +174,12 @@ def update_holdings(decisions):
             ticker = decision.get("ticker")
             amount = float(decision.get("amount_usd", 0))
             reason = decision.get("reason", "")
+
+            # Clean the ticker symbol for database operations
+            clean_ticker = clean_ticker_symbol(ticker)
+            if not clean_ticker:
+                print(f"Skipping {action} for {ticker} due to invalid ticker symbol.")
+                continue
 
             price = get_current_price(ticker)
             if not price:
@@ -153,7 +221,7 @@ def update_holdings(decisions):
                     continue
 
                 # Check if we already have this ticker (active or inactive)
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"), {"ticker": clean_ticker}).fetchone()
                 
                 if existing:
                     if existing.is_active:
@@ -178,7 +246,7 @@ def update_holdings(decisions):
                                 reason = :reason
                             WHERE ticker = :ticker
                         """), {
-                            "ticker": ticker,
+                            "ticker": clean_ticker,
                             "shares": new_shares,
                             "avg_price": new_avg_price,
                             "current_price": float(price),
@@ -188,7 +256,7 @@ def update_holdings(decisions):
                             "gain_loss": new_gain_loss,
                             "reason": f"{existing.reason if existing.reason else ''} + {reason}"
                         })
-                        print(f"Added {shares} shares of {ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                        print(f"Added {shares} shares of {clean_ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
                     else:
                         # Reactivate the holding with new shares
                         conn.execute(text("""
@@ -215,30 +283,30 @@ def update_holdings(decisions):
                             "gain_loss": 0.0,
                             "reason": reason
                         })
-                        print(f"Reactivated {ticker}: {shares} shares at ${price:.2f}")
+                        print(f"Reactivated {clean_ticker}: {shares} shares at ${price:.2f}")
                 else:
                     # First purchase of this ticker
                     conn.execute(text("""
                         INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
                         VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
-                    """), {
-                        "ticker": ticker,
-                        "shares": float(shares),
-                        "purchase_price": float(price),
-                        "current_price": float(price),
-                        "purchase_timestamp": timestamp,
-                        "current_price_timestamp": timestamp,
-                        "total_value": float(shares * price),
-                        "current_value": float(shares * price),
-                        "gain_loss": 0.0,
-                        "reason": reason
-                    })
-                    print(f"First purchase: {shares} shares of {ticker} at ${price:.2f}")
+                                            """), {
+                            "ticker": clean_ticker,
+                            "shares": float(shares),
+                            "purchase_price": float(price),
+                            "current_price": float(price),
+                            "purchase_timestamp": timestamp,
+                            "current_price_timestamp": timestamp,
+                            "total_value": float(shares * price),
+                            "current_value": float(shares * price),
+                            "gain_loss": 0.0,
+                            "reason": reason
+                        })
+                    print(f"First purchase: {shares} shares of {clean_ticker} at ${price:.2f}")
 
                 cash -= actual_spent
 
             elif action == "sell":
-                holding = conn.execute(text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"), {"ticker": ticker}).fetchone()
+                holding = conn.execute(text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"), {"ticker": clean_ticker}).fetchone()
                 if holding:
                     shares = float(holding.shares)
                     purchase_price = float(holding.purchase_price)
@@ -271,7 +339,7 @@ def update_holdings(decisions):
                             gain_loss = :gain_loss
                         WHERE ticker = :ticker
                     """), {
-                        "ticker": ticker,
+                        "ticker": clean_ticker,
                         "price": float(price),
                         "timestamp": timestamp,
                         "value": total_value,

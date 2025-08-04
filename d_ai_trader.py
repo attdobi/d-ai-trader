@@ -37,9 +37,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Timezone configuration
-ET_TIMEZONE = pytz.timezone('US/Eastern')
+PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
+EASTERN_TIMEZONE = pytz.timezone('US/Eastern')
 
-# Market hours configuration
+# Market hours configuration (Eastern Time - market hours are always ET)
 MARKET_OPEN_TIME = "09:30"
 MARKET_CLOSE_TIME = "16:00"
 SUMMARIZER_START_TIME = "08:25"
@@ -79,32 +80,36 @@ class DAITraderOrchestrator:
     
     def is_market_open(self):
         """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
-        now = datetime.now(ET_TIMEZONE)
+        # Get current time in Pacific, convert to Eastern for market hours check
+        now_pacific = datetime.now(PACIFIC_TIMEZONE)
+        now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
         
         # Check if it's a weekday (Monday = 0, Sunday = 6)
-        if now.weekday() >= 5:  # Saturday or Sunday
+        if now_eastern.weekday() >= 5:  # Saturday or Sunday
             return False
             
-        # Check if it's within market hours
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        # Check if it's within market hours (Eastern Time)
+        market_open = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
         
-        return market_open <= now <= market_close
+        return market_open <= now_eastern <= market_close
     
     def is_summarizer_time(self):
         """Check if it's time to run summarizers"""
-        now = datetime.now(ET_TIMEZONE)
+        # Get current time in Pacific, convert to Eastern for time checks
+        now_pacific = datetime.now(PACIFIC_TIMEZONE)
+        now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
         
         # Weekday summarizer hours (8:25am-5:25pm ET)
-        if now.weekday() < 5:  # Monday to Friday
-            summarizer_start = now.replace(hour=8, minute=25, second=0, microsecond=0)
-            summarizer_end = now.replace(hour=17, minute=25, second=0, microsecond=0)
-            return summarizer_start <= now <= summarizer_end
+        if now_eastern.weekday() < 5:  # Monday to Friday
+            summarizer_start = now_eastern.replace(hour=8, minute=25, second=0, microsecond=0)
+            summarizer_end = now_eastern.replace(hour=17, minute=25, second=0, microsecond=0)
+            return summarizer_start <= now_eastern <= summarizer_end
         
         # Weekend summarizer (3pm ET)
         else:
-            weekend_time = now.replace(hour=15, minute=0, second=0, microsecond=0)
-            return abs((now - weekend_time).total_seconds()) < 300  # Within 5 minutes of 3pm
+            weekend_time = now_eastern.replace(hour=15, minute=0, second=0, microsecond=0)
+            return abs((now_eastern - weekend_time).total_seconds()) < 300  # Within 5 minutes of 3pm
     
     def is_decider_time(self):
         """Check if it's time to run decider (market hours only)"""
@@ -112,17 +117,19 @@ class DAITraderOrchestrator:
     
     def is_feedback_time(self):
         """Check if it's time to run feedback (after market close)"""
-        now = datetime.now(ET_TIMEZONE)
+        # Get current time in Pacific, convert to Eastern for time checks
+        now_pacific = datetime.now(PACIFIC_TIMEZONE)
+        now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
         
         # Only on weekdays
-        if now.weekday() >= 5:
+        if now_eastern.weekday() >= 5:
             return False
             
         # After market close (4pm ET)
-        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        feedback_window_end = now.replace(hour=17, minute=0, second=0, microsecond=0)
+        market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
+        feedback_window_end = now_eastern.replace(hour=17, minute=0, second=0, microsecond=0)
         
-        return market_close <= now <= feedback_window_end
+        return market_close <= now_eastern <= feedback_window_end
     
     def get_unprocessed_summaries(self):
         """Get all summaries that haven't been processed by the decider yet"""
