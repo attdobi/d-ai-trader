@@ -138,10 +138,45 @@ def trade_decisions():
             # Parse JSON if data is a string
             if isinstance(trade_dict['data'], str):
                 try:
-                    trade_dict['data'] = json.loads(trade_dict['data'])
+                    parsed_data = json.loads(trade_dict['data'])
+                    trade_dict['data'] = parsed_data
                 except json.JSONDecodeError:
-                    # If JSON parsing fails, keep as string
-                    pass
+                    # If JSON parsing fails, create empty list
+                    trade_dict['data'] = []
+            
+            # Ensure data is a list and each item is a dict
+            if not isinstance(trade_dict['data'], list):
+                trade_dict['data'] = []
+            else:
+                # Clean up each decision to ensure it's a dict with proper fields
+                cleaned_data = []
+                for decision in trade_dict['data']:
+                    if isinstance(decision, dict):
+                        # Ensure all required fields exist
+                        cleaned_decision = {
+                            'ticker': decision.get('ticker', 'N/A'),
+                            'action': decision.get('action', 'N/A'),
+                            'amount_usd': decision.get('amount_usd', 0),
+                            'reason': decision.get('reason', 'N/A')
+                        }
+                        cleaned_data.append(cleaned_decision)
+                    elif isinstance(decision, str):
+                        # If decision is a string, try to parse it
+                        try:
+                            parsed_decision = json.loads(decision)
+                            if isinstance(parsed_decision, dict):
+                                cleaned_decision = {
+                                    'ticker': parsed_decision.get('ticker', 'N/A'),
+                                    'action': parsed_decision.get('action', 'N/A'),
+                                    'amount_usd': parsed_decision.get('amount_usd', 0),
+                                    'reason': parsed_decision.get('reason', 'N/A')
+                                }
+                                cleaned_data.append(cleaned_decision)
+                        except:
+                            # If parsing fails, skip this decision
+                            continue
+                
+                trade_dict['data'] = cleaned_data
             
             trades.append(trade_dict)
         
