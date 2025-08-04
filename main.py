@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -14,6 +15,7 @@ import chromedriver_autoinstaller
 import openai
 import undetected_chromedriver as uc
 from feedback_agent import TradeOutcomeTracker
+from bs4 import BeautifulSoup
 
 # Configuration
 URLS = [
@@ -23,10 +25,17 @@ URLS = [
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com")
 ]
-SCREENSHOT_DIR = "screenshots"
+
+# Use absolute path for screenshot directory to avoid working directory issues
+import os
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCREENSHOT_DIR = os.path.join(SCRIPT_DIR, "screenshots")
 RUN_TIMESTAMP = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
 RUN_DIR = os.path.join(SCREENSHOT_DIR, RUN_TIMESTAMP)
 os.makedirs(RUN_DIR, exist_ok=True)
+
+print(f"Screenshot directory: {SCREENSHOT_DIR}")
+print(f"Run directory: {RUN_DIR}")
 
 # Automatically install correct ChromeDriver version
 chromedriver_autoinstaller.install()
@@ -84,26 +93,76 @@ def get_openai_summary(agent_name, html_content, image_paths):
     except Exception as e:
         print(f"Failed to get summarizer feedback: {e}")
 
+    # Reduce HTML content length to avoid rate limiting
+    # Extract only the most relevant content from the HTML
+    
+    # Remove script and style tags
+    html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
+    html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
+    
+    # Extract text content more efficiently
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # Get text content
+        text_content = soup.get_text()
+        
+        # Clean up whitespace
+        lines = (line.strip() for line in text_content.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text_content = ' '.join(chunk for chunk in chunks if chunk)
+        
+        # Limit content length to avoid rate limiting (reduced from 10000 to 5000)
+        if len(text_content) > 5000:
+            text_content = text_content[:5000] + "... [content truncated]"
+            
+        html_content = text_content
+    except Exception as e:
+        print(f"Failed to parse HTML content for {agent_name}: {e}")
+        # Fallback: just truncate the raw HTML
+        if len(html_content) > 5000:
+            html_content = html_content[:5000] + "... [content truncated]"
+
     prompt = f"""
 Summarize the financial news from the following content. Focus on actionable information relevant to trading decisions — especially news related to companies, sectors, market movements, and economic indicators.
 
 {feedback_context}
 
-HTML Content:
+Content:
 
-{html_content[:10000]}
+{html_content}
+
+IMPORTANT: You must respond with a valid JSON object in this exact format:
+{{
+    "headlines": ["headline 1", "headline 2", "headline 3"],
+    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
+}}
+
+Do not include any text before or after the JSON object. Only return the JSON.
 """
     system_prompt = (
         "You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages."
         "Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation"
         "Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively."
         "Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades."
-        "Return a JSON object with 'headlines' (list of strings) and 'insights' (paragraph summary focused on companies, trades, economic indicators, or investor sentiment)."
-        "Respond strictly in valid JSON format with keys"
+        "You must ALWAYS respond with valid JSON format as specified in the prompt."
     )
-
-    result = prompt_manager.ask_openai(prompt, system_prompt, agent_name=agent_name, image_paths=image_paths)
-    return result
+    
+    # Only include images if they were successfully saved and are reasonably sized
+    valid_image_paths = []
+    for img_path in image_paths:
+        if os.path.exists(img_path):
+            file_size = os.path.getsize(img_path)
+            # Only include images smaller than 1MB to avoid rate limiting
+            if file_size < 1024 * 1024:
+                valid_image_paths.append(img_path)
+            else:
+                print(f"Skipping large image {img_path} ({file_size} bytes)")
+    
+    return prompt_manager.ask_openai(prompt, system_prompt, agent_name="SummarizerAgent", image_paths=valid_image_paths)
 
 def try_click_popup(driver, agent_name):
 
@@ -153,13 +212,24 @@ def summarize_page(agent_name, url):
     try_click_popup(driver, agent_name)
 
     screenshot_path_1 = os.path.join(RUN_DIR, f"{agent_name}_1.png")
+    screenshot_saved_1 = False
     try:
         driver.save_screenshot(screenshot_path_1)
+        if os.path.exists(screenshot_path_1) and os.path.getsize(screenshot_path_1) > 0:
+            screenshot_saved_1 = True
+            print(f"Screenshot 1 saved successfully for {agent_name}: {screenshot_path_1}")
+        else:
+            print(f"Screenshot 1 file not created or empty for {agent_name}")
     except Exception as e:
         print(f"Screenshot 1 failed for {agent_name}: {e}")
         time.sleep(3)
         try:
             driver.save_screenshot(screenshot_path_1)
+            if os.path.exists(screenshot_path_1) and os.path.getsize(screenshot_path_1) > 0:
+                screenshot_saved_1 = True
+                print(f"Screenshot 1 retry successful for {agent_name}")
+            else:
+                print(f"Screenshot 1 retry failed - file not created for {agent_name}")
         except Exception as e:
             print(f"Retry failed for Screenshot 1: {e}")
 
@@ -171,13 +241,24 @@ def summarize_page(agent_name, url):
     time.sleep(2)
 
     screenshot_path_2 = os.path.join(RUN_DIR, f"{agent_name}_2.png")
+    screenshot_saved_2 = False
     try:
         driver.save_screenshot(screenshot_path_2)
+        if os.path.exists(screenshot_path_2) and os.path.getsize(screenshot_path_2) > 0:
+            screenshot_saved_2 = True
+            print(f"Screenshot 2 saved successfully for {agent_name}: {screenshot_path_2}")
+        else:
+            print(f"Screenshot 2 file not created or empty for {agent_name}")
     except Exception as e:
         print(f"Screenshot 2 failed for {agent_name}: {e}")
         time.sleep(3)
         try:
             driver.save_screenshot(screenshot_path_2)
+            if os.path.exists(screenshot_path_2) and os.path.getsize(screenshot_path_2) > 0:
+                screenshot_saved_2 = True
+                print(f"Screenshot 2 retry successful for {agent_name}")
+            else:
+                print(f"Screenshot 2 retry failed - file not created for {agent_name}")
         except Exception as e:
             print(f"Retry failed for Screenshot 2: {e}")
 
@@ -187,8 +268,15 @@ def summarize_page(agent_name, url):
         print(f"Failed to capture page source for {agent_name}: {e}")
         html = ""
 
+    # Only include screenshot paths that were actually saved
+    saved_screenshots = []
+    if screenshot_saved_1:
+        saved_screenshots.append(screenshot_path_1)
+    if screenshot_saved_2:
+        saved_screenshots.append(screenshot_path_2)
+
     try:
-        summary_data = get_openai_summary(agent_name, html, [screenshot_path_1, screenshot_path_2])
+        summary_data = get_openai_summary(agent_name, html, saved_screenshots)
     except Exception as e:
         summary_data = {"error": f"Summary failed: {e}"}
 
@@ -196,7 +284,7 @@ def summarize_page(agent_name, url):
         "agent": agent_name,
         "timestamp": RUN_TIMESTAMP,
         "summary": summary_data,
-        "screenshot_paths": [screenshot_path_1, screenshot_path_2],
+        "screenshot_paths": saved_screenshots,
         "run_id": RUN_TIMESTAMP
     }
 

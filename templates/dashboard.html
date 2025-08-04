@@ -390,106 +390,86 @@
     function renderPerformanceChart(data) {
         console.log('Rendering performance chart with data:', data);
         
-        const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
-        const netGainLoss = data.map(row => row.net_gain_loss);
-        const netPercentageGain = data.map(row => row.net_percentage_gain);
-        const portfolioValue = data.map(row => row.total_portfolio_value);
-        
-        console.log('Processed data:', { labels, netGainLoss, netPercentageGain, portfolioValue });
+        try {
+            const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
+            const netGainLoss = data.map(row => parseFloat(row.net_gain_loss) || 0);
+            const netPercentageGain = data.map(row => parseFloat(row.net_percentage_gain) || 0);
+            const portfolioValue = data.map(row => parseFloat(row.total_portfolio_value) || 0);
+            
+            console.log('Processed data:', { labels, netGainLoss, netPercentageGain, portfolioValue });
 
-        if (performanceChart) performanceChart.destroy();
+            if (performanceChart) performanceChart.destroy();
 
-        // Reset canvas display
-        const performanceCtx = document.getElementById('performanceChart');
-        if (performanceCtx) {
-            performanceCtx.style.display = 'block';
-            performanceCtx.style.height = 'auto';
-            performanceCtx.style.backgroundColor = 'transparent';
-            performanceCtx.style.border = 'none';
-            performanceCtx.style.borderRadius = '0';
-            performanceCtx.innerHTML = '';
-        }
+            // Reset canvas display
+            const performanceCtx = document.getElementById('performanceChart');
+            if (performanceCtx) {
+                performanceCtx.style.display = 'block';
+                performanceCtx.style.height = 'auto';
+                performanceCtx.style.backgroundColor = 'transparent';
+                performanceCtx.style.border = 'none';
+                performanceCtx.style.borderRadius = '0';
+                performanceCtx.innerHTML = '';
+            }
 
-        performanceChart = new Chart(performanceCtx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Net Gain/Loss ($)',
-                    data: netGainLoss,
-                    borderColor: function(context) {
-                        const value = context.parsed.y;
-                        return value >= 0 ? '#28a745' : '#dc3545';
-                    },
-                    backgroundColor: function(context) {
-                        const value = context.parsed.y;
-                        return value >= 0 ? 'rgba(40, 167, 69, 0.1)' : 'rgba(220, 53, 69, 0.1)';
-                    },
-                    fill: true,
-                    tension: 0.1,
-                    yAxisID: 'y'
-                }, {
-                    label: 'Net Percentage Gain (%)',
-                    data: netPercentageGain,
-                    borderColor: '#17a2b8',
-                    fill: false,
-                    tension: 0.1,
-                    yAxisID: 'y1'
-                }, {
-                    label: 'Portfolio Value ($)',
-                    data: portfolioValue,
-                    borderColor: '#6f42c1',
-                    fill: false,
-                    tension: 0.1,
-                    yAxisID: 'y2'
-                }]
-            },
-            options: {
-                responsive: true,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
+            // Create a simpler chart with just the net gain/loss
+            performanceChart = new Chart(performanceCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Net Gain/Loss ($)',
+                        data: netGainLoss,
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: true,
+                        tension: 0.1
+                    }]
                 },
-                scales: {
-                    x: {
-                        display: true,
-                        title: {
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
                             display: true,
-                            text: 'Date'
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Net Gain/Loss ($)'
+                            },
+                            beginAtZero: false
                         }
                     },
-                    y: {
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
-                        title: {
-                            display: true,
-                            text: 'Net Gain/Loss ($)'
+                    plugins: {
+                        legend: {
+                            display: true
                         }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        title: {
-                            display: true,
-                            text: 'Net Percentage Gain (%)'
-                        },
-                        grid: {
-                            drawOnChartArea: false,
-                        },
-                    },
-                    y2: {
-                        type: 'linear',
-                        display: false,
-                        position: 'right',
-                        grid: {
-                            drawOnChartArea: false,
-                        },
                     }
                 }
+            });
+        } catch (error) {
+            console.error('Error rendering performance chart:', error);
+            // Show error message on the chart
+            const performanceCtx = document.getElementById('performanceChart');
+            if (performanceCtx) {
+                performanceCtx.style.display = 'flex';
+                performanceCtx.style.alignItems = 'center';
+                performanceCtx.style.justifyContent = 'center';
+                performanceCtx.style.height = '200px';
+                performanceCtx.style.backgroundColor = '#f8d7da';
+                performanceCtx.style.border = '1px solid #f5c6cb';
+                performanceCtx.style.borderRadius = '4px';
+                performanceCtx.innerHTML = '<div style="text-align: center; color: #721c24;"><p>Error rendering performance chart.</p><p>Please check console for details.</p></div>';
             }
-        });
+        }
     }
 
     function renderBreakdownChart(data) {
@@ -569,38 +549,55 @@
             .then(data => {
                 console.log('Performance data received:', data);
                 if (data && data.length > 0) {
-                    renderPerformanceChart(data);
+                    // Check if we have meaningful data (not all zeros)
+                    const hasData = data.some(row => 
+                        parseFloat(row.net_gain_loss) !== 0 || 
+                        parseFloat(row.total_portfolio_value) !== 10000
+                    );
+                    
+                    if (hasData) {
+                        renderPerformanceChart(data);
+                    } else {
+                        console.log('No meaningful performance data available');
+                        showNoDataMessage();
+                    }
                 } else {
                     console.log('No performance data available');
-                    // Show a message on the chart
-                    const performanceCtx = document.getElementById('performanceChart');
-                    if (performanceCtx) {
-                        performanceCtx.style.display = 'flex';
-                        performanceCtx.style.alignItems = 'center';
-                        performanceCtx.style.justifyContent = 'center';
-                        performanceCtx.style.height = '200px';
-                        performanceCtx.style.backgroundColor = '#f8f9fa';
-                        performanceCtx.style.border = '1px solid #dee2e6';
-                        performanceCtx.style.borderRadius = '4px';
-                        performanceCtx.innerHTML = '<div style="text-align: center; color: #6c757d;"><p>No performance data available yet.</p><p>Start trading to see performance metrics.</p></div>';
-                    }
+                    showNoDataMessage();
                 }
             })
             .catch(err => {
                 console.error('Failed to load performance chart:', err);
-                // Show error message on the chart
-                const performanceCtx = document.getElementById('performanceChart');
-                if (performanceCtx) {
-                    performanceCtx.style.display = 'flex';
-                    performanceCtx.style.alignItems = 'center';
-                    performanceCtx.style.justifyContent = 'center';
-                    performanceCtx.style.height = '200px';
-                    performanceCtx.style.backgroundColor = '#f8d7da';
-                    performanceCtx.style.border = '1px solid #f5c6cb';
-                    performanceCtx.style.borderRadius = '4px';
-                    performanceCtx.innerHTML = '<div style="text-align: center; color: #721c24;"><p>Error loading performance data.</p><p>Please try refreshing the page.</p></div>';
-                }
+                showErrorMessage();
             });
+    }
+
+    function showNoDataMessage() {
+        const performanceCtx = document.getElementById('performanceChart');
+        if (performanceCtx) {
+            performanceCtx.style.display = 'flex';
+            performanceCtx.style.alignItems = 'center';
+            performanceCtx.style.justifyContent = 'center';
+            performanceCtx.style.height = '200px';
+            performanceCtx.style.backgroundColor = '#f8f9fa';
+            performanceCtx.style.border = '1px solid #dee2e6';
+            performanceCtx.style.borderRadius = '4px';
+            performanceCtx.innerHTML = '<div style="text-align: center; color: #6c757d;"><p>No performance data available yet.</p><p>Start trading to see performance metrics.</p></div>';
+        }
+    }
+
+    function showErrorMessage() {
+        const performanceCtx = document.getElementById('performanceChart');
+        if (performanceCtx) {
+            performanceCtx.style.display = 'flex';
+            performanceCtx.style.alignItems = 'center';
+            performanceCtx.style.justifyContent = 'center';
+            performanceCtx.style.height = '200px';
+            performanceCtx.style.backgroundColor = '#f8d7da';
+            performanceCtx.style.border = '1px solid #f5c6cb';
+            performanceCtx.style.borderRadius = '4px';
+            performanceCtx.innerHTML = '<div style="text-align: center; color: #721c24;"><p>Error loading performance data.</p><p>Please try refreshing the page.</p></div>';
+        }
     }
 
     function loadBreakdownChart() {

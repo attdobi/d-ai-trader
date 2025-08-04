@@ -2,8 +2,9 @@ import os
 import json
 import base64
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import openai
 
@@ -86,22 +87,33 @@ class PromptManager:
                 )
                 content = response.choices[0].message.content.strip()
 
-                # Save context
-                #if agent_name:
-                #    context_entry = Summary(agent=agent_name, timestamp=datetime.utcnow(), run_id=self.run_id or 'unspecified', data=json.dumps({"summary": content}))
-                #    self.session.add(context_entry)
-                #    self.session.commit()
-
                 # Try parsing JSON
-                return json.loads(content)
-
-            except json.JSONDecodeError as e:
-                print(f"JSON Decode Error: {e}")
-                print(f"Response was: {content}")
-                retries += 1
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError as e:
+                    print(f"JSON Decode Error: {e}")
+                    print(f"Response was: {content}")
+                    
+                    # Try to extract JSON from the response if it's wrapped in text
+                    import re
+                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if json_match:
+                        try:
+                            return json.loads(json_match.group())
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # If we can't parse JSON, create a fallback response
+                    print(f"Creating fallback response for {agent_name}")
+                    return {
+                        "headlines": ["Unable to parse AI response"],
+                        "insights": f"Error parsing AI response: {content[:200]}..."
+                    }
 
             except Exception as e:
                 print(f"API Call Error: {e}")
-                return {"error": "[API error, no response]"}
+                retries += 1
+                if retries >= max_retries:
+                    return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
 
-        return {"error": "Max retries reached, incomplete JSON response"}
+        return {"headlines": ["Max retries reached"], "insights": "Failed to get valid response after multiple attempts"}
