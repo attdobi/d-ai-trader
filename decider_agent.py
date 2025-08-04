@@ -100,6 +100,8 @@ def get_current_price(ticker):
 
 def update_holdings(decisions):
     timestamp = datetime.utcnow()
+    skipped_decisions = []  # Track decisions that were skipped
+    
     with engine.begin() as conn:
         # Get current cash balance
         cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'")).fetchone()
@@ -114,16 +116,40 @@ def update_holdings(decisions):
             price = get_current_price(ticker)
             if not price:
                 print(f"Skipping {action} for {ticker} due to missing price.")
+                # Record the skipped decision
+                skipped_decision = {
+                    "action": action,
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": f"Market closed - no trade executed (Original: {reason})"
+                }
+                skipped_decisions.append(skipped_decision)
                 continue
 
             if action == "buy":
                 shares = floor(amount / price)
                 if shares == 0:
                     print(f"Skipping buy for {ticker} due to insufficient funds for 1 share.")
+                    # Record the skipped decision
+                    skipped_decision = {
+                        "action": action,
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Insufficient funds for 1 share - no trade executed (Original: {reason})"
+                    }
+                    skipped_decisions.append(skipped_decision)
                     continue
                 actual_spent = shares * price
                 if cash - actual_spent < MIN_BUFFER:
                     print(f"Skipping buy for {ticker}, would breach minimum buffer.")
+                    # Record the skipped decision
+                    skipped_decision = {
+                        "action": action,
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Would breach minimum buffer - no trade executed (Original: {reason})"
+                    }
+                    skipped_decisions.append(skipped_decision)
                     continue
 
                 # Check if we already have this ticker (active or inactive)
@@ -263,6 +289,12 @@ def update_holdings(decisions):
                 current_price_timestamp = :timestamp
             WHERE ticker = 'CASH'
         """), {"cash": cash, "timestamp": timestamp})
+    
+    # Store skipped decisions if any
+    if skipped_decisions:
+        run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
+        print(f"Stored {len(skipped_decisions)} skipped decisions due to market closure")
 
 def record_portfolio_snapshot():
     """Record current portfolio state for historical tracking - same as dashboard_server"""
