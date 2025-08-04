@@ -133,33 +133,17 @@ def trade_decisions():
         
         trades = []
         for row in result:
-            try:
-                # Parse the JSON data
-                trade_data = json.loads(row.data)
-                
-                # Ensure each decision has all required fields
-                if isinstance(trade_data, list):
-                    for decision in trade_data:
-                        if isinstance(decision, dict):
-                            # Add default values for missing fields
-                            decision.setdefault('ticker', 'N/A')
-                            decision.setdefault('action', 'N/A')
-                            decision.setdefault('amount_usd', 0)
-                            decision.setdefault('reason', 'N/A')
-                
-                trades.append({
-                    'id': row.id,
-                    'timestamp': row.timestamp,
-                    'data': trade_data
-                })
-            except Exception as e:
-                print(f"Failed to parse trade decision {row.id}: {e}")
-                # Add a fallback entry with empty data
-                trades.append({
-                    'id': row.id,
-                    'timestamp': row.timestamp,
-                    'data': []
-                })
+            trade_dict = dict(row._mapping)
+            
+            # Parse JSON if data is a string
+            if isinstance(trade_dict['data'], str):
+                try:
+                    trade_dict['data'] = json.loads(trade_dict['data'])
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, keep as string
+                    pass
+            
+            trades.append(trade_dict)
         
         return render_template("trades.html", active_tab="trades", trades=trades)
 
