@@ -685,6 +685,77 @@ def reset_portfolio():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def clean_ticker_symbol(ticker):
+    """Clean up ticker symbol to extract just the symbol"""
+    if not ticker:
+        return None
+    
+    # Remove common prefixes/suffixes and extract just the symbol
+    ticker = str(ticker).strip()
+    
+    # Handle cases like "S&P500 ETF (SPY)" -> "SPY"
+    if '(' in ticker and ')' in ticker:
+        # Extract text between parentheses
+        start = ticker.rfind('(') + 1
+        end = ticker.rfind(')')
+        if start > 0 and end > start:
+            ticker = ticker[start:end]
+    
+    # Remove common words that might be added by AI
+    ticker = ticker.replace('ETF', '').replace('Stock', '').replace('Shares', '').strip()
+    
+    # Remove any remaining parentheses and clean up
+    ticker = ticker.replace('(', '').replace(')', '').strip()
+    
+    return ticker
+
+def get_current_price_robust(ticker):
+    """Get current price with robust error handling"""
+    # Clean the ticker symbol first
+    clean_ticker = clean_ticker_symbol(ticker)
+    if not clean_ticker:
+        print(f"Invalid ticker symbol: {ticker}")
+        return None
+    
+    try:
+        stock = yf.Ticker(clean_ticker)
+        
+        # Try multiple approaches to get price data
+        # First try: 1 day period
+        try:
+            hist = stock.history(period="1d")
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # Second try: 5 day period
+        try:
+            hist = stock.history(period="5d")
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # Third try: specific date range (last 7 days)
+        try:
+            from datetime import datetime, timedelta
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+            hist = stock.history(start=start_date, end=end_date)
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
+        # If all attempts fail, return None
+        print(f"No price data available for {clean_ticker} (original: {ticker})")
+        return None
+        
+    except Exception as e:
+        print(f"Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
+        return None
+
 def update_prices():
     while True:
         time.sleep(REFRESH_INTERVAL_MINUTES * 60)
@@ -693,13 +764,11 @@ def update_prices():
             tickers = [row.ticker for row in result]
             for ticker in tickers:
                 try:
-                    stock = yf.Ticker(ticker)
-                    hist = stock.history(period="1d")
-                    if hist.empty:
-                        print(f"{ticker}: No data found for this date range, symbol may be delisted")
+                    price = get_current_price_robust(ticker)
+                    if price is None:
+                        print(f"Skipping price update for {ticker} - no data available")
                         continue
 
-                    price = float(hist.iloc[-1].Close)
                     now = datetime.utcnow()
 
                     conn.execute(text("""
@@ -713,6 +782,7 @@ def update_prices():
                             "current_price_timestamp": now,
                             "ticker": ticker
                         })
+                    print(f"Updated price for {ticker}: ${price:.2f}")
                 except Exception as e:
                     print(f"Failed to update {ticker}: {e}")
             
