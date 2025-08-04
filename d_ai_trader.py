@@ -237,6 +237,9 @@ class DAITraderOrchestrator:
             
             decider.get_latest_run_id = mock_get_latest_run_id
             
+            # Update current prices before making decisions
+            decider.update_all_current_prices()
+            
             # Run the decider agent
             summaries = unprocessed_summaries
             holdings = decider.fetch_holdings()

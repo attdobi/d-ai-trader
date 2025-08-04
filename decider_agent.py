@@ -1,10 +1,15 @@
 import json
+import pytz
 from datetime import datetime
 from math import floor
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
+
+# Timezone configuration
+PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
+EASTERN_TIMEZONE = pytz.timezone('US/Eastern')
 
 # Trading configuration
 MAX_TRADES = 5
@@ -16,6 +21,22 @@ prompt_manager = PromptManager(client=openai, session=session)
 
 # Initialize feedback tracker
 feedback_tracker = TradeOutcomeTracker()
+
+def is_market_open():
+    """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
+    # Get current time in Pacific, convert to Eastern for market hours check
+    now_pacific = datetime.now(PACIFIC_TIMEZONE)
+    now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
+    
+    # Check if it's a weekday (Monday = 0, Sunday = 6)
+    if now_eastern.weekday() >= 5:  # Saturday or Sunday
+        return False
+        
+    # Check if it's within market hours (Eastern Time)
+    market_open = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
+    
+    return market_open <= now_eastern <= market_close
 
 def get_latest_run_id():
     with engine.connect() as conn:
@@ -57,6 +78,71 @@ def mark_summaries_processed(summary_ids):
                 "summary_id": summary_id,
                 "run_id": datetime.utcnow().strftime("%Y%m%dT%H%M%S")
             })
+
+def update_all_current_prices():
+    """Update current prices for all active holdings before decision making"""
+    print("=== Updating Current Prices for Decision Making ===")
+    
+    with engine.begin() as conn:
+        # Get all active holdings
+        result = conn.execute(text("""
+            SELECT ticker, shares, total_value, current_price
+            FROM holdings 
+            WHERE is_active = TRUE AND ticker != 'CASH'
+        """))
+        
+        holdings = [dict(row._mapping) for row in result]
+        
+        if not holdings:
+            print("No active holdings to update.")
+            return
+        
+        updated_count = 0
+        api_failures = []
+        
+        for holding in holdings:
+            ticker = holding['ticker']
+            shares = holding['shares']
+            old_price = holding['current_price']
+            
+            # Get new price
+            new_price = get_current_price(ticker)
+            
+            if new_price is None:
+                print(f"⚠️  Could not get price for {ticker}, using last known price: ${old_price:.2f}")
+                api_failures.append(ticker)
+                continue
+            
+            # Calculate new values
+            new_current_value = shares * new_price
+            new_gain_loss = new_current_value - holding['total_value']
+            
+            # Update the database
+            conn.execute(text("""
+                UPDATE holdings
+                SET current_price = :price,
+                    current_value = :current_value,
+                    gain_loss = :gain_loss,
+                    current_price_timestamp = :timestamp
+                WHERE ticker = :ticker
+            """), {
+                "price": new_price,
+                "current_value": new_current_value,
+                "gain_loss": new_gain_loss,
+                "timestamp": datetime.utcnow(),
+                "ticker": ticker
+            })
+            
+            print(f"✅ Updated {ticker}: ${old_price:.2f} → ${new_price:.2f} (Gain/Loss: ${new_gain_loss:.2f})")
+            updated_count += 1
+        
+        print(f"Updated {updated_count} out of {len(holdings)} holdings")
+        
+        # If API failures occurred, provide manual update option
+        if api_failures:
+            print(f"\n🚨 API failures detected for: {', '.join(api_failures)}")
+            print("💡 To manually update prices, run: python manual_price_update.py --interactive")
+            print("💡 Or use: python manual_price_update.py --show (to view current holdings)")
 
 def fetch_holdings():
     with engine.begin() as conn:
@@ -124,8 +210,31 @@ def get_current_price(ticker):
     try:
         stock = yf.Ticker(clean_ticker)
         
-        # Try multiple approaches to get price data
-        # First try: 1 day period
+        # Method 1: Try to get current price from info
+        try:
+            current_price = stock.info.get('currentPrice')
+            if current_price and current_price > 0:
+                return float(current_price)
+        except:
+            pass
+        
+        # Method 2: Try regular market price from info
+        try:
+            regular_price = stock.info.get('regularMarketPrice')
+            if regular_price and regular_price > 0:
+                return float(regular_price)
+        except:
+            pass
+        
+        # Method 3: Try previous close from info
+        try:
+            prev_close = stock.info.get('previousClose')
+            if prev_close and prev_close > 0:
+                return float(prev_close)
+        except:
+            pass
+        
+        # Method 4: Try history with 1 day period
         try:
             hist = stock.history(period="1d")
             if len(hist) > 0:
@@ -133,7 +242,7 @@ def get_current_price(ticker):
         except:
             pass
         
-        # Second try: 5 day period
+        # Method 5: Try history with 5 day period
         try:
             hist = stock.history(period="5d")
             if len(hist) > 0:
@@ -141,7 +250,7 @@ def get_current_price(ticker):
         except:
             pass
         
-        # Third try: specific date range (last 7 days)
+        # Method 6: Try specific date range (last 7 days)
         try:
             from datetime import datetime, timedelta
             end_date = datetime.now()
@@ -152,8 +261,16 @@ def get_current_price(ticker):
         except:
             pass
         
+        # Method 7: Try with longer period (1 month)
+        try:
+            hist = stock.history(period="1mo")
+            if len(hist) > 0:
+                return float(hist.iloc[-1].Close)
+        except:
+            pass
+        
         # If all attempts fail, return None
-        print(f"No price data available for {clean_ticker} (original: {ticker})")
+        print(f"All price fetching methods failed for {clean_ticker} (original: {ticker})")
         return None
         
     except Exception as e:
@@ -181,6 +298,19 @@ def update_holdings(decisions):
                 print(f"Skipping {action} for {ticker} due to invalid ticker symbol.")
                 continue
 
+            # Check if market is open before attempting to get prices
+            if not is_market_open():
+                print(f"Skipping {action} for {ticker} - market is closed.")
+                # Record the skipped decision
+                skipped_decision = {
+                    "action": action,
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": f"Market closed - no trade executed (Original: {reason})"
+                }
+                skipped_decisions.append(skipped_decision)
+                continue
+            
             price = get_current_price(ticker)
             if not price:
                 print(f"Skipping {action} for {ticker} due to missing price.")
@@ -189,7 +319,7 @@ def update_holdings(decisions):
                     "action": action,
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Market closed - no trade executed (Original: {reason})"
+                    "reason": f"Price data unavailable - no trade executed (Original: {reason})"
                 }
                 skipped_decisions.append(skipped_decision)
                 continue
@@ -481,7 +611,7 @@ def ask_decision_agent(summaries, run_id, holdings):
     summarized_text = "\n".join(summary_parts)
 
     holdings_text = "\n".join([
-        f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']} (Reason: {h['reason']})"
+        f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']} → Current: ${h['current_price']} (Gain/Loss: ${h['gain_loss']:.2f}) (Reason: {h['reason']})"
         for h in holdings if h['ticker'] != 'CASH'
     ]) or "No current holdings."
 
@@ -502,19 +632,21 @@ You are a financial decision-making AI. Make buy/sell recommendations based on t
 Use a one-month outlook, maximize ROI. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
 Retain at least ${MIN_BUFFER} in funds.
 
+IMPORTANT: Consider current gains/losses when making sell decisions. If a position has significant gains (>5%), consider taking profits. If a position has significant losses (>10%), consider cutting losses or holding based on fundamentals.
+
 Performance Context: {feedback_context}
 
 Summaries:
 {summarized_text}
 
-Current Holdings:
+Current Holdings (with current prices and gains/losses):
 {holdings_text}
 
 Return a JSON list of trade decisions. Each decision should include:
 - action ("buy" or "sell")
 - ticker
 - amount_usd (funds to allocate or recover)
-- reason (short term, long term, etc)
+- reason (short term, long term, profit taking, loss cutting, etc)
 Respond strictly in valid JSON format with keys.
 """
 
@@ -558,7 +690,18 @@ if __name__ == "__main__":
         latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
         run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
         
+        # Update current prices before making decisions
+        update_all_current_prices()
+        
         holdings = fetch_holdings()
+        
+        # Check if we have current prices for decision making
+        holdings_without_prices = [h for h in holdings if h['ticker'] != 'CASH' and h['current_price'] == h['purchase_price']]
+        if holdings_without_prices:
+            tickers_without_prices = [h['ticker'] for h in holdings_without_prices]
+            print(f"\n⚠️  WARNING: Using purchase prices for decision making on: {', '.join(tickers_without_prices)}")
+            print("💡 Consider manually updating prices for accurate decision making")
+        
         decisions = ask_decision_agent(unprocessed_summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
         update_holdings(decisions)
