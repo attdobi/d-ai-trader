@@ -701,7 +701,57 @@
         loadPerformanceChart();
         loadBreakdownChart();
     };
+
+    function updatePrices() {
+        const statusDiv = document.getElementById('price-update-status');
+        const button = document.querySelector('.price-update-btn');
+        
+        // Show loading state
+        statusDiv.innerHTML = '🔄 Fetching latest stock prices...';
+        statusDiv.className = 'price-update-status loading';
+        button.disabled = true;
+        
+        // Make API call
+        fetch('/api/trigger/price-update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusDiv.innerHTML = `✅ ${data.message}`;
+                statusDiv.className = 'price-update-status success';
+                
+                // Refresh the page after a short delay to show updated data
+                setTimeout(() => {
+                    location.reload();
+                }, 3000);
+            } else {
+                statusDiv.innerHTML = `❌ Error: ${data.error}`;
+                statusDiv.className = 'price-update-status error';
+            }
+        })
+        .catch(error => {
+            statusDiv.innerHTML = `❌ Network error: ${error.message}`;
+            statusDiv.className = 'price-update-status error';
+        })
+        .finally(() => {
+            // Re-enable button
+            button.disabled = false;
+        });
+    }
 </script>
+
+<!-- Price Update Button -->
+<div class="price-update-container">
+    <button class="price-update-btn" onclick="updatePrices()">
+        <span class="btn-icon">📈</span>
+        Update Stock Prices
+    </button>
+    <div id="price-update-status" class="price-update-status"></div>
+</div>
 
 <!-- Reset Portfolio Button -->
 <div class="reset-container">
