@@ -593,6 +593,59 @@ def trigger_feedback():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/trigger/price-update', methods=['POST'])
+def trigger_price_update():
+    """Manually trigger price updates for all holdings"""
+    def run_price_update():
+        try:
+            print("=== Manual Price Update Triggered ===")
+            with engine.begin() as conn:
+                result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH'"))
+                tickers = [row.ticker for row in result]
+                
+                updated_count = 0
+                for ticker in tickers:
+                    try:
+                        price = get_current_price_robust(ticker)
+                        if price is None:
+                            print(f"⚠️  Could not get price for {ticker}")
+                            continue
+
+                        now = datetime.utcnow()
+                        conn.execute(text("""
+                            UPDATE holdings
+                            SET current_price = :price,
+                                current_value = shares * :price,
+                                gain_loss = (shares * :price) - total_value,
+                                current_price_timestamp = :current_price_timestamp
+                            WHERE ticker = :ticker"""), {
+                                "price": price,
+                                "current_price_timestamp": now,
+                                "ticker": ticker
+                            })
+                        print(f"✅ Updated {ticker}: ${price:.2f}")
+                        updated_count += 1
+                    except Exception as e:
+                        print(f"❌ Failed to update {ticker}: {e}")
+                
+                # Record portfolio snapshot after updates
+                try:
+                    record_portfolio_snapshot()
+                    print("📊 Portfolio snapshot recorded")
+                except Exception as e:
+                    print(f"❌ Failed to record portfolio snapshot: {e}")
+                
+                print(f"🎯 Manual price update completed: {updated_count} holdings updated")
+        except Exception as e:
+            print(f"Error in manual price update: {e}")
+    
+    thread = threading.Thread(target=run_price_update, daemon=True)
+    thread.start()
+    return jsonify({
+        'success': True,
+        'message': 'Manual price update triggered successfully'
+    })
+
 @app.route('/api/trigger/all', methods=['POST'])
 def trigger_all():
     """Manually trigger all agents in sequence"""

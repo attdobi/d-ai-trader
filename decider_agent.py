@@ -477,6 +477,18 @@ def update_holdings(decisions):
                     })
 
                     cash += total_value
+                    
+            elif action == "hold":
+                # For hold decisions, we don't need to do anything except log it
+                print(f"Holding {ticker} - no action taken")
+                # Record the hold decision for tracking
+                skipped_decision = {
+                    "action": action,
+                    "ticker": ticker,
+                    "amount_usd": 0,
+                    "reason": f"Hold decision: {reason}"
+                }
+                skipped_decisions.append(skipped_decision)
 
         # Update cash balance
         conn.execute(text("""
@@ -492,7 +504,7 @@ def update_holdings(decisions):
     if skipped_decisions:
         run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
         store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
-        print(f"Stored {len(skipped_decisions)} skipped decisions due to market closure")
+        print(f"Stored {len(skipped_decisions)} skipped decisions due to price/data issues")
 
 def record_portfolio_snapshot():
     """Record current portfolio state for historical tracking - same as dashboard_server"""
@@ -628,11 +640,21 @@ def ask_decision_agent(summaries, run_id, holdings):
         feedback_context = "Feedback system unavailable."
 
     prompt = f"""
-You are a financial decision-making AI. Make buy/sell recommendations based on the summaries and current portfolio.
-Use a one-month outlook, maximize ROI. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
 Retain at least ${MIN_BUFFER} in funds.
 
-IMPORTANT: Consider current gains/losses when making sell decisions. If a position has significant gains (>5%), consider taking profits. If a position has significant losses (>10%), consider cutting losses or holding based on fundamentals.
+DAY TRADING STRATEGY:
+- Take profits quickly: Sell positions with >3% gains
+- Cut losses fast: Sell positions with >5% losses  
+- Be aggressive: If you have conviction for a new buy, consider selling existing positions to fund it
+- Rotate capital: Don't hold positions too long, look for better opportunities
+- Use momentum: Buy stocks with positive news/momentum, sell those with negative news
+
+IMPORTANT: Before making buy decisions, evaluate if you should sell existing positions to free up cash. Consider:
+1. Which current positions have gains that can be locked in?
+2. Which positions are underperforming and should be cut?
+3. Is the new opportunity better than holding current positions?
 
 Performance Context: {feedback_context}
 
@@ -646,7 +668,7 @@ Return a JSON list of trade decisions. Each decision should include:
 - action ("buy" or "sell")
 - ticker
 - amount_usd (funds to allocate or recover)
-- reason (short term, long term, profit taking, loss cutting, etc)
+- reason (day trading, profit taking, loss cutting, funding new position, etc)
 Respond strictly in valid JSON format with keys.
 """
 
