@@ -31,6 +31,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **News Summaries**: Display of analyzed financial news that influenced trading decisions
 - **Feedback Dashboard**: AI-powered performance analysis and agent improvement insights
 - **Manual Trigger Controls**: Buttons to manually run summarizer, decider, and feedback agents for testing
+- **🆕 Manual Price Updates**: "Update Stock Prices" button for immediate price refresh and portfolio recalculation
 
 ### 🧠 AI Feedback & Learning System
 - **Outcome Tracking**: Automatically records and categorizes trade results (significant profit, moderate profit, break-even, moderate loss, significant loss)
@@ -38,6 +39,16 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Agent Improvement**: Dynamic feedback to summarizer and decider agents based on trading performance
 - **Continuous Learning**: System improves over time by learning from both successful and unsuccessful trades
 - **Pattern Recognition**: Identifies what news patterns and trading strategies work best
+
+### ⚡ **NEW: Aggressive Day Trading Strategy**
+- **Short-Term Focus**: 1-3 day holding periods for maximum ROI through frequent trading
+- **Quick Profit Taking**: Automatically sells positions with >3% gains to lock in profits
+- **Fast Loss Cutting**: Sells positions with >5% losses to minimize downside
+- **Capital Rotation**: Evaluates existing positions before making new buys
+- **Sequential Trading**: Can sell existing positions and immediately buy new opportunities
+- **Cash Management**: Maintains minimum $10 buffer while maximizing capital utilization
+- **Momentum Trading**: Buys stocks with positive news/momentum, sells those with negative news
+- **Aggressive Positioning**: Considers selling existing positions to fund better opportunities
 
 ## 📁 Project Structure
 
@@ -138,9 +149,11 @@ python main.py
 ```bash
 python decider_agent.py
 ```
-- Analyzes latest news summaries
-- Generates buy/sell recommendations using AI
-- Executes trades and updates portfolio
+- **Day Trading Analysis**: Evaluates positions for quick profit-taking (>3% gains) or loss-cutting (>5% losses)
+- **Capital Rotation**: Considers selling existing positions to fund better opportunities
+- **Sequential Processing**: Sells processed first, then buys using updated cash balance
+- **Cash Management**: Maintains minimum $10 buffer while maximizing capital utilization
+- **Momentum-Based Decisions**: Buys positive momentum, sells negative news
 - Records portfolio snapshots for performance tracking
 
 #### 3. Monitor Performance
@@ -192,6 +205,7 @@ python test_feedback_system.py
 - `/api/history` - Account value history
 - `/api/feedback` - Feedback analysis and performance metrics
 - `/api/trade_outcomes` - Recent trade outcomes and categorization
+- `/api/update-prices` - 🆕 Manually update stock prices and portfolio values
 - `/api/trigger/summarizer` - 🆕 Manually trigger summarizer agents
 - `/api/trigger/decider` - 🆕 Manually trigger decider agent
 - `/api/trigger/feedback` - 🆕 Manually trigger feedback agent
