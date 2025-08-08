@@ -41,8 +41,11 @@ class Summary(Base):
 Base.metadata.create_all(engine)
 
 # OpenAI configuration
-# api_key = os.getenv("OPENAI_API_KEY")
-api_key= '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'
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise EnvironmentError(
+        "OPENAI_API_KEY is not set. Add it to your environment or a .env file in the project root."
+    )
 openai.api_key = api_key
 
 # Define the global model to use

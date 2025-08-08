@@ -83,6 +83,14 @@ def update_all_current_prices():
     """Update current prices for all active holdings before decision making"""
     print("=== Updating Current Prices for Decision Making ===")
     
+    # Check market status
+    market_open = is_market_open()
+    if not market_open:
+        print("⚠️  Market is currently CLOSED - using previous close prices")
+        print("💡 For real-time prices, try during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)")
+    else:
+        print("✅ Market is OPEN - fetching real-time prices")
+    
     with engine.begin() as conn:
         # Get all active holdings
         result = conn.execute(text("""
@@ -210,45 +218,52 @@ def get_current_price(ticker):
     try:
         stock = yf.Ticker(clean_ticker)
         
-        # Method 1: Try to get current price from info
+        # Method 1: Try to get current price from info (works during market hours)
         try:
             current_price = stock.info.get('currentPrice')
             if current_price and current_price > 0:
+                print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
                 return float(current_price)
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 1 failed: {e}")
         
-        # Method 2: Try regular market price from info
+        # Method 2: Try regular market price from info (works during market hours)
         try:
             regular_price = stock.info.get('regularMarketPrice')
             if regular_price and regular_price > 0:
+                print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
                 return float(regular_price)
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 2 failed: {e}")
         
-        # Method 3: Try previous close from info
+        # Method 3: Try previous close from info (works after hours)
         try:
             prev_close = stock.info.get('previousClose')
             if prev_close and prev_close > 0:
+                print(f"✅ {clean_ticker}: Got previous close: ${prev_close:.2f}")
                 return float(prev_close)
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 3 failed: {e}")
         
-        # Method 4: Try history with 1 day period
+        # Method 4: Try history with 1 day period (may fail after hours)
         try:
             hist = stock.history(period="1d")
             if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
-            pass
+                price = float(hist.iloc[-1].Close)
+                print(f"✅ {clean_ticker}: Got price from 1d history: ${price:.2f}")
+                return price
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 4 failed: {e}")
         
-        # Method 5: Try history with 5 day period
+        # Method 5: Try history with 5 day period (more reliable after hours)
         try:
             hist = stock.history(period="5d")
             if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
-            pass
+                price = float(hist.iloc[-1].Close)
+                print(f"✅ {clean_ticker}: Got price from 5d history: ${price:.2f}")
+                return price
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 5 failed: {e}")
         
         # Method 6: Try specific date range (last 7 days)
         try:
@@ -257,24 +272,33 @@ def get_current_price(ticker):
             start_date = end_date - timedelta(days=7)
             hist = stock.history(start=start_date, end=end_date)
             if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
-            pass
+                price = float(hist.iloc[-1].Close)
+                print(f"✅ {clean_ticker}: Got price from 7d history: ${price:.2f}")
+                return price
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 6 failed: {e}")
         
-        # Method 7: Try with longer period (1 month)
+        # Method 7: Try with longer period (1 month) - most reliable after hours
         try:
             hist = stock.history(period="1mo")
             if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
-            pass
+                price = float(hist.iloc[-1].Close)
+                print(f"✅ {clean_ticker}: Got price from 1mo history: ${price:.2f}")
+                return price
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: Method 7 failed: {e}")
         
-        # If all attempts fail, return None
-        print(f"All price fetching methods failed for {clean_ticker} (original: {ticker})")
+        # If all attempts fail, provide better error message
+        print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
+        print(f"💡 This may be due to:")
+        print(f"   - After market hours (current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')})")
+        print(f"   - Weekend or holiday")
+        print(f"   - Temporary API issues")
+        print(f"   - Symbol may be delisted (unlikely for {clean_ticker})")
         return None
         
     except Exception as e:
-        print(f"Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
+        print(f"❌ Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None
 
 def update_holdings(decisions):
