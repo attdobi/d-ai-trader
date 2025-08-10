@@ -8,8 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import openai
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (prefer .env over existing shell vars to avoid stale keys)
+load_dotenv(override=True)
 
 # Database connection
 DATABASE_URI = 'postgresql://adobi@localhost/adobi'
