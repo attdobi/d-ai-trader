@@ -217,7 +217,7 @@ def get_current_price(ticker):
     
     try:
         stock = yf.Ticker(clean_ticker)
-        
+
         # Method 1: Try to get current price from info (works during market hours)
         try:
             current_price = stock.info.get('currentPrice')
@@ -226,8 +226,8 @@ def get_current_price(ticker):
                 return float(current_price)
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 1 failed: {e}")
-        
-        # Method 2: Try regular market price from info (works during market hours)
+
+        # Method 2: Try regular market price from info
         try:
             regular_price = stock.info.get('regularMarketPrice')
             if regular_price and regular_price > 0:
@@ -235,7 +235,7 @@ def get_current_price(ticker):
                 return float(regular_price)
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 2 failed: {e}")
-        
+
         # Method 3: Try previous close from info (works after hours)
         try:
             prev_close = stock.info.get('previousClose')
@@ -244,59 +244,82 @@ def get_current_price(ticker):
                 return float(prev_close)
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 3 failed: {e}")
-        
-        # Method 4: Try history with 1 day period (may fail after hours)
+
+        # Method 3b: Try fast_info fields (often available off-hours)
         try:
-            hist = stock.history(period="1d")
-            if len(hist) > 0:
-                price = float(hist.iloc[-1].Close)
+            fast_info = getattr(stock, 'fast_info', None)
+            if fast_info:
+                for key in (
+                    'lastPrice',
+                    'regularMarketPreviousClose',
+                    'regularMarketPrice',
+                ):
+                    value = None
+                    try:
+                        value = fast_info.get(key) if hasattr(fast_info, 'get') else getattr(fast_info, key, None)
+                    except Exception:
+                        value = None
+                    if value and float(value) > 0:
+                        print(f"✅ {clean_ticker}: Got price from fast_info {key}: ${float(value):.2f}")
+                        return float(value)
+        except Exception as e:
+            print(f"⚠️  {clean_ticker}: fast_info lookup failed: {e}")
+
+        # Method 4: Try history with 1 day period
+        try:
+            hist = stock.history(period="1d", interval="1d", prepost=True)
+            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
+                price = float(hist['Close'].dropna().iloc[-1])
                 print(f"✅ {clean_ticker}: Got price from 1d history: ${price:.2f}")
                 return price
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 4 failed: {e}")
-        
-        # Method 5: Try history with 5 day period (more reliable after hours)
+
+        # Method 5: Try history with 5 day period
         try:
-            hist = stock.history(period="5d")
-            if len(hist) > 0:
-                price = float(hist.iloc[-1].Close)
+            hist = stock.history(period="5d", interval="1d", prepost=True)
+            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
+                price = float(hist['Close'].dropna().iloc[-1])
                 print(f"✅ {clean_ticker}: Got price from 5d history: ${price:.2f}")
                 return price
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 5 failed: {e}")
-        
+
         # Method 6: Try specific date range (last 7 days)
         try:
             from datetime import datetime, timedelta
             end_date = datetime.now()
             start_date = end_date - timedelta(days=7)
-            hist = stock.history(start=start_date, end=end_date)
-            if len(hist) > 0:
-                price = float(hist.iloc[-1].Close)
+            hist = stock.history(start=start_date, end=end_date, interval="1d", prepost=True)
+            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
+                price = float(hist['Close'].dropna().iloc[-1])
                 print(f"✅ {clean_ticker}: Got price from 7d history: ${price:.2f}")
                 return price
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 6 failed: {e}")
-        
-        # Method 7: Try with longer period (1 month) - most reliable after hours
+
+        # Method 7: Use yf.download over a month and pick last valid close (reliable on weekends)
         try:
-            hist = stock.history(period="1mo")
-            if len(hist) > 0:
-                price = float(hist.iloc[-1].Close)
-                print(f"✅ {clean_ticker}: Got price from 1mo history: ${price:.2f}")
-                return price
+            dl = yf.download(tickers=clean_ticker, period="1mo", interval="1d", prepost=True, progress=False)
+            if dl is not None and len(dl) > 0:
+                close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
+                if close_series is not None:
+                    last_valid = close_series.dropna()
+                    if len(last_valid) > 0:
+                        price = float(last_valid.iloc[-1])
+                        print(f"✅ {clean_ticker}: Got price from yf.download 1mo: ${price:.2f}")
+                        return price
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 7 failed: {e}")
-        
+
         # If all attempts fail, provide better error message
         print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
         print(f"💡 This may be due to:")
-        print(f"   - After market hours (current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')})")
-        print(f"   - Weekend or holiday")
-        print(f"   - Temporary API issues")
-        print(f"   - Symbol may be delisted (unlikely for {clean_ticker})")
+        print(f"   - After market hours or weekend/holiday")
+        print(f"   - Temporary Yahoo Finance API issues/rate limits")
+        print(f"   - Symbol may be invalid or delisted")
         return None
-        
+
     except Exception as e:
         print(f"❌ Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None
