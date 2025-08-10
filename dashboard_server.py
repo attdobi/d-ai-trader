@@ -342,7 +342,8 @@ def get_trade_outcomes():
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT ticker, sell_timestamp, purchase_price, sell_price, 
-                       gain_loss_percentage, outcome_category, hold_duration_days
+                       shares, gain_loss_amount, gain_loss_percentage, 
+                       outcome_category, hold_duration_days
                 FROM trade_outcomes 
                 ORDER BY sell_timestamp DESC 
                 LIMIT 50
@@ -355,6 +356,8 @@ def get_trade_outcomes():
                     'sell_date': row.sell_timestamp.isoformat() if row.sell_timestamp else None,
                     'purchase_price': float(row.purchase_price),
                     'sell_price': float(row.sell_price),
+                    'shares': float(row.shares),
+                    'net_gain_dollars': float(row.gain_loss_amount),
                     'gain_loss_pct': float(row.gain_loss_percentage),
                     'category': row.outcome_category,
                     'hold_days': row.hold_duration_days

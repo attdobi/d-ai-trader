@@ -152,6 +152,37 @@
     margin-bottom: 20px;
     height: 400px;
 }
+.text-success {
+    color: #28a745 !important;
+}
+.text-danger {
+    color: #dc3545 !important;
+}
+.outcomes-table th {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 20px;
+}
+.outcomes-table th:hover {
+    background-color: #e9ecef;
+}
+.outcomes-table th.sortable::after {
+    content: " ↕️";
+    position: absolute;
+    right: 8px;
+    opacity: 0.5;
+}
+.outcomes-table th.sort-asc::after {
+    content: " ↑";
+    opacity: 1;
+    color: #007bff;
+}
+.outcomes-table th.sort-desc::after {
+    content: " ↓";
+    opacity: 1;
+    color: #007bff;
+}
 </style>
 
 <!-- Latest Feedback Analysis -->
@@ -187,17 +218,19 @@
         <table class="outcomes-table" id="outcomesTable">
             <thead>
                 <tr>
-                    <th>Ticker</th>
-                    <th>Sell Date</th>
-                    <th>Purchase Price</th>
-                    <th>Sell Price</th>
-                    <th>Gain/Loss %</th>
-                    <th>Category</th>
-                    <th>Hold Days</th>
+                    <th class="sortable" data-column="ticker">Ticker</th>
+                    <th class="sortable" data-column="sell_date">Sell Date</th>
+                    <th class="sortable" data-column="shares">Shares</th>
+                    <th class="sortable" data-column="purchase_price">Purchase Price</th>
+                    <th class="sortable" data-column="sell_price">Sell Price</th>
+                    <th class="sortable" data-column="net_gain_dollars">Net Gain ($)</th>
+                    <th class="sortable" data-column="gain_loss_pct">Gain/Loss %</th>
+                    <th class="sortable" data-column="category">Category</th>
+                    <th class="sortable" data-column="hold_days">Hold Days</th>
                 </tr>
             </thead>
             <tbody id="outcomesBody">
-                <tr><td colspan="7">Loading...</td></tr>
+                <tr><td colspan="9">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -399,13 +432,18 @@
         });
     }
 
+    let currentOutcomes = [];
+    let currentSort = { column: 'sell_date', direction: 'desc' };
+
     async function loadTradeOutcomes() {
         try {
             const response = await fetch('/api/trade_outcomes');
             const outcomes = await response.json();
             
             if (Array.isArray(outcomes)) {
-                updateOutcomesTable(outcomes);
+                currentOutcomes = outcomes;
+                updateOutcomesTable(currentOutcomes);
+                setupTableSorting();
             }
         } catch (error) {
             console.error('Error loading trade outcomes:', error);
@@ -416,21 +454,102 @@
         const tbody = document.getElementById('outcomesBody');
         
         if (outcomes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7">No trade outcomes recorded yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9">No trade outcomes recorded yet</td></tr>';
             return;
         }
         
-        tbody.innerHTML = outcomes.map(outcome => `
-            <tr class="outcome-${outcome.category}">
-                <td>${outcome.ticker}</td>
-                <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
-                <td>$${outcome.purchase_price.toFixed(2)}</td>
-                <td>$${outcome.sell_price.toFixed(2)}</td>
-                <td>${outcome.gain_loss_pct.toFixed(2)}%</td>
-                <td>${outcome.category.replace('_', ' ').toUpperCase()}</td>
-                <td>${outcome.hold_days || 'N/A'}</td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = outcomes.map(outcome => {
+            const netGainClass = outcome.net_gain_dollars >= 0 ? 'text-success' : 'text-danger';
+            const netGainValue = outcome.net_gain_dollars >= 0 ? 
+                `$${outcome.net_gain_dollars.toFixed(2)}` : 
+                `-$${Math.abs(outcome.net_gain_dollars).toFixed(2)}`;
+            
+            const percentageClass = outcome.gain_loss_pct >= 0 ? 'text-success' : 'text-danger';
+            const percentageValue = outcome.gain_loss_pct >= 0 ? 
+                `${outcome.gain_loss_pct.toFixed(2)}%` : 
+                `-${Math.abs(outcome.gain_loss_pct).toFixed(2)}%`;
+            
+            return `
+                <tr class="outcome-${outcome.category}">
+                    <td><strong>${outcome.ticker}</strong></td>
+                    <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
+                    <td>${outcome.shares.toFixed(0)}</td>
+                    <td>$${outcome.purchase_price.toFixed(2)}</td>
+                    <td>$${outcome.sell_price.toFixed(2)}</td>
+                    <td class="${netGainClass}"><strong>${netGainValue}</strong></td>
+                    <td class="${percentageClass}"><strong>${percentageValue}</strong></td>
+                    <td>${outcome.category.replace('_', ' ').toUpperCase()}</td>
+                    <td>${outcome.hold_days || 'N/A'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function setupTableSorting() {
+        const headers = document.querySelectorAll('.outcomes-table th.sortable');
+        
+        headers.forEach(header => {
+            header.addEventListener('click', () => {
+                const column = header.dataset.column;
+                
+                // Toggle sort direction if same column, otherwise default to ascending
+                if (currentSort.column === column) {
+                    currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSort = { column, direction: 'asc' };
+                }
+                
+                // Update header styles
+                headers.forEach(h => {
+                    h.classList.remove('sort-asc', 'sort-desc');
+                });
+                header.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                
+                // Sort and update table
+                sortOutcomes(column, currentSort.direction);
+            });
+        });
+        
+        // Set initial sort indicator
+        const defaultHeader = document.querySelector(`[data-column="${currentSort.column}"]`);
+        if (defaultHeader) {
+            defaultHeader.classList.add(`sort-${currentSort.direction}`);
+        }
+    }
+
+    function sortOutcomes(column, direction) {
+        const sortedOutcomes = [...currentOutcomes].sort((a, b) => {
+            let aVal = a[column];
+            let bVal = b[column];
+            
+            // Handle different data types
+            switch (column) {
+                case 'sell_date':
+                    aVal = new Date(aVal);
+                    bVal = new Date(bVal);
+                    break;
+                case 'shares':
+                case 'purchase_price':
+                case 'sell_price':
+                case 'net_gain_dollars':
+                case 'gain_loss_pct':
+                case 'hold_days':
+                    aVal = parseFloat(aVal) || 0;
+                    bVal = parseFloat(bVal) || 0;
+                    break;
+                case 'ticker':
+                case 'category':
+                    aVal = String(aVal).toLowerCase();
+                    bVal = String(bVal).toLowerCase();
+                    break;
+            }
+            
+            if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+            if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        
+        updateOutcomesTable(sortedOutcomes);
     }
 
     async function loadPromptComparison() {
