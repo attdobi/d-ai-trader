@@ -7,7 +7,8 @@ An intelligent trading system that uses AI agents to analyze financial news from
 ### Core Trading System
 - **Multi-Source News Analysis**: Scrapes financial news from CNN Money, CNBC, Bloomberg, Fox Business, and Yahoo Finance
 - **AI-Powered Decision Making**: Uses OpenAI GPT-4 to analyze news sentiment and generate trading recommendations
-- **Automated Trade Execution**: Executes buy/sell decisions based on AI analysis
+- **Dual-Mode Trading**: Supports both simulation and live trading through Schwab API
+- **Automated Trade Execution**: Executes buy/sell decisions with comprehensive safety checks
 - **Real-Time Price Updates**: Automatically updates stock prices and portfolio values
 
 ### 🤖 **NEW: Automated Execution System**
@@ -24,9 +25,18 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Historical Performance**: Time-series tracking of portfolio performance over time
 - **Visual Analytics**: Interactive charts showing profit/loss trends and portfolio evolution
 
+### 💰 **NEW: Schwab API Integration**
+- **Live Trading**: Connect to real Schwab account with $10,000 for actual trade execution
+- **Dual Dashboard**: Separate tabs for simulation and live portfolio tracking
+- **Safety Systems**: Comprehensive risk management and position limits
+- **Authentication**: Secure OAuth2 flow with token management
+- **Real-Time Sync**: Live account data and position tracking
+
 ### Dashboard & Visualization
-- **Real-Time Dashboard**: Web interface displaying current holdings, cash balance, and performance metrics
+- **Simulation Dashboard**: Web interface displaying simulated holdings and performance
+- **Schwab Live Dashboard**: Real-time view of actual Schwab account positions and P&L
 - **Interactive Charts**: Portfolio value and profit/loss visualization over time
+- **Manual Controls**: Trigger buttons for testing and emergency overrides
 - **Trade History**: Complete record of all trading decisions and their outcomes
 - **News Summaries**: Display of analyzed financial news that influenced trading decisions
 - **Feedback Dashboard**: AI-powered performance analysis and agent improvement insights
@@ -81,6 +91,30 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - Python 3.8+
 - PostgreSQL
 - Chrome/Chromium browser (for web scraping)
+- OpenAI API key
+- **NEW**: Schwab Developer Account (for live trading)
+
+### Quick Setup for Simulation Mode
+```bash
+# Clone and setup
+git clone <repository>
+cd d-ai-trader
+pip install -r requirements.txt
+
+# Configure environment
+cp env_template.txt .env
+# Edit .env with your OpenAI API key
+
+# Start the system
+python dashboard_server.py  # Web dashboard on port 8080
+python d_ai_trader.py       # Automated agents
+```
+
+### 💰 Schwab Live Trading Setup
+For connecting to your real Schwab account with $10,000:
+- See **[SCHWAB_SETUP.md](SCHWAB_SETUP.md)** for complete setup instructions
+- Includes developer account creation, authentication, safety configuration, and testing procedures
+- **Start with simulation mode first** to validate the system
 
 ### Database Setup
 ```bash

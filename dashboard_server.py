@@ -16,6 +16,14 @@ import os
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
 
+# Initialize trading interface for Schwab integration
+try:
+    from trading_interface import trading_interface
+    SCHWAB_ENABLED = True
+except ImportError:
+    SCHWAB_ENABLED = False
+    print("Warning: Trading interface not available, Schwab features disabled")
+
 def create_portfolio_history_table():
     """Create portfolio_history table to track portfolio value over time"""
     with engine.begin() as conn:
@@ -888,6 +896,62 @@ def update_prices():
 def start_price_updater():
     thread = threading.Thread(target=update_prices, daemon=True)
     thread.start()
+
+@app.route('/api/schwab/holdings')
+def get_schwab_holdings():
+    """Get current Schwab holdings and portfolio data"""
+    if not SCHWAB_ENABLED:
+        return jsonify({
+            'error': 'Schwab integration not available',
+            'enabled': False
+        })
+    
+    try:
+        schwab_data = trading_interface.sync_schwab_positions()
+        schwab_data['enabled'] = True
+        return jsonify(schwab_data)
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'enabled': True,
+            'status': 'error'
+        })
+
+@app.route('/api/schwab/account-info')
+def get_schwab_account_info():
+    """Get Schwab account information"""
+    if not SCHWAB_ENABLED:
+        return jsonify({
+            'error': 'Schwab integration not available',
+            'enabled': False
+        })
+    
+    try:
+        from schwab_client import schwab_client
+        account_info = schwab_client.get_account_info()
+        if account_info:
+            return jsonify({
+                'status': 'success',
+                'account_info': account_info,
+                'enabled': True
+            })
+        else:
+            return jsonify({
+                'error': 'Could not retrieve account information',
+                'enabled': True,
+                'status': 'error'
+            })
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'enabled': True,
+            'status': 'error'
+        })
+
+@app.route('/schwab')
+def schwab_dashboard():
+    """Render the Schwab holdings dashboard"""
+    return render_template('schwab_dashboard.html')
 
 if __name__ == "__main__":
     start_price_updater()

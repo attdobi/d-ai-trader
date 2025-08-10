@@ -832,7 +832,31 @@ if __name__ == "__main__":
         
         decisions = ask_decision_agent(unprocessed_summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
-        update_holdings(decisions)
+        
+        # Execute trades through the unified trading interface
+        try:
+            from trading_interface import trading_interface
+            execution_results = trading_interface.execute_trade_decisions(decisions)
+            
+            # Log execution results
+            if execution_results.get("summary"):
+                summary = execution_results["summary"]
+                print(f"🔄 Trade Execution Summary:")
+                print(f"   📊 Simulation: {summary['simulation_executed']} executed")
+                if summary.get('live_executed', 0) > 0:
+                    print(f"   💰 Live: {summary['live_executed']} executed")
+                if summary.get('skipped', 0) > 0:
+                    print(f"   ⏭️  Skipped: {summary['skipped']}")
+                if summary.get('errors', 0) > 0:
+                    print(f"   ❌ Errors: {summary['errors']}")
+        except ImportError:
+            # Fallback to original method if trading_interface is not available
+            print("⚠️  Trading interface not available, using simulation only")
+            update_holdings(decisions)
+        except Exception as e:
+            print(f"❌ Error in trading interface: {e}")
+            print("🔄 Falling back to simulation mode")
+            update_holdings(decisions)
         
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]

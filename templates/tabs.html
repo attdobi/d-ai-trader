@@ -23,6 +23,7 @@
 <body>
     <div class="nav">
         <a href="/" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
+        <a href="/schwab" class="{{ 'active' if request.path.startswith('/schwab') else '' }}">Schwab Live</a>
         <a href="/trades" class="{{ 'active' if request.path.startswith('/trades') else '' }}">Trades</a>
         <a href="/summaries" class="{{ 'active' if request.path.startswith('/summaries') else '' }}">Summaries</a>
         <a href="/feedback" class="{{ 'active' if request.path.startswith('/feedback') else '' }}">Feedback</a>

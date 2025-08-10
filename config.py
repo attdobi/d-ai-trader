@@ -43,6 +43,19 @@ Base.metadata.create_all(engine)
 # OpenAI configuration
 api_key = os.getenv("OPENAI_API_KEY")
 
+# Schwab API configuration
+SCHWAB_CLIENT_ID = os.getenv("SCHWAB_CLIENT_ID")
+SCHWAB_CLIENT_SECRET = os.getenv("SCHWAB_CLIENT_SECRET")
+SCHWAB_REDIRECT_URI = os.getenv("SCHWAB_REDIRECT_URI", "https://localhost:8443/callback")
+SCHWAB_ACCOUNT_HASH = os.getenv("SCHWAB_ACCOUNT_HASH")
+
+# Trading configuration
+TRADING_MODE = os.getenv("TRADING_MODE", "simulation")  # simulation or live
+MAX_POSITION_VALUE = float(os.getenv("MAX_POSITION_VALUE", "1000"))
+MAX_TOTAL_INVESTMENT = float(os.getenv("MAX_TOTAL_INVESTMENT", "10000"))
+MIN_CASH_BUFFER = float(os.getenv("MIN_CASH_BUFFER", "500"))
+DEBUG_TRADING = os.getenv("DEBUG_TRADING", "true").lower() == "true"
+
 # Optional: print masked key for debugging if requested
 try:
     if os.getenv("PRINT_OPENAI_KEY"):

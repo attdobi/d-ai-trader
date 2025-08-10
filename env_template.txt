@@ -1,0 +1,20 @@
+# Copy this to .env and fill in your actual values
+
+# OpenAI Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Schwab API Configuration
+SCHWAB_CLIENT_ID=your_schwab_client_id_here
+SCHWAB_CLIENT_SECRET=your_schwab_client_secret_here
+SCHWAB_REDIRECT_URI=https://localhost:8443/callback
+SCHWAB_ACCOUNT_HASH=your_account_hash_here
+
+# Trading Configuration
+TRADING_MODE=simulation  # Options: simulation, live
+MAX_POSITION_VALUE=1000  # Maximum value per position in USD
+MAX_TOTAL_INVESTMENT=10000  # Maximum total investment
+MIN_CASH_BUFFER=500  # Minimum cash to keep in account
+
+# Debug Configuration
+PRINT_OPENAI_KEY=false
+DEBUG_TRADING=true
