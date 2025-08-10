@@ -5,7 +5,6 @@ from math import floor
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai
 import yfinance as yf
-import requests
 from feedback_agent import TradeOutcomeTracker
 
 # Timezone configuration
@@ -217,16 +216,7 @@ def get_current_price(ticker):
         return None
     
     try:
-        # Use a session with a modern User-Agent to reduce Yahoo filtering issues
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/127.0.0.0 Safari/537.36"
-            )
-        })
-        stock = yf.Ticker(clean_ticker, session=session)
+        stock = yf.Ticker(clean_ticker)
 
         # Method 1: Try to get current price from info (works during market hours)
         try:
@@ -316,7 +306,6 @@ def get_current_price(ticker):
                 interval="1d",
                 prepost=True,
                 progress=False,
-                session=session,
             )
             if dl is not None and len(dl) > 0:
                 close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
