@@ -1,6 +1,7 @@
 import json
 import pytz
 from datetime import datetime
+import time
 from math import floor
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai
@@ -332,164 +333,61 @@ def get_current_price(ticker):
 
 def update_holdings(decisions):
     timestamp = datetime.utcnow()
-    skipped_decisions = []  # Track decisions that were skipped
-    
-    with engine.begin() as conn:
-        # Get current cash balance
-        cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'")).fetchone()
-        cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
+    skipped_decisions = []
 
-        for decision in decisions:
-            action = decision.get("action")
-            ticker = decision.get("ticker")
-            amount = float(decision.get("amount_usd", 0))
-            reason = decision.get("reason", "")
+    decisions_normalized = [
+        {
+            **d,
+            "action": (d.get("action") or "").lower(),
+        }
+        for d in decisions
+    ]
+    sell_decisions = [d for d in decisions_normalized if d.get("action") == "sell"]
+    buy_decisions = [d for d in decisions_normalized if d.get("action") == "buy"]
+    hold_decisions = [d for d in decisions_normalized if d.get("action") not in ("buy", "sell")]
 
-            # Clean the ticker symbol for database operations
-            clean_ticker = clean_ticker_symbol(ticker)
-            if not clean_ticker:
-                print(f"Skipping {action} for {ticker} due to invalid ticker symbol.")
-                continue
+    # 1) Process all SELLS first
+    if sell_decisions:
+        with engine.begin() as conn:
+            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'"))\
+                .fetchone()
+            cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
 
-            # Check if market is open before attempting to get prices
-            if not is_market_open():
-                print(f"Skipping {action} for {ticker} - market is closed.")
-                # Record the skipped decision
-                skipped_decision = {
-                    "action": action,
-                    "ticker": ticker,
-                    "amount_usd": amount,
-                    "reason": f"Market closed - no trade executed (Original: {reason})"
-                }
-                skipped_decisions.append(skipped_decision)
-                continue
-            
-            price = get_current_price(ticker)
-            if not price:
-                print(f"Skipping {action} for {ticker} due to missing price.")
-                # Record the skipped decision
-                skipped_decision = {
-                    "action": action,
-                    "ticker": ticker,
-                    "amount_usd": amount,
-                    "reason": f"Price data unavailable - no trade executed (Original: {reason})"
-                }
-                skipped_decisions.append(skipped_decision)
-                continue
+            for decision in sell_decisions:
+                ticker = decision.get("ticker")
+                amount = float(decision.get("amount_usd", 0))
+                reason = decision.get("reason", "")
 
-            if action == "buy":
-                shares = floor(amount / price)
-                if shares == 0:
-                    print(f"Skipping buy for {ticker} due to insufficient funds for 1 share.")
-                    # Record the skipped decision
-                    skipped_decision = {
-                        "action": action,
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Insufficient funds for 1 share - no trade executed (Original: {reason})"
-                    }
-                    skipped_decisions.append(skipped_decision)
-                    continue
-                actual_spent = shares * price
-                if cash - actual_spent < MIN_BUFFER:
-                    print(f"Skipping buy for {ticker}, would breach minimum buffer.")
-                    # Record the skipped decision
-                    skipped_decision = {
-                        "action": action,
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Would breach minimum buffer - no trade executed (Original: {reason})"
-                    }
-                    skipped_decisions.append(skipped_decision)
+                clean_ticker = clean_ticker_symbol(ticker)
+                if not clean_ticker:
+                    print(f"Skipping sell for {ticker} due to invalid ticker symbol.")
                     continue
 
-                # Check if we already have this ticker (active or inactive)
-                existing = conn.execute(text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"), {"ticker": clean_ticker}).fetchone()
-                
-                if existing:
-                    if existing.is_active:
-                        # Accumulate shares and total investment (cost basis)
-                        new_shares = float(existing.shares) + shares
-                        new_total_value = float(existing.total_value) + actual_spent
-                        new_current_value = new_shares * price
-                        # Preserve any existing unrealized gains/losses and add this purchase at cost
-                        new_gain_loss = new_current_value - new_total_value
-                        new_avg_price = new_total_value / new_shares
-                        
-                        conn.execute(text("""
-                            UPDATE holdings SET
-                                shares = :shares,
-                                purchase_price = :avg_price,
-                                current_price = :current_price,
-                                purchase_timestamp = :timestamp,
-                                current_price_timestamp = :timestamp,
-                                total_value = :total_value,
-                                current_value = :current_value,
-                                gain_loss = :gain_loss,
-                                reason = :reason
-                            WHERE ticker = :ticker
-                        """), {
-                            "ticker": clean_ticker,
-                            "shares": new_shares,
-                            "avg_price": new_avg_price,
-                            "current_price": float(price),
-                            "timestamp": timestamp,
-                            "total_value": new_total_value,
-                            "current_value": new_current_value,
-                            "gain_loss": new_gain_loss,
-                            "reason": f"{existing.reason if existing.reason else ''} + {reason}"
-                        })
-                        print(f"Added {shares} shares of {clean_ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
-                    else:
-                        # Reactivate the holding with new shares
-                        conn.execute(text("""
-                            UPDATE holdings SET
-                                shares = :shares,
-                                purchase_price = :purchase_price,
-                                current_price = :current_price,
-                                purchase_timestamp = :timestamp,
-                                current_price_timestamp = :timestamp,
-                                total_value = :total_value,
-                                current_value = :current_value,
-                                gain_loss = :gain_loss,
-                                reason = :reason,
-                                is_active = TRUE
-                            WHERE ticker = :ticker
-                        """), {
-                            "ticker": ticker,
-                            "shares": float(shares),
-                            "purchase_price": float(price),
-                            "current_price": float(price),
-                            "timestamp": timestamp,
-                            "total_value": float(shares * price),
-                            "current_value": float(shares * price),
-                            "gain_loss": 0.0,
-                            "reason": reason
-                        })
-                        print(f"Reactivated {clean_ticker}: {shares} shares at ${price:.2f}")
-                else:
-                    # First purchase of this ticker
-                    conn.execute(text("""
-                        INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                        VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
-                                            """), {
-                            "ticker": clean_ticker,
-                            "shares": float(shares),
-                            "purchase_price": float(price),
-                            "current_price": float(price),
-                            "purchase_timestamp": timestamp,
-                            "current_price_timestamp": timestamp,
-                            "total_value": float(shares * price),
-                            "current_value": float(shares * price),
-                            "gain_loss": 0.0,
-                            "reason": reason
-                        })
-                    print(f"First purchase: {shares} shares of {clean_ticker} at ${price:.2f}")
+                if not is_market_open():
+                    print(f"Skipping sell for {ticker} - market is closed.")
+                    skipped_decisions.append({
+                        "action": "sell",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Market closed - no trade executed (Original: {reason})"
+                    })
+                    continue
 
-                cash -= actual_spent
+                price = get_current_price(ticker)
+                if not price:
+                    print(f"Skipping sell for {ticker} due to missing price.")
+                    skipped_decisions.append({
+                        "action": "sell",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Price data unavailable - no trade executed (Original: {reason})"
+                    })
+                    continue
 
-            elif action == "sell":
-                holding = conn.execute(text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"), {"ticker": clean_ticker}).fetchone()
+                holding = conn.execute(
+                    text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"),
+                    {"ticker": clean_ticker}
+                ).fetchone()
                 if holding:
                     shares = float(holding.shares)
                     purchase_price = float(holding.purchase_price)
@@ -497,7 +395,6 @@ def update_holdings(decisions):
                     purchase_value = shares * purchase_price
                     gain_loss = total_value - purchase_value
 
-                    # Record outcome for feedback system
                     holding_data = {
                         'purchase_price': purchase_price,
                         'shares': shares,
@@ -530,30 +427,186 @@ def update_holdings(decisions):
                     })
 
                     cash += total_value
-                    
-            elif action == "hold":
-                # For hold decisions, we don't need to do anything except log it
-                print(f"Holding {ticker} - no action taken")
-                # Record the hold decision for tracking
-                skipped_decision = {
-                    "action": action,
-                    "ticker": ticker,
-                    "amount_usd": 0,
-                    "reason": f"Hold decision: {reason}"
-                }
-                skipped_decisions.append(skipped_decision)
 
-        # Update cash balance
-        conn.execute(text("""
-            UPDATE holdings SET
-                current_price = :cash,
-                current_value = :cash,
-                total_value = :cash,
-                current_price_timestamp = :timestamp
-            WHERE ticker = 'CASH'
-        """), {"cash": cash, "timestamp": timestamp})
-    
-    # Store skipped decisions if any
+            # Persist updated cash
+            conn.execute(text("""
+                UPDATE holdings SET
+                    current_price = :cash,
+                    current_value = :cash,
+                    total_value = :cash,
+                    current_price_timestamp = :timestamp
+                WHERE ticker = 'CASH'
+            """), {"cash": cash, "timestamp": timestamp})
+
+    # Optional wait if buys are pending
+    if sell_decisions and buy_decisions:
+        print("Waiting 30 seconds after sells to allow funds to free up before buys...")
+        time.sleep(30)
+
+    # 2) Process all BUYS
+    if buy_decisions:
+        with engine.begin() as conn:
+            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'"))\
+                .fetchone()
+            cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
+
+            for decision in buy_decisions:
+                ticker = decision.get("ticker")
+                amount = float(decision.get("amount_usd", 0))
+                reason = decision.get("reason", "")
+
+                clean_ticker = clean_ticker_symbol(ticker)
+                if not clean_ticker:
+                    print(f"Skipping buy for {ticker} due to invalid ticker symbol.")
+                    continue
+
+                if not is_market_open():
+                    print(f"Skipping buy for {ticker} - market is closed.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Market closed - no trade executed (Original: {reason})"
+                    })
+                    continue
+
+                price = get_current_price(ticker)
+                if not price:
+                    print(f"Skipping buy for {ticker} due to missing price.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Price data unavailable - no trade executed (Original: {reason})"
+                    })
+                    continue
+
+                shares = floor(amount / price)
+                if shares == 0:
+                    print(f"Skipping buy for {ticker} due to insufficient funds for 1 share.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Insufficient funds for 1 share - no trade executed (Original: {reason})"
+                    })
+                    continue
+
+                actual_spent = shares * price
+                if cash - actual_spent < MIN_BUFFER:
+                    print(f"Skipping buy for {ticker}, would breach minimum buffer.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Would breach minimum buffer - no trade executed (Original: {reason})"
+                    })
+                    continue
+
+                existing = conn.execute(
+                    text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"),
+                    {"ticker": clean_ticker}
+                ).fetchone()
+
+                if existing and existing.is_active:
+                    new_shares = float(existing.shares) + shares
+                    new_total_value = float(existing.total_value) + actual_spent
+                    new_current_value = new_shares * price
+                    new_gain_loss = new_current_value - new_total_value
+                    new_avg_price = new_total_value / new_shares
+
+                    conn.execute(text("""
+                        UPDATE holdings SET
+                            shares = :shares,
+                            purchase_price = :avg_price,
+                            current_price = :current_price,
+                            purchase_timestamp = :timestamp,
+                            current_price_timestamp = :timestamp,
+                            total_value = :total_value,
+                            current_value = :current_value,
+                            gain_loss = :gain_loss,
+                            reason = :reason
+                        WHERE ticker = :ticker
+                    """), {
+                        "ticker": clean_ticker,
+                        "shares": new_shares,
+                        "avg_price": new_avg_price,
+                        "current_price": float(price),
+                        "timestamp": timestamp,
+                        "total_value": new_total_value,
+                        "current_value": new_current_value,
+                        "gain_loss": new_gain_loss,
+                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                    })
+                    print(f"Added {shares} shares of {clean_ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
+                elif existing and not existing.is_active:
+                    conn.execute(text("""
+                        UPDATE holdings SET
+                            shares = :shares,
+                            purchase_price = :purchase_price,
+                            current_price = :current_price,
+                            purchase_timestamp = :timestamp,
+                            current_price_timestamp = :timestamp,
+                            total_value = :total_value,
+                            current_value = :current_value,
+                            gain_loss = :gain_loss,
+                            reason = :reason,
+                            is_active = TRUE
+                        WHERE ticker = :ticker
+                    """), {
+                        "ticker": clean_ticker,
+                        "shares": float(shares),
+                        "purchase_price": float(price),
+                        "current_price": float(price),
+                        "timestamp": timestamp,
+                        "total_value": float(shares * price),
+                        "current_value": float(shares * price),
+                        "gain_loss": 0.0,
+                        "reason": reason
+                    })
+                    print(f"Reactivated {clean_ticker}: {shares} shares at ${price:.2f}")
+                else:
+                    conn.execute(text("""
+                        INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                        VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                    """), {
+                        "ticker": clean_ticker,
+                        "shares": float(shares),
+                        "purchase_price": float(price),
+                        "current_price": float(price),
+                        "purchase_timestamp": timestamp,
+                        "current_price_timestamp": timestamp,
+                        "total_value": float(shares * price),
+                        "current_value": float(shares * price),
+                        "gain_loss": 0.0,
+                        "reason": reason
+                    })
+                    print(f"First purchase: {shares} shares of {clean_ticker} at ${price:.2f}")
+
+                cash -= actual_spent
+
+            # Persist updated cash after buys
+            conn.execute(text("""
+                UPDATE holdings SET
+                    current_price = :cash,
+                    current_value = :cash,
+                    total_value = :cash,
+                    current_price_timestamp = :timestamp
+                WHERE ticker = 'CASH'
+            """), {"cash": cash, "timestamp": timestamp})
+
+    # 3) Handle HOLD records for visibility
+    for decision in hold_decisions:
+        ticker = decision.get("ticker")
+        reason = decision.get("reason", "")
+        print(f"Holding {ticker} - no action taken")
+        skipped_decisions.append({
+            "action": "hold",
+            "ticker": ticker,
+            "amount_usd": 0,
+            "reason": f"Hold decision: {reason}"
+        })
+
     if skipped_decisions:
         run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
         store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
