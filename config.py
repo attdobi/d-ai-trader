@@ -42,6 +42,22 @@ Base.metadata.create_all(engine)
 
 # OpenAI configuration
 api_key = os.getenv("OPENAI_API_KEY")
+
+# Optional: print masked key for debugging if requested
+try:
+    if os.getenv("PRINT_OPENAI_KEY"):
+        # Mask first 6 and last 4 characters unless PRINT_OPENAI_KEY=full
+        if api_key:
+            if os.getenv("PRINT_OPENAI_KEY").lower() == "full":
+                masked = api_key
+            else:
+                masked = f"{api_key[:6]}...{api_key[-4:]} (len={len(api_key)})"
+        else:
+            masked = None
+        print(f"[config] OPENAI_API_KEY present={bool(api_key)} key={masked}")
+except Exception:
+    pass
+
 if not api_key:
     raise EnvironmentError(
         "OPENAI_API_KEY is not set. Add it to your environment or a .env file in the project root."
