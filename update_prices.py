@@ -11,6 +11,7 @@ from config import engine
 from sqlalchemy import text
 from datetime import datetime
 import yfinance as yf
+import requests
 
 def clean_ticker_symbol(ticker):
     """Clean up ticker symbol to extract just the symbol"""
@@ -45,7 +46,15 @@ def get_current_price_robust(ticker):
         return None
     
     try:
-        stock = yf.Ticker(clean_ticker)
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/127.0.0.0 Safari/537.36"
+            )
+        })
+        stock = yf.Ticker(clean_ticker, session=session)
 
         # Fast info fields first
         try:
@@ -101,7 +110,14 @@ def get_current_price_robust(ticker):
 
         # yf.download over 1 month as a final fallback
         try:
-            dl = yf.download(tickers=clean_ticker, period="1mo", interval="1d", prepost=True, progress=False)
+            dl = yf.download(
+                tickers=clean_ticker,
+                period="1mo",
+                interval="1d",
+                prepost=True,
+                progress=False,
+                session=session,
+            )
             if dl is not None and len(dl) > 0:
                 close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
                 if close_series is not None:
