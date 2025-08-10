@@ -300,27 +300,24 @@ def get_feedback_data():
     try:
         tracker = TradeOutcomeTracker()
         
-        # Get recent feedback
-        latest_feedback = tracker.get_latest_feedback()
+        # Get recent feedback (gracefully handle missing AI key)
+        try:
+            latest_feedback = tracker.get_latest_feedback()
+        except Exception:
+            latest_feedback = None
         
         # Get trade outcomes for different periods
         periods = [7, 14, 30]
         period_data = {}
         
         for days in periods:
-            result = tracker.analyze_recent_outcomes(days_back=days)
-            if result:
-                period_data[f'{days}d'] = {
-                    'total_trades': result['total_trades'],
-                    'success_rate': result['success_rate'],
-                    'avg_profit': result['avg_profit']
-                }
-            else:
-                period_data[f'{days}d'] = {
-                    'total_trades': 0,
-                    'success_rate': 0,
-                    'avg_profit': 0
-                }
+            # Compute metrics without AI call to avoid API failures impacting the dashboard
+            metrics = tracker.compute_recent_outcomes_metrics(days_back=days)
+            period_data[f'{days}d'] = {
+                'total_trades': metrics['total_trades'],
+                'success_rate': metrics['success_rate'],
+                'avg_profit': metrics['avg_profit']
+            }
         
         return jsonify({
             'latest_feedback': latest_feedback,
