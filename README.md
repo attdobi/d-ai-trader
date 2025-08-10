@@ -105,7 +105,11 @@ pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv opena
 ```
 
 ### Configuration
-1. Set your OpenAI API key in `config.py`
+1. Set your OpenAI API key via environment variable or a `.env` file in the project root
+   - Create a `.env` file with:
+     - `OPENAI_API_KEY=your_key_here`
+   - Or export in your shell:
+     - `export OPENAI_API_KEY='your_key_here'`
 2. Ensure database connection string is correct: `postgresql://adobi@localhost/adobi`
 
 ## 🎯 Usage
@@ -122,18 +126,25 @@ python d_ai_trader.py
 - **Market-aware**: Respects trading hours and holidays
 - **Intelligent processing**: Handles all unseen summaries
 - **Comprehensive logging**: Full system monitoring
+- Uses the project virtual environment automatically (ensures correct `yfinance` version)
 
 ### 🧪 **Testing & Manual Execution**
 ```bash
 # Test system components
 python test_system.py
 
-# Start dashboard with manual triggers
+# Start dashboard with manual triggers (use the project virtualenv)
+source dai/bin/activate
 python dashboard_server.py
 ```
 - **Manual triggers**: Use dashboard buttons for immediate testing
 - **End-to-end testing**: Run all agents in sequence
 - **Real-time monitoring**: Watch system execution live
+
+Note: If you prefer not to activate the virtualenv, run the dashboard with an absolute path to the venv Python to avoid Anaconda conflicts:
+```
+/Users/adobi/d-ai-trader/dai/bin/python /Users/adobi/d-ai-trader/dashboard_server.py
+```
 
 ### 📊 **Traditional Manual Usage**
 
