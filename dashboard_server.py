@@ -300,27 +300,24 @@ def get_feedback_data():
     try:
         tracker = TradeOutcomeTracker()
         
-        # Get recent feedback
-        latest_feedback = tracker.get_latest_feedback()
+        # Get recent feedback (gracefully handle missing AI key)
+        try:
+            latest_feedback = tracker.get_latest_feedback()
+        except Exception:
+            latest_feedback = None
         
         # Get trade outcomes for different periods
         periods = [7, 14, 30]
         period_data = {}
         
         for days in periods:
-            result = tracker.analyze_recent_outcomes(days_back=days)
-            if result:
-                period_data[f'{days}d'] = {
-                    'total_trades': result['total_trades'],
-                    'success_rate': result['success_rate'],
-                    'avg_profit': result['avg_profit']
-                }
-            else:
-                period_data[f'{days}d'] = {
-                    'total_trades': 0,
-                    'success_rate': 0,
-                    'avg_profit': 0
-                }
+            # Compute metrics without AI call to avoid API failures impacting the dashboard
+            metrics = tracker.compute_recent_outcomes_metrics(days_back=days)
+            period_data[f'{days}d'] = {
+                'total_trades': metrics['total_trades'],
+                'success_rate': metrics['success_rate'],
+                'avg_profit': metrics['avg_profit']
+            }
         
         return jsonify({
             'latest_feedback': latest_feedback,
@@ -763,48 +760,90 @@ def clean_ticker_symbol(ticker):
     return ticker
 
 def get_current_price_robust(ticker):
-    """Get current price with robust error handling"""
+    """Get current/last-close price with robust weekend/after-hours fallbacks"""
     # Clean the ticker symbol first
     clean_ticker = clean_ticker_symbol(ticker)
     if not clean_ticker:
         print(f"Invalid ticker symbol: {ticker}")
         return None
-    
+
     try:
         stock = yf.Ticker(clean_ticker)
-        
-        # Try multiple approaches to get price data
-        # First try: 1 day period
+
+        # Fast info fields first
         try:
-            hist = stock.history(period="1d")
-            if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
+            fast_info = getattr(stock, 'fast_info', None)
+            if fast_info:
+                for key in (
+                    'lastPrice',
+                    'regularMarketPrice',
+                    'regularMarketPreviousClose',
+                ):
+                    value = None
+                    try:
+                        value = fast_info.get(key) if hasattr(fast_info, 'get') else getattr(fast_info, key, None)
+                    except Exception:
+                        value = None
+                    if value and float(value) > 0:
+                        return float(value)
+        except Exception:
             pass
-        
-        # Second try: 5 day period
+
+        # Try info dict
         try:
-            hist = stock.history(period="5d")
-            if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
+            for key in ('currentPrice', 'regularMarketPrice', 'previousClose'):
+                value = stock.info.get(key)
+                if value and float(value) > 0:
+                    return float(value)
+        except Exception:
             pass
-        
-        # Third try: specific date range (last 7 days)
+
+        # History with prepost, daily bars
+        try:
+            for period in ("1d", "5d"):
+                hist = stock.history(period=period, interval="1d", prepost=True)
+                if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
+                    close = hist['Close'].dropna()
+                    if len(close) > 0:
+                        return float(close.iloc[-1])
+        except Exception:
+            pass
+
+        # Last 7 days range
         try:
             from datetime import datetime, timedelta
             end_date = datetime.now()
             start_date = end_date - timedelta(days=7)
-            hist = stock.history(start=start_date, end=end_date)
-            if len(hist) > 0:
-                return float(hist.iloc[-1].Close)
-        except:
+            hist = stock.history(start=start_date, end=end_date, interval="1d", prepost=True)
+            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
+                close = hist['Close'].dropna()
+                if len(close) > 0:
+                    return float(close.iloc[-1])
+        except Exception:
             pass
-        
+
+        # yf.download over 1 month as a final fallback
+        try:
+            dl = yf.download(
+                tickers=clean_ticker,
+                period="1mo",
+                interval="1d",
+                prepost=True,
+                progress=False,
+            )
+            if dl is not None and len(dl) > 0:
+                close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
+                if close_series is not None:
+                    last_valid = close_series.dropna()
+                    if len(last_valid) > 0:
+                        return float(last_valid.iloc[-1])
+        except Exception:
+            pass
+
         # If all attempts fail, return None
         print(f"No price data available for {clean_ticker} (original: {ticker})")
         return None
-        
+
     except Exception as e:
         print(f"Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None

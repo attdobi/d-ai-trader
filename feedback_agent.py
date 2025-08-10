@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai
+from config import engine, PromptManager, session, openai, GPT_MODEL
 import yfinance as yf
 import pandas as pd
 
@@ -224,6 +224,32 @@ class TradeOutcomeTracker:
             "total_trades": total_trades,
             "feedback": feedback
         }
+
+    def compute_recent_outcomes_metrics(self, days_back=FEEDBACK_LOOKBACK_DAYS):
+        """Compute recent outcome metrics only (no AI call)"""
+        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT gain_loss_percentage
+                FROM trade_outcomes 
+                WHERE sell_timestamp >= :cutoff_date
+            """), {"cutoff_date": cutoff_date})
+            rows = [r.gain_loss_percentage for r in result]
+
+        total_trades = len(rows)
+        if total_trades == 0:
+            return {"total_trades": 0, "success_rate": 0.0, "avg_profit": 0.0}
+
+        profitable = sum(1 for v in rows if v > 0)
+        success_rate = profitable / total_trades
+        avg_profit = sum(rows) / total_trades
+
+        return {
+            "total_trades": total_trades,
+            "success_rate": success_rate,
+            "avg_profit": avg_profit,
+        }
     
     def _analyze_patterns(self, outcomes):
         """Analyze patterns in trading outcomes"""
@@ -299,7 +325,7 @@ Please provide your response in the following JSON format:
             ]
 
             response = prompt_manager.client.chat.completions.create(
-                model="gpt-4.1",
+                model=GPT_MODEL,
                 messages=messages,
                 max_tokens=2000,
                 temperature=0.3,
@@ -485,7 +511,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             ]
 
             response = prompt_manager.client.chat.completions.create(
-                model="gpt-4.1",
+                model=GPT_MODEL,
                 messages=messages,
                 max_tokens=2000,
                 temperature=0.3,
