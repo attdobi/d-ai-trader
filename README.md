@@ -31,6 +31,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Safety Systems**: Comprehensive risk management and position limits
 - **Authentication**: Secure OAuth2 flow with token management
 - **Real-Time Sync**: Live account data and position tracking
+- **Auto-Detection**: Automatically enables when API credentials are configured
 
 ### Dashboard & Visualization
 - **Simulation Dashboard**: Web interface displaying simulated holdings and performance
@@ -115,6 +116,14 @@ For connecting to your real Schwab account with $10,000:
 - See **[SCHWAB_SETUP.md](SCHWAB_SETUP.md)** for complete setup instructions
 - Includes developer account creation, authentication, safety configuration, and testing procedures
 - **Start with simulation mode first** to validate the system
+
+#### API Status Detection
+The system automatically detects and enables Schwab API integration:
+- **"Schwab API disabled"** → Missing credentials or `TRADING_MODE=simulation`
+- **"Connection Error"** → Credentials found but authentication failed
+- **"✅ Connected to Schwab"** → Successfully connected to live account
+
+Simply add your API credentials to `.env` and set `TRADING_MODE=live` - no code changes needed!
 
 ### Database Setup
 ```bash
