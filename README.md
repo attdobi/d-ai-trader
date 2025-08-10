@@ -125,6 +125,48 @@ The system automatically detects and enables Schwab API integration:
 
 Simply add your API credentials to `.env` and set `TRADING_MODE=live` - no code changes needed!
 
+### 🚀 Going Live with Real Trading
+
+**Prerequisites**: Complete simulation testing and Schwab API setup first.
+
+#### Step 1: Reset Portfolio for Clean Start
+```bash
+# 1. Access the main dashboard
+python dashboard_server.py
+# Visit http://localhost:8080
+
+# 2. Hit "Reset Portfolio" button 
+# This sets simulation back to $10,000 cash, zero positions
+# Ensures perfect sync with your fresh Schwab account
+```
+
+#### Step 2: Enable Live Trading
+```bash
+# In your .env file:
+TRADING_MODE=live
+SCHWAB_CLIENT_ID=your_actual_client_id
+SCHWAB_CLIENT_SECRET=your_actual_client_secret
+SCHWAB_ACCOUNT_HASH=your_account_hash
+
+# Recommended safety settings:
+MAX_POSITION_VALUE=1000      # Max $1,000 per stock position
+MAX_TOTAL_INVESTMENT=10000   # Full $10,000 as designed
+MIN_CASH_BUFFER=500          # Keep $500 cash buffer
+```
+
+#### Step 3: Verify Synchronization
+- **Main Dashboard**: Shows simulation positions (AI's view)
+- **Schwab Live Tab**: Shows real account positions 
+- **Should be identical**: Both start with $10,000 cash, mirror all future trades
+
+#### Step 4: Monitor Live Trading
+- Check both dashboards regularly for sync
+- Monitor logs: `tail -f d-ai-trader.log`
+- Safety systems active: position limits, loss protection, daily limits
+- All AI decisions execute on both simulation AND live account
+
+⚠️ **Important**: Start monitoring closely for the first few trades to ensure everything works as expected!
+
 ### Database Setup
 ```bash
 # Install PostgreSQL

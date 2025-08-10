@@ -110,18 +110,20 @@ print('Trading Status:', status)
 
 ⚠️ **IMPORTANT**: Only enable live trading after thorough testing!
 
-1. **Start Small**: Begin with small position sizes (e.g., $50-100)
+1. **Test Thoroughly**: Ensure simulation mode works perfectly first
 
 2. **Update Environment**:
 ```bash
 # In .env file, change:
 TRADING_MODE=live
-MAX_POSITION_VALUE=100  # Start small!
+MAX_POSITION_VALUE=1000  # Matches original design
+MAX_TOTAL_INVESTMENT=10000  # Full $10,000 as intended
+MIN_CASH_BUFFER=500  # Keep minimum buffer
 ```
 
 3. **Monitor Closely**: Watch the first few trades carefully
 
-4. **Gradually Increase**: Once comfortable, increase position sizes
+4. **Monitor Closely**: Watch the AI decisions and execution carefully
 
 ## Safety Features
 
