@@ -47,14 +47,13 @@ chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1920,1080")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+chrome_options.add_argument("--disable-extensions")  # Disable extensions
+chrome_options.add_argument("--disable-plugins")  # Disable plugins
+chrome_options.add_argument("--disable-images")  # Disable image loading for faster performance
 
-# Setup Selenium WebDriver for Chrome
-# chrome_options = Options()
-# chrome_options.add_argument("--headless")
-# chrome_options.add_argument("--disable-gpu")
-# chrome_options.add_argument("--window-size=1920,1080")
-# chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-driver = webdriver.Chrome(options=chrome_options)
+# Global driver variable (will be created fresh for each run)
+driver = None
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session, run_id=RUN_TIMESTAMP)
@@ -164,11 +163,11 @@ Do not include any text before or after the JSON object. Only return the JSON.
     
     return prompt_manager.ask_openai(prompt, system_prompt, agent_name="SummarizerAgent", image_paths=valid_image_paths)
 
-def try_click_popup(driver, agent_name):
+def try_click_popup(web_driver, agent_name):
 
     def click_button(button):
         try:
-            driver.execute_script("arguments[0].click();", button)
+            web_driver.execute_script("arguments[0].click();", button)
             print(f"Clicked button via JS: '{button.text.strip()}'")
             return True
         except Exception as e:
@@ -184,17 +183,17 @@ def try_click_popup(driver, agent_name):
     try:
         if agent_name == "Agent_CNN_Money":
             try:
-                button = WebDriverWait(driver, 5).until(
+                button = WebDriverWait(web_driver, 5).until(
                     EC.presence_of_element_located((By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'agree')]"))
                 )
-                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Agree')]")))
+                WebDriverWait(web_driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Agree')]")))
                 if click_button(button):
                     print("CNN Money popup dismissed.")
                     return
             except Exception as e:
                 print("Failed to dismiss CNN popup via XPath:", e)
 
-        buttons = driver.find_elements(By.TAG_NAME, 'button')
+        buttons = web_driver.find_elements(By.TAG_NAME, 'button')
         for btn in buttons:
             text = btn.text.lower()
             if any(keyword in text for keyword in keywords):
@@ -205,20 +204,30 @@ def try_click_popup(driver, agent_name):
     except Exception as e:
         print(f"Unexpected error in try_click_popup for {agent_name}: {e}")
 
-def summarize_page(agent_name, url):
+def summarize_page(agent_name, url, web_driver):
+    """
+    Summarize a webpage using the provided webdriver
+    """
+    # Check if driver session is still valid
+    try:
+        web_driver.current_url  # Test if session is alive
+    except Exception as e:
+        print(f"Driver session invalid for {agent_name}: {e}")
+        raise e
+    
     # Special handling for Yahoo Finance which can be slow
     if "yahoo.com" in url.lower():
         print(f"Loading {agent_name} (Yahoo Finance - extended timeout)")
         try:
             # Set page load timeout for Yahoo Finance
-            driver.set_page_load_timeout(180)  # 3 minutes
-            driver.get(url)
+            web_driver.set_page_load_timeout(180)  # 3 minutes
+            web_driver.get(url)
             time.sleep(8)  # Extra wait for Yahoo Finance
         except Exception as e:
             print(f"Timeout loading {agent_name}, retrying with shorter timeout: {e}")
             try:
-                driver.set_page_load_timeout(60)  # Fallback to 1 minute
-                driver.get(url)
+                web_driver.set_page_load_timeout(60)  # Fallback to 1 minute
+                web_driver.get(url)
                 time.sleep(5)
             except Exception as e2:
                 print(f"Failed to load {agent_name} after retry: {e2}")
@@ -232,21 +241,21 @@ def summarize_page(agent_name, url):
                 }
     else:
         # Normal handling for other sites
-        driver.get(url)
+        web_driver.get(url)
         time.sleep(5)
 
     # Reset timeout to default after successful page load
     try:
-        driver.set_page_load_timeout(30)  # Reset to 30 seconds default
+        web_driver.set_page_load_timeout(30)  # Reset to 30 seconds default
     except:
         pass
 
-    try_click_popup(driver, agent_name)
+    try_click_popup(web_driver, agent_name)
 
     screenshot_path_1 = os.path.join(RUN_DIR, f"{agent_name}_1.png")
     screenshot_saved_1 = False
     try:
-        driver.save_screenshot(screenshot_path_1)
+        web_driver.save_screenshot(screenshot_path_1)
         if os.path.exists(screenshot_path_1) and os.path.getsize(screenshot_path_1) > 0:
             screenshot_saved_1 = True
             print(f"Screenshot 1 saved successfully for {agent_name}: {screenshot_path_1}")
@@ -256,7 +265,7 @@ def summarize_page(agent_name, url):
         print(f"Screenshot 1 failed for {agent_name}: {e}")
         time.sleep(3)
         try:
-            driver.save_screenshot(screenshot_path_1)
+            web_driver.save_screenshot(screenshot_path_1)
             if os.path.exists(screenshot_path_1) and os.path.getsize(screenshot_path_1) > 0:
                 screenshot_saved_1 = True
                 print(f"Screenshot 1 retry successful for {agent_name}")
@@ -266,7 +275,7 @@ def summarize_page(agent_name, url):
             print(f"Retry failed for Screenshot 1: {e}")
 
     try:
-        driver.execute_script("window.scrollBy(0, window.innerHeight * 0.875);")
+        web_driver.execute_script("window.scrollBy(0, window.innerHeight * 0.875);")
     except Exception as e:
         print(f"Scroll failed for {agent_name}: {e}")
 
@@ -275,7 +284,7 @@ def summarize_page(agent_name, url):
     screenshot_path_2 = os.path.join(RUN_DIR, f"{agent_name}_2.png")
     screenshot_saved_2 = False
     try:
-        driver.save_screenshot(screenshot_path_2)
+        web_driver.save_screenshot(screenshot_path_2)
         if os.path.exists(screenshot_path_2) and os.path.getsize(screenshot_path_2) > 0:
             screenshot_saved_2 = True
             print(f"Screenshot 2 saved successfully for {agent_name}: {screenshot_path_2}")
@@ -285,7 +294,7 @@ def summarize_page(agent_name, url):
         print(f"Screenshot 2 failed for {agent_name}: {e}")
         time.sleep(3)
         try:
-            driver.save_screenshot(screenshot_path_2)
+            web_driver.save_screenshot(screenshot_path_2)
             if os.path.exists(screenshot_path_2) and os.path.getsize(screenshot_path_2) > 0:
                 screenshot_saved_2 = True
                 print(f"Screenshot 2 retry successful for {agent_name}")
@@ -295,7 +304,7 @@ def summarize_page(agent_name, url):
             print(f"Retry failed for Screenshot 2: {e}")
 
     try:
-        html = driver.page_source
+        html = web_driver.page_source
     except Exception as e:
         print(f"Failed to capture page source for {agent_name}: {e}")
         html = ""
@@ -334,44 +343,61 @@ def store_summary(summary):
         })
 
 def run_summary_agents():
-    global driver
     initialize_database()
+    current_driver = None
     
-    # Create a fresh Chrome driver for this run
     try:
-        # Close existing driver if it exists
-        if 'driver' in globals() and driver:
-            try:
-                driver.quit()
-            except:
-                pass
-        
-        # Create new driver
-        driver = webdriver.Chrome(options=chrome_options)
-        print("Created new Chrome driver for summarizer run")
+        # Create a fresh Chrome driver for this run
+        print("Creating new Chrome driver for summarizer run")
+        current_driver = uc.Chrome(options=chrome_options, version_main=138)
+        print("Chrome driver created successfully")
         
         for agent_name, url in URLS:
             try:
-                summary = summarize_page(agent_name, url)
+                # Check if driver is still alive before each agent
+                try:
+                    current_driver.current_url
+                except Exception as session_error:
+                    print(f"Driver session lost before {agent_name}, creating new driver: {session_error}")
+                    try:
+                        current_driver.quit()
+                    except:
+                        pass
+                    current_driver = uc.Chrome(options=chrome_options, version_main=138)
+                    print(f"New driver created for {agent_name}")
+                
+                summary = summarize_page(agent_name, url, current_driver)
                 store_summary(summary)
                 print(f"Stored summary for {agent_name}")
                 # Small delay between agents to prevent overwhelming the system
-                time.sleep(2)
+                time.sleep(3)
+                
             except Exception as e:
                 print(f"Error processing {agent_name} ({url}): {e}")
-                # Continue with next agent even if one fails
+                
+                # Try to create a new driver for the next agent if this one failed
+                try:
+                    current_driver.quit()
+                except:
+                    pass
+                try:
+                    current_driver = uc.Chrome(options=chrome_options, version_main=138)
+                    print(f"Created new driver after {agent_name} error")
+                except Exception as driver_error:
+                    print(f"Failed to create new driver: {driver_error}")
+                    # Continue with next agent - maybe the driver will work
                 continue
                 
     except Exception as e:
-        print(f"Failed to create Chrome driver: {e}")
+        print(f"Failed to create initial Chrome driver: {e}")
     finally:
         # Always cleanup the driver
         try:
-            if 'driver' in globals() and driver:
-                driver.quit()
+            if current_driver:
+                current_driver.quit()
                 print("Chrome driver cleaned up")
-        except:
-            pass
+        except Exception as e:
+            print(f"Error cleaning up driver: {e}")
 
 if __name__ == "__main__":
     run_summary_agents()
