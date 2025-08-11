@@ -40,17 +40,20 @@ print(f"Run directory: {RUN_DIR}")
 # Automatically install correct ChromeDriver version
 chromedriver_autoinstaller.install()
 
-# Set up undetected Chrome with options
-chrome_options = uc.ChromeOptions()
-chrome_options.add_argument("--headless=new")  #This is stealthier than old headless
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--window-size=1920,1080")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
-chrome_options.add_argument("--disable-extensions")  # Disable extensions
-chrome_options.add_argument("--disable-plugins")  # Disable plugins
-chrome_options.add_argument("--disable-images")  # Disable image loading for faster performance
+# Function to create fresh Chrome options (never reuse)
+def create_chrome_options():
+    """Create fresh ChromeOptions - never reuse the same object"""
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")  #This is stealthier than old headless
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+    options.add_argument("--disable-extensions")  # Disable extensions
+    options.add_argument("--disable-plugins")  # Disable plugins
+    options.add_argument("--disable-images")  # Disable image loading for faster performance
+    return options
 
 # Global driver variable (will be created fresh for each run)
 driver = None
@@ -349,7 +352,7 @@ def run_summary_agents():
     try:
         # Create a fresh Chrome driver for this run
         print("Creating new Chrome driver for summarizer run")
-        current_driver = uc.Chrome(options=chrome_options, version_main=138)
+        current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
         print("Chrome driver created successfully")
         
         for agent_name, url in URLS:
@@ -363,7 +366,7 @@ def run_summary_agents():
                         current_driver.quit()
                     except:
                         pass
-                    current_driver = uc.Chrome(options=chrome_options, version_main=138)
+                    current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
                     print(f"New driver created for {agent_name}")
                 
                 summary = summarize_page(agent_name, url, current_driver)
@@ -381,7 +384,7 @@ def run_summary_agents():
                 except:
                     pass
                 try:
-                    current_driver = uc.Chrome(options=chrome_options, version_main=138)
+                    current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
                     print(f"Created new driver after {agent_name} error")
                 except Exception as driver_error:
                     print(f"Failed to create new driver: {driver_error}")
