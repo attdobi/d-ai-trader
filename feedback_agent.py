@@ -217,6 +217,9 @@ class TradeOutcomeTracker:
         feedback_id = self._store_feedback(days_back, total_trades, success_rate, 
                                          avg_profit, analysis, feedback)
         
+        # Automatically create new prompts based on feedback
+        self._auto_generate_prompts_from_feedback(feedback, feedback_id)
+        
         return {
             "feedback_id": feedback_id,
             "success_rate": success_rate,
@@ -224,6 +227,70 @@ class TradeOutcomeTracker:
             "total_trades": total_trades,
             "feedback": feedback
         }
+
+    def _auto_generate_prompts_from_feedback(self, feedback, feedback_id):
+        """Automatically generate new prompts based on feedback analysis"""
+        try:
+            summarizer_feedback = feedback.get('summarizer_feedback', '')
+            decider_feedback = feedback.get('decider_feedback', '')
+            
+            if summarizer_feedback:
+                # Create new summarizer prompt
+                new_summarizer_user = f'''You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages.
+
+PERFORMANCE FEEDBACK: {summarizer_feedback}
+
+Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation. Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
+
+Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.
+
+You must ALWAYS respond with valid JSON format as specified in the prompt.'''
+
+                new_summarizer_system = f'''You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages.
+Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation
+Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
+Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.
+You must ALWAYS respond with valid JSON format as specified in the prompt.
+
+INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
+{summarizer_feedback}'''
+
+                # Save the new summarizer prompt
+                summarizer_version = self.save_prompt_version(
+                    'summarizer', 
+                    new_summarizer_user, 
+                    new_summarizer_system,
+                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements',
+                    'feedback_automation'
+                )
+                print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback')
+            
+            if decider_feedback:
+                # Create new decider prompt
+                new_decider_user = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+
+PERFORMANCE FEEDBACK: {decider_feedback}
+
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {{MAX_TRADES}} total trades, never allocate more than ${{MAX_FUNDS - MIN_BUFFER}} total.
+Retain at least ${{MIN_BUFFER}} in funds.'''
+
+                new_decider_system = f'''You are an aggressive day trading AI focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.
+
+INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
+{decider_feedback}'''
+
+                # Save the new decider prompt
+                decider_version = self.save_prompt_version(
+                    'decider',
+                    new_decider_user, 
+                    new_decider_system,
+                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements',
+                    'feedback_automation'
+                )
+                print(f'✅ Auto-generated new decider prompt v{decider_version} from feedback')
+        
+        except Exception as e:
+            print(f"⚠️  Error auto-generating prompts from feedback: {e}")
 
     def compute_recent_outcomes_metrics(self, days_back=FEEDBACK_LOOKBACK_DAYS):
         """Compute recent outcome metrics only (no AI call)"""

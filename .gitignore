@@ -1,3 +1,48 @@
-*.png
+# Python
 *.pyc
+*.pyo
+*.pyd
 __pycache__/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+dai/
+venv/
+env/
+.env
+
+# Chrome driver downloads (auto-installed by chromedriver-autoinstaller)
+*/chromedriver*
+chromedriver*
+*/chromedriver
+138/
+
+# Screenshots and test data
+*.png
+*.jpg
+*.jpeg
+screenshots/
+tests/
+
+# Logs
+*.log
+d-ai-trader.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+
+# Jupyter
+.ipynb_checkpoints/
