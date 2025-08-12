@@ -343,6 +343,46 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
             "avg_hold_duration_unprofitable": sum(o['hold_duration_days'] for o in bad_outcomes) / len(bad_outcomes) if bad_outcomes else 0
         }
     
+    def _get_detailed_trade_analysis(self):
+        """Get detailed individual trade data for pattern analysis"""
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                SELECT 
+                    ticker,
+                    purchase_price,
+                    sell_price,
+                    shares,
+                    sell_timestamp,
+                    gain_loss_percentage,
+                    outcome_category,
+                    original_reason,
+                    sell_reason,
+                    hold_duration_days,
+                    market_context
+                FROM trade_outcomes 
+                WHERE sell_timestamp >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY sell_timestamp DESC
+                LIMIT 20
+            """)).fetchall()
+            
+            trades = []
+            for row in result:
+                trades.append({
+                    "symbol": row.ticker,
+                    "buy_price": float(row.purchase_price),
+                    "sell_price": float(row.sell_price),
+                    "shares": row.shares,
+                    "sell_date": row.sell_timestamp.strftime("%Y-%m-%d"),
+                    "hold_days": row.hold_duration_days,
+                    "gain_loss_pct": float(row.gain_loss_percentage),
+                    "outcome": row.outcome_category,
+                    "buy_reasoning": row.original_reason,
+                    "sell_reasoning": row.sell_reason,
+                    "market_context": row.market_context
+                })
+            
+            return trades
+
     def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis):
         """Use AI to generate feedback for improving agent performance"""
         outcomes_summary = json.dumps({
@@ -358,20 +398,31 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
             }
         }, indent=2)
         
+        # Get recent individual trades for detailed analysis
+        recent_trades = self._get_detailed_trade_analysis()
+        
         prompt = f"""
 Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
 
 Performance Data:
 {outcomes_summary}
 
+Recent Trade Details (for pattern analysis):
+{json.dumps(recent_trades, indent=2)}
+
 Please provide:
 1. Key insights about what's working well and what isn't
 2. Specific recommendations for the SUMMARIZER agents (how they should adjust their news analysis focus)
 3. Specific recommendations for the DECIDER agent (how it should adjust its trading strategy)
 4. Patterns in successful vs unsuccessful trades
-5. Timing and market context insights
+5. Timing and market context insights - especially focus on:
+   - Are we buying at market highs vs dips?
+   - Are we selling at lows vs highs?
+   - What technical indicators should we consider?
+6. Specific trade examples of mistakes (like buying CRLC at a high when we should have waited for a dip)
 
 Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic.
+Pay special attention to entry and exit timing to maximize profits.
 """
 
         system_prompt = """You are a trading performance analyst providing feedback to improve AI trading agents. 

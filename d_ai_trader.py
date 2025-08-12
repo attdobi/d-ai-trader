@@ -125,11 +125,35 @@ class DAITraderOrchestrator:
         if now_eastern.weekday() >= 5:
             return False
             
-        # After market close (4pm ET)
+        # After market close (4pm ET) but before 6pm ET to ensure it runs daily
         market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
-        feedback_window_end = now_eastern.replace(hour=17, minute=0, second=0, microsecond=0)
+        feedback_window_end = now_eastern.replace(hour=18, minute=0, second=0, microsecond=0)
         
+        # Check if feedback already ran today
+        if self._feedback_already_ran_today():
+            return False
+            
         return market_close <= now_eastern <= feedback_window_end
+    
+    def _feedback_already_ran_today(self):
+        """Check if feedback agent already ran today"""
+        try:
+            from config import engine
+            from sqlalchemy import text
+            
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT COUNT(*) as count
+                    FROM system_runs 
+                    WHERE run_type = 'feedback' 
+                    AND start_time >= CURRENT_DATE
+                    AND status = 'completed'
+                """)).fetchone()
+                
+                return result.count > 0
+        except Exception as e:
+            logger.warning(f"Could not check if feedback ran today: {e}")
+            return False  # If we can't check, allow it to run
     
     def get_unprocessed_summaries(self):
         """Get all summaries that haven't been processed by the decider yet"""
