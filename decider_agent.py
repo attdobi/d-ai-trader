@@ -190,6 +190,12 @@ def clean_ticker_symbol(ticker):
     if not ticker:
         return None
     
+    # Common symbol corrections
+    SYMBOL_CORRECTIONS = {
+        'CIRCL': 'CRCL',  # Circle Internet Financial
+        # Add more corrections as needed
+    }
+    
     # Remove common prefixes/suffixes and extract just the symbol
     ticker = str(ticker).strip()
     
@@ -207,13 +213,32 @@ def clean_ticker_symbol(ticker):
     # Remove any remaining parentheses and clean up
     ticker = ticker.replace('(', '').replace(')', '').strip()
     
+    # Apply symbol corrections
+    ticker = SYMBOL_CORRECTIONS.get(ticker.upper(), ticker)
+    
     return ticker
+
+def validate_ticker_symbol(ticker):
+    """Validate that a ticker symbol exists and can be traded"""
+    import yfinance as yf
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        # Check if we can get basic info (name, sector, etc.)
+        return info.get('symbol') == ticker.upper() or info.get('shortName') is not None
+    except:
+        return False
 
 def get_current_price(ticker):
     # Clean the ticker symbol first
     clean_ticker = clean_ticker_symbol(ticker)
     if not clean_ticker:
         print(f"Invalid ticker symbol: {ticker}")
+        return None
+    
+    # Validate ticker exists before trying to get price
+    if not validate_ticker_symbol(clean_ticker):
+        print(f"🚫 Ticker {clean_ticker} does not exist or is not tradeable")
         return None
     
     try:
