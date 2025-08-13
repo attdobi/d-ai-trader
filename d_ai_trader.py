@@ -401,19 +401,12 @@ class DAITraderOrchestrator:
         logger.info("Starting D-AI-Trader automation system")
         self.setup_schedule()
         
-        # Run initial cycle immediately for testing/demo purposes
-        logger.info("🚀 Running initial cycle immediately...")
-        try:
-            logger.info("Running initial summarizer...")
-            self.run_summarizer_agents()
-            
-            logger.info("Running initial decider...")
-            self.run_decider_agent()
-            
-            logger.info("✅ Initial cycle completed")
-        except Exception as e:
-            logger.error(f"Error in initial cycle: {e}")
-        
+        # Skip immediate cycle - rely on scheduled runs only
+        logger.info("📅 System will run on schedule:")
+        logger.info("  - Summarizer: Every hour at :25")  
+        logger.info("  - Decider: Every 30 minutes during market hours")
+        logger.info("  - Feedback: Daily at 4:30pm ET")
+        logger.info("🕐 Waiting for next scheduled run...")
         try:
             while True:
                 schedule.run_pending()

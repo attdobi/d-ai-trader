@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy import text
-from config import engine, TRADING_MODE, DEBUG_TRADING
+from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash
 from schwab_client import schwab_client
 from feedback_agent import TradeOutcomeTracker
 from safety_checks import safety_manager
@@ -428,8 +428,8 @@ class TradingInterface:
                 
                 # Get cash balance
                 cash_result = conn.execute(text("""
-                    SELECT current_value FROM holdings WHERE ticker = 'CASH'
-                """))
+                    SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash
+                """), {"config_hash": get_current_config_hash()})
                 cash_row = cash_result.fetchone()
                 cash_balance = float(cash_row.current_value) if cash_row else 0
                 

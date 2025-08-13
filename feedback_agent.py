@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash
 import yfinance as yf
 import pandas as pd
 
@@ -26,6 +26,7 @@ class TradeOutcomeTracker:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS trade_outcomes (
                     id SERIAL PRIMARY KEY,
+                    config_hash VARCHAR(50) NOT NULL,
                     ticker TEXT NOT NULL,
                     sell_timestamp TIMESTAMP NOT NULL,
                     purchase_price FLOAT NOT NULL,
@@ -151,13 +152,14 @@ class TradeOutcomeTracker:
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO trade_outcomes 
-                (ticker, sell_timestamp, purchase_price, sell_price, shares, 
+                (config_hash, ticker, sell_timestamp, purchase_price, sell_price, shares, 
                  gain_loss_amount, gain_loss_percentage, hold_duration_days, 
                  original_reason, sell_reason, outcome_category, market_context)
-                VALUES (:ticker, :sell_timestamp, :purchase_price, :sell_price, :shares,
+                VALUES (:config_hash, :ticker, :sell_timestamp, :purchase_price, :sell_price, :shares,
                         :gain_loss_amount, :gain_loss_percentage, :hold_duration_days,
                         :original_reason, :sell_reason, :outcome_category, :market_context)
             """), {
+                "config_hash": get_current_config_hash(),
                 "ticker": ticker,
                 "sell_timestamp": datetime.utcnow(),
                 "purchase_price": purchase_price,

@@ -4,7 +4,7 @@ Test script to verify summaries parsing logic
 """
 
 import json
-from config import engine
+from config import engine, get_current_config_hash
 from sqlalchemy import text
 
 def test_summaries_parsing():
@@ -14,9 +14,10 @@ def test_summaries_parsing():
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM summaries 
-            WHERE data::text NOT LIKE '%%API error, no response%%'
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%API error, no response%%'
             ORDER BY id DESC LIMIT 5
-        """)).fetchall()
+        """), {"config_hash": get_current_config_hash()}).fetchall()
 
         summaries = []
         for row in result:

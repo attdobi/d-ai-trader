@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from config import (
     engine, MAX_POSITION_VALUE, MAX_TOTAL_INVESTMENT, 
-    MIN_CASH_BUFFER, DEBUG_TRADING
+    MIN_CASH_BUFFER, DEBUG_TRADING, get_current_config_hash
 )
 
 logger = logging.getLogger(__name__)
@@ -151,8 +151,8 @@ class TradingSafetyManager:
                 result = conn.execute(text("""
                     SELECT COUNT(*) as trade_count
                     FROM trade_decisions 
-                    WHERE DATE(timestamp) = :today
-                """), {"today": today})
+                    WHERE DATE(timestamp) = :today AND config_hash = :config_hash
+                """), {"today": today, "config_hash": get_current_config_hash()})
                 
                 trade_count = result.fetchone().trade_count
                 return trade_count < self.max_daily_trades
@@ -188,8 +188,8 @@ class TradingSafetyManager:
             # Check cash buffer
             with engine.begin() as conn:
                 cash_result = conn.execute(text("""
-                    SELECT current_value FROM holdings WHERE ticker = 'CASH'
-                """))
+                    SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash
+                """), {"config_hash": get_current_config_hash()})
                 cash_row = cash_result.fetchone()
                 
                 if cash_row:
@@ -232,8 +232,8 @@ class TradingSafetyManager:
                 
                 # Get cash balance
                 cash_result = conn.execute(text("""
-                    SELECT current_value FROM holdings WHERE ticker = 'CASH'
-                """))
+                    SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash
+                """), {"config_hash": get_current_config_hash()})
                 cash_row = cash_result.fetchone()
                 cash_balance = float(cash_row.current_value) if cash_row else 0
                 
@@ -242,8 +242,8 @@ class TradingSafetyManager:
                 trades_result = conn.execute(text("""
                     SELECT COUNT(*) as trade_count
                     FROM trade_decisions 
-                    WHERE DATE(timestamp) = :today
-                """), {"today": today})
+                    WHERE DATE(timestamp) = :today AND config_hash = :config_hash
+                """), {"today": today, "config_hash": get_current_config_hash()})
                 trades_row = trades_result.fetchone()
                 daily_trades = trades_row.trade_count if trades_row else 0
             

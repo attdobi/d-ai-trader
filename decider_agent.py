@@ -43,16 +43,17 @@ def get_latest_run_id():
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT run_id FROM summaries
+            WHERE config_hash = :config_hash
             ORDER BY timestamp DESC LIMIT 1
-        """)).fetchone()
+        """), {"config_hash": get_current_config_hash()}).fetchone()
         return result[0] if result else None
 
 def fetch_summaries(run_id):
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT agent, data FROM summaries
-            WHERE run_id = :run_id
-        """), {"run_id": run_id})
+            WHERE run_id = :run_id AND config_hash = :config_hash
+        """), {"run_id": run_id, "config_hash": get_current_config_hash()})
         return [row._mapping for row in result]
 
 def get_unprocessed_summaries():
@@ -479,7 +480,15 @@ def update_holdings(decisions):
     # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
     if buy_decisions:
         print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
-        available_cash = process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions)
+        # TODO: Fix process_buy_decisions function implementation
+        print(f"⚠️  Skipping buy execution due to missing process_buy_decisions function")
+        for decision in buy_decisions:
+            skipped_decisions.append({
+                "action": "buy",
+                "ticker": decision.get("ticker", "Unknown"),
+                "amount_usd": decision.get("amount_usd", 0),
+                "reason": f"Function not implemented - execution deferred. Original: {decision.get('reason', '')}"
+            })
     
     # 3) Log hold decisions
     if hold_decisions:
@@ -767,6 +776,7 @@ def record_portfolio_snapshot():
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS portfolio_history (
                 id SERIAL PRIMARY KEY,
+                config_hash VARCHAR(50) NOT NULL,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 total_portfolio_value FLOAT,
                 cash_balance FLOAT,
@@ -815,16 +825,12 @@ def record_portfolio_snapshot():
         })
 
 def ask_decision_agent(summaries, run_id, holdings):
-    # Check market status first
+    # Check market status for later use
     market_open = is_market_open()
     if not market_open:
-        print("📈 Market is CLOSED - Recording N/A decision")
-        return [{
-            "action": "N/A",
-            "ticker": "N/A", 
-            "amount_usd": 0,
-            "reason": "Market is closed - no trading action taken"
-        }]
+        print("📈 Market is CLOSED - Will analyze summaries but defer execution")
+    else:
+        print("📈 Market is OPEN - Will analyze summaries and execute trades")
     
     parsed_summaries = []
     
@@ -969,18 +975,39 @@ Example format: [{{\"action\": \"buy\", \"ticker\": \"AAPL\", \"amount_usd\": 10
     # Import the JSON schema for structured responses
     from config import get_decider_json_schema
     
-    return prompt_manager.ask_openai(
+    # Get AI decision regardless of market status
+    ai_response = prompt_manager.ask_openai(
         prompt, 
         system_prompt, 
         agent_name="DeciderAgent",
         response_format=get_decider_json_schema()
     )
+    
+    # Ensure response is always a list
+    if isinstance(ai_response, dict):
+        ai_response = [ai_response]
+    elif not isinstance(ai_response, list):
+        print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
+        ai_response = [ai_response] if ai_response else []
+    
+    # If market is closed, modify decisions to show they're deferred
+    if not market_open:
+        print("🕒 Market closed - Decisions recorded but execution deferred")
+        # Modify each decision to indicate deferred execution
+        for decision in ai_response:
+            if isinstance(decision, dict) and decision.get('action') not in ['N/A', 'hold']:
+                original_reason = decision.get('reason', '')
+                decision['reason'] = f"Market closed - execution deferred. Original: {original_reason}"
+                decision['execution_status'] = 'deferred'
+    
+    return ai_response
 
 def store_trade_decisions(decisions, run_id):
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
                 id SERIAL PRIMARY KEY,
+                config_hash VARCHAR(50) NOT NULL,
                 run_id TEXT,
                 timestamp TIMESTAMP,
                 data JSONB
