@@ -345,9 +345,29 @@ class PromptManager:
                     
                     # If we can't parse JSON, create a fallback response
                     print(f"Creating fallback response for {agent_name}")
+                    print(f"Full response content: {content[:500]}...")
+                    
+                    # Try to extract useful content even if not JSON
+                    lines = content.split('\n')
+                    headlines = []
+                    insights = ""
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if line and not line.startswith('{') and not line.startswith('}'):
+                            if len(line) < 100 and ('stock' in line.lower() or 'market' in line.lower() or '$' in line):
+                                headlines.append(line)
+                            elif len(insights) < 200:
+                                insights += line + " "
+                    
+                    if not headlines:
+                        headlines = ["Unable to parse AI response"]
+                    if not insights:
+                        insights = f"Error parsing AI response: {content[:200]}..."
+                        
                     return {
-                        "headlines": ["Unable to parse AI response"],
-                        "insights": f"Error parsing AI response: {content[:200]}..."
+                        "headlines": headlines[:3],  # Limit to 3 headlines
+                        "insights": insights.strip()
                     }
 
             except Exception as e:

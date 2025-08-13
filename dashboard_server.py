@@ -86,14 +86,15 @@ create_portfolio_history_table()
 
 @app.route("/")
 def dashboard():
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, purchase_timestamp, current_timestamp,
                    total_value, current_value, gain_loss, reason
             FROM holdings
-            WHERE is_active = TRUE
+            WHERE is_active = TRUE AND config_hash = :config_hash
             ORDER BY CASE WHEN ticker = 'CASH' THEN 1 ELSE 0 END, ticker
-        """)).fetchall()
+        """), {"config_hash": config_hash}).fetchall()
 
         holdings = [dict(row._mapping) for row in result]
 
@@ -139,13 +140,15 @@ def from_json_filter(s):
 
 @app.route("/trades")
 def trade_decisions():
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM trade_decisions 
-            WHERE data::text NOT LIKE '%%Max retries reached%%'
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%Max retries reached%%'
               AND data::text NOT LIKE '%%API error, no response%%'
             ORDER BY id DESC LIMIT 20
-        """)).fetchall()
+        """), {"config_hash": config_hash}).fetchall()
         
         trades = []
         for row in result:
@@ -200,12 +203,14 @@ def trade_decisions():
 
 @app.route("/summaries")
 def summaries():
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM summaries 
-            WHERE data::text NOT LIKE '%%API error, no response%%'
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%API error, no response%%'
             ORDER BY id DESC LIMIT 20
-        """)).fetchall()
+        """), {"config_hash": config_hash}).fetchall()
 
         summaries = []
         for row in result:
@@ -253,27 +258,31 @@ def api_configuration():
 
 @app.route("/api/holdings")
 def api_holdings():
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
-            SELECT * FROM holdings WHERE is_active = TRUE
-        """)).fetchall()
+            SELECT * FROM holdings WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
         return jsonify([dict(row._mapping) for row in result])
 
 @app.route("/api/history")
 def api_history():
     ticker = request.args.get("ticker")
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         if ticker:
             result = conn.execute(text("""
                 SELECT current_price_timestamp, current_value FROM holdings
-                WHERE ticker = :ticker ORDER BY current_price_timestamp ASC
-            """), {"ticker": ticker}).fetchall()
+                WHERE ticker = :ticker AND config_hash = :config_hash 
+                ORDER BY current_price_timestamp ASC
+            """), {"ticker": ticker, "config_hash": config_hash}).fetchall()
         else:
             result = conn.execute(text("""
                 SELECT current_timestamp, SUM(current_value) AS total_value
                 FROM holdings
+                WHERE config_hash = :config_hash
                 GROUP BY current_timestamp ORDER BY current_timestamp ASC
-            """)).fetchall()
+            """), {"config_hash": config_hash}).fetchall()
 
         return jsonify([dict(row._mapping) for row in result])
 
@@ -629,8 +638,9 @@ def trigger_price_update():
     def run_price_update():
         try:
             print("=== Manual Price Update Triggered ===")
+            config_hash = get_current_config_hash()
             with engine.begin() as conn:
-                result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH'"))
+                result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})
                 tickers = [row.ticker for row in result]
                 
                 updated_count = 0
@@ -648,10 +658,11 @@ def trigger_price_update():
                                 current_value = shares * :price,
                                 gain_loss = (shares * :price) - total_value,
                                 current_price_timestamp = :current_price_timestamp
-                            WHERE ticker = :ticker"""), {
+                            WHERE ticker = :ticker AND config_hash = :config_hash"""), {
                                 "price": price,
                                 "current_price_timestamp": now,
-                                "ticker": ticker
+                                "ticker": ticker,
+                                "config_hash": config_hash
                             })
                         print(f"✅ Updated {ticker}: ${price:.2f}")
                         updated_count += 1
@@ -744,18 +755,19 @@ def reset_portfolio():
                     })
             
             # Deactivate all current holdings
+            config_hash = get_current_config_hash()
             conn.execute(text("""
                 UPDATE holdings 
                 SET is_active = FALSE, shares = 0, current_value = 0, gain_loss = 0
-                WHERE ticker != 'CASH'
-            """))
+                WHERE ticker != 'CASH' AND config_hash = :config_hash
+            """), {"config_hash": config_hash})
             
             # Reset cash to $10,000
             conn.execute(text("""
                 UPDATE holdings 
                 SET current_value = 10000, total_value = 10000, current_price = 10000
-                WHERE ticker = 'CASH'
-            """))
+                WHERE ticker = 'CASH' AND config_hash = :config_hash
+            """), {"config_hash": config_hash})
             
             # Record portfolio snapshot after reset
             record_portfolio_snapshot()
@@ -884,8 +896,9 @@ def get_current_price_robust(ticker):
 def update_prices():
     while True:
         time.sleep(REFRESH_INTERVAL_MINUTES * 60)
+        config_hash = get_current_config_hash()
         with engine.begin() as conn:
-            result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH'"))
+            result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})
             tickers = [row.ticker for row in result]
             for ticker in tickers:
                 try:
@@ -902,10 +915,11 @@ def update_prices():
                             current_value = shares * :price,
                             gain_loss = (shares * :price) - total_value,
                             current_price_timestamp = :current_price_timestamp
-                        WHERE ticker = :ticker"""), {
+                        WHERE ticker = :ticker AND config_hash = :config_hash"""), {
                             "price": price,
                             "current_price_timestamp": now,
-                            "ticker": ticker
+                            "ticker": ticker,
+                            "config_hash": config_hash
                         })
                     print(f"Updated price for {ticker}: ${price:.2f}")
                 except Exception as e:
