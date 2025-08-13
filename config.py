@@ -113,7 +113,7 @@ class PromptManager:
                 response = self.client.chat.completions.create(
                     model=GPT_MODEL,
                     messages=messages,
-                    max_tokens=1000,
+                    max_tokens=1500,  # Increased for richer responses while managing costs
                     temperature=0.3,
                     #response_format="json",
                 )

@@ -228,17 +228,59 @@ class TradeOutcomeTracker:
             "feedback": feedback
         }
 
+    def _get_historical_feedback_summary(self, agent_type, max_feedbacks=10):
+        """Get and summarize historical feedback for an agent type"""
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                SELECT summarizer_feedback, decider_feedback, analysis_timestamp
+                FROM agent_feedback 
+                ORDER BY analysis_timestamp DESC 
+                LIMIT :max_feedbacks
+            """), {"max_feedbacks": max_feedbacks}).fetchall()
+            
+            historical_insights = []
+            for row in result:
+                try:
+                    if agent_type == 'summarizer':
+                        fb_data = json.loads(row.summarizer_feedback)
+                    else:
+                        fb_data = json.loads(row.decider_feedback)
+                    
+                    if isinstance(fb_data, str):
+                        historical_insights.append({
+                            "date": row.analysis_timestamp.strftime("%Y-%m-%d"),
+                            "feedback": fb_data[:200] + "..." if len(fb_data) > 200 else fb_data
+                        })
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+            
+            return historical_insights
+
     def _auto_generate_prompts_from_feedback(self, feedback, feedback_id):
-        """Automatically generate new prompts based on feedback analysis"""
+        """Automatically generate new prompts based on feedback analysis with historical context"""
         try:
             summarizer_feedback = feedback.get('summarizer_feedback', '')
             decider_feedback = feedback.get('decider_feedback', '')
             
             if summarizer_feedback:
-                # Create new summarizer prompt
+                # Get historical feedback for context
+                historical_summarizer = self._get_historical_feedback_summary('summarizer', max_feedbacks=5)
+                
+                # Create comprehensive summarizer prompt with historical context
+                historical_context = ""
+                if historical_summarizer:
+                    historical_context = "\n\nHISTORICAL LESSONS LEARNED:\n"
+                    for i, insight in enumerate(historical_summarizer[:3], 1):
+                        historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
+                
                 new_summarizer_user = f'''You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages.
 
-PERFORMANCE FEEDBACK: {summarizer_feedback}
+LATEST PERFORMANCE FEEDBACK: {summarizer_feedback}{historical_context}
+
+SPECIFIC INSIGHTS TO APPLY:
+- Timing Patterns: {feedback.get('timing_patterns', 'Focus on market timing')}
+- Risk Management: {feedback.get('risk_management', 'Maintain risk awareness')}
+- Sector Analysis: {feedback.get('sector_insights', 'Monitor sector trends')}
 
 Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation. Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
 
@@ -266,10 +308,24 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                 print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback')
             
             if decider_feedback:
-                # Create new decider prompt
+                # Get historical feedback for context
+                historical_decider = self._get_historical_feedback_summary('decider', max_feedbacks=5)
+                
+                # Create comprehensive decider prompt with historical context
+                historical_context = ""
+                if historical_decider:
+                    historical_context = "\n\nHISTORICAL LESSONS LEARNED:\n"
+                    for i, insight in enumerate(historical_decider[:3], 1):
+                        historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
+                
                 new_decider_user = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-PERFORMANCE FEEDBACK: {decider_feedback}
+LATEST PERFORMANCE FEEDBACK: {decider_feedback}{historical_context}
+
+SPECIFIC INSIGHTS TO APPLY:
+- Timing Patterns: {feedback.get('timing_patterns', 'Focus on optimal entry/exit timing')}
+- Risk Management: {feedback.get('risk_management', 'Implement strict risk controls')}
+- Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}
 
 Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {{MAX_TRADES}} total trades, never allocate more than ${{MAX_FUNDS - MIN_BUFFER}} total.
 Retain at least ${{MIN_BUFFER}} in funds.'''
@@ -428,11 +484,21 @@ Pay special attention to entry and exit timing to maximize profits.
         system_prompt = """You are a trading performance analyst providing feedback to improve AI trading agents. 
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help agents make better decisions.
 
+CRITICAL INSTRUCTIONS:
+1. Create COMPREHENSIVE feedback that preserves important historical lessons
+2. Group insights by categories: timing, risk management, sector analysis, technical patterns
+3. Provide specific examples from the trade data
+4. Include both tactical improvements (immediate actions) and strategic insights (long-term patterns)
+5. Make feedback cumulative - build upon previous lessons rather than replacing them
+
 Please provide your response in the following JSON format:
 {
-    "summarizer_feedback": "Specific recommendations for the summarizer agent",
-    "decider_feedback": "Specific recommendations for the decider agent", 
-    "key_insights": ["insight 1", "insight 2", "insight 3"]
+    "summarizer_feedback": "Comprehensive recommendations for the summarizer agent including historical context",
+    "decider_feedback": "Comprehensive recommendations for the decider agent including historical context", 
+    "key_insights": ["insight 1", "insight 2", "insight 3", "insight 4", "insight 5"],
+    "timing_patterns": "Specific patterns about entry/exit timing",
+    "risk_management": "Risk management lessons learned",
+    "sector_insights": "Sector-specific trading patterns"
 }"""
         
         try:
@@ -445,7 +511,7 @@ Please provide your response in the following JSON format:
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                max_tokens=2000,
+                max_tokens=2000,  # Balanced for comprehensive feedback while managing costs
                 temperature=0.3,
             )
             ai_response = response.choices[0].message.content.strip()
@@ -462,6 +528,9 @@ Please provide your response in the following JSON format:
                     "summarizer_feedback": ai_response,
                     "decider_feedback": ai_response,
                     "key_insights": [ai_response],
+                    "timing_patterns": "Analysis provided in main feedback",
+                    "risk_management": "Analysis provided in main feedback", 
+                    "sector_insights": "Analysis provided in main feedback",
                     "raw_response": ai_response
                 }
                 
@@ -631,7 +700,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                max_tokens=2000,
+                max_tokens=2000,  # Balanced for comprehensive feedback while managing costs
                 temperature=0.3,
             )
             ai_response = response.choices[0].message.content.strip()
