@@ -524,7 +524,7 @@ Please provide your response in the following JSON format:
                 **temperature_params  # Use temperature or omit for GPT-5
             }
             
-            print(f"🔧 Using structured JSON schema for FeedbackAgent analysis")
+            print(f"🔧 Using simple JSON mode for FeedbackAgent")
             response = prompt_manager.client.chat.completions.create(**api_params)
             ai_response = response.choices[0].message.content.strip()
             
@@ -723,7 +723,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 **temperature_params  # Use temperature or omit for GPT-5
             }
             
-            print(f"🔧 Using structured JSON schema for FeedbackAgent manual request")
+            print(f"🔧 Using simple JSON mode for FeedbackAgent manual")
             response = prompt_manager.client.chat.completions.create(**api_params)
             ai_response = response.choices[0].message.content.strip()
             
