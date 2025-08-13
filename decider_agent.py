@@ -428,6 +428,7 @@ def update_holdings(decisions):
     else:
         print("🎮 Running in simulation mode - no real trades executed")
 
+    # Normalize decisions
     decisions_normalized = [
         {
             **d,
@@ -435,26 +436,55 @@ def update_holdings(decisions):
         }
         for d in decisions
     ]
+    
+    # Separate decision types
     sell_decisions = [d for d in decisions_normalized if d.get("action") == "sell"]
-    buy_decisions = [d for d in decisions_normalized if d.get("action") == "buy"]
+    buy_decisions = [d for d in decisions_normalized if d.get("action") == "buy"]  # Keep original order for priority
     hold_decisions = [d for d in decisions_normalized if d.get("action") not in ("buy", "sell")]
+    
+    print(f"📊 Processing {len(sell_decisions)} sells, {len(buy_decisions)} buys, {len(hold_decisions)} holds")
+    
+    # Get current cash balance
+    with engine.begin() as conn:
+        cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash}).fetchone()
+        available_cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
+        print(f"💰 Starting cash balance: ${available_cash:.2f}")
 
-    # 1) Process all SELLS first
+    # 1) EXECUTE ALL SELLS FIRST (to free up cash)
     if sell_decisions:
-        with engine.begin() as conn:
-            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
-                .fetchone()
-            cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
+        print(f"🔥 Executing {len(sell_decisions)} sell orders first...")
+        available_cash = process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions)
+    
+    # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
+    if buy_decisions:
+        print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
+        available_cash = process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions)
+    
+    # 3) Log hold decisions
+    if hold_decisions:
+        print(f"⏸️  {len(hold_decisions)} hold decisions (no action needed)")
+        for decision in hold_decisions:
+            skipped_decisions.append({
+                **decision,
+                "reason": f"Hold decision - no action taken (Original: {decision.get('reason', '')})"
+            })
 
-            for decision in sell_decisions:
-                ticker = decision.get("ticker")
-                amount = float(decision.get("amount_usd", 0))
-                reason = decision.get("reason", "")
+    return skipped_decisions
 
-                clean_ticker = clean_ticker_symbol(ticker)
-                if not clean_ticker:
-                    print(f"Skipping sell for {ticker} due to invalid ticker symbol.")
-                    continue
+def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions):
+    """Process all sell decisions and return updated cash balance"""
+    
+    with engine.begin() as conn:
+        for decision in sell_decisions:
+            ticker = decision.get("ticker")
+            amount = float(decision.get("amount_usd", 0))
+            reason = decision.get("reason", "")
+
+            clean_ticker = clean_ticker_symbol(ticker)
+            if not clean_ticker:
+                print(f"❌ Skipping sell for {ticker} - invalid ticker symbol")
+                skipped_decisions.append({**decision, "reason": f"Invalid ticker - {reason}"})
+                continue
 
                 if not is_market_open():
                     print(f"Skipping sell for {ticker} - market is closed.")
@@ -836,10 +866,18 @@ def ask_decision_agent(summaries, run_id, holdings):
     
     summarized_text = "\n".join(summary_parts)
 
+    # Separate cash and stock holdings
+    cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
+    stock_holdings = [h for h in holdings if h['ticker'] != 'CASH']
+    
     holdings_text = "\n".join([
         f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']} → Current: ${h['current_price']} (Gain/Loss: ${h['gain_loss']:.2f}) (Reason: {h['reason']})"
-        for h in holdings if h['ticker'] != 'CASH'
-    ]) or "No current holdings."
+        for h in stock_holdings
+    ]) or "No current stock holdings."
+    
+    # Calculate available funds
+    available_cash = cash_balance
+    max_spendable = max(0, available_cash - MIN_BUFFER)
 
     # Get feedback from recent performance (simplified to reduce tokens)
     feedback_context = ""
@@ -855,35 +893,47 @@ def ask_decision_agent(summaries, run_id, holdings):
 
     prompt = f"""
 You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
-Retain at least ${MIN_BUFFER} in funds.
 
-DAY TRADING STRATEGY:
+💰 CURRENT CASH SITUATION:
+- Available Cash: ${available_cash:.2f}
+- Maximum Spendable: ${max_spendable:.2f} (keeping ${MIN_BUFFER} buffer)
+- Total Portfolio Budget: ${MAX_FUNDS}
+
+📊 CURRENT STOCK HOLDINGS:
+{holdings_text}
+
+🎯 DAY TRADING STRATEGY:
 - Take profits quickly: Sell positions with >3% gains
 - Cut losses fast: Sell positions with >5% losses  
 - Be aggressive: If you have conviction for a new buy, consider selling existing positions to fund it
 - Rotate capital: Don't hold positions too long, look for better opportunities
 - Use momentum: Buy stocks with positive news/momentum, sell those with negative news
 
-IMPORTANT: Before making buy decisions, evaluate if you should sell existing positions to free up cash. Consider:
-1. Which current positions have gains that can be locked in?
-2. Which positions are underperforming and should be cut?
-3. Is the new opportunity better than holding current positions?
+⚠️  CRITICAL BUDGET RULES:
+1. NEVER exceed your available cash (${available_cash:.2f})
+2. All SELL decisions will be executed FIRST to free up cash
+3. BUY decisions will be executed in order until cash runs out
+4. If you want to buy multiple stocks, order them by priority (most conviction first)
+5. You can sell stocks to fund new purchases
+
+📈 TRADING LOGIC:
+- First, identify any stocks to SELL (take profits, cut losses, free up cash)
+- Then, identify new stocks to BUY with available + freed-up cash
+- Consider the total amount: sells will add to your ${available_cash:.2f} cash
 
 Performance Context: {feedback_context}
 
-Summaries:
+📰 Market Summaries:
 {summarized_text}
 
-Current Holdings (with current prices and gains/losses):
-{holdings_text}
+Return a JSON list of trade decisions. Each decision must include:
+- action ("buy" or "sell") 
+- ticker (stock symbol)
+- amount_usd (dollars to spend/recover - be precise!)
+- reason (profit taking, loss cutting, new opportunity, etc.)
 
-Return a JSON list of trade decisions. Each decision should include:
-- action ("buy" or "sell")
-- ticker
-- amount_usd (funds to allocate or recover)
-- reason (day trading, profit taking, loss cutting, funding new position, etc)
-Respond strictly in valid JSON format with keys.
+IMPORTANT: Your buy decisions should total ≤ ${max_spendable:.2f} + (total from any sell decisions)
+Respond strictly in valid JSON format.
 """
 
     system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions."
