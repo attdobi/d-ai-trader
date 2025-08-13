@@ -31,7 +31,10 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_DIR = os.path.join(SCRIPT_DIR, "screenshots")
 RUN_TIMESTAMP = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-RUN_DIR = os.path.join(SCREENSHOT_DIR, RUN_TIMESTAMP)
+
+# Include configuration hash to isolate screenshots for parallel runs
+CONFIG_HASH = get_current_config_hash()
+RUN_DIR = os.path.join(SCREENSHOT_DIR, CONFIG_HASH, RUN_TIMESTAMP)
 os.makedirs(RUN_DIR, exist_ok=True)
 
 print(f"Screenshot directory: {SCREENSHOT_DIR}")
