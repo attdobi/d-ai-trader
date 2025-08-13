@@ -343,6 +343,16 @@ class PromptManager:
                         except json.JSONDecodeError:
                             pass
                     
+                    # Try to find and extract valid JSON more aggressively
+                    content_lines = content.split('\n')
+                    for line in content_lines:
+                        line = line.strip()
+                        if line.startswith('{') and line.endswith('}'):
+                            try:
+                                return json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                    
                     # If we can't parse JSON, create a fallback response
                     print(f"Creating fallback response for {agent_name}")
                     print(f"Full response content: {content[:500]}...")

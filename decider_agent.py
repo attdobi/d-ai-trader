@@ -94,11 +94,12 @@ def update_all_current_prices():
     
     with engine.begin() as conn:
         # Get all active holdings
+        config_hash = get_current_config_hash()
         result = conn.execute(text("""
             SELECT ticker, shares, total_value, current_price
             FROM holdings 
-            WHERE is_active = TRUE AND ticker != 'CASH'
-        """))
+            WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
+        """), {"config_hash": config_hash})
         
         holdings = [dict(row._mapping) for row in result]
         
@@ -133,13 +134,14 @@ def update_all_current_prices():
                     current_value = :current_value,
                     gain_loss = :gain_loss,
                     current_price_timestamp = :timestamp
-                WHERE ticker = :ticker
+                WHERE ticker = :ticker AND config_hash = :config_hash
             """), {
                 "price": new_price,
                 "current_value": new_current_value,
                 "gain_loss": new_gain_loss,
                 "timestamp": datetime.utcnow(),
-                "ticker": ticker
+                "ticker": ticker,
+                "config_hash": config_hash
             })
             
             print(f"✅ Updated {ticker}: ${old_price:.2f} → ${new_price:.2f} (Gain/Loss: ${new_gain_loss:.2f})")
@@ -440,7 +442,7 @@ def update_holdings(decisions):
     # 1) Process all SELLS first
     if sell_decisions:
         with engine.begin() as conn:
-            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'"))\
+            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
                 .fetchone()
             cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
 
@@ -476,8 +478,8 @@ def update_holdings(decisions):
                     continue
 
                 holding = conn.execute(
-                    text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker"),
-                    {"ticker": clean_ticker}
+                    text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
+                    {"ticker": clean_ticker, "config_hash": config_hash}
                 ).fetchone()
                 if holding:
                     shares = float(holding.shares)
@@ -508,13 +510,14 @@ def update_holdings(decisions):
                             current_price_timestamp = :timestamp,
                             current_value = :value,
                             gain_loss = :gain_loss
-                        WHERE ticker = :ticker
+                        WHERE ticker = :ticker AND config_hash = :config_hash
                     """), {
                         "ticker": clean_ticker,
                         "price": float(price),
                         "timestamp": timestamp,
                         "value": total_value,
-                        "gain_loss": gain_loss
+                        "gain_loss": gain_loss,
+                        "config_hash": config_hash
                     })
 
                     cash += total_value
@@ -526,8 +529,8 @@ def update_holdings(decisions):
                     current_value = :cash,
                     total_value = :cash,
                     current_price_timestamp = :timestamp
-                WHERE ticker = 'CASH'
-            """), {"cash": cash, "timestamp": timestamp})
+                WHERE ticker = 'CASH' AND config_hash = :config_hash
+            """), {"cash": cash, "timestamp": timestamp, "config_hash": config_hash})
 
     # Optional wait if buys are pending
     if sell_decisions and buy_decisions:
@@ -537,7 +540,7 @@ def update_holdings(decisions):
     # 2) Process all BUYS
     if buy_decisions:
         with engine.begin() as conn:
-            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH'"))\
+            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
                 .fetchone()
             cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
 
@@ -595,8 +598,8 @@ def update_holdings(decisions):
                     continue
 
                 existing = conn.execute(
-                    text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker"),
-                    {"ticker": clean_ticker}
+                    text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
+                    {"ticker": clean_ticker, "config_hash": config_hash}
                 ).fetchone()
 
                 if existing and existing.is_active:
@@ -617,7 +620,7 @@ def update_holdings(decisions):
                             current_value = :current_value,
                             gain_loss = :gain_loss,
                             reason = :reason
-                        WHERE ticker = :ticker
+                        WHERE ticker = :ticker AND config_hash = :config_hash
                     """), {
                         "ticker": clean_ticker,
                         "shares": new_shares,
@@ -627,7 +630,8 @@ def update_holdings(decisions):
                         "total_value": new_total_value,
                         "current_value": new_current_value,
                         "gain_loss": new_gain_loss,
-                        "reason": f"{existing.reason if existing.reason else ''} + {reason}"
+                        "reason": f"{existing.reason if existing.reason else ''} + {reason}",
+                        "config_hash": config_hash
                     })
                     print(f"Added {shares} shares of {clean_ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
                 elif existing and not existing.is_active:
@@ -643,7 +647,7 @@ def update_holdings(decisions):
                             gain_loss = :gain_loss,
                             reason = :reason,
                             is_active = TRUE
-                        WHERE ticker = :ticker
+                        WHERE ticker = :ticker AND config_hash = :config_hash
                     """), {
                         "ticker": clean_ticker,
                         "shares": float(shares),
@@ -653,14 +657,16 @@ def update_holdings(decisions):
                         "total_value": float(shares * price),
                         "current_value": float(shares * price),
                         "gain_loss": 0.0,
-                        "reason": reason
+                        "reason": reason,
+                        "config_hash": config_hash
                     })
                     print(f"Reactivated {clean_ticker}: {shares} shares at ${price:.2f}")
                 else:
                     conn.execute(text("""
-                        INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                        VALUES (:ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                        INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                        VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
                     """), {
+                        "config_hash": config_hash,
                         "ticker": clean_ticker,
                         "shares": float(shares),
                         "purchase_price": float(price),
@@ -683,8 +689,8 @@ def update_holdings(decisions):
                     current_value = :cash,
                     total_value = :cash,
                     current_price_timestamp = :timestamp
-                WHERE ticker = 'CASH'
-            """), {"cash": cash, "timestamp": timestamp})
+                WHERE ticker = 'CASH' AND config_hash = :config_hash
+            """), {"cash": cash, "timestamp": timestamp, "config_hash": config_hash})
 
     # 3) Handle HOLD records for visibility
     for decision in hold_decisions:
@@ -883,11 +889,12 @@ def store_trade_decisions(decisions, run_id):
             )
         """))
         conn.execute(text("""
-            INSERT INTO trade_decisions (run_id, timestamp, data) VALUES (:run_id, :timestamp, :data)
+            INSERT INTO trade_decisions (run_id, timestamp, data, config_hash) VALUES (:run_id, :timestamp, :data, :config_hash)
         """), {
             "run_id": run_id,
             "timestamp": datetime.utcnow(),
-            "data": json.dumps(decisions)
+            "data": json.dumps(decisions),
+            "config_hash": get_current_config_hash()
         })
 
 if __name__ == "__main__":
