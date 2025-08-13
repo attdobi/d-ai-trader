@@ -28,6 +28,42 @@
     </div>
 </div>
 
+<!-- System Configuration Section -->
+<div class="config-section">
+    <h3>🤖 Current System Configuration</h3>
+    <div class="config-cards">
+        <div class="config-card">
+            <h4>AI Model</h4>
+            <p class="config-value">{{ current_config.gpt_model }}</p>
+        </div>
+        <div class="config-card">
+            <h4>Prompt Mode</h4>
+            <p class="config-value">
+                {% if current_config.prompt_config.mode == 'auto' %}
+                    AUTO (Latest)
+                {% else %}
+                    FIXED v{{ current_config.prompt_config.forced_version }}
+                {% endif %}
+            </p>
+        </div>
+        <div class="config-card">
+            <h4>Trading Mode</h4>
+            <p class="config-value {{ 'real-mode' if current_config.trading_mode == 'real_world' else 'sim-mode' }}">
+                {{ current_config.trading_mode.upper() }}
+                {% if current_config.trading_mode == 'real_world' %}
+                    💰
+                {% else %}
+                    🎮
+                {% endif %}
+            </p>
+        </div>
+        <div class="config-card">
+            <h4>Configuration Hash</h4>
+            <p class="config-value hash">{{ current_config.config_hash }}</p>
+        </div>
+    </div>
+</div>
+
 <!-- Manual Trigger Section -->
 <div class="trigger-section">
     <h3>Manual System Triggers</h3>
@@ -101,6 +137,73 @@
 }
 .gain { color: #28a745; }
 .loss { color: #dc3545; }
+
+/* Configuration Section Styles */
+.config-section {
+    background: #f1f8ff;
+    border: 1px solid #c1d7f0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 30px;
+}
+
+.config-section h3 {
+    margin: 0 0 15px 0;
+    color: #0366d6;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.config-cards {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.config-card {
+    background: white;
+    border: 1px solid #d1d9e0;
+    border-radius: 6px;
+    padding: 15px;
+    min-width: 160px;
+    flex: 1;
+    text-align: center;
+}
+
+.config-card h4 {
+    margin: 0 0 8px 0;
+    color: #586069;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.config-card .config-value {
+    margin: 0;
+    color: #24292e;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.config-value.hash {
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 14px;
+    background: #f6f8fa;
+    padding: 4px 8px;
+    border-radius: 3px;
+    border: 1px solid #e1e4e8;
+}
+
+.config-value.real-mode {
+    color: #d73a49;
+    font-weight: bold;
+}
+
+.config-value.sim-mode {
+    color: #28a745;
+    font-weight: bold;
+}
 
 /* Trigger Section Styles */
 .trigger-section {

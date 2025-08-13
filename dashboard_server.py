@@ -1,6 +1,6 @@
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
-from config import engine
+from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash
 import json
 import pandas as pd
 import threading
@@ -114,12 +114,20 @@ def dashboard():
         # Calculate percentage gain on invested amount (excluding cash)
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
 
+        # Get current system configuration
+        current_config = {
+            'gpt_model': get_gpt_model(),
+            'prompt_config': get_prompt_version_config(),
+            'trading_mode': get_trading_mode(),
+            'config_hash': get_current_config_hash()
+        }
+
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
                                total_value=total_portfolio_value, cash_balance=cash_balance,
                                portfolio_value=total_current_value, total_invested=total_invested,
                                total_profit_loss=total_profit_loss, percentage_gain=percentage_gain,
                                initial_investment=initial_investment, net_gain_loss=net_gain_loss,
-                               net_percentage_gain=net_percentage_gain)
+                               net_percentage_gain=net_percentage_gain, current_config=current_config)
 
 @app.template_filter('from_json')
 def from_json_filter(s):
@@ -228,6 +236,20 @@ def summaries():
                 continue
 
         return render_template("summaries.html", summaries=summaries)
+
+@app.route("/api/configuration")
+def api_configuration():
+    """Get current system configuration"""
+    try:
+        current_config = {
+            'gpt_model': get_gpt_model(),
+            'prompt_config': get_prompt_version_config(),
+            'trading_mode': get_trading_mode(),
+            'config_hash': get_current_config_hash()
+        }
+        return jsonify(current_config)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route("/api/holdings")
 def api_holdings():
