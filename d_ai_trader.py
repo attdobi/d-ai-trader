@@ -175,19 +175,34 @@ class DAITraderOrchestrator:
             return [row._mapping for row in result]
     
     def get_recent_summaries(self, hours_back=6):
-        """Get recent summaries within the specified time window (processed or not)"""
+        """Get summaries from the latest run (processed or not)"""
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
         
         with engine.connect() as conn:
-            # Get recent summaries regardless of processing status
+            # First, get the latest run_id
+            latest_run_result = conn.execute(text("""
+                SELECT run_id 
+                FROM summaries 
+                WHERE config_hash = :config_hash
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            """), {"config_hash": config_hash})
+            
+            latest_run_row = latest_run_result.fetchone()
+            if not latest_run_row:
+                return []
+            
+            latest_run_id = latest_run_row.run_id
+            
+            # Get all summaries from the latest run
             result = conn.execute(text("""
                 SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
                 FROM summaries s
-                WHERE s.timestamp >= NOW() - INTERVAL %s
+                WHERE s.run_id = :run_id
                   AND s.config_hash = :config_hash
                 ORDER BY s.timestamp DESC
-            """ % f"'{hours_back} hours'"), {"config_hash": config_hash})
+            """), {"run_id": latest_run_id, "config_hash": config_hash})
             return [row._mapping for row in result]
     
     def mark_summaries_processed(self, summary_ids, processed_by):
@@ -265,13 +280,14 @@ class DAITraderOrchestrator:
             unprocessed_summaries = self.get_unprocessed_summaries()
             
             if not unprocessed_summaries:
-                logger.info("No unprocessed summaries found for decider - using latest available summaries")
-                # Get the most recent summaries instead of empty list
-                unprocessed_summaries = self.get_recent_summaries(hours_back=6)
+                logger.info("No unprocessed summaries found for decider - using latest run summaries")
+                # Get summaries from the latest run instead of empty list
+                unprocessed_summaries = self.get_recent_summaries()
                 if unprocessed_summaries:
-                    logger.info(f"Using {len(unprocessed_summaries)} recent summaries for decision making")
+                    latest_run_id = unprocessed_summaries[0]['run_id']
+                    logger.info(f"Using {len(unprocessed_summaries)} summaries from latest run {latest_run_id}")
                 else:
-                    logger.info("No recent summaries available - will record market status only")
+                    logger.info("No summaries available - will record market status only")
                     unprocessed_summaries = []
             else:
                 logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
