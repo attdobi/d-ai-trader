@@ -926,17 +926,24 @@ Performance Context: {feedback_context}
 📰 Market Summaries:
 {summarized_text}
 
-Return a JSON list of trade decisions. Each decision must include:
+🚨 CRITICAL JSON REQUIREMENT:
+Return ONLY a JSON array of trade decisions. Each decision must include:
 - action ("buy" or "sell") 
 - ticker (stock symbol)
 - amount_usd (dollars to spend/recover - be precise!)
 - reason (profit taking, loss cutting, new opportunity, etc.)
 
 IMPORTANT: Your buy decisions should total ≤ ${max_spendable:.2f} + (total from any sell decisions)
-Respond strictly in valid JSON format.
+
+⛔ NO explanatory text
+⛔ NO markdown formatting  
+⛔ NO text before or after the JSON
+✅ ONLY pure JSON array starting with [ and ending with ]
+
+Example format: [{{\"action\": \"buy\", \"ticker\": \"AAPL\", \"amount_usd\": 1000, \"reason\": \"Strong earnings\"}}]
 """
 
-    system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions."
+    system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions. 🚨 CRITICAL: You must respond with ONLY valid JSON array format. No explanatory text or formatting."
     
     # Import the JSON schema for structured responses
     from config import get_decider_json_schema

@@ -330,7 +330,9 @@ class PromptManager:
                         })
 
                 # Get the correct parameters based on model type
-                token_params = get_model_token_params(GPT_MODEL, 1500)
+                # Increase token limit to prevent truncation for GPT-5 models
+                max_tokens = 2000 if _is_gpt5_model(GPT_MODEL) else 1500
+                token_params = get_model_token_params(GPT_MODEL, max_tokens)
                 temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 
                 # Build API call parameters
@@ -353,58 +355,80 @@ class PromptManager:
                 response = self.client.chat.completions.create(**api_params)
                 content = response.choices[0].message.content.strip()
 
-                # Try parsing JSON
+                # Try parsing JSON with enhanced error handling
                 try:
-                    return json.loads(content)
+                    parsed_json = json.loads(content)
+                    return parsed_json
                 except json.JSONDecodeError as e:
-                    print(f"JSON Decode Error: {e}")
-                    print(f"Response was: {content}")
+                    print(f"JSON Decode Error (attempt {retries + 1}/{max_retries}): {e}")
+                    print(f"Response was: {content[:300]}...")
                     
-                    # Try to extract JSON from the response if it's wrapped in text
+                    # If using JSON mode and this is not the last retry, try again with more explicit instructions
+                    if response_format and retries < max_retries - 1:
+                        print(f"🔄 Retrying {agent_name} with enhanced JSON instructions...")
+                        # Enhance the prompt for next retry
+                        enhanced_prompt = prompt + "\n\n🚨 CRITICAL: Respond with ONLY valid JSON. No explanatory text, no markdown, no code blocks. Just pure JSON starting with { and ending with }."
+                        
+                        # Update messages for retry
+                        messages = [
+                            {"role": "system", "content": system_prompt + "\n\nYou MUST respond with valid JSON only. No other text."},
+                            {"role": "user", "content": enhanced_prompt}
+                        ]
+                        
+                        # Add images back if they were provided
+                        if image_paths and len(image_paths) > 0:
+                            user_content = [{"type": "text", "text": enhanced_prompt}]
+                            for image_path in image_paths:
+                                try:
+                                    with open(image_path, "rb") as img_file:
+                                        image_bytes = img_file.read()
+                                    encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+                                    user_content.append({
+                                        "type": "image_url",
+                                        "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
+                                    })
+                                except Exception as img_e:
+                                    print(f"Error re-adding image {image_path}: {img_e}")
+                            messages[-1]["content"] = user_content
+                        
+                        retries += 1
+                        continue  # Retry the request
+                    
+                    # Try aggressive JSON extraction
                     import re
-                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                    if json_match:
-                        try:
-                            return json.loads(json_match.group())
-                        except json.JSONDecodeError:
-                            pass
+                    # Try to find JSON object in the response
+                    json_patterns = [
+                        r'\{[^{}]*"headlines"[^{}]*"insights"[^{}]*\}',  # Specific to summarizer
+                        r'\{.*?"headlines".*?\}',  # Look for headlines key
+                        r'\{.*?\}',  # Any JSON object
+                        r'\[.*?\]'   # JSON array (for decider)
+                    ]
                     
-                    # Try to find and extract valid JSON more aggressively
-                    content_lines = content.split('\n')
-                    for line in content_lines:
-                        line = line.strip()
-                        if line.startswith('{') and line.endswith('}'):
+                    for pattern in json_patterns:
+                        json_match = re.search(pattern, content, re.DOTALL)
+                        if json_match:
                             try:
-                                return json.loads(line)
+                                extracted = json.loads(json_match.group())
+                                print(f"✅ Successfully extracted JSON using pattern: {pattern[:30]}...")
+                                return extracted
                             except json.JSONDecodeError:
                                 continue
                     
-                    # If we can't parse JSON, create a fallback response
-                    print(f"Creating fallback response for {agent_name}")
-                    print(f"Full response content: {content[:500]}...")
-                    
-                    # Try to extract useful content even if not JSON
-                    lines = content.split('\n')
-                    headlines = []
-                    insights = ""
-                    
-                    for line in lines:
+                    # Try line by line extraction
+                    content_lines = content.split('\n')
+                    for line in content_lines:
                         line = line.strip()
-                        if line and not line.startswith('{') and not line.startswith('}'):
-                            if len(line) < 100 and ('stock' in line.lower() or 'market' in line.lower() or '$' in line):
-                                headlines.append(line)
-                            elif len(insights) < 200:
-                                insights += line + " "
+                        if (line.startswith('{') and line.endswith('}')) or (line.startswith('[') and line.endswith(']')):
+                            try:
+                                line_json = json.loads(line)
+                                print(f"✅ Successfully extracted JSON from line")
+                                return line_json
+                            except json.JSONDecodeError:
+                                continue
                     
-                    if not headlines:
-                        headlines = ["Unable to parse AI response"]
-                    if not insights:
-                        insights = f"Error parsing AI response: {content[:200]}..."
-                        
-                    return {
-                        "headlines": headlines[:3],  # Limit to 3 headlines
-                        "insights": insights.strip()
-                    }
+                    # If all JSON parsing fails, create a structured fallback
+                    print(f"❌ All JSON extraction attempts failed for {agent_name}")
+                    return self._create_fallback_response(content, agent_name)
 
             except Exception as e:
                 print(f"API Call Error: {e}")
@@ -413,3 +437,41 @@ class PromptManager:
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
 
         return {"headlines": ["Max retries reached"], "insights": "Failed to get valid response after multiple attempts"}
+
+    def _create_fallback_response(self, content, agent_name):
+        """Create a structured fallback response when JSON parsing fails"""
+        if agent_name and "Summarizer" in agent_name:
+            # Create summarizer-style response
+            lines = content.split('\n')
+            headlines = []
+            insights = ""
+            
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith('{') and not line.startswith('}'):
+                    if len(line) < 100 and any(word in line.lower() for word in ['stock', 'market', '$', 'trading', 'earnings']):
+                        headlines.append(line)
+                    elif len(insights) < 300:
+                        insights += line + " "
+            
+            return {
+                "headlines": headlines[:3] if headlines else ["Unable to parse AI response"],
+                "insights": insights.strip() if insights else f"Error parsing AI response: {content[:200]}..."
+            }
+        
+        elif agent_name and "Decider" in agent_name:
+            # Create decider-style response (hold decision)
+            return [{
+                "action": "hold",
+                "ticker": "N/A",
+                "amount_usd": 0,
+                "reason": f"Unable to parse AI response - defaulting to hold. Original response: {content[:100]}..."
+            }]
+        
+        else:
+            # Generic fallback
+            return {
+                "error": "Unable to parse AI response",
+                "raw_content": content[:500],
+                "agent": agent_name
+            }

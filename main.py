@@ -141,20 +141,32 @@ Content:
 
 {html_content}
 
-IMPORTANT: You must respond with a valid JSON object in this exact format:
+🚨 CRITICAL JSON REQUIREMENT:
+You MUST respond with ONLY valid JSON in this EXACT format:
 {{
     "headlines": ["headline 1", "headline 2", "headline 3"],
     "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
 }}
 
-Do not include any text before or after the JSON object. Only return the JSON.
+⛔ NO explanatory text
+⛔ NO markdown formatting  
+⛔ NO code blocks
+⛔ NO text before or after the JSON
+✅ ONLY pure JSON starting with {{ and ending with }}
+
+If you cannot parse the content, return:
+{{
+    "headlines": ["Unable to analyze content"],
+    "insights": "Content could not be processed for analysis."
+}}
 """
     system_prompt = (
         "You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages."
         "Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation"
         "Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively."
         "Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades."
-        "You must ALWAYS respond with valid JSON format as specified in the prompt."
+        "\n\n🚨 CRITICAL: You must ALWAYS respond with ONLY valid JSON format. No other text, explanations, or formatting."
+        f"\n\n{feedback_context}"
     )
     
     # Only include images if they were successfully saved and are reasonably sized
