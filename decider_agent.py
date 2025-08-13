@@ -191,28 +191,23 @@ def fetch_holdings():
             
             # Create initial portfolio snapshot for new configuration
             print(f"📊 Recording initial portfolio snapshot for config {config_hash}")
-            try:
-                from dashboard_server import record_portfolio_snapshot
-                record_portfolio_snapshot()
-                print(f"✅ Initial portfolio snapshot recorded successfully")
-            except Exception as e:
-                print(f"⚠️  Failed to record initial portfolio snapshot: {e}")
-                # Manually create the snapshot inline as fallback
-                conn.execute(text("""
-                    INSERT INTO portfolio_history 
-                    (total_portfolio_value, cash_balance, total_invested, 
-                     total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
-                    VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
-                            :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
-                """), {
-                    "total_portfolio_value": MAX_FUNDS,
-                    "cash_balance": MAX_FUNDS,
-                    "total_invested": 0,
-                    "total_profit_loss": 0,
-                    "percentage_gain": 0,
-                    "holdings_snapshot": json.dumps([{"ticker": "CASH", "current_value": MAX_FUNDS}]),
-                    "config_hash": config_hash
-                })
+            # Use inline approach to avoid transaction issues
+            conn.execute(text("""
+                INSERT INTO portfolio_history 
+                (total_portfolio_value, cash_balance, total_invested, 
+                 total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
+                VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+                        :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
+            """), {
+                "total_portfolio_value": MAX_FUNDS,
+                "cash_balance": MAX_FUNDS,
+                "total_invested": 0,
+                "total_profit_loss": 0,
+                "percentage_gain": 0,
+                "holdings_snapshot": json.dumps([{"ticker": "CASH", "current_value": MAX_FUNDS}]),
+                "config_hash": config_hash
+            })
+            print(f"✅ Initial portfolio snapshot recorded successfully")
 
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss, reason, is_active FROM holdings

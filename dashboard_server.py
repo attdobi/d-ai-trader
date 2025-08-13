@@ -89,6 +89,12 @@ create_portfolio_history_table()
 
 @app.route("/")
 def dashboard():
+    # Import and ensure portfolio initialization
+    from decider_agent import fetch_holdings
+    
+    # This will trigger initialization if needed
+    holdings_data = fetch_holdings()
+    
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
@@ -777,12 +783,20 @@ def reset_portfolio():
                 WHERE ticker != 'CASH' AND config_hash = :config_hash
             """), {"config_hash": config_hash})
             
-            # Reset cash to $10,000
-            conn.execute(text("""
+            # Reset cash to $10,000 (or create if not exists)
+            cash_update_result = conn.execute(text("""
                 UPDATE holdings 
                 SET current_value = 10000, total_value = 10000, current_price = 10000
                 WHERE ticker = 'CASH' AND config_hash = :config_hash
             """), {"config_hash": config_hash})
+            
+            # If no CASH holding exists, create it
+            if cash_update_result.rowcount == 0:
+                print(f"🚀 Creating initial CASH holding for config {config_hash}")
+                conn.execute(text("""
+                    INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                    VALUES (:config_hash, 'CASH', 1, 10000, 10000, now(), now(), 10000, 10000, 0, 'Reset to initial cash', TRUE)
+                """), {"config_hash": config_hash})
             
             # Record portfolio snapshot after reset
             record_portfolio_snapshot()
