@@ -174,6 +174,22 @@ class DAITraderOrchestrator:
             """), {"config_hash": config_hash})
             return [row._mapping for row in result]
     
+    def get_recent_summaries(self, hours_back=6):
+        """Get recent summaries within the specified time window (processed or not)"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
+        with engine.connect() as conn:
+            # Get recent summaries regardless of processing status
+            result = conn.execute(text("""
+                SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
+                FROM summaries s
+                WHERE s.timestamp >= NOW() - INTERVAL %s
+                  AND s.config_hash = :config_hash
+                ORDER BY s.timestamp DESC
+            """ % f"'{hours_back} hours'"), {"config_hash": config_hash})
+            return [row._mapping for row in result]
+    
     def mark_summaries_processed(self, summary_ids, processed_by):
         """Mark summaries as processed"""
         with engine.begin() as conn:
@@ -249,9 +265,14 @@ class DAITraderOrchestrator:
             unprocessed_summaries = self.get_unprocessed_summaries()
             
             if not unprocessed_summaries:
-                logger.info("No unprocessed summaries found for decider - but will still run to record market status")
-                # Create empty list to allow decider to run and record N/A decisions
-                unprocessed_summaries = []
+                logger.info("No unprocessed summaries found for decider - using latest available summaries")
+                # Get the most recent summaries instead of empty list
+                unprocessed_summaries = self.get_recent_summaries(hours_back=6)
+                if unprocessed_summaries:
+                    logger.info(f"Using {len(unprocessed_summaries)} recent summaries for decision making")
+                else:
+                    logger.info("No recent summaries available - will record market status only")
+                    unprocessed_summaries = []
             else:
                 logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
             
