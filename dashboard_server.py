@@ -326,6 +326,7 @@ def api_portfolio_performance():
 @app.route("/api/profit-loss")
 def api_profit_loss():
     """Get current profit/loss breakdown by holding"""
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price,
@@ -335,9 +336,9 @@ def api_profit_loss():
                        ELSE 0 
                    END as percentage_gain
             FROM holdings
-            WHERE is_active = TRUE AND ticker != 'CASH'
+            WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
             ORDER BY gain_loss DESC
-        """)).fetchall()
+        """), {"config_hash": config_hash}).fetchall()
         
         return jsonify([dict(row._mapping) for row in result])
 
@@ -735,13 +736,14 @@ def trigger_all():
 def reset_portfolio():
     """Reset portfolio to initial state with $10,000 cash"""
     try:
+        config_hash = get_current_config_hash()
         with engine.begin() as conn:
-            # Get current holdings to record them as sold for history
+            # Get current holdings to record them as sold for history (filter by config_hash)
             current_holdings = conn.execute(text("""
                 SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss
                 FROM holdings
-                WHERE is_active = TRUE AND ticker != 'CASH'
-            """)).fetchall()
+                WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchall()
             
             # Record current holdings as sold for historical tracking
             for holding in current_holdings:
@@ -751,12 +753,12 @@ def reset_portfolio():
                         INSERT INTO trade_outcomes (
                             ticker, sell_timestamp, purchase_price, sell_price, 
                             shares, gain_loss_amount, gain_loss_percentage, 
-                            hold_duration_days, original_reason, sell_reason, outcome_category
+                            hold_duration_days, original_reason, sell_reason, outcome_category, config_hash
                         ) VALUES (
                             :ticker, CURRENT_TIMESTAMP, :purchase_price, :current_price,
                             :shares, :gain_loss, 
                             CASE WHEN :total_value > 0 THEN (:gain_loss / :total_value * 100) ELSE 0 END,
-                            0, 'Portfolio reset', 'Portfolio reset', 'break_even'
+                            0, 'Portfolio reset', 'Portfolio reset', 'break_even', :config_hash
                         )
                     """), {
                         "ticker": holding.ticker,
@@ -764,11 +766,11 @@ def reset_portfolio():
                         "current_price": float(holding.current_price),
                         "shares": float(holding.shares),
                         "gain_loss": float(holding.gain_loss),
-                        "total_value": float(holding.total_value)
+                        "total_value": float(holding.total_value),
+                        "config_hash": config_hash
                     })
             
             # Deactivate all current holdings
-            config_hash = get_current_config_hash()
             conn.execute(text("""
                 UPDATE holdings 
                 SET is_active = FALSE, shares = 0, current_value = 0, gain_loss = 0
