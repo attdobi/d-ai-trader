@@ -764,6 +764,17 @@ def record_portfolio_snapshot():
         })
 
 def ask_decision_agent(summaries, run_id, holdings):
+    # Check market status first
+    market_open = is_market_open()
+    if not market_open:
+        print("📈 Market is CLOSED - Recording N/A decision")
+        return [{
+            "action": "N/A",
+            "ticker": "N/A", 
+            "amount_usd": 0,
+            "reason": "Market is closed - no trading action taken"
+        }]
+    
     parsed_summaries = []
     
     # Limit the number of summaries to process to avoid rate limiting

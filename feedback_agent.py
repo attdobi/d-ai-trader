@@ -185,13 +185,15 @@ class TradeOutcomeTracker:
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         with engine.connect() as conn:
-            # Get recent outcomes
+            # Get recent outcomes (exclude N/A actions from feedback analysis)
             result = conn.execute(text("""
                 SELECT ticker, gain_loss_percentage, outcome_category, 
                        hold_duration_days, original_reason, sell_reason,
                        market_context
                 FROM trade_outcomes 
                 WHERE sell_timestamp >= :cutoff_date
+                  AND ticker != 'N/A'
+                  AND original_reason NOT LIKE '%Market is closed%'
                 ORDER BY sell_timestamp DESC
             """), {"cutoff_date": cutoff_date})
             

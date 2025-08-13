@@ -36,7 +36,8 @@ def create_portfolio_history_table():
                 total_invested FLOAT,
                 total_profit_loss FLOAT,
                 percentage_gain FLOAT,
-                holdings_snapshot JSONB
+                holdings_snapshot JSONB,
+                config_hash VARCHAR(50)
             )
         """))
 
@@ -149,6 +150,7 @@ def trade_decisions():
             WHERE config_hash = :config_hash
               AND data::text NOT LIKE '%%Max retries reached%%'
               AND data::text NOT LIKE '%%API error, no response%%'
+              AND data::text NOT LIKE '%%"action": "N/A"%%'
             ORDER BY id DESC LIMIT 20
         """), {"config_hash": config_hash}).fetchall()
         
