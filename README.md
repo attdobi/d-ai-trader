@@ -21,12 +21,22 @@ An intelligent trading system that uses AI agents to analyze financial news from
 
 ### 🚀 **NEW: Unified Startup System**
 - **Single Command Launch**: Start dashboard + automation with one command
-- **Configurable Parameters**: Custom port, AI model, and prompt version settings
+- **Configurable Parameters**: Custom port, AI model, prompt version, and trading mode
 - **Multiple AI Models**: Support for GPT-4.1, o3, GPT-5 and their mini variants
 - **Smart Prompt Management**: Choose between auto-updating or fixed prompt versions
+- **Trading Modes**: Simulation mode for testing, real_world mode for actual trades
 - **Automatic Setup**: Virtual environment creation and dependency installation
 - **Parameter Validation**: Input validation with helpful error messages
 - **Background Operation**: Dashboard and automation run concurrently
+
+### 🔄 **NEW: Parallel Run Support**
+- **Multiple Configurations**: Run different AI models simultaneously for performance comparison
+- **Configuration Isolation**: Each configuration maintains separate data and holdings
+- **Performance Testing**: Compare GPT-4.1 vs GPT-5 vs o3 across weeks or months
+- **A/B Testing**: Test impact of feedback systems by fixing prompt versions
+- **Real vs Simulation**: Run real-world trading alongside simulation for validation
+- **Configuration Hashing**: Unique identifiers ensure data separation
+- **Comprehensive Tracking**: All trades, decisions, and outcomes tracked per configuration
 
 ### Advanced Profit Tracking
 - **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
@@ -243,17 +253,18 @@ The new unified startup system combines the dashboard and automation into a sing
 | **Port** | `-p` | `--port` | `8080` | Dashboard web server port |
 | **AI Model** | `-m` | `--model` | `gpt-4.1` | OpenAI model for analysis |
 | **Prompt Version** | `-v` | `--prompt-version` | `auto` | Prompt version strategy |
+| **Trading Mode** | `-t` | `--trading-mode` | `simulation` | Simulation or real-world trading |
 
 **Parameter Examples:**
 ```bash
 # Short form parameters
-./start_d_ai_trader.sh -p 9000 -m o3 -v v4
+./start_d_ai_trader.sh -p 9000 -m o3 -v v4 -t simulation
 
 # Long form parameters  
-./start_d_ai_trader.sh --port 9000 --model o3 --prompt-version v4
+./start_d_ai_trader.sh --port 9000 --model o3 --prompt-version v4 --trading-mode real_world
 
 # Mixed form (also valid)
-./start_d_ai_trader.sh -p 9000 --model o3 -v v4
+./start_d_ai_trader.sh -p 9000 --model o3 -v v4 -t simulation
 ```
 
 #### Available AI Models
@@ -267,6 +278,35 @@ The new unified startup system combines the dashboard and automation into a sing
 #### Prompt Version Strategies
 - **auto** (default) - Always uses latest prompt versions updated by daily feedback
 - **v4, v7, etc.** - Locks to specific prompt version regardless of feedback updates
+
+#### Trading Modes
+- **simulation** (default) - Safe testing mode, no real money involved
+- **real_world** - Executes actual trades through Schwab API with real money
+
+### 🔄 **Parallel Run Examples**
+
+Run multiple configurations simultaneously for performance comparison:
+
+```bash
+# Terminal 1: GPT-4.1 with auto prompts in simulation
+./start_d_ai_trader.sh -p 8080 -m gpt-4.1 -v auto -t simulation
+
+# Terminal 2: GPT-5 with auto prompts in simulation  
+./start_d_ai_trader.sh -p 8081 -m gpt-5 -v auto -t simulation
+
+# Terminal 3: GPT-4.1 with fixed prompts for baseline
+./start_d_ai_trader.sh -p 8082 -m gpt-4.1 -v v4 -t simulation
+
+# Terminal 4: Real world trading with best performing model
+./start_d_ai_trader.sh -p 8083 -m gpt-5 -v auto -t real_world
+```
+
+Each instance will:
+- ✅ Maintain separate holdings and portfolio data
+- ✅ Generate unique configuration hashes for data isolation
+- ✅ Track performance independently
+- ✅ Allow direct performance comparison
+- ✅ Support different AI models, prompt versions, and trading modes
 
 #### What the Unified System Does
 - **Automatic Setup**: Creates virtual environment, installs dependencies

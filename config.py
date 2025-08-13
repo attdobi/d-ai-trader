@@ -7,6 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import openai
+from sqlalchemy import text
 
 # Load environment variables (prefer .env over existing shell vars to avoid stale keys)
 load_dotenv(override=True)
@@ -140,6 +141,100 @@ def get_prompt_version_config():
 def should_use_specific_prompt_version():
     """Check if we should use a specific prompt version instead of the latest"""
     return PROMPT_VERSION_MODE == "fixed" and FORCED_PROMPT_VERSION is not None
+
+# Trading mode configuration
+TRADING_MODE = "simulation"  # Default to simulation
+
+def set_trading_mode(mode):
+    """Set trading mode: simulation or real_world"""
+    global TRADING_MODE
+    valid_modes = ["simulation", "real_world"]
+    if mode in valid_modes:
+        TRADING_MODE = mode
+        print(f"🔄 Trading mode set to: {TRADING_MODE.upper()}")
+    else:
+        print(f"❌ Invalid trading mode '{mode}'. Valid modes: {valid_modes}")
+        print(f"🔄 Keeping current mode: {TRADING_MODE}")
+
+def get_trading_mode():
+    """Get current trading mode"""
+    return TRADING_MODE
+
+# Configuration hash system for parallel runs
+import hashlib
+import json
+
+def generate_configuration_hash():
+    """Generate a unique hash for the current configuration"""
+    config_data = {
+        "gpt_model": GPT_MODEL,
+        "prompt_mode": PROMPT_VERSION_MODE,
+        "forced_prompt_version": FORCED_PROMPT_VERSION,
+        "trading_mode": TRADING_MODE
+    }
+    
+    # Create a stable hash from configuration
+    config_string = json.dumps(config_data, sort_keys=True)
+    config_hash = hashlib.md5(config_string.encode()).hexdigest()[:8]
+    
+    return config_hash
+
+def get_current_configuration():
+    """Get complete current configuration"""
+    return {
+        "config_hash": generate_configuration_hash(),
+        "gpt_model": GPT_MODEL,
+        "prompt_mode": PROMPT_VERSION_MODE,
+        "forced_prompt_version": FORCED_PROMPT_VERSION,
+        "trading_mode": TRADING_MODE,
+        "description": f"{GPT_MODEL}_{PROMPT_VERSION_MODE}_{TRADING_MODE}"
+    }
+
+# Global configuration hash for this run
+CURRENT_CONFIG_HASH = None
+
+def initialize_configuration_hash():
+    """Initialize and store the configuration hash for this run"""
+    global CURRENT_CONFIG_HASH
+    CURRENT_CONFIG_HASH = generate_configuration_hash()
+    
+    # Store configuration in database
+    try:
+        with engine.begin() as conn:
+            # Create configurations table if it doesn't exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS run_configurations (
+                    config_hash TEXT PRIMARY KEY,
+                    gpt_model TEXT NOT NULL,
+                    prompt_mode TEXT NOT NULL,
+                    forced_prompt_version INTEGER,
+                    trading_mode TEXT NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Insert or update configuration
+            config = get_current_configuration()
+            conn.execute(text("""
+                INSERT INTO run_configurations 
+                (config_hash, gpt_model, prompt_mode, forced_prompt_version, trading_mode, description, last_used)
+                VALUES (:config_hash, :gpt_model, :prompt_mode, :forced_prompt_version, :trading_mode, :description, CURRENT_TIMESTAMP)
+                ON CONFLICT (config_hash) DO UPDATE SET last_used = CURRENT_TIMESTAMP
+            """), config)
+            
+        print(f"📋 Configuration hash: {CURRENT_CONFIG_HASH}")
+        print(f"📝 Description: {config['description']}")
+        
+    except Exception as e:
+        print(f"⚠️  Warning: Could not store configuration: {e}")
+    
+    return CURRENT_CONFIG_HASH
+
+def get_current_config_hash():
+    """Get the current configuration hash"""
+    return CURRENT_CONFIG_HASH or initialize_configuration_hash()
 
 class PromptManager:
     def __init__(self, client, session, run_id=None):

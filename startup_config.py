@@ -11,22 +11,40 @@ import subprocess
 
 def configure_system():
     """Configure the system with startup parameters"""
-    from config import set_gpt_model, set_prompt_version_mode
+    from config import (set_gpt_model, set_prompt_version_mode, set_trading_mode, 
+                       initialize_configuration_hash)
     
     # Set the AI model
-    set_gpt_model("gpt-4.1")
+    set_gpt_model("gpt-5-mini")
     
     # Set prompt version configuration
-    prompt_version = "auto"
+    prompt_version = "v3"
     if prompt_version.lower() == "auto":
         set_prompt_version_mode("auto")
     else:
         set_prompt_version_mode("fixed", prompt_version)
     
+    # Set trading mode
+    set_trading_mode("simulation")
+    
+    # Initialize configuration hash and store in database
+    config_hash = initialize_configuration_hash()
+    
     print(f"✅ System configured with:")
-    print(f"   - AI Model: gpt-4.1")
-    print(f"   - Prompt Version: auto")
-    print(f"   - Dashboard Port: 8080")
+    print(f"   - AI Model: gpt-5-mini")
+    print(f"   - Prompt Version: v3")
+    print(f"   - Trading Mode: simulation")
+    print(f"   - Dashboard Port: 8090")
+    print(f"   - Configuration Hash: {config_hash}")
+    
+    # Show warning for real world trading
+    if "simulation" == "real_world":
+        print("")
+        print("⚠️  WARNING: REAL WORLD TRADING MODE ENABLED")
+        print("💰 This will execute actual trades with real money!")
+        print("🔒 Ensure your Schwab API credentials are configured")
+        print("📊 All trades will be logged with this configuration hash")
+        print("")
 
 def start_dashboard():
     """Start the dashboard server"""
@@ -36,7 +54,7 @@ def start_dashboard():
     import dashboard_server
     
     # Set the port for the dashboard
-    dashboard_server.app.run(debug=False, port=8080, host='0.0.0.0', threaded=True)
+    dashboard_server.app.run(debug=False, port=8090, host='0.0.0.0', threaded=True)
 
 def start_automation():
     """Start the automation system"""
@@ -64,7 +82,7 @@ def main():
         
         # Give dashboard time to start
         time.sleep(3)
-        print(f"✅ Dashboard started on http://localhost:8080")
+        print(f"✅ Dashboard started on http://localhost:8090")
         
         # Start automation system in main thread
         start_automation()

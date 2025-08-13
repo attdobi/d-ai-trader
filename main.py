@@ -10,7 +10,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from sqlalchemy import text
-from config import engine, api_key, PromptManager, session
+from config import engine, api_key, PromptManager, session, get_current_config_hash
 import chromedriver_autoinstaller
 import openai
 import undetected_chromedriver as uc
@@ -69,6 +69,7 @@ def initialize_database():
         conn.execute(text('''
             CREATE TABLE IF NOT EXISTS summaries (
                 id SERIAL PRIMARY KEY,
+                config_hash TEXT NOT NULL DEFAULT 'default',
                 agent TEXT,
                 timestamp TIMESTAMP,
                 run_id TEXT,
@@ -335,10 +336,12 @@ def summarize_page(agent_name, url, web_driver):
     return summary
 
 def store_summary(summary):
+    config_hash = get_current_config_hash()
     with engine.begin() as conn:
         conn.execute(text(
-            "INSERT INTO summaries (agent, timestamp, run_id, data) VALUES (:agent, :timestamp, :run_id, :data)"
+            "INSERT INTO summaries (config_hash, agent, timestamp, run_id, data) VALUES (:config_hash, :agent, :timestamp, :run_id, :data)"
         ), {
+            "config_hash": config_hash,
             "agent": summary['agent'],
             "timestamp": datetime.strptime(summary['timestamp'], "%Y%m%dT%H%M%S"),
             "run_id": summary['run_id'],

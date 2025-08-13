@@ -7,6 +7,7 @@
 DEFAULT_PORT=8080
 DEFAULT_MODEL="gpt-4.1"
 DEFAULT_PROMPT_VERSION="auto"
+DEFAULT_TRADING_MODE="simulation"
 
 # Function to display usage information
 show_usage() {
@@ -18,18 +19,22 @@ show_usage() {
     echo "                            Available: gpt-4.1, gpt-4.1-mini, o3, o3-mini, gpt-5, gpt-5-mini"
     echo "  -v, --prompt-version VER  Set prompt version (default: $DEFAULT_PROMPT_VERSION)"
     echo "                            Use 'auto' for latest prompts or specific version like 'v4'"
+    echo "  -t, --trading-mode MODE   Set trading mode (default: $DEFAULT_TRADING_MODE)"
+    echo "                            'simulation' for safe testing, 'real_world' for actual trades"
     echo "  -h, --help               Show this help message"
     echo ""
     echo "Examples:"
-    echo "  ./start_d_ai_trader.sh                                    # Use all defaults"
-    echo "  ./start_d_ai_trader.sh -p 8081 -m o3 -v v4               # Custom settings"
-    echo "  ./start_d_ai_trader.sh --port 9000 --model gpt-5         # Mixed syntax"
+    echo "  ./start_d_ai_trader.sh                                         # Use all defaults"
+    echo "  ./start_d_ai_trader.sh -p 8081 -m o3 -v v4                    # Custom settings"
+    echo "  ./start_d_ai_trader.sh --port 9000 --model gpt-5 -t real_world # Real trading"
+    echo "  ./start_d_ai_trader.sh -m gpt-5-mini -v v3 -t simulation      # Performance test"
 }
 
 # Parse command line arguments
 PORT=$DEFAULT_PORT
 MODEL=$DEFAULT_MODEL
 PROMPT_VERSION=$DEFAULT_PROMPT_VERSION
+TRADING_MODE=$DEFAULT_TRADING_MODE
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -43,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -v|--prompt-version)
             PROMPT_VERSION="$2"
+            shift 2
+            ;;
+        -t|--trading-mode)
+            TRADING_MODE="$2"
             shift 2
             ;;
         -h|--help)
@@ -71,6 +80,14 @@ if [[ ! " ${VALID_MODELS[@]} " =~ " ${MODEL} " ]]; then
     exit 1
 fi
 
+# Validate trading mode
+VALID_TRADING_MODES=("simulation" "real_world")
+if [[ ! " ${VALID_TRADING_MODES[@]} " =~ " ${TRADING_MODE} " ]]; then
+    echo "Error: Invalid trading mode '$TRADING_MODE'."
+    echo "Valid trading modes are: ${VALID_TRADING_MODES[*]}"
+    exit 1
+fi
+
 # Display configuration
 echo "========================================"
 echo "D-AI-Trader Startup Configuration"
@@ -78,6 +95,7 @@ echo "========================================"
 echo "Dashboard Port:    $PORT"
 echo "AI Model:          $MODEL"
 echo "Prompt Version:    $PROMPT_VERSION"
+echo "Trading Mode:      $TRADING_MODE"
 echo "========================================"
 
 # Check if virtual environment exists
@@ -129,7 +147,8 @@ import subprocess
 
 def configure_system():
     """Configure the system with startup parameters"""
-    from config import set_gpt_model, set_prompt_version_mode
+    from config import (set_gpt_model, set_prompt_version_mode, set_trading_mode, 
+                       initialize_configuration_hash)
     
     # Set the AI model
     set_gpt_model("$MODEL")
@@ -141,10 +160,27 @@ def configure_system():
     else:
         set_prompt_version_mode("fixed", prompt_version)
     
+    # Set trading mode
+    set_trading_mode("$TRADING_MODE")
+    
+    # Initialize configuration hash and store in database
+    config_hash = initialize_configuration_hash()
+    
     print(f"✅ System configured with:")
     print(f"   - AI Model: $MODEL")
     print(f"   - Prompt Version: $PROMPT_VERSION")
+    print(f"   - Trading Mode: $TRADING_MODE")
     print(f"   - Dashboard Port: $PORT")
+    print(f"   - Configuration Hash: {config_hash}")
+    
+    # Show warning for real world trading
+    if "$TRADING_MODE" == "real_world":
+        print("")
+        print("⚠️  WARNING: REAL WORLD TRADING MODE ENABLED")
+        print("💰 This will execute actual trades with real money!")
+        print("🔒 Ensure your Schwab API credentials are configured")
+        print("📊 All trades will be logged with this configuration hash")
+        print("")
 
 def start_dashboard():
     """Start the dashboard server"""

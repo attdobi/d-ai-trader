@@ -4,7 +4,7 @@ from datetime import datetime
 import time
 from math import floor
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai
+from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
 
@@ -157,7 +157,9 @@ def fetch_holdings():
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS holdings (
-                ticker TEXT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
+                config_hash TEXT NOT NULL DEFAULT 'default',
+                ticker TEXT NOT NULL,
                 shares FLOAT,
                 purchase_price FLOAT,
                 current_price FLOAT,
@@ -167,22 +169,27 @@ def fetch_holdings():
                 current_value FLOAT,
                 gain_loss FLOAT,
                 reason TEXT,
-                is_active BOOLEAN
+                is_active BOOLEAN,
+                UNIQUE(config_hash, ticker)
             )
         """))
 
-        # Ensure cash row exists
-        result = conn.execute(text("SELECT 1 FROM holdings WHERE ticker = 'CASH'"))
+        # Get current configuration hash
+        config_hash = get_current_config_hash()
+        
+        # Ensure cash row exists for this configuration
+        result = conn.execute(text("SELECT 1 FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), 
+                            {"config_hash": config_hash})
         if not result.fetchone():
             conn.execute(text("""
-                INSERT INTO holdings (ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                VALUES ('CASH', 1, :initial_cash, :initial_cash, now(), now(), :initial_cash, :initial_cash, 0, 'Initial cash', TRUE)
-            """), {"initial_cash": MAX_FUNDS})
+                INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
+                VALUES (:config_hash, 'CASH', 1, :initial_cash, :initial_cash, now(), now(), :initial_cash, :initial_cash, 0, 'Initial cash', TRUE)
+            """), {"config_hash": config_hash, "initial_cash": MAX_FUNDS})
 
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss, reason, is_active FROM holdings
-            WHERE is_active = TRUE
-        """))
+            WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash})
         return [row._mapping for row in result]
 
 def clean_ticker_symbol(ticker):
@@ -356,9 +363,68 @@ def get_current_price(ticker):
         print(f"❌ Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None
 
+def execute_real_world_trade(decision):
+    """Execute a real trade through Schwab API when in real_world mode"""
+    trading_mode = get_trading_mode()
+    
+    if trading_mode != "real_world":
+        return True  # Skip real execution in simulation mode
+    
+    try:
+        # Import trading interface (only when needed)
+        from trading_interface import trading_interface
+        
+        action = decision.get('action', '').lower()
+        ticker = decision.get('ticker', '')
+        amount_usd = decision.get('amount_usd', 0)
+        
+        if action == 'buy':
+            result = trading_interface.execute_buy_order(ticker, amount_usd)
+        elif action == 'sell':
+            # For sell orders, we need to determine shares from holdings
+            current_holdings = fetch_holdings()
+            holding = next((h for h in current_holdings if h['ticker'] == ticker), None)
+            if holding and holding['shares'] > 0:
+                result = trading_interface.execute_sell_order(ticker, holding['shares'])
+            else:
+                print(f"⚠️  Cannot sell {ticker} - no shares found in holdings")
+                return False
+        else:
+            return True  # Hold decisions don't require real execution
+        
+        if result.get('success'):
+            print(f"💰 REAL TRADE EXECUTED: {action.upper()} {ticker} for ${amount_usd}")
+            return True
+        else:
+            print(f"❌ REAL TRADE FAILED: {action.upper()} {ticker} - {result.get('error', 'Unknown error')}")
+            return False
+            
+    except ImportError:
+        print("⚠️  Trading interface not available for real-world trading")
+        print("🔄 Falling back to simulation mode for this trade")
+        return True
+    except Exception as e:
+        print(f"❌ Real trade execution error: {e}")
+        return False
+
 def update_holdings(decisions):
     timestamp = datetime.utcnow()
     skipped_decisions = []
+    trading_mode = get_trading_mode()
+    config_hash = get_current_config_hash()
+    
+    print(f"🔄 Updating holdings in {trading_mode.upper()} mode (config: {config_hash})")
+    
+    # Execute real trades if in real_world mode
+    if trading_mode == "real_world":
+        print("💰 Executing real trades through Schwab API...")
+        for decision in decisions:
+            if decision.get('action', '').lower() in ['buy', 'sell']:
+                success = execute_real_world_trade(decision)
+                if not success:
+                    print(f"⚠️  Real trade failed for {decision.get('ticker', 'unknown')}, continuing with simulation")
+    else:
+        print("🎮 Running in simulation mode - no real trades executed")
 
     decisions_normalized = [
         {
