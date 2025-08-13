@@ -47,6 +47,7 @@ class TradeOutcomeTracker:
                 CREATE TABLE IF NOT EXISTS agent_feedback (
                     id SERIAL PRIMARY KEY,
                     analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    config_hash VARCHAR(50),
                     lookback_period_days INTEGER NOT NULL,
                     total_trades_analyzed INTEGER NOT NULL,
                     success_rate FLOAT NOT NULL,
@@ -58,6 +59,15 @@ class TradeOutcomeTracker:
                     decider_feedback TEXT
                 )
             """))
+            
+            # Add config_hash column to existing table if it doesn't exist
+            try:
+                conn.execute(text("""
+                    ALTER TABLE agent_feedback 
+                    ADD COLUMN IF NOT EXISTS config_hash VARCHAR(50)
+                """))
+            except Exception:
+                pass  # Column might already exist
             
             # Agent instruction updates table
             conn.execute(text("""
@@ -182,6 +192,8 @@ class TradeOutcomeTracker:
     
     def analyze_recent_outcomes(self, days_back=FEEDBACK_LOOKBACK_DAYS):
         """Analyze recent trade outcomes and generate feedback"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         with engine.connect() as conn:
@@ -192,10 +204,11 @@ class TradeOutcomeTracker:
                        market_context
                 FROM trade_outcomes 
                 WHERE sell_timestamp >= :cutoff_date
+                  AND config_hash = :config_hash
                   AND ticker != 'N/A'
                   AND original_reason NOT LIKE '%Market is closed%'
                 ORDER BY sell_timestamp DESC
-            """), {"cutoff_date": cutoff_date})
+            """), {"cutoff_date": cutoff_date, "config_hash": config_hash})
             
             outcomes = [dict(row._mapping) for row in result]
         
@@ -232,13 +245,17 @@ class TradeOutcomeTracker:
 
     def _get_historical_feedback_summary(self, agent_type, max_feedbacks=10):
         """Get and summarize historical feedback for an agent type"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.begin() as conn:
             result = conn.execute(text("""
                 SELECT summarizer_feedback, decider_feedback, analysis_timestamp
                 FROM agent_feedback 
+                WHERE config_hash = :config_hash
                 ORDER BY analysis_timestamp DESC 
                 LIMIT :max_feedbacks
-            """), {"max_feedbacks": max_feedbacks}).fetchall()
+            """), {"max_feedbacks": max_feedbacks, "config_hash": config_hash}).fetchall()
             
             historical_insights = []
             for row in result:
@@ -352,14 +369,16 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
 
     def compute_recent_outcomes_metrics(self, days_back=FEEDBACK_LOOKBACK_DAYS):
         """Compute recent outcome metrics only (no AI call)"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
 
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT gain_loss_percentage
                 FROM trade_outcomes 
-                WHERE sell_timestamp >= :cutoff_date
-            """), {"cutoff_date": cutoff_date})
+                WHERE sell_timestamp >= :cutoff_date AND config_hash = :config_hash
+            """), {"cutoff_date": cutoff_date, "config_hash": config_hash})
             rows = [r.gain_loss_percentage for r in result]
 
         total_trades = len(rows)
@@ -403,6 +422,9 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
     
     def _get_detailed_trade_analysis(self):
         """Get detailed individual trade data for pattern analysis"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.begin() as conn:
             result = conn.execute(text("""
                 SELECT 
@@ -419,9 +441,10 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     market_context
                 FROM trade_outcomes 
                 WHERE sell_timestamp >= CURRENT_DATE - INTERVAL '30 days'
+                  AND config_hash = :config_hash
                 ORDER BY sell_timestamp DESC
                 LIMIT 20
-            """)).fetchall()
+            """), {"config_hash": config_hash}).fetchall()
             
             trades = []
             for row in result:
@@ -556,16 +579,20 @@ Please provide your response in the following JSON format:
     
     def _store_feedback(self, lookback_days, total_trades, success_rate, avg_profit, analysis, feedback):
         """Store the generated feedback in the database"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.begin() as conn:
             result = conn.execute(text("""
                 INSERT INTO agent_feedback 
-                (lookback_period_days, total_trades_analyzed, success_rate, avg_profit_percentage,
+                (config_hash, lookback_period_days, total_trades_analyzed, success_rate, avg_profit_percentage,
                  top_performing_patterns, underperforming_patterns, recommended_adjustments,
                  summarizer_feedback, decider_feedback)
-                VALUES (:lookback_days, :total_trades, :success_rate, :avg_profit,
+                VALUES (:config_hash, :lookback_days, :total_trades, :success_rate, :avg_profit,
                         :top_patterns, :under_patterns, :adjustments, :summarizer_fb, :decider_fb)
                 RETURNING id
             """), {
+                "config_hash": config_hash,
                 "lookback_days": lookback_days,
                 "total_trades": total_trades,
                 "success_rate": success_rate,
@@ -580,14 +607,18 @@ Please provide your response in the following JSON format:
     
     def get_latest_feedback(self):
         """Get the most recent feedback for agent improvement"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT summarizer_feedback, decider_feedback, recommended_adjustments,
                        success_rate, avg_profit_percentage, total_trades_analyzed
                 FROM agent_feedback 
+                WHERE config_hash = :config_hash
                 ORDER BY analysis_timestamp DESC 
                 LIMIT 1
-            """))
+            """), {"config_hash": config_hash})
             row = result.fetchone()
             if row:
                 return dict(row._mapping)

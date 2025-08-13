@@ -183,10 +183,36 @@ def fetch_holdings():
         result = conn.execute(text("SELECT 1 FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), 
                             {"config_hash": config_hash})
         if not result.fetchone():
+            print(f"🚀 Initializing new configuration {config_hash} with ${MAX_FUNDS} cash")
             conn.execute(text("""
                 INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
                 VALUES (:config_hash, 'CASH', 1, :initial_cash, :initial_cash, now(), now(), :initial_cash, :initial_cash, 0, 'Initial cash', TRUE)
             """), {"config_hash": config_hash, "initial_cash": MAX_FUNDS})
+            
+            # Create initial portfolio snapshot for new configuration
+            print(f"📊 Recording initial portfolio snapshot for config {config_hash}")
+            try:
+                from dashboard_server import record_portfolio_snapshot
+                record_portfolio_snapshot()
+                print(f"✅ Initial portfolio snapshot recorded successfully")
+            except Exception as e:
+                print(f"⚠️  Failed to record initial portfolio snapshot: {e}")
+                # Manually create the snapshot inline as fallback
+                conn.execute(text("""
+                    INSERT INTO portfolio_history 
+                    (total_portfolio_value, cash_balance, total_invested, 
+                     total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
+                    VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+                            :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
+                """), {
+                    "total_portfolio_value": MAX_FUNDS,
+                    "cash_balance": MAX_FUNDS,
+                    "total_invested": 0,
+                    "total_profit_loss": 0,
+                    "percentage_gain": 0,
+                    "holdings_snapshot": json.dumps([{"ticker": "CASH", "current_value": MAX_FUNDS}]),
+                    "config_hash": config_hash
+                })
 
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss, reason, is_active FROM holdings
