@@ -72,7 +72,7 @@ def initialize_database():
         conn.execute(text('''
             CREATE TABLE IF NOT EXISTS summaries (
                 id SERIAL PRIMARY KEY,
-                config_hash TEXT NOT NULL DEFAULT 'default',
+                config_hash TEXT NOT NULL,
                 agent TEXT,
                 timestamp TIMESTAMP,
                 run_id TEXT,

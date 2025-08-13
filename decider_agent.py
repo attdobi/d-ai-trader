@@ -161,7 +161,7 @@ def fetch_holdings():
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS holdings (
                 id SERIAL PRIMARY KEY,
-                config_hash TEXT NOT NULL DEFAULT 'default',
+                config_hash TEXT NOT NULL,
                 ticker TEXT NOT NULL,
                 shares FLOAT,
                 purchase_price FLOAT,
@@ -277,19 +277,46 @@ def get_current_price(ticker):
 
         # Method 1: Try to get current price from info (works during market hours)
         try:
-            current_price = stock.info.get('currentPrice')
-            if current_price and current_price > 0:
-                print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
-                return float(current_price)
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Price fetch timeout")
+            
+            # Set 10 second timeout
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(10)
+            
+            try:
+                current_price = stock.info.get('currentPrice')
+                signal.alarm(0)  # Cancel timeout
+                if current_price and current_price > 0:
+                    print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
+                    return float(current_price)
+            except TimeoutError:
+                signal.alarm(0)  # Cancel timeout
+                print(f"⏰ {clean_ticker}: Price fetch timeout after 10 seconds")
+                raise Exception("Timeout fetching price")
+                
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 1 failed: {e}")
 
         # Method 2: Try regular market price from info
         try:
-            regular_price = stock.info.get('regularMarketPrice')
-            if regular_price and regular_price > 0:
-                print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
-                return float(regular_price)
+            # Set 10 second timeout
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(10)
+            
+            try:
+                regular_price = stock.info.get('regularMarketPrice')
+                signal.alarm(0)  # Cancel timeout
+                if regular_price and regular_price > 0:
+                    print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
+                    return float(regular_price)
+            except TimeoutError:
+                signal.alarm(0)  # Cancel timeout
+                print(f"⏰ {clean_ticker}: Regular market price timeout after 10 seconds")
+                raise Exception("Timeout fetching regular market price")
+                
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 2 failed: {e}")
 

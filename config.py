@@ -234,7 +234,12 @@ def initialize_configuration_hash():
 
 def get_current_config_hash():
     """Get the current configuration hash"""
-    return CURRENT_CONFIG_HASH or initialize_configuration_hash()
+    global CURRENT_CONFIG_HASH
+    if CURRENT_CONFIG_HASH is None:
+        # If not initialized, regenerate based on current settings
+        print("⚠️  Config hash not initialized, regenerating from current settings")
+        CURRENT_CONFIG_HASH = generate_configuration_hash()
+    return CURRENT_CONFIG_HASH
 
 def _is_gpt5_model(model_name):
     """
