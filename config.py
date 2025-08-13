@@ -331,7 +331,7 @@ class PromptManager:
 
                 # Get the correct parameters based on model type
                 # Increase token limit to prevent truncation for GPT-5 models
-                max_tokens = 2000 if _is_gpt5_model(GPT_MODEL) else 1500
+                max_tokens = 1000
                 token_params = get_model_token_params(GPT_MODEL, max_tokens)
                 temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 

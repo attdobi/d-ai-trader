@@ -243,15 +243,20 @@ class DAITraderOrchestrator:
             unprocessed_summaries = self.get_unprocessed_summaries()
             
             if not unprocessed_summaries:
-                logger.info("No unprocessed summaries found for decider")
-                return
-            
-            logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
+                logger.info("No unprocessed summaries found for decider - but will still run to record market status")
+                # Create empty list to allow decider to run and record N/A decisions
+                unprocessed_summaries = []
+            else:
+                logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
             
             # Create a mock run_id for the decider to use
-            # We'll use the latest timestamp from the summaries
-            latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
-            mock_run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
+            # We'll use the latest timestamp from the summaries, or current time if no summaries
+            if unprocessed_summaries:
+                latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
+                mock_run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
+            else:
+                # No summaries, use current time for run_id
+                mock_run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
             
             # Temporarily override the get_latest_run_id function
             original_get_latest_run_id = decider.get_latest_run_id

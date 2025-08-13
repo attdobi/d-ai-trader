@@ -1007,6 +1007,10 @@ if __name__ == "__main__":
             print("Initial portfolio snapshot recorded")
         except Exception as e:
             print(f"Failed to record initial snapshot: {e}")
+        
+        # Create empty run and proceed to decision making (will record N/A if market closed)
+        run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S") + "_no_summaries"
+        unprocessed_summaries = []  # Empty list will trigger market status check
     else:
         print(f"Found {len(unprocessed_summaries)} unprocessed summaries")
         
