@@ -19,6 +19,15 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Enhanced Data Processing**: Processes ALL unseen summaries, not just the latest batch
 - **Manual Trigger System**: Dashboard buttons for immediate testing and manual execution
 
+### 🚀 **NEW: Unified Startup System**
+- **Single Command Launch**: Start dashboard + automation with one command
+- **Configurable Parameters**: Custom port, AI model, and prompt version settings
+- **Multiple AI Models**: Support for GPT-4.1, o3, GPT-5 and their mini variants
+- **Smart Prompt Management**: Choose between auto-updating or fixed prompt versions
+- **Automatic Setup**: Virtual environment creation and dependency installation
+- **Parameter Validation**: Input validation with helpful error messages
+- **Background Operation**: Dashboard and automation run concurrently
+
 ### Advanced Profit Tracking
 - **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
 - **Portfolio Performance Metrics**: Real-time calculation of total P&L, percentage gains, and portfolio value
@@ -69,8 +78,8 @@ An intelligent trading system that uses AI agents to analyze financial news from
 ├── decider_agent.py           # Trading decision engine (enhanced)
 ├── feedback_agent.py          # AI feedback and learning system
 ├── dashboard_server.py        # Web dashboard and API endpoints (enhanced)
-├── config.py                  # Database configuration and AI setup
-├── start_d_ai_trader.sh       # 🆕 Easy startup script
+├── config.py                  # Database and AI configuration (enhanced with model/prompt management)
+├── start_d_ai_trader.sh       # 🆕 Unified startup script with configurable parameters
 ├── test_system.py             # 🆕 System validation script
 ├── requirements.txt           # 🆕 All dependencies
 ├── run_feedback_analysis.py   # Manual feedback analysis tool
@@ -95,7 +104,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - OpenAI API key
 - **NEW**: Schwab Developer Account (for live trading)
 
-### Quick Setup for Simulation Mode
+### 🚀 **NEW: Quick Setup with Unified Startup**
 ```bash
 # Clone and setup
 git clone <repository>
@@ -106,7 +115,13 @@ pip install -r requirements.txt
 cp env_template.txt .env
 # Edit .env with your OpenAI API key
 
-# Start the system
+# Start the complete system (dashboard + automation)
+./start_d_ai_trader.sh
+```
+
+### Traditional Setup (Manual Components)
+```bash
+# Start components separately if needed
 python dashboard_server.py  # Web dashboard on port 8080
 python d_ai_trader.py       # Automated agents
 ```
@@ -199,19 +214,105 @@ pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv opena
 
 ## 🎯 Usage
 
-### 🚀 **NEW: Automated Execution (Recommended)**
+### 🚀 **NEW: Unified Startup System (Recommended)**
+
+The new unified startup system combines the dashboard and automation into a single command with customizable parameters:
+
+#### Basic Usage
 ```bash
-# Start the complete automated system
+# Start with defaults (port 8080, GPT-4.1, auto prompts)
 ./start_d_ai_trader.sh
 
-# Or run manually
+# View all options
+./start_d_ai_trader.sh --help
+```
+
+#### Advanced Configuration
+```bash
+# Custom port, AI model, and prompt version
+./start_d_ai_trader.sh -p 9000 -m o3 -v v4
+
+# Mixed parameter syntax
+./start_d_ai_trader.sh --port 8081 --model gpt-4.1-mini --prompt-version auto
+```
+
+#### Available Parameters
+
+| Parameter | Short | Long | Default | Description |
+|-----------|-------|------|---------|-------------|
+| **Port** | `-p` | `--port` | `8080` | Dashboard web server port |
+| **AI Model** | `-m` | `--model` | `gpt-4.1` | OpenAI model for analysis |
+| **Prompt Version** | `-v` | `--prompt-version` | `auto` | Prompt version strategy |
+
+**Parameter Examples:**
+```bash
+# Short form parameters
+./start_d_ai_trader.sh -p 9000 -m o3 -v v4
+
+# Long form parameters  
+./start_d_ai_trader.sh --port 9000 --model o3 --prompt-version v4
+
+# Mixed form (also valid)
+./start_d_ai_trader.sh -p 9000 --model o3 -v v4
+```
+
+#### Available AI Models
+- **gpt-4.1** (default) - Latest GPT-4.1 model
+- **gpt-4.1-mini** - Smaller, faster GPT-4.1 variant
+- **o3** - OpenAI's o3 model
+- **o3-mini** - Smaller o3 variant
+- **gpt-5** - GPT-5 model
+- **gpt-5-mini** - Smaller GPT-5 variant
+
+#### Prompt Version Strategies
+- **auto** (default) - Always uses latest prompt versions updated by daily feedback
+- **v4, v7, etc.** - Locks to specific prompt version regardless of feedback updates
+
+#### What the Unified System Does
+- **Automatic Setup**: Creates virtual environment, installs dependencies
+- **Database Check**: Validates database connection before starting
+- **Dashboard Launch**: Starts web dashboard on specified port
+- **Automation Start**: Launches market-aware automation system
+- **Configuration**: Sets AI model and prompt version globally
+- **Monitoring**: Runs hourly market updates and decision-making
+- **Background Operation**: Both components run concurrently
+
+#### Example Startup Output
+```
+========================================
+D-AI-Trader Startup Configuration
+========================================
+Dashboard Port:    9000
+AI Model:          gpt-4.1-mini
+Prompt Version:    v5
+========================================
+
+✅ Database connection successful
+🚀 Starting D-AI-Trader system...
+📊 Dashboard will be available at: http://localhost:9000
+🤖 Automation system will start after dashboard initialization
+
+Updated GPT model to: gpt-4.1-mini
+📌 Prompt version mode set to FIXED - will use version 5
+✅ System configured with:
+   - AI Model: gpt-4.1-mini
+   - Prompt Version: v5
+   - Dashboard Port: 9000
+
+🌐 Starting dashboard server...
+✅ Dashboard started on http://localhost:9000
+🤖 Starting D-AI-Trader automation system...
+```
+
+### 🚀 **Traditional Automated Execution**
+```bash
+# Start automation only (separate from dashboard)
 python d_ai_trader.py
 ```
 - **Fully automated**: Runs all components on schedule
 - **Market-aware**: Respects trading hours and holidays
 - **Intelligent processing**: Handles all unseen summaries
 - **Comprehensive logging**: Full system monitoring
-- Uses the project virtual environment automatically (ensures correct `yfinance` version)
 
 ### 🧪 **Testing & Manual Execution**
 ```bash
@@ -442,6 +543,9 @@ FEEDBACK_TIME = "16:30"                  # Once daily after market close
 5. **Demo Mode**: Test with small amounts before full deployment
 6. **🆕 Automation**: System runs continuously - monitor logs and performance
 7. **🆕 Testing**: Use manual triggers for immediate testing without waiting for scheduled runs
+8. **🚀 Unified Startup**: Use `./start_d_ai_trader.sh` for the easiest and most reliable system launch
+9. **🤖 AI Model Selection**: Choose appropriate models based on your needs (speed vs. capability)
+10. **📌 Prompt Versions**: Use "auto" for continuous improvement or fixed versions for consistency
 
 ## 🤝 Contributing
 

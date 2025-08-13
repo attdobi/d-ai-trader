@@ -78,7 +78,68 @@ if not api_key:
 openai.api_key = api_key
 
 # Define the global model to use
-GPT_MODEL = "gpt-4.1"
+# Available models: gpt-4.1, gpt-4.1-mini, o3, o3-mini, gpt-5, gpt-5-mini
+GPT_MODEL = "gpt-4.1"  # Default model
+
+def set_gpt_model(model_name):
+    """Update the global GPT model"""
+    global GPT_MODEL
+    valid_models = ["gpt-4.1", "gpt-4.1-mini", "o3", "o3-mini", "gpt-5", "gpt-5-mini"]
+    if model_name in valid_models:
+        GPT_MODEL = model_name
+        print(f"Updated GPT model to: {GPT_MODEL}")
+    else:
+        print(f"Invalid model '{model_name}'. Valid models are: {valid_models}")
+        print(f"Keeping current model: {GPT_MODEL}")
+
+def get_gpt_model():
+    """Get the current GPT model"""
+    return GPT_MODEL
+
+# Prompt version configuration
+PROMPT_VERSION_MODE = "auto"  # Default to auto
+FORCED_PROMPT_VERSION = None
+
+def set_prompt_version_mode(mode, specific_version=None):
+    """Set the prompt version mode
+    
+    Args:
+        mode: "auto" to use latest prompts, "fixed" to use a specific version
+        specific_version: The specific version to use when mode is "fixed" (e.g., "v4", "4", etc.)
+    """
+    global PROMPT_VERSION_MODE, FORCED_PROMPT_VERSION
+    
+    if mode == "auto":
+        PROMPT_VERSION_MODE = "auto"
+        FORCED_PROMPT_VERSION = None
+        print("🔄 Prompt version mode set to AUTO - will use latest prompt versions")
+    elif mode == "fixed" and specific_version:
+        PROMPT_VERSION_MODE = "fixed"
+        # Normalize version format (remove 'v' prefix if present, then add it back)
+        normalized_version = specific_version.lower().replace('v', '')
+        try:
+            version_num = int(normalized_version)
+            FORCED_PROMPT_VERSION = version_num
+            print(f"📌 Prompt version mode set to FIXED - will use version {version_num}")
+        except ValueError:
+            print(f"❌ Invalid version format '{specific_version}'. Expected format like 'v4', '4', etc.")
+            print("🔄 Falling back to AUTO mode")
+            PROMPT_VERSION_MODE = "auto"
+            FORCED_PROMPT_VERSION = None
+    else:
+        print(f"❌ Invalid mode '{mode}' or missing specific_version")
+        print("🔄 Keeping current mode")
+
+def get_prompt_version_config():
+    """Get current prompt version configuration"""
+    return {
+        "mode": PROMPT_VERSION_MODE,
+        "forced_version": FORCED_PROMPT_VERSION
+    }
+
+def should_use_specific_prompt_version():
+    """Check if we should use a specific prompt version instead of the latest"""
+    return PROMPT_VERSION_MODE == "fixed" and FORCED_PROMPT_VERSION is not None
 
 class PromptManager:
     def __init__(self, client, session, run_id=None):

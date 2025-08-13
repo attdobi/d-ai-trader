@@ -800,7 +800,37 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def get_active_prompt(self, agent_type):
         """Get the currently active prompt for an agent type"""
+        # Import here to avoid circular imports
+        from config import should_use_specific_prompt_version, get_prompt_version_config
+        
         with engine.connect() as conn:
+            # Check if we should use a specific version instead of the latest
+            if should_use_specific_prompt_version():
+                config = get_prompt_version_config()
+                forced_version = config["forced_version"]
+                
+                # Try to get the specific version first
+                result = conn.execute(text("""
+                    SELECT user_prompt, system_prompt, prompt_version, description
+                    FROM ai_agent_prompts 
+                    WHERE agent_type = :agent_type AND prompt_version = :version
+                    ORDER BY prompt_version DESC
+                    LIMIT 1
+                """), {"agent_type": agent_type, "version": forced_version})
+                
+                row = result.fetchone()
+                if row:
+                    print(f"🔒 Using FIXED prompt version {forced_version} for {agent_type}")
+                    return {
+                        "user_prompt": row.user_prompt,
+                        "system_prompt": row.system_prompt,
+                        "prompt_version": row.prompt_version,
+                        "description": row.description
+                    }
+                else:
+                    print(f"⚠️  Version {forced_version} not found for {agent_type}, falling back to latest")
+            
+            # Default behavior: get the latest active prompt
             result = conn.execute(text("""
                 SELECT user_prompt, system_prompt, prompt_version, description
                 FROM ai_agent_prompts 
@@ -811,6 +841,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             
             row = result.fetchone()
             if row:
+                if not should_use_specific_prompt_version():
+                    print(f"🔄 Using LATEST prompt version {row.prompt_version} for {agent_type}")
                 return {
                     "user_prompt": row.user_prompt,
                     "system_prompt": row.system_prompt,
