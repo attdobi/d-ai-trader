@@ -42,14 +42,15 @@ def create_portfolio_history_table():
 
 def record_portfolio_snapshot():
     """Record current portfolio state for historical tracking"""
+    config_hash = get_current_config_hash()
     with engine.begin() as conn:
         # Get current holdings
         result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, 
                    total_value, current_value, gain_loss
             FROM holdings
-            WHERE is_active = TRUE
-        """)).fetchall()
+            WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
         
         holdings = [dict(row._mapping) for row in result]
         
@@ -68,16 +69,17 @@ def record_portfolio_snapshot():
         conn.execute(text("""
             INSERT INTO portfolio_history 
             (total_portfolio_value, cash_balance, total_invested, 
-             total_profit_loss, percentage_gain, holdings_snapshot)
+             total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
             VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
-                    :total_profit_loss, :percentage_gain, :holdings_snapshot)
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
         """), {
             "total_portfolio_value": total_portfolio_value,
             "cash_balance": cash_balance,
             "total_invested": total_invested,
             "total_profit_loss": total_profit_loss,
             "percentage_gain": percentage_gain,
-            "holdings_snapshot": json.dumps(holdings)
+            "holdings_snapshot": json.dumps(holdings),
+            "config_hash": config_hash
         })
 
 # Initialize portfolio history table
@@ -289,13 +291,15 @@ def api_history():
 @app.route("/api/portfolio-history")
 def api_portfolio_history():
     """Get portfolio performance over time"""
+    config_hash = get_current_config_hash()
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, total_invested, 
                    total_profit_loss, percentage_gain, cash_balance
             FROM portfolio_history 
+            WHERE config_hash = :config_hash
             ORDER BY timestamp ASC
-        """)).fetchall()
+        """), {"config_hash": config_hash}).fetchall()
         
         return jsonify([dict(row._mapping) for row in result])
 
@@ -303,6 +307,7 @@ def api_portfolio_history():
 def api_portfolio_performance():
     """Get portfolio performance relative to initial $10,000 investment"""
     initial_investment = 10000.0
+    config_hash = get_current_config_hash()
     
     with engine.connect() as conn:
         result = conn.execute(text("""
@@ -310,8 +315,9 @@ def api_portfolio_performance():
                    (total_portfolio_value - :initial_investment) as net_gain_loss,
                    ((total_portfolio_value - :initial_investment) / :initial_investment * 100) as net_percentage_gain
             FROM portfolio_history 
+            WHERE config_hash = :config_hash
             ORDER BY timestamp ASC
-        """), {"initial_investment": initial_investment}).fetchall()
+        """), {"initial_investment": initial_investment, "config_hash": config_hash}).fetchall()
         
         return jsonify([dict(row._mapping) for row in result])
 
@@ -370,15 +376,17 @@ def get_feedback_data():
 def get_trade_outcomes():
     """Get recent trade outcomes"""
     try:
+        config_hash = get_current_config_hash()
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT ticker, sell_timestamp, purchase_price, sell_price, 
                        shares, gain_loss_amount, gain_loss_percentage, 
                        outcome_category, hold_duration_days
                 FROM trade_outcomes 
+                WHERE config_hash = :config_hash
                 ORDER BY sell_timestamp DESC 
                 LIMIT 50
-            """)).fetchall()
+            """), {"config_hash": config_hash}).fetchall()
             
             outcomes = []
             for row in result:
@@ -404,21 +412,24 @@ def get_feedback_log():
     try:
         with engine.connect() as conn:
             # Get agent feedback entries
+            config_hash = get_current_config_hash()
             feedback_result = conn.execute(text("""
                 SELECT analysis_timestamp, lookback_period_days, total_trades_analyzed,
                        success_rate, avg_profit_percentage, summarizer_feedback, decider_feedback
                 FROM agent_feedback 
+                WHERE config_hash = :config_hash
                 ORDER BY analysis_timestamp DESC 
                 LIMIT 100
-            """)).fetchall()
+            """), {"config_hash": config_hash}).fetchall()
             
             # Get instruction updates
             instruction_result = conn.execute(text("""
                 SELECT agent_type, update_timestamp, reason_for_update, performance_trigger
                 FROM agent_instruction_updates 
+                WHERE config_hash = :config_hash
                 ORDER BY update_timestamp DESC 
                 LIMIT 50
-            """)).fetchall()
+            """), {"config_hash": config_hash}).fetchall()
             
             feedback_log = []
             for row in feedback_result:
