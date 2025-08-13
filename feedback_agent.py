@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, get_feedback_json_schema
 import yfinance as yf
 import pandas as pd
 
@@ -215,8 +215,9 @@ class TradeOutcomeTracker:
             outcomes = [dict(row._mapping) for row in result]
         
         if not outcomes:
-            print("No recent trades to analyze")
-            return None
+            print("No completed trades to analyze - checking decision patterns instead")
+            # If no completed trades, analyze decision patterns
+            return self._analyze_decision_patterns(days_back, config_hash)
         
         # Calculate metrics
         total_trades = len(outcomes)
@@ -972,6 +973,156 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 })
             
             return prompts
+
+    def _analyze_decision_patterns(self, days_back, config_hash):
+        """Analyze recent trading decisions when no completed trades exist"""
+        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+        
+        with engine.connect() as conn:
+            # Get recent decisions (exclude pure N/A decisions but include deferred ones)
+            result = conn.execute(text("""
+                SELECT timestamp, data
+                FROM trade_decisions 
+                WHERE timestamp >= :cutoff_date
+                  AND config_hash = :config_hash
+                  AND data::text NOT LIKE '%"action": "N/A"%'
+                ORDER BY timestamp DESC
+            """), {"cutoff_date": cutoff_date, "config_hash": config_hash})
+            
+            decisions = [dict(row._mapping) for row in result]
+        
+        if not decisions:
+            print("No recent decisions to analyze")
+            return None
+            
+        # Parse and analyze decision patterns
+        parsed_decisions = []
+        for decision in decisions:
+            try:
+                decision_data = decision['data']
+                if isinstance(decision_data, list) and len(decision_data) > 0:
+                    decision_item = decision_data[0]  # Take first decision in list
+                    parsed_decisions.append({
+                        'timestamp': decision['timestamp'],
+                        'action': decision_item.get('action', 'unknown'),
+                        'ticker': decision_item.get('ticker', 'unknown'),
+                        'amount_usd': decision_item.get('amount_usd', 0),
+                        'reason': decision_item.get('reason', ''),
+                        'execution_status': decision_item.get('execution_status', 'normal')
+                    })
+            except Exception as e:
+                print(f"Error parsing decision: {e}")
+                continue
+        
+        if not parsed_decisions:
+            print("No parseable decisions to analyze")
+            return None
+        
+        # Generate decision pattern feedback
+        total_decisions = len(parsed_decisions)
+        buy_decisions = len([d for d in parsed_decisions if d['action'] == 'buy'])
+        deferred_decisions = len([d for d in parsed_decisions if d['execution_status'] == 'deferred'])
+        
+        # Analyze decision quality and patterns
+        decision_analysis = {
+            "total_decisions": total_decisions,
+            "buy_decisions": buy_decisions,
+            "deferred_decisions": deferred_decisions,
+            "recent_tickers": list(set([d['ticker'] for d in parsed_decisions[:5]])),
+            "decision_reasons": [d['reason'][:100] + "..." if len(d['reason']) > 100 else d['reason'] for d in parsed_decisions[:3]],
+            # Add required fields for _store_feedback compatibility
+            "outcome_distribution": {"decision_pattern_analysis": total_decisions},
+            "successful_reasons": [d['reason'] for d in parsed_decisions if d['action'] == 'buy'][:5],
+            "unsuccessful_reasons": [],  # No unsuccessful patterns for decisions
+            "avg_hold_duration_profitable": 0,
+            "avg_hold_duration_unprofitable": 0
+        }
+        
+        # Generate AI feedback on decision patterns
+        feedback = self._generate_decision_pattern_feedback(parsed_decisions, decision_analysis)
+        
+        # Store feedback
+        feedback_id = self._store_feedback(days_back, total_decisions, 0, 0, decision_analysis, feedback)
+        
+        return {
+            "feedback_id": feedback_id,
+            "type": "decision_pattern_analysis",
+            "total_decisions": total_decisions,
+            "buy_decisions": buy_decisions,
+            "deferred_decisions": deferred_decisions,
+            "analysis": decision_analysis,
+            "feedback": feedback
+        }
+        
+    def _generate_decision_pattern_feedback(self, decisions, analysis):
+        """Generate AI feedback on decision-making patterns"""
+        try:
+            # Use the global prompt_manager instance
+            
+            # Create analysis summary
+            decision_summary = f"""
+            Recent Decision Analysis:
+            - Total decisions made: {analysis['total_decisions']}
+            - Buy decisions: {analysis['buy_decisions']}
+            - Deferred executions (market closed): {analysis['deferred_decisions']}
+            - Recent tickers selected: {', '.join(analysis['recent_tickers'])}
+            
+            Sample decision reasons:
+            {chr(10).join([f"- {reason}" for reason in analysis['decision_reasons']])}
+            """
+            
+            user_prompt = f"""Analyze these recent trading decisions and provide feedback on decision-making quality, even though no trades have been executed yet.
+
+{decision_summary}
+
+Provide structured feedback focusing on:
+1. Decision logic quality and consistency
+2. Stock selection patterns and diversification
+3. Risk management in decision sizing
+4. Timing and market awareness
+5. Recommendations for improvement
+
+Return as JSON with keys: decision_quality, stock_selection, risk_management, timing_analysis, recommendations"""
+
+            system_prompt = """You are an expert trading analyst providing feedback on AI trading decisions. Focus on the quality of the decision-making process, stock selection logic, and risk management practices. Be constructive and specific in your recommendations."""
+            
+            # Get AI model parameters
+            token_params = get_model_token_params(GPT_MODEL, 1000)
+            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
+            
+            api_params = {
+                "model": GPT_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "response_format": get_feedback_json_schema(),
+                **token_params,
+                **temperature_params
+            }
+            
+            response = prompt_manager.client.chat.completions.create(**api_params)
+            ai_response = response.choices[0].message.content.strip()
+            
+            try:
+                feedback_data = json.loads(ai_response)
+                return feedback_data
+            except json.JSONDecodeError:
+                return {
+                    "decision_quality": ai_response,
+                    "stock_selection": "Analysis provided in main feedback",
+                    "risk_management": "Analysis provided in main feedback",
+                    "timing_analysis": "Analysis provided in main feedback",
+                    "recommendations": "Analysis provided in main feedback",
+                    "raw_response": ai_response
+                }
+                
+        except Exception as e:
+            print(f"Failed to generate decision pattern feedback: {e}")
+            return {
+                "decision_quality": "Unable to generate feedback",
+                "error": str(e)
+            }
 
 def main():
     """Run feedback analysis on recent trades"""
