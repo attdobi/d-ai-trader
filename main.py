@@ -168,7 +168,16 @@ Do not include any text before or after the JSON object. Only return the JSON.
             else:
                 print(f"Skipping large image {img_path} ({file_size} bytes)")
     
-    return prompt_manager.ask_openai(prompt, system_prompt, agent_name="SummarizerAgent", image_paths=valid_image_paths)
+    # Import the JSON schema for structured responses
+    from config import get_summarizer_json_schema
+    
+    return prompt_manager.ask_openai(
+        prompt, 
+        system_prompt, 
+        agent_name="SummarizerAgent", 
+        image_paths=valid_image_paths,
+        response_format=get_summarizer_json_schema()
+    )
 
 def try_click_popup(web_driver, agent_name):
 

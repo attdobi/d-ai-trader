@@ -510,16 +510,22 @@ Please provide your response in the following JSON format:
                 {"role": "user", "content": prompt}
             ]
 
-            # Get the correct parameters based on model type
+            # Get the correct parameters and use structured JSON schema
+            from config import get_feedback_json_schema
+            
             token_params = get_model_token_params(GPT_MODEL, 2000)
             temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
-            response = prompt_manager.client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=messages,
+            api_params = {
+                "model": GPT_MODEL,
+                "messages": messages,
+                "response_format": get_feedback_json_schema(),
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
                 **temperature_params  # Use temperature or omit for GPT-5
-            )
+            }
+            
+            print(f"🔧 Using structured JSON schema for FeedbackAgent analysis")
+            response = prompt_manager.client.chat.completions.create(**api_params)
             ai_response = response.choices[0].message.content.strip()
             
             # Parse the response to extract summarizer and decider feedback
@@ -703,16 +709,22 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 {"role": "user", "content": user_prompt}
             ]
 
-            # Get the correct parameters based on model type
+            # Get the correct parameters and use structured JSON schema
+            from config import get_feedback_json_schema
+            
             token_params = get_model_token_params(GPT_MODEL, 2000)
             temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
-            response = prompt_manager.client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=messages,
+            api_params = {
+                "model": GPT_MODEL,
+                "messages": messages,
+                "response_format": get_feedback_json_schema(),
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
                 **temperature_params  # Use temperature or omit for GPT-5
-            )
+            }
+            
+            print(f"🔧 Using structured JSON schema for FeedbackAgent manual request")
+            response = prompt_manager.client.chat.completions.create(**api_params)
             ai_response = response.choices[0].message.content.strip()
             
             # Store the response in the database

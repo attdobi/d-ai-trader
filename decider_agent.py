@@ -937,7 +937,16 @@ Respond strictly in valid JSON format.
 """
 
     system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions."
-    return prompt_manager.ask_openai(prompt, system_prompt, agent_name="DeciderAgent")
+    
+    # Import the JSON schema for structured responses
+    from config import get_decider_json_schema
+    
+    return prompt_manager.ask_openai(
+        prompt, 
+        system_prompt, 
+        agent_name="DeciderAgent",
+        response_format=get_decider_json_schema()
+    )
 
 def store_trade_decisions(decisions, run_id):
     with engine.begin() as conn:

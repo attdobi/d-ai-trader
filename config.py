@@ -284,13 +284,121 @@ def get_model_temperature_params(model_name, temperature_value):
         # GPT-4 and earlier models support custom temperature
         return {"temperature": temperature_value}
 
+def get_summarizer_json_schema():
+    """Get structured JSON schema for summarizer agent responses"""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "summarizer_response",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "headlines": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "description": "Array of key headlines from the financial news"
+                    },
+                    "insights": {
+                        "type": "string",
+                        "description": "Comprehensive analysis paragraph focusing on actionable trading insights"
+                    }
+                },
+                "required": ["headlines", "insights"],
+                "additionalProperties": false
+            },
+            "strict": true
+        }
+    }
+
+def get_decider_json_schema():
+    """Get structured JSON schema for decider agent responses"""
+    return {
+        "type": "json_schema", 
+        "json_schema": {
+            "name": "trading_decisions",
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["buy", "sell", "hold"],
+                            "description": "Trading action to take"
+                        },
+                        "ticker": {
+                            "type": "string",
+                            "description": "Stock ticker symbol"
+                        },
+                        "amount_usd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Dollar amount to spend or recover"
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Explanation for the trading decision"
+                        }
+                    },
+                    "required": ["action", "ticker", "amount_usd", "reason"],
+                    "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 10
+            },
+            "strict": true
+        }
+    }
+
+def get_feedback_json_schema():
+    """Get structured JSON schema for feedback agent responses"""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "feedback_analysis",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "key_insights": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Main insights from the performance analysis"
+                    },
+                    "summarizer_feedback": {
+                        "type": "string",
+                        "description": "Specific feedback for the summarizer agent"
+                    },
+                    "decider_feedback": {
+                        "type": "string", 
+                        "description": "Specific feedback for the decider agent"
+                    },
+                    "successful_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Trading patterns that led to success"
+                    },
+                    "unsuccessful_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Trading patterns that led to losses"
+                    }
+                },
+                "required": ["key_insights", "summarizer_feedback", "decider_feedback"],
+                "additionalProperties": false
+            },
+            "strict": true
+        }
+    }
+
 class PromptManager:
     def __init__(self, client, session, run_id=None):
         self.client = client
         self.session = session
         self.run_id = run_id
 
-    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3):
+    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, response_format=None):
         retries = 0
         while retries < max_retries:
             try:
@@ -318,13 +426,20 @@ class PromptManager:
                 token_params = get_model_token_params(GPT_MODEL, 1500)
                 temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 
-                response = self.client.chat.completions.create(
-                    model=GPT_MODEL,
-                    messages=messages,
-                    #response_format="json",
+                # Build API call parameters
+                api_params = {
+                    "model": GPT_MODEL,
+                    "messages": messages,
                     **token_params,  # Use max_tokens or max_completion_tokens based on model
                     **temperature_params  # Use temperature or omit for GPT-5
-                )
+                }
+                
+                # Add structured response format if provided
+                if response_format:
+                    api_params["response_format"] = response_format
+                    print(f"🔧 Using structured JSON schema for {agent_name}")
+                
+                response = self.client.chat.completions.create(**api_params)
                 content = response.choices[0].message.content.strip()
 
                 # Try parsing JSON
