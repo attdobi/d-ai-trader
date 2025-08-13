@@ -295,20 +295,10 @@ def validate_ticker_symbol(ticker):
         # Check if we can get basic info (name, sector, etc.)
         has_valid_data = info.get('symbol') == ticker.upper() or info.get('shortName') is not None
         
-        # TEMPORARY: If validation fails due to rate limiting, allow common stocks
-        if not has_valid_data:
-            common_stocks = ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA', 'NVDA', 'SPY', 'QQQ', 'META', 'NFLX', 'BULL']
-            if ticker.upper() in common_stocks:
-                print(f"⚠️  Using fallback validation for common stock: {ticker}")
-                return True
-        
         return has_valid_data
-    except:
-        # TEMPORARY: If exception due to rate limiting, allow common stocks
-        common_stocks = ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'TSLA', 'NVDA', 'SPY', 'QQQ', 'META', 'NFLX', 'BULL']
-        if ticker.upper() in common_stocks:
-            print(f"⚠️  Using fallback validation for common stock: {ticker} (API error)")
-            return True
+    except Exception as e:
+        print(f"⚠️  Ticker validation failed for {ticker}: {e}")
+        print(f"🚫 Skipping trade due to validation failure")
         return False
 
 def get_current_price(ticker):
@@ -453,24 +443,14 @@ def get_current_price(ticker):
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 7 failed: {e}")
 
-        # If all attempts fail, try fallback prices for common stocks during testing
+        # If all attempts fail, do not use fallback prices - skip trading instead
         print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
         print(f"💡 This may be due to:")
         print(f"   - After market hours or weekend/holiday")
         print(f"   - Temporary Yahoo Finance API issues/rate limits")
         print(f"   - Symbol may be invalid or delisted")
-        
-        # TEMPORARY: Fallback prices for testing when API is rate-limited
-        fallback_prices = {
-            'AAPL': 175.0, 'MSFT': 350.0, 'GOOG': 140.0, 'AMZN': 145.0,
-            'TSLA': 220.0, 'NVDA': 450.0, 'SPY': 450.0, 'QQQ': 380.0,
-            'META': 280.0, 'NFLX': 420.0, 'BULL': 50.0
-        }
-        
-        if clean_ticker.upper() in fallback_prices:
-            fallback_price = fallback_prices[clean_ticker.upper()]
-            print(f"🔄 Using fallback price for {clean_ticker}: ${fallback_price:.2f} (API rate-limited)")
-            return fallback_price
+        print(f"🚫 Yahoo Finance rate limit exceeded - skipping trade to ensure accurate pricing")
+        print(f"💡 API rate limits typically clear within 1 hour")
         
         return None
 
@@ -599,53 +579,54 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 skipped_decisions.append({**decision, "reason": f"Invalid ticker - {reason}"})
                 continue
 
-                if not is_market_open():
-                    print(f"Skipping sell for {ticker} - market is closed.")
-                    skipped_decisions.append({
-                        "action": "sell",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Market closed - no trade executed (Original: {reason})"
-                    })
-                    continue
+            # Get price first - we always want current/close price for analysis
+            price = get_current_price(ticker)
+            if not price:
+                print(f"Skipping sell for {ticker} due to missing price (API rate limited).")
+                skipped_decisions.append({
+                    "action": "sell",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": f"Price data unavailable due to API rate limiting (Original: {reason})"
+                })
+                continue
 
-                price = get_current_price(ticker)
-                if not price:
-                    print(f"Skipping sell for {ticker} due to missing price.")
-                    skipped_decisions.append({
-                        "action": "sell",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Price data unavailable - no trade executed (Original: {reason})"
-                    })
-                    continue
+            if not is_market_open():
+                print(f"Market closed - recording sell decision for {ticker} but deferring execution.")
+                skipped_decisions.append({
+                    "action": "sell",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
+                })
+                continue
 
-                holding = conn.execute(
-                    text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
-                    {"ticker": clean_ticker, "config_hash": config_hash}
-                ).fetchone()
-                if holding:
-                    shares = float(holding.shares)
-                    purchase_price = float(holding.purchase_price)
-                    total_value = shares * price
-                    purchase_value = shares * purchase_price
-                    gain_loss = total_value - purchase_value
+            holding = conn.execute(
+                text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
+                {"ticker": clean_ticker, "config_hash": config_hash}
+            ).fetchone()
+            if holding:
+                shares = float(holding.shares)
+                purchase_price = float(holding.purchase_price)
+                total_value = shares * price
+                purchase_value = shares * purchase_price
+                gain_loss = total_value - purchase_value
 
-                    holding_data = {
-                        'purchase_price': purchase_price,
-                        'shares': shares,
-                        'purchase_timestamp': holding.purchase_timestamp,
-                        'reason': holding.reason
-                    }
-                    try:
-                        outcome_category = feedback_tracker.record_sell_outcome(
-                            ticker, price, holding_data, reason
-                        )
-                        print(f"Sell outcome recorded for {ticker}: {outcome_category}")
-                    except Exception as e:
-                        print(f"Failed to record sell outcome for {ticker}: {e}")
+                holding_data = {
+                    'purchase_price': purchase_price,
+                    'shares': shares,
+                    'purchase_timestamp': holding.purchase_timestamp,
+                    'reason': holding.reason
+                }
+                try:
+                    outcome_category = feedback_tracker.record_sell_outcome(
+                        ticker, price, holding_data, reason
+                    )
+                    print(f"Sell outcome recorded for {ticker}: {outcome_category}")
+                except Exception as e:
+                    print(f"Failed to record sell outcome for {ticker}: {e}")
 
-                    conn.execute(text("""
+                conn.execute(text("""
                         UPDATE holdings SET
                             shares = 0,
                             is_active = FALSE,
@@ -663,7 +644,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                         "config_hash": config_hash
                     })
 
-                    cash += total_value
+                cash += total_value
 
             # Persist updated cash
             conn.execute(text("""
@@ -867,24 +848,25 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 skipped_decisions.append({**decision, "reason": f"Invalid ticker - {reason}"})
                 continue
 
-            if not is_market_open():
-                print(f"Skipping buy for {ticker} - market is closed.")
+            # Get price first - we always want current/close price for analysis
+            price = get_current_price(ticker)
+            if not price:
+                print(f"Skipping buy for {ticker} due to missing price (API rate limited).")
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Market closed - no trade executed (Original: {reason})"
+                    "reason": f"Price data unavailable due to API rate limiting (Original: {reason})"
                 })
                 continue
 
-            price = get_current_price(ticker)
-            if not price:
-                print(f"Skipping buy for {ticker} due to missing price.")
+            if not is_market_open():
+                print(f"Market closed - recording buy decision for {ticker} but deferring execution.")
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Price data unavailable - no trade executed (Original: {reason})"
+                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
                 })
                 continue
 
