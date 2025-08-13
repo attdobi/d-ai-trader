@@ -22,21 +22,24 @@ An intelligent trading system that uses AI agents to analyze financial news from
 ### 🚀 **NEW: Unified Startup System**
 - **Single Command Launch**: Start dashboard + automation with one command
 - **Configurable Parameters**: Custom port, AI model, prompt version, and trading mode
-- **Multiple AI Models**: Support for GPT-4.1, o3, GPT-5 and their mini variants
+- **Multiple AI Models**: Support for GPT-4.1, GPT-5 (including nano/mini variants), o1, o3 series
+- **Advanced API Compatibility**: Automatic parameter handling for different OpenAI model generations
 - **Smart Prompt Management**: Choose between auto-updating or fixed prompt versions
 - **Trading Modes**: Simulation mode for testing, real_world mode for actual trades
 - **Automatic Setup**: Virtual environment creation and dependency installation
 - **Parameter Validation**: Input validation with helpful error messages
 - **Background Operation**: Dashboard and automation run concurrently
+- **Configuration Display**: Dashboard shows current AI model, prompt mode, and trading settings
 
 ### 🔄 **NEW: Parallel Run Support**
 - **Multiple Configurations**: Run different AI models simultaneously for performance comparison
 - **Configuration Isolation**: Each configuration maintains separate data and holdings
-- **Performance Testing**: Compare GPT-4.1 vs GPT-5 vs o3 across weeks or months
+- **Performance Testing**: Compare GPT-4.1 vs GPT-5 vs o1/o3 across weeks or months
 - **A/B Testing**: Test impact of feedback systems by fixing prompt versions
 - **Real vs Simulation**: Run real-world trading alongside simulation for validation
-- **Configuration Hashing**: Unique identifiers ensure data separation
+- **Configuration Hashing**: Unique identifiers ensure data separation and screenshot isolation
 - **Comprehensive Tracking**: All trades, decisions, and outcomes tracked per configuration
+- **Isolated Screenshots**: Each configuration saves screenshots to separate directories
 
 ### Advanced Profit Tracking
 - **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
@@ -268,12 +271,27 @@ The new unified startup system combines the dashboard and automation into a sing
 ```
 
 #### Available AI Models
+
+**GPT-4 Series (Use `max_tokens` + custom temperature):**
 - **gpt-4.1** (default) - Latest GPT-4.1 model
 - **gpt-4.1-mini** - Smaller, faster GPT-4.1 variant
+- **gpt-4** - Standard GPT-4 model
+- **gpt-4-turbo** - Optimized GPT-4 variant
+
+**GPT-5 Series (Use `max_completion_tokens` + default temperature):**
+- **gpt-5** - Latest GPT-5 model 
+- **gpt-5-mini** - Smaller GPT-5 variant
+- **gpt-5-nano** - Ultra-compact GPT-5 variant
+
+**OpenAI Advanced Series (Use `max_completion_tokens` + default temperature):**
+- **o1** - OpenAI's o1 reasoning model
+- **o1-mini** - Smaller o1 variant
+- **o1-preview** - Preview version of o1
 - **o3** - OpenAI's o3 model
 - **o3-mini** - Smaller o3 variant
-- **gpt-5** - GPT-5 model
-- **gpt-5-mini** - Smaller GPT-5 variant
+- **o3-preview** - Preview version of o3
+
+> **Note**: The system automatically handles API parameter differences between model generations using regex-based detection.
 
 #### Prompt Version Strategies
 - **auto** (default) - Always uses latest prompt versions updated by daily feedback

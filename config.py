@@ -236,17 +236,53 @@ def get_current_config_hash():
     """Get the current configuration hash"""
     return CURRENT_CONFIG_HASH or initialize_configuration_hash()
 
+def _is_gpt5_model(model_name):
+    """
+    Determine if a model is a GPT-5 series model that requires special API handling.
+    GPT-5 models use different parameter names and restrictions.
+    Uses regex patterns to catch variations like gpt-5-mini, gpt-5-nano, etc.
+    """
+    if not model_name:
+        return False
+    
+    import re
+    model_lower = model_name.lower()
+    
+    # Regex patterns for GPT-5 family models
+    gpt5_patterns = [
+        r'^gpt-5(-.*)?$',        # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-turbo, etc.
+        r'^o1(-.*)?$',           # o1, o1-mini, o1-preview, etc.
+        r'^o3(-.*)?$'            # o3, o3-mini, o3-preview, etc.
+    ]
+    
+    # Check if model matches any GPT-5 pattern
+    for pattern in gpt5_patterns:
+        if re.match(pattern, model_lower):
+            return True
+    
+    return False
+
 def get_model_token_params(model_name, max_tokens_value):
     """
     Get the correct token parameter for different OpenAI models.
     GPT-5 series uses 'max_completion_tokens' while GPT-4 and earlier use 'max_tokens'
     """
-    # GPT-5 models use max_completion_tokens
-    if model_name and ('gpt-5' in model_name.lower() or 'o1' in model_name.lower() or 'o3' in model_name.lower()):
+    if _is_gpt5_model(model_name):
         return {"max_completion_tokens": max_tokens_value}
     else:
         # GPT-4 and earlier models use max_tokens
         return {"max_tokens": max_tokens_value}
+
+def get_model_temperature_params(model_name, temperature_value):
+    """
+    Get the correct temperature parameter for different OpenAI models.
+    GPT-5 series only supports default temperature (1.0), while GPT-4 and earlier support custom values
+    """
+    if _is_gpt5_model(model_name):
+        return {}  # Don't include temperature parameter for GPT-5
+    else:
+        # GPT-4 and earlier models support custom temperature
+        return {"temperature": temperature_value}
 
 class PromptManager:
     def __init__(self, client, session, run_id=None):
@@ -278,15 +314,16 @@ class PromptManager:
                             ]
                         })
 
-                # Get the correct token parameter based on model type
+                # Get the correct parameters based on model type
                 token_params = get_model_token_params(GPT_MODEL, 1500)
+                temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 
                 response = self.client.chat.completions.create(
                     model=GPT_MODEL,
                     messages=messages,
-                    temperature=0.3,
                     #response_format="json",
-                    **token_params  # Use max_tokens or max_completion_tokens based on model
+                    **token_params,  # Use max_tokens or max_completion_tokens based on model
+                    **temperature_params  # Use temperature or omit for GPT-5
                 )
                 content = response.choices[0].message.content.strip()
 

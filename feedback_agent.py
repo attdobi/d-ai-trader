@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params
 import yfinance as yf
 import pandas as pd
 
@@ -508,14 +508,15 @@ Please provide your response in the following JSON format:
                 {"role": "user", "content": prompt}
             ]
 
-            # Get the correct token parameter based on model type
+            # Get the correct parameters based on model type
             token_params = get_model_token_params(GPT_MODEL, 2000)
+            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                temperature=0.3,
-                **token_params  # Use max_tokens or max_completion_tokens based on model
+                **token_params,  # Use max_tokens or max_completion_tokens based on model
+                **temperature_params  # Use temperature or omit for GPT-5
             )
             ai_response = response.choices[0].message.content.strip()
             
@@ -700,14 +701,15 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 {"role": "user", "content": user_prompt}
             ]
 
-            # Get the correct token parameter based on model type
+            # Get the correct parameters based on model type
             token_params = get_model_token_params(GPT_MODEL, 2000)
+            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                temperature=0.3,
-                **token_params  # Use max_tokens or max_completion_tokens based on model
+                **token_params,  # Use max_tokens or max_completion_tokens based on model
+                **temperature_params  # Use temperature or omit for GPT-5
             )
             ai_response = response.choices[0].message.content.strip()
             
