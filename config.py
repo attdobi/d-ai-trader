@@ -289,20 +289,8 @@ def get_model_temperature_params(model_name, temperature_value):
         # GPT-4 and earlier models support custom temperature
         return {"temperature": temperature_value}
 
-def get_summarizer_json_schema():
-    """Get structured JSON schema for summarizer agent responses"""
-    # Start with simple JSON mode instead of strict schema
-    return {"type": "json_object"}
-
-def get_decider_json_schema():
-    """Get structured JSON schema for decider agent responses"""
-    # Start with simple JSON mode instead of strict schema
-    return {"type": "json_object"}
-
-def get_feedback_json_schema():
-    """Get structured JSON schema for feedback agent responses"""
-    # Start with simple JSON mode instead of strict schema
-    return {"type": "json_object"}
+# JSON schema functions removed - now using strong system prompts instead
+# as structured response_format was unreliable with GPT-5 models
 
 class PromptManager:
     def __init__(self, client, session, run_id=None):
@@ -310,7 +298,7 @@ class PromptManager:
         self.session = session
         self.run_id = run_id
 
-    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, response_format=None):
+    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3):
         retries = 0
         while retries < max_retries:
             try:
@@ -348,14 +336,8 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # Add structured response format if provided
-                if response_format:
-                    try:
-                        api_params["response_format"] = response_format
-                        print(f"🔧 Using structured JSON schema for {agent_name}")
-                    except Exception as e:
-                        print(f"⚠️  Failed to add JSON schema for {agent_name}: {e}")
-                        # Continue without schema
+                # Note: Removed structured response_format as it's unreliable with GPT-5
+                # Now relying on strong system prompts for JSON formatting
                 
                 response = self.client.chat.completions.create(**api_params)
                 content = response.choices[0].message.content.strip()
@@ -368,8 +350,8 @@ class PromptManager:
                     print(f"JSON Decode Error (attempt {retries + 1}/{max_retries}): {e}")
                     print(f"Response was: {content[:300]}...")
                     
-                    # If using JSON mode and this is not the last retry, try again with more explicit instructions
-                    if response_format and retries < max_retries - 1:
+                    # If this is not the last retry, try again with more explicit instructions
+                    if retries < max_retries - 1:
                         print(f"🔄 Retrying {agent_name} with enhanced JSON instructions...")
                         # Enhance the prompt for next retry
                         enhanced_prompt = prompt + "\n\n🚨 CRITICAL: Respond with ONLY valid JSON. No explanatory text, no markdown, no code blocks. Just pure JSON starting with { and ending with }."

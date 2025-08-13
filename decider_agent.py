@@ -1233,14 +1233,11 @@ Example format: [{{\"action\": \"buy\", \"ticker\": \"AAPL\", \"amount_usd\": 10
     system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions. 🚨 CRITICAL: You must respond with ONLY valid JSON array format. No explanatory text or formatting."
     
     # Import the JSON schema for structured responses
-    from config import get_decider_json_schema
-    
     # Get AI decision regardless of market status
     ai_response = prompt_manager.ask_openai(
         prompt, 
         system_prompt, 
-        agent_name="DeciderAgent",
-        response_format=get_decider_json_schema()
+        agent_name="DeciderAgent"
     )
     
     # Ensure response is always a list

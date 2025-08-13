@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, get_feedback_json_schema
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash
 import yfinance as yf
 import pandas as pd
 
@@ -537,15 +537,14 @@ Please provide your response in the following JSON format:
             ]
 
             # Get the correct parameters and use structured JSON schema
-            from config import get_feedback_json_schema
-            
+
             token_params = get_model_token_params(GPT_MODEL, 2000)
             temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
             api_params = {
                 "model": GPT_MODEL,
                 "messages": messages,
-                "response_format": get_feedback_json_schema(),
+
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
                 **temperature_params  # Use temperature or omit for GPT-5
             }
@@ -744,15 +743,14 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             ]
 
             # Get the correct parameters and use structured JSON schema
-            from config import get_feedback_json_schema
-            
+
             token_params = get_model_token_params(GPT_MODEL, 2000)
             temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
             
             api_params = {
                 "model": GPT_MODEL,
                 "messages": messages,
-                "response_format": get_feedback_json_schema(),
+
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
                 **temperature_params  # Use temperature or omit for GPT-5
             }
@@ -1096,7 +1094,7 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "response_format": get_feedback_json_schema(),
+
                 **token_params,
                 **temperature_params
             }
