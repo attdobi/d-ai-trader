@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params
 import yfinance as yf
 import pandas as pd
 
@@ -508,11 +508,14 @@ Please provide your response in the following JSON format:
                 {"role": "user", "content": prompt}
             ]
 
+            # Get the correct token parameter based on model type
+            token_params = get_model_token_params(GPT_MODEL, 2000)
+            
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                max_tokens=2000,  # Balanced for comprehensive feedback while managing costs
                 temperature=0.3,
+                **token_params  # Use max_tokens or max_completion_tokens based on model
             )
             ai_response = response.choices[0].message.content.strip()
             
@@ -697,11 +700,14 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 {"role": "user", "content": user_prompt}
             ]
 
+            # Get the correct token parameter based on model type
+            token_params = get_model_token_params(GPT_MODEL, 2000)
+            
             response = prompt_manager.client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=messages,
-                max_tokens=2000,  # Balanced for comprehensive feedback while managing costs
                 temperature=0.3,
+                **token_params  # Use max_tokens or max_completion_tokens based on model
             )
             ai_response = response.choices[0].message.content.strip()
             

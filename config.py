@@ -236,6 +236,18 @@ def get_current_config_hash():
     """Get the current configuration hash"""
     return CURRENT_CONFIG_HASH or initialize_configuration_hash()
 
+def get_model_token_params(model_name, max_tokens_value):
+    """
+    Get the correct token parameter for different OpenAI models.
+    GPT-5 series uses 'max_completion_tokens' while GPT-4 and earlier use 'max_tokens'
+    """
+    # GPT-5 models use max_completion_tokens
+    if model_name and ('gpt-5' in model_name.lower() or 'o1' in model_name.lower() or 'o3' in model_name.lower()):
+        return {"max_completion_tokens": max_tokens_value}
+    else:
+        # GPT-4 and earlier models use max_tokens
+        return {"max_tokens": max_tokens_value}
+
 class PromptManager:
     def __init__(self, client, session, run_id=None):
         self.client = client
@@ -266,12 +278,15 @@ class PromptManager:
                             ]
                         })
 
+                # Get the correct token parameter based on model type
+                token_params = get_model_token_params(GPT_MODEL, 1500)
+                
                 response = self.client.chat.completions.create(
                     model=GPT_MODEL,
                     messages=messages,
-                    max_tokens=1500,  # Increased for richer responses while managing costs
                     temperature=0.3,
                     #response_format="json",
+                    **token_params  # Use max_tokens or max_completion_tokens based on model
                 )
                 content = response.choices[0].message.content.strip()
 
