@@ -57,6 +57,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 
 ### Dashboard & Visualization
 - **Simulation Dashboard**: Web interface displaying simulated holdings and performance
+- **🆕 Configuration Display**: Shows current AI model, prompt mode, trading mode, and unique config hash
 - **Schwab Live Dashboard**: Real-time view of actual Schwab account positions and P&L
 - **Interactive Charts**: Portfolio value and profit/loss visualization over time
 - **Manual Controls**: Trigger buttons for testing and emergency overrides
@@ -91,7 +92,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 ├── decider_agent.py           # Trading decision engine (enhanced)
 ├── feedback_agent.py          # AI feedback and learning system
 ├── dashboard_server.py        # Web dashboard and API endpoints (enhanced)
-├── config.py                  # Database and AI configuration (enhanced with model/prompt management)
+├── config.py                  # Database and AI configuration (enhanced with model/prompt management + GPT-5 API compatibility)
 ├── start_d_ai_trader.sh       # 🆕 Unified startup script with configurable parameters
 ├── test_system.py             # 🆕 System validation script
 ├── requirements.txt           # 🆕 All dependencies
@@ -105,7 +106,7 @@ An intelligent trading system that uses AI agents to analyze financial news from
 │   ├── trades.html            # Trading history view
 │   ├── summaries.html         # News analysis summaries
 │   └── tabs.html              # Base template
-└── screenshots/               # Captured screenshots from news sites
+└── screenshots/               # Captured screenshots from news sites (organized by config hash for parallel runs)
 ```
 
 ## 🔧 Installation & Setup
@@ -460,6 +461,7 @@ python test_feedback_system.py
 - `/api/history` - Account value history
 - `/api/feedback` - Feedback analysis and performance metrics
 - `/api/trade_outcomes` - Recent trade outcomes and categorization
+- `/api/configuration` - 🆕 Current system configuration (AI model, prompt mode, trading mode, config hash)
 - `/api/update-prices` - 🆕 Manually update stock prices and portfolio values
 - `/api/trigger/summarizer` - 🆕 Manually trigger summarizer agents
 - `/api/trigger/decider` - 🆕 Manually trigger decider agent
@@ -528,6 +530,27 @@ Portfolio snapshots are automatically recorded:
 - Fallback mechanisms for price data
 - Comprehensive logging for debugging
 
+## 🤖 **NEW: Advanced AI Model Support**
+
+### GPT-5 API Compatibility
+- **Automatic Parameter Detection**: Uses regex patterns to identify GPT-5 series models
+- **Dynamic API Calls**: GPT-4 models use `max_tokens` + custom temperature, GPT-5 uses `max_completion_tokens` + default temperature
+- **Future-Proof**: Supports upcoming models like `gpt-5-nano`, `o1-preview`, `o3-mini`, etc.
+- **Seamless Integration**: No manual configuration needed - just specify the model name
+
+### Model Detection Logic
+```python
+# Automatically detects model type and adjusts API parameters
+gpt-4.1      → max_tokens=1500, temperature=0.3      ✅
+gpt-5-mini   → max_completion_tokens=1500            ✅  
+o3           → max_completion_tokens=1500            ✅
+```
+
+### Configuration Management
+- **Dashboard Display**: Shows current AI model, prompt mode, and trading settings
+- **Configuration Hashing**: Unique hash per model/prompt/trading mode combination
+- **Data Isolation**: Each configuration maintains separate screenshots, holdings, and trade history
+
 ## 📈 Performance Analytics
 
 ### Real-Time Metrics
@@ -555,9 +578,10 @@ Portfolio snapshots are automatically recorded:
 ### Technology Stack
 - **Backend**: Python, SQLAlchemy, PostgreSQL
 - **Frontend**: Flask, Chart.js, HTML/CSS/JavaScript
-- **AI**: OpenAI GPT-4 for analysis and decision making
+- **AI**: OpenAI GPT-4/GPT-5/o1/o3 series with automatic API compatibility handling
 - **Data**: yfinance for market data, Selenium for web scraping
 - **🆕 Automation**: schedule, pytz for intelligent scheduling and timezone handling
+- **🆕 Model Detection**: Regex-based detection for OpenAI model generation compatibility
 
 ### Security & Authentication
 - PostgreSQL peer authentication
@@ -604,6 +628,9 @@ FEEDBACK_TIME = "16:30"                  # Once daily after market close
 8. **🚀 Unified Startup**: Use `./start_d_ai_trader.sh` for the easiest and most reliable system launch
 9. **🤖 AI Model Selection**: Choose appropriate models based on your needs (speed vs. capability)
 10. **📌 Prompt Versions**: Use "auto" for continuous improvement or fixed versions for consistency
+11. **🆕 GPT-5 Compatibility**: System automatically handles API differences between GPT-4 and GPT-5 series
+12. **🔄 Parallel Testing**: Each configuration runs in isolation with separate data and screenshots
+13. **📊 Configuration Display**: Dashboard shows current AI model and settings for easy monitoring
 
 ## 🤝 Contributing
 
