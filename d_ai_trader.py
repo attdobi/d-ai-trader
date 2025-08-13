@@ -136,10 +136,12 @@ class DAITraderOrchestrator:
         return market_close <= now_eastern <= feedback_window_end
     
     def _feedback_already_ran_today(self):
-        """Check if feedback agent already ran today"""
+        """Check if feedback agent already ran today for this configuration"""
         try:
-            from config import engine
+            from config import engine, get_current_config_hash
             from sqlalchemy import text
+            
+            config_hash = get_current_config_hash()
             
             with engine.connect() as conn:
                 result = conn.execute(text("""
@@ -148,7 +150,8 @@ class DAITraderOrchestrator:
                     WHERE run_type = 'feedback' 
                     AND start_time >= CURRENT_DATE
                     AND status = 'completed'
-                """)).fetchone()
+                    AND details->>'config_hash' = :config_hash
+                """), {"config_hash": config_hash}).fetchone()
                 
                 return result.count > 0
         except Exception as e:
@@ -157,15 +160,18 @@ class DAITraderOrchestrator:
     
     def get_unprocessed_summaries(self):
         """Get all summaries that haven't been processed by the decider yet"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.connect() as conn:
-            # Get all summaries that haven't been processed
+            # Get all summaries that haven't been processed (filtered by config_hash)
             result = conn.execute(text("""
                 SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
                 FROM summaries s
                 LEFT JOIN processed_summaries ps ON s.id = ps.summary_id AND ps.processed_by = 'decider'
-                WHERE ps.summary_id IS NULL
+                WHERE ps.summary_id IS NULL AND s.config_hash = :config_hash
                 ORDER BY s.timestamp ASC
-            """))
+            """), {"config_hash": config_hash})
             return [row._mapping for row in result]
     
     def mark_summaries_processed(self, summary_ids, processed_by):
@@ -306,8 +312,11 @@ class DAITraderOrchestrator:
     
     def run_feedback_agent(self):
         """Run the feedback agent for daily analysis"""
+        from config import get_current_config_hash
+        
         run_id = f"feedback_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        logger.info(f"Starting feedback agent run: {run_id}")
+        config_hash = get_current_config_hash()
+        logger.info(f"Starting feedback agent run: {run_id} (config: {config_hash})")
         
         try:
             # Record run start
@@ -316,7 +325,11 @@ class DAITraderOrchestrator:
                     INSERT INTO system_runs (run_type, details)
                     VALUES ('feedback', :details)
                 """), {
-                    "details": json.dumps({"run_id": run_id, "timestamp": datetime.now().isoformat()})
+                    "details": json.dumps({
+                        "run_id": run_id, 
+                        "timestamp": datetime.now().isoformat(),
+                        "config_hash": config_hash
+                    })
                 })
             
             # Run the feedback analysis
@@ -387,6 +400,19 @@ class DAITraderOrchestrator:
         """Main run loop"""
         logger.info("Starting D-AI-Trader automation system")
         self.setup_schedule()
+        
+        # Run initial cycle immediately for testing/demo purposes
+        logger.info("🚀 Running initial cycle immediately...")
+        try:
+            logger.info("Running initial summarizer...")
+            self.run_summarizer_agents()
+            
+            logger.info("Running initial decider...")
+            self.run_decider_agent()
+            
+            logger.info("✅ Initial cycle completed")
+        except Exception as e:
+            logger.error(f"Error in initial cycle: {e}")
         
         try:
             while True:

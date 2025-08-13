@@ -156,7 +156,6 @@ def trade_decisions():
             WHERE config_hash = :config_hash
               AND data::text NOT LIKE '%%Max retries reached%%'
               AND data::text NOT LIKE '%%API error, no response%%'
-              AND data::text NOT LIKE '%%"action": "N/A"%%'
             ORDER BY id DESC LIMIT 20
         """), {"config_hash": config_hash}).fetchall()
         
