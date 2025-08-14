@@ -323,8 +323,11 @@ class PromptManager:
                         })
 
                 # Get the correct parameters based on model type
-                # Increase token limit to prevent truncation for GPT-5 models
-                max_tokens = 1000
+                # Increase token limit for GPT-5 models to prevent truncation in JSON mode
+                if _is_gpt5_model(GPT_MODEL):
+                    max_tokens = 2000  # GPT-5 needs more tokens for JSON mode
+                else:
+                    max_tokens = 1000
                 token_params = get_model_token_params(GPT_MODEL, max_tokens)
                 temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 
@@ -343,23 +346,11 @@ class PromptManager:
                     # Add response_format for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
                     
-                    # Enhance system prompt to be very explicit about JSON for GPT-5
-                    system_msg = messages[0]["content"]
-                    messages[0]["content"] = "You are a strict JSON assistant. You must ONLY output valid JSON. No explanations, no markdown, just pure JSON."
+                    # For GPT-5, simplify the system prompt to be compatible with JSON mode
+                    messages[0]["content"] = "You are a helpful assistant that responds in JSON format."
                     
-                    # Also enhance user prompt with JSON template
-                    for i, msg in enumerate(messages):
-                        if msg["role"] == "user" and isinstance(msg["content"], str):
-                            original_content = msg["content"]
-                            # Add specific JSON format requirement
-                            if "SummarizerAgent" in str(agent_name):
-                                json_example = '\n\nOutput ONLY this JSON format:\n{"headlines": ["headline1", "headline2"], "insights": "analysis"}'
-                            elif "DeciderAgent" in str(agent_name):
-                                json_example = '\n\nOutput ONLY this JSON format:\n[{"action": "buy", "ticker": "SYMBOL", "amount_usd": 1000, "reason": "reason"}]'
-                            else:
-                                json_example = '\n\nOutput ONLY valid JSON format.'
-                            messages[i]["content"] = original_content + json_example
-                            break
+                    # Debug: Print token params for GPT-5
+                    print(f"📊 GPT-5 token params: {token_params}")
                 
                 response = self.client.chat.completions.create(**api_params)
                 choice = response.choices[0]
