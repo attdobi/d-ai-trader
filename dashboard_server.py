@@ -706,6 +706,20 @@ def trigger_price_update():
         'message': 'Manual price update triggered successfully'
     })
 
+@app.route('/api/trigger/<agent_type>', methods=['POST'])
+def trigger_agent(agent_type):
+    """Generic route to trigger different agent types"""
+    if agent_type == 'all':
+        return trigger_all()
+    elif agent_type == 'summarizer':
+        return trigger_summarizer()
+    elif agent_type == 'decider':
+        return trigger_decider()
+    elif agent_type == 'feedback':
+        return trigger_feedback()
+    else:
+        return jsonify({'error': f'Unknown agent type: {agent_type}'}), 400
+
 @app.route('/api/trigger/all', methods=['POST'])
 def trigger_all():
     """Manually trigger all agents in sequence"""
