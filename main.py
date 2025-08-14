@@ -81,6 +81,26 @@ def initialize_database():
         '''))
 
 def get_openai_summary(agent_name, html_content, image_paths):
+    # Get versioned prompt for SummarizerAgent
+    from prompt_manager import get_active_prompt
+    try:
+        prompt_data = get_active_prompt("SummarizerAgent")
+        system_prompt_template = prompt_data["system_prompt"]
+        user_prompt_template = prompt_data["user_prompt_template"]
+        prompt_version = prompt_data["version"]
+        print(f"🔧 Using SummarizerAgent prompt v{prompt_version}")
+    except Exception as e:
+        print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
+        # Fallback to basic prompts
+        system_prompt_template = "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles."
+        user_prompt_template = """Analyze the following financial news and extract the most important actionable insights.
+
+Content: {content}
+
+Return a JSON object with:
+- "headlines": A list of 3-5 most important headlines
+- "insights": A paragraph summarizing key trading opportunities and risks"""
+    
     # Get feedback context for summarizer
     feedback_context = ""
     try:
@@ -132,42 +152,14 @@ def get_openai_summary(agent_name, html_content, image_paths):
         if len(html_content) > 5000:
             html_content = html_content[:5000] + "... [content truncated]"
 
-    prompt = f"""
-Summarize the financial news from the following content. Focus on actionable information relevant to trading decisions — especially news related to companies, sectors, market movements, and economic indicators.
-
-{feedback_context}
-
-Content:
-
-{html_content}
-
-🚨 CRITICAL JSON REQUIREMENT:
-You MUST respond with ONLY valid JSON in this EXACT format:
-{{
-    "headlines": ["headline 1", "headline 2", "headline 3"],
-    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
-}}
-
-⛔ NO explanatory text
-⛔ NO markdown formatting  
-⛔ NO code blocks
-⛔ NO text before or after the JSON
-✅ ONLY pure JSON starting with {{ and ending with }}
-
-If you cannot parse the content, return:
-{{
-    "headlines": ["Unable to analyze content"],
-    "insights": "Content could not be processed for analysis."
-}}
-"""
-    system_prompt = (
-        "You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages."
-        "Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation"
-        "Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively."
-        "Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades."
-        "\n\n🚨 CRITICAL: You must ALWAYS respond with ONLY valid JSON format. No other text, explanations, or formatting."
-        f"\n\n{feedback_context}"
+    # Use versioned prompt template
+    prompt = user_prompt_template.format(
+        content=html_content,
+        feedback_context=feedback_context
     )
+    
+    # Use versioned system prompt with feedback context
+    system_prompt = system_prompt_template + f"\n\n{feedback_context}"
     
     # Only include images if they were successfully saved and are reasonably sized
     valid_image_paths = []

@@ -1102,6 +1102,33 @@ def record_portfolio_snapshot():
         })
 
 def ask_decision_agent(summaries, run_id, holdings):
+    # Get versioned prompt for DeciderAgent
+    from prompt_manager import get_active_prompt
+    try:
+        prompt_data = get_active_prompt("DeciderAgent")
+        system_prompt = prompt_data["system_prompt"]
+        user_prompt_template = prompt_data["user_prompt_template"]
+        prompt_version = prompt_data["version"]
+        print(f"🔧 Using DeciderAgent prompt v{prompt_version}")
+    except Exception as e:
+        print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
+        # Fallback to basic prompt
+        system_prompt = "You are a day trading assistant making quick decisions based on current market news and momentum."
+        user_prompt_template = """Based on the market analysis below, make specific trading decisions.
+
+Current Portfolio:
+- Available Cash: ${available_cash}
+- Holdings: {holdings}
+
+Market Analysis:
+{summaries}
+
+Make 1-3 specific trades. Return a JSON array with:
+- "action": "buy" or "sell" or "hold"
+- "ticker": Stock symbol
+- "amount_usd": Dollar amount to trade
+- "reason": Brief explanation"""
+    
     # Check market status for later use
     market_open = is_market_open()
     if not market_open:
@@ -1195,59 +1222,16 @@ def ask_decision_agent(summaries, run_id, holdings):
         print(f"Failed to get feedback context: {e}")
         feedback_context = "Feedback system unavailable."
 
-    prompt = f"""
-You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-
-💰 CURRENT CASH SITUATION:
-- Available Cash: ${available_cash:.2f}
-- Maximum Spendable: ${max_spendable:.2f} (keeping ${MIN_BUFFER} buffer)
-- Total Portfolio Budget: ${MAX_FUNDS}
-
-📊 CURRENT STOCK HOLDINGS:
-{holdings_text}
-
-🎯 DAY TRADING STRATEGY:
-- Take profits quickly: Sell positions with >3% gains
-- Cut losses fast: Sell positions with >5% losses  
-- Be aggressive: If you have conviction for a new buy, consider selling existing positions to fund it
-- Rotate capital: Don't hold positions too long, look for better opportunities
-- Use momentum: Buy stocks with positive news/momentum, sell those with negative news
-
-⚠️  CRITICAL BUDGET RULES:
-1. NEVER exceed your available cash (${available_cash:.2f})
-2. All SELL decisions will be executed FIRST to free up cash
-3. BUY decisions will be executed in order until cash runs out
-4. If you want to buy multiple stocks, order them by priority (most conviction first)
-5. You can sell stocks to fund new purchases
-
-📈 TRADING LOGIC:
-- First, identify any stocks to SELL (take profits, cut losses, free up cash)
-- Then, identify new stocks to BUY with available + freed-up cash
-- Consider the total amount: sells will add to your ${available_cash:.2f} cash
-
-Performance Context: {feedback_context}
-
-📰 Market Summaries:
-{summarized_text}
-
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY a JSON array of trade decisions. Each decision must include:
-- action ("buy" or "sell") 
-- ticker (stock symbol)
-- amount_usd (dollars to spend/recover - be precise!)
-- reason (profit taking, loss cutting, new opportunity, etc.)
-
-IMPORTANT: Your buy decisions should total ≤ ${max_spendable:.2f} + (total from any sell decisions)
-
-⛔ NO explanatory text
-⛔ NO markdown formatting  
-⛔ NO text before or after the JSON
-✅ ONLY pure JSON array starting with [ and ending with ]
-
-Example format: [{{\"action\": \"buy\", \"ticker\": \"AAPL\", \"amount_usd\": 1000, \"reason\": \"Strong earnings\"}}]
-"""
-
-    system_prompt = "You are a trading advisor providing rational investment actions. Learn from past performance feedback to improve decisions. 🚨 CRITICAL: You must respond with ONLY valid JSON array format. No explanatory text or formatting."
+    # Use versioned prompt template
+    prompt = user_prompt_template.format(
+        available_cash=available_cash,
+        max_spendable=max_spendable,
+        min_buffer=MIN_BUFFER,
+        max_funds=MAX_FUNDS,
+        holdings=holdings_text,
+        feedback=feedback_context,
+        summaries=summarized_text
+    )
     
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status

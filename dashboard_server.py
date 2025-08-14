@@ -726,20 +726,69 @@ def trigger_all():
     try:
         # Import the orchestrator to run all agents
         from d_ai_trader import DAITraderOrchestrator
+        from config import get_current_config_hash
+        import json
+        from datetime import datetime
+        
+        # Ensure config hash is set before running
+        config_hash = get_current_config_hash()
+        print(f"🔧 Running all agents for config: {config_hash}")
+        
         orchestrator = DAITraderOrchestrator()
         
         # Run all agents in sequence in a separate thread
         def run_all():
             try:
-                print("Starting manual run of all agents...")
+                # Ensure config hash is available in this thread
+                import os
+                os.environ['CURRENT_CONFIG_HASH'] = config_hash
+                
+                print("🚀 Starting manual run of all agents...")
+                print(f"🔧 Config hash in thread: {config_hash}")
+                
+                # 1. Run summarizer
+                print("📰 Step 1/3: Running summarizer agents...")
                 orchestrator.run_summarizer_agents()
-                print("Summarizer completed, running decider...")
+                print("✅ Summarizer completed")
+                
+                # Small delay to ensure summarizer data is committed
+                import time
+                time.sleep(2)
+                
+                # 2. Run decider
+                print("🤖 Step 2/3: Running decider agent...")
                 orchestrator.run_decider_agent()
-                print("Decider completed, running feedback...")
+                print("✅ Decider completed")
+                
+                # 3. Run feedback
+                print("📊 Step 3/3: Running feedback agent...")
                 orchestrator.run_feedback_agent()
-                print("All agents completed successfully")
+                print("✅ Feedback completed")
+                
+                print("🎉 All agents completed successfully!")
+                
             except Exception as e:
-                print(f"Error in manual all agents run: {e}")
+                print(f"❌ Error in manual all agents run: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Store the error in the database so we can see it
+                try:
+                    from config import get_current_config_hash
+                    config_hash = get_current_config_hash()
+                    with engine.begin() as conn:
+                        conn.execute(text("""
+                            INSERT INTO system_runs (run_type, status, details)
+                            VALUES ('run_all_agents', 'failed', :details)
+                        """), {
+                            "details": json.dumps({
+                                "error": str(e),
+                                "config_hash": config_hash,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        })
+                except:
+                    pass  # Don't let error logging cause more errors
         
         thread = threading.Thread(target=run_all, daemon=True)
         thread.start()
@@ -750,6 +799,36 @@ def trigger_all():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/run-status')
+def get_run_status():
+    """Get status of recent runs to debug issues"""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT run_type, start_time, end_time, status, 
+                       details->>'error' as error,
+                       details->>'config_hash' as config_hash
+                FROM system_runs 
+                WHERE start_time > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+                ORDER BY start_time DESC
+                LIMIT 10
+            """))
+            
+            runs = []
+            for row in result:
+                runs.append({
+                    'run_type': row.run_type,
+                    'start_time': row.start_time.isoformat() if row.start_time else None,
+                    'end_time': row.end_time.isoformat() if row.end_time else None,
+                    'status': row.status,
+                    'error': row.error,
+                    'config_hash': row.config_hash
+                })
+            
+            return jsonify(runs)
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route('/api/reset-portfolio', methods=['POST'])
 def reset_portfolio():
