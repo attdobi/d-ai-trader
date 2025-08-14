@@ -338,18 +338,28 @@ class PromptManager:
                 
                 # GPT-5 specific handling with proper JSON mode
                 if _is_gpt5_model(GPT_MODEL):
-                    print(f"🤖 Using GPT-5 strict JSON mode for {agent_name}")
+                    print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
                     
-                    # Add required parameters for GPT-5 JSON mode
+                    # Add response_format for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
-                    api_params["tool_choice"] = "none"  # Prevents tool-call responses causing empty content
-                    # Note: Don't set temperature=0 for GPT-5 - it only supports default (1)
                     
-                    # Keep max_completion_tokens for GPT-5 (max_output_tokens not supported in Python client yet)
-                    # The token params are already set correctly by get_model_token_params()
+                    # Enhance system prompt to be very explicit about JSON for GPT-5
+                    system_msg = messages[0]["content"]
+                    messages[0]["content"] = "You are a strict JSON assistant. You must ONLY output valid JSON. No explanations, no markdown, just pure JSON."
                     
-                    # Ensure system prompt is strict for JSON
-                    messages[0]["content"] = "You are a strict JSON emitter. Output ONLY valid JSON."
+                    # Also enhance user prompt with JSON template
+                    for i, msg in enumerate(messages):
+                        if msg["role"] == "user" and isinstance(msg["content"], str):
+                            original_content = msg["content"]
+                            # Add specific JSON format requirement
+                            if "SummarizerAgent" in str(agent_name):
+                                json_example = '\n\nOutput ONLY this JSON format:\n{"headlines": ["headline1", "headline2"], "insights": "analysis"}'
+                            elif "DeciderAgent" in str(agent_name):
+                                json_example = '\n\nOutput ONLY this JSON format:\n[{"action": "buy", "ticker": "SYMBOL", "amount_usd": 1000, "reason": "reason"}]'
+                            else:
+                                json_example = '\n\nOutput ONLY valid JSON format.'
+                            messages[i]["content"] = original_content + json_example
+                            break
                 
                 response = self.client.chat.completions.create(**api_params)
                 choice = response.choices[0]
@@ -360,11 +370,14 @@ class PromptManager:
                 if _is_gpt5_model(GPT_MODEL):
                     print(f"🔍 GPT-5 response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
-                    # Check for problematic finish reasons
-                    if finish_reason in {"tool_calls", "content_filter"} or not content:
-                        print(f"⚠️  GPT-5 {agent_name} failed: finish_reason={finish_reason}, retrying...")
+                    # Check for problematic finish reasons or empty content
+                    if finish_reason == "content_filter" or not content:
+                        print(f"⚠️  GPT-5 {agent_name} failed: finish_reason={finish_reason}, empty_content={not content}")
                         if retries < max_retries - 1:
                             retries += 1
+                            # Add delay before retry
+                            import time
+                            time.sleep(1)
                             continue
                         else:
                             return {"error": f"GPT-5 failed after retries: {finish_reason}", "agent": agent_name}
