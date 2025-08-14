@@ -343,7 +343,7 @@ class PromptManager:
                     # Add required parameters for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
                     api_params["tool_choice"] = "none"  # Prevents tool-call responses causing empty content
-                    api_params["temperature"] = 0  # More deterministic output
+                    # Note: Don't set temperature=0 for GPT-5 - it only supports default (1)
                     
                     # Keep max_completion_tokens for GPT-5 (max_output_tokens not supported in Python client yet)
                     # The token params are already set correctly by get_model_token_params()
