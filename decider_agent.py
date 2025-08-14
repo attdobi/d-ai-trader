@@ -3,6 +3,7 @@ import pytz
 from datetime import datetime
 import time
 from math import floor
+import concurrent.futures
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode
 import yfinance as yf
@@ -318,45 +319,34 @@ def get_current_price(ticker):
 
         # Method 1: Try to get current price from info (works during market hours)
         try:
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Price fetch timeout")
-            
-            # Set 10 second timeout
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(10)
-            
-            try:
-                current_price = stock.info.get('currentPrice')
-                signal.alarm(0)  # Cancel timeout
-                if current_price and current_price > 0:
-                    print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
-                    return float(current_price)
-            except TimeoutError:
-                signal.alarm(0)  # Cancel timeout
-                print(f"⏰ {clean_ticker}: Price fetch timeout after 10 seconds")
-                raise Exception("Timeout fetching price")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                # Submit the task with a 10 second timeout
+                future = executor.submit(lambda: stock.info.get('currentPrice'))
+                try:
+                    current_price = future.result(timeout=10)
+                    if current_price and current_price > 0:
+                        print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
+                        return float(current_price)
+                except concurrent.futures.TimeoutError:
+                    print(f"⏰ {clean_ticker}: Price fetch timeout after 10 seconds")
+                    raise Exception("Timeout fetching price")
                 
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 1 failed: {e}")
 
         # Method 2: Try regular market price from info
         try:
-            # Set 10 second timeout
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(10)
-            
-            try:
-                regular_price = stock.info.get('regularMarketPrice')
-                signal.alarm(0)  # Cancel timeout
-                if regular_price and regular_price > 0:
-                    print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
-                    return float(regular_price)
-            except TimeoutError:
-                signal.alarm(0)  # Cancel timeout
-                print(f"⏰ {clean_ticker}: Regular market price timeout after 10 seconds")
-                raise Exception("Timeout fetching regular market price")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                # Submit the task with a 10 second timeout
+                future = executor.submit(lambda: stock.info.get('regularMarketPrice'))
+                try:
+                    regular_price = future.result(timeout=10)
+                    if regular_price and regular_price > 0:
+                        print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
+                        return float(regular_price)
+                except concurrent.futures.TimeoutError:
+                    print(f"⏰ {clean_ticker}: Regular market price timeout after 10 seconds")
+                    raise Exception("Timeout fetching regular market price")
                 
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 2 failed: {e}")
