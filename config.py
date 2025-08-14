@@ -339,27 +339,8 @@ class PromptManager:
                 # Note: Removed structured response_format as it's unreliable with GPT-5
                 # Now relying on strong system prompts for JSON formatting
                 
-                # Add explicit headers for better GPT-5 compatibility
-                if hasattr(self.client, '_client') and hasattr(self.client._client, 'session'):
-                    # Ensure proper headers are set
-                    self.client._client.session.headers.update({
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    })
-                
                 response = self.client.chat.completions.create(**api_params)
-                content = response.choices[0].message.content
-                
-                # Handle completely empty responses
-                if not content or content.strip() == "":
-                    print(f"⚠️  Empty response from {agent_name} (attempt {retries + 1}/{max_retries})")
-                    if retries < max_retries - 1:
-                        retries += 1
-                        continue
-                    else:
-                        return {"error": "Empty response after all retries", "agent": agent_name}
-                
-                content = content.strip()
+                content = response.choices[0].message.content.strip()
 
                 # Try parsing JSON with enhanced error handling
                 try:
@@ -368,30 +349,16 @@ class PromptManager:
                 except json.JSONDecodeError as e:
                     print(f"JSON Decode Error (attempt {retries + 1}/{max_retries}): {e}")
                     print(f"Response was: {content[:300]}...")
-                    print(f"Response length: {len(content)} characters")
-                    print(f"First 50 chars: '{content[:50]}'")
-                    print(f"Last 50 chars: '{content[-50:]}'")
-                    if _is_gpt5_model(GPT_MODEL):
-                        print(f"🤖 GPT-5 model detected - applying enhanced recovery")
                     
-                    # If this is not the last retry, try again with more explicit instructions
+                    # If this is not the last retry, try again with simpler instructions
                     if retries < max_retries - 1:
                         print(f"🔄 Retrying {agent_name} with enhanced JSON instructions...")
-                        # Enhance the prompt for next retry with GPT-5 specific instructions
-                        enhanced_prompt = prompt + "\n\n🚨 CRITICAL JSON REQUIREMENT FOR GPT-5:\n" + \
-                                        "- Return ONLY valid JSON format\n" + \
-                                        "- NO explanatory text before or after\n" + \
-                                        "- NO markdown formatting or code blocks\n" + \
-                                        "- NO ``` or any other formatting\n" + \
-                                        "- Start with { and end with }\n" + \
-                                        "- Use double quotes for all strings\n" + \
-                                        "- Ensure all brackets and braces are properly closed\n" + \
-                                        "EXAMPLE GOOD RESPONSE: {\"headlines\": \"Sample text\", \"insights\": \"Sample insight\"}\n" + \
-                                        "DO NOT add any text outside the JSON object."
+                        # Simple enhancement for retry
+                        enhanced_prompt = prompt + "\n\nIMPORTANT: Return only valid JSON format. Example: {\"headlines\": \"text\", \"insights\": \"text\"}"
                         
                         # Update messages for retry
                         messages = [
-                            {"role": "system", "content": system_prompt + "\n\n🚨 SYSTEM OVERRIDE FOR GPT-5: You are REQUIRED to respond with ONLY valid JSON. Any non-JSON output will cause system failure. Return nothing but properly formatted JSON."},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": enhanced_prompt}
                         ]
                         
