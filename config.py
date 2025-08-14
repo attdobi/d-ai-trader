@@ -336,14 +336,43 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # Add response_format for GPT-5 models only
+                # GPT-5 specific handling with proper JSON mode
                 if _is_gpt5_model(GPT_MODEL):
+                    print(f"🤖 Using GPT-5 strict JSON mode for {agent_name}")
+                    
+                    # Add required parameters for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
-                    print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
-                # GPT-4.1 and earlier don't use response_format
+                    api_params["tool_choice"] = "none"  # Prevents tool-call responses causing empty content
+                    api_params["temperature"] = 0  # More deterministic output
+                    
+                    # Use max_output_tokens for GPT-5 instead of max_tokens
+                    if "max_completion_tokens" in api_params:
+                        api_params["max_output_tokens"] = api_params.pop("max_completion_tokens")
+                    elif "max_tokens" in api_params:
+                        api_params["max_output_tokens"] = api_params.pop("max_tokens")
+                    
+                    # Ensure system prompt is strict for JSON
+                    messages[0]["content"] = "You are a strict JSON emitter. Output ONLY valid JSON."
                 
                 response = self.client.chat.completions.create(**api_params)
-                content = response.choices[0].message.content.strip()
+                choice = response.choices[0]
+                finish_reason = choice.finish_reason
+                content = choice.message.content
+                
+                # GPT-5 specific handling with finish_reason checking
+                if _is_gpt5_model(GPT_MODEL):
+                    print(f"🔍 GPT-5 response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
+                    
+                    # Check for problematic finish reasons
+                    if finish_reason in {"tool_calls", "content_filter"} or not content:
+                        print(f"⚠️  GPT-5 {agent_name} failed: finish_reason={finish_reason}, retrying...")
+                        if retries < max_retries - 1:
+                            retries += 1
+                            continue
+                        else:
+                            return {"error": f"GPT-5 failed after retries: {finish_reason}", "agent": agent_name}
+                
+                content = content.strip() if content else ""
 
                 # Try parsing JSON with enhanced error handling
                 try:
