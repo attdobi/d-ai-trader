@@ -345,11 +345,8 @@ class PromptManager:
                     api_params["tool_choice"] = "none"  # Prevents tool-call responses causing empty content
                     api_params["temperature"] = 0  # More deterministic output
                     
-                    # Use max_output_tokens for GPT-5 instead of max_tokens
-                    if "max_completion_tokens" in api_params:
-                        api_params["max_output_tokens"] = api_params.pop("max_completion_tokens")
-                    elif "max_tokens" in api_params:
-                        api_params["max_output_tokens"] = api_params.pop("max_tokens")
+                    # Keep max_completion_tokens for GPT-5 (max_output_tokens not supported in Python client yet)
+                    # The token params are already set correctly by get_model_token_params()
                     
                     # Ensure system prompt is strict for JSON
                     messages[0]["content"] = "You are a strict JSON emitter. Output ONLY valid JSON."
