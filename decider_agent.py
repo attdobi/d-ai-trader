@@ -538,6 +538,12 @@ def update_holdings(decisions):
         print(f"🔥 Executing {len(sell_decisions)} sell orders first...")
         available_cash = process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions)
     
+    # Wait 30 seconds between sells and buys if both exist (allows position swapping)
+    if sell_decisions and buy_decisions:
+        print("⏳ Waiting 30 seconds after sells to allow funds to clear before buys...")
+        import time
+        time.sleep(30)
+    
     # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
     if buy_decisions:
         print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
@@ -634,9 +640,20 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                         "config_hash": config_hash
                     })
 
-                cash += total_value
+                available_cash += total_value
+                print(f"💰 Sold {ticker}: {shares} shares at ${price:.2f} = ${total_value:.2f} (Gain/Loss: ${gain_loss:.2f})")
 
-            # Persist updated cash
+            else:
+                print(f"❌ No holding found for {ticker} (cleaned: {clean_ticker}) - cannot sell")
+                skipped_decisions.append({
+                    "action": "sell",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": f"No holding found to sell (Original: {reason})"
+                })
+
+        # Update cash balance after all sells are processed
+        if sell_decisions:
             conn.execute(text("""
                 UPDATE holdings SET
                     current_price = :cash,
@@ -644,14 +661,12 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                     total_value = :cash,
                     current_price_timestamp = :timestamp
                 WHERE ticker = 'CASH' AND config_hash = :config_hash
-            """), {"cash": cash, "timestamp": timestamp, "config_hash": config_hash})
+            """), {"cash": available_cash, "timestamp": timestamp, "config_hash": config_hash})
+            print(f"💰 Updated cash balance to: ${available_cash:.2f}")
 
-    # Optional wait if buys are pending
-    if sell_decisions and buy_decisions:
-        print("Waiting 30 seconds after sells to allow funds to free up before buys...")
-        time.sleep(30)
+    return available_cash
 
-    # 2) Process all BUYS
+def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
     if buy_decisions:
         with engine.begin() as conn:
             cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
