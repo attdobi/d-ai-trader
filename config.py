@@ -336,8 +336,11 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # Note: Removed structured response_format as it's unreliable with GPT-5
-                # Now relying on strong system prompts for JSON formatting
+                # Add response_format for GPT-5 models only
+                if _is_gpt5_model(GPT_MODEL):
+                    api_params["response_format"] = {"type": "json_object"}
+                    print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
+                # GPT-4.1 and earlier don't use response_format
                 
                 response = self.client.chat.completions.create(**api_params)
                 content = response.choices[0].message.content.strip()
