@@ -811,12 +811,93 @@ def reset_portfolio():
                     VALUES (:config_hash, 'CASH', 1, 10000, 10000, now(), now(), 10000, 10000, 0, 'Reset to initial cash', TRUE)
                 """), {"config_hash": config_hash})
             
+            # Clear feedback data for this config
+            print(f"🧹 Clearing feedback data for config {config_hash}")
+            
+            # Clear agent feedback (success rates, etc.)
+            conn.execute(text("""
+                DELETE FROM agent_feedback 
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Clear trade outcomes (historical trades)
+            conn.execute(text("""
+                DELETE FROM trade_outcomes 
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Reset prompts to v4 baseline
+            agent_types = ['SummarizerAgent', 'DeciderAgent']
+            for agent_type in agent_types:
+                # Check if v4 exists
+                v4_exists = conn.execute(text("""
+                    SELECT id FROM prompt_versions 
+                    WHERE agent_type = :agent_type AND version = 4
+                """), {"agent_type": agent_type}).fetchone()
+                
+                if v4_exists:
+                    # Set all prompts to inactive first
+                    conn.execute(text("""
+                        UPDATE prompt_versions 
+                        SET is_active = FALSE
+                        WHERE agent_type = :agent_type
+                    """), {"agent_type": agent_type})
+                    
+                    # Then activate v4
+                    conn.execute(text("""
+                        UPDATE prompt_versions 
+                        SET is_active = TRUE
+                        WHERE agent_type = :agent_type AND version = 4
+                    """), {"agent_type": agent_type})
+                    
+                    print(f"✅ Reset {agent_type} to v4 prompt")
+                else:
+                    print(f"⚠️  No v4 prompt found for {agent_type}, keeping current active prompt")
+            
+            # Clear any custom agent instruction updates
+            conn.execute(text("""
+                DELETE FROM agent_instruction_updates
+                WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent')
+            """))
+            
+            # Clear system runs history for this config
+            conn.execute(text("""
+                DELETE FROM system_runs 
+                WHERE details->>'config_hash' = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Clear processed summaries tracking
+            conn.execute(text("""
+                DELETE FROM processed_summaries 
+                WHERE summary_id IN (
+                    SELECT id FROM summaries WHERE config_hash = :config_hash
+                )
+            """), {"config_hash": config_hash})
+            
+            # Clear summaries for this config  
+            conn.execute(text("""
+                DELETE FROM summaries 
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Clear trade decisions for this config
+            conn.execute(text("""
+                DELETE FROM trade_decisions 
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Clear portfolio history for this config
+            conn.execute(text("""
+                DELETE FROM portfolio_history 
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
             # Record portfolio snapshot after reset
             record_portfolio_snapshot()
             
             return jsonify({
                 'success': True,
-                'message': 'Portfolio reset successfully. Cash balance set to $10,000.'
+                'message': 'Portfolio reset successfully. Cash: $10,000, Feedback cleared, Prompts reset to v4.'
             })
             
     except Exception as e:
