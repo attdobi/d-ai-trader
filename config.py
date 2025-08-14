@@ -190,13 +190,10 @@ def get_current_configuration():
         "description": f"{GPT_MODEL}_{PROMPT_VERSION_MODE}_{TRADING_MODE}"
     }
 
-# Global configuration hash for this run
-CURRENT_CONFIG_HASH = None
-
+# Process-specific configuration hash (no global state to avoid sharing between parallel instances)
 def initialize_configuration_hash():
     """Initialize and store the configuration hash for this run"""
-    global CURRENT_CONFIG_HASH
-    CURRENT_CONFIG_HASH = generate_configuration_hash()
+    config_hash = generate_configuration_hash()
     
     # Store configuration in database
     try:
@@ -217,6 +214,7 @@ def initialize_configuration_hash():
             
             # Insert or update configuration
             config = get_current_configuration()
+            config['config_hash'] = config_hash  # Use the locally generated hash
             conn.execute(text("""
                 INSERT INTO run_configurations 
                 (config_hash, gpt_model, prompt_mode, forced_prompt_version, trading_mode, description, last_used)
@@ -224,22 +222,30 @@ def initialize_configuration_hash():
                 ON CONFLICT (config_hash) DO UPDATE SET last_used = CURRENT_TIMESTAMP
             """), config)
             
-        print(f"📋 Configuration hash: {CURRENT_CONFIG_HASH}")
+        print(f"📋 Configuration hash: {config_hash}")
         print(f"📝 Description: {config['description']}")
         
     except Exception as e:
         print(f"⚠️  Warning: Could not store configuration: {e}")
     
-    return CURRENT_CONFIG_HASH
+    # Store in environment variable for this process (process-specific isolation)
+    os.environ['CURRENT_CONFIG_HASH'] = config_hash
+    print(f"🔧 Set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
+    return config_hash
 
 def get_current_config_hash():
-    """Get the current configuration hash"""
-    global CURRENT_CONFIG_HASH
-    if CURRENT_CONFIG_HASH is None:
-        # If not initialized, regenerate based on current settings
-        print("⚠️  Config hash not initialized, regenerating from current settings")
-        CURRENT_CONFIG_HASH = generate_configuration_hash()
-    return CURRENT_CONFIG_HASH
+    """Get the current configuration hash from environment or generate new one"""
+    # First try to get from environment variable (process-specific)
+    config_hash = os.environ.get('CURRENT_CONFIG_HASH')
+    if config_hash:
+        return config_hash
+    
+    # If not in environment, generate based on current settings
+    print("⚠️  Config hash not found in environment, generating from current settings")
+    config_hash = generate_configuration_hash()
+    os.environ['CURRENT_CONFIG_HASH'] = config_hash
+    print(f"🔧 Generated and set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
+    return config_hash
 
 def _is_gpt5_model(model_name):
     """
