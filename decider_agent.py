@@ -563,6 +563,9 @@ def update_holdings(decisions):
 def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions):
     """Process all sell decisions and return updated cash balance"""
     
+    # Track the cash we're adding from sells
+    cash_from_sells = 0.0
+    
     with engine.begin() as conn:
         for decision in sell_decisions:
             ticker = decision.get("ticker")
@@ -598,7 +601,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 continue
 
             holding = conn.execute(
-                text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
+                text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash AND is_active = TRUE AND shares > 0"),
                 {"ticker": clean_ticker, "config_hash": config_hash}
             ).fetchone()
             if holding:
@@ -640,20 +643,45 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                         "config_hash": config_hash
                     })
 
-                available_cash += total_value
+                cash_from_sells += total_value
                 print(f"💰 Sold {ticker}: {shares} shares at ${price:.2f} = ${total_value:.2f} (Gain/Loss: ${gain_loss:.2f})")
 
             else:
-                print(f"❌ No holding found for {ticker} (cleaned: {clean_ticker}) - cannot sell")
+                # Check if it's inactive or just doesn't exist
+                inactive_check = conn.execute(
+                    text("SELECT shares, is_active FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
+                    {"ticker": clean_ticker, "config_hash": config_hash}
+                ).fetchone()
+                
+                if inactive_check:
+                    if not inactive_check.is_active:
+                        print(f"⚠️  {ticker} is already INACTIVE (previously sold) - skipping duplicate sell")
+                        reason_msg = f"Already sold - position is inactive (Original: {reason})"
+                    else:
+                        print(f"⚠️  {ticker} has 0 shares - nothing to sell")
+                        reason_msg = f"No shares to sell (Original: {reason})"
+                else:
+                    print(f"❌ No holding found for {ticker} (cleaned: {clean_ticker}) - cannot sell")
+                    reason_msg = f"No holding found to sell (Original: {reason})"
+                
                 skipped_decisions.append({
                     "action": "sell",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"No holding found to sell (Original: {reason})"
+                    "reason": reason_msg
                 })
 
         # Update cash balance after all sells are processed
-        if sell_decisions:
+        if cash_from_sells > 0:
+            # Get current cash balance and add the proceeds from sells
+            cash_result = conn.execute(text("""
+                SELECT current_value FROM holdings 
+                WHERE ticker = 'CASH' AND config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchone()
+            
+            current_cash = float(cash_result.current_value) if cash_result else 0.0
+            new_cash_balance = current_cash + cash_from_sells
+            
             conn.execute(text("""
                 UPDATE holdings SET
                     current_price = :cash,
@@ -661,10 +689,12 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                     total_value = :cash,
                     current_price_timestamp = :timestamp
                 WHERE ticker = 'CASH' AND config_hash = :config_hash
-            """), {"cash": available_cash, "timestamp": timestamp, "config_hash": config_hash})
-            print(f"💰 Updated cash balance to: ${available_cash:.2f}")
-
-    return available_cash
+            """), {"cash": new_cash_balance, "timestamp": timestamp, "config_hash": config_hash})
+            print(f"💰 Cash updated: ${current_cash:.2f} + ${cash_from_sells:.2f} = ${new_cash_balance:.2f}")
+            
+            return new_cash_balance
+        else:
+            return available_cash
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
     if buy_decisions:
@@ -1247,6 +1277,29 @@ Example format: [{{\"action\": \"buy\", \"ticker\": \"AAPL\", \"amount_usd\": 10
     return ai_response
 
 def store_trade_decisions(decisions, run_id):
+    # Filter out error responses before storing
+    valid_decisions = []
+    for decision in decisions:
+        if isinstance(decision, dict) and 'error' in decision:
+            print(f"⚠️  Skipping error response: {decision.get('error', 'Unknown error')}")
+            continue
+        if isinstance(decision, dict) and decision.get('action') and decision.get('ticker'):
+            valid_decisions.append(decision)
+        else:
+            print(f"⚠️  Skipping invalid decision format: {decision}")
+    
+    # Only store if we have valid decisions
+    if not valid_decisions:
+        print("❌ No valid trade decisions to store - AI response was malformed")
+        # Store a proper N/A decision if market is closed
+        if not is_market_open():
+            valid_decisions = [{
+                "action": "N/A",
+                "ticker": "N/A", 
+                "amount_usd": 0,
+                "reason": "Market is closed - no trading action taken"
+            }]
+    
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
@@ -1262,7 +1315,7 @@ def store_trade_decisions(decisions, run_id):
         """), {
             "run_id": run_id,
             "timestamp": datetime.utcnow(),
-            "data": json.dumps(decisions),
+            "data": json.dumps(valid_decisions),
             "config_hash": get_current_config_hash()
         })
 
