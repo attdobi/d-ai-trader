@@ -3,6 +3,18 @@
 {% block content %}
 <h1>AI Trading Feedback Dashboard</h1>
 
+<!-- Current Prompt Versions -->
+<div class="portfolio-summary">
+    <div class="metric-card" id="summarizerVersionCard">
+        <h3>📊 Summarizer Prompt</h3>
+        <p class="value" id="summarizerVersion">--</p>
+    </div>
+    <div class="metric-card" id="deciderVersionCard">
+        <h3>🎯 Decider Prompt</h3>
+        <p class="value" id="deciderVersion">--</p>
+    </div>
+</div>
+
 <!-- Performance Metrics -->
 <div class="portfolio-summary">
     <div class="metric-card">
@@ -558,8 +570,8 @@
         try {
             // Load prompts for both agents
             const [summarizerResponse, deciderResponse] = await Promise.all([
-                fetch('/api/prompts/summarizer'),
-                fetch('/api/prompts/decider')
+                fetch('/api/prompts/SummarizerAgent'),
+                fetch('/api/prompts/DeciderAgent')
             ]);
             
             if (!summarizerResponse.ok || !deciderResponse.ok) {
@@ -668,19 +680,135 @@
         return html;
     }
 
+    let lastKnownPromptVersions = {};
+
     function refreshData() {
         loadLatestFeedback();
         loadFeedbackHistory();
         loadPromptComparison();
         loadTradeOutcomes();
+        checkForPromptReset();
+    }
+
+    async function checkForPromptReset() {
+        try {
+            // Check current active prompt versions
+            const [summarizerResponse, deciderResponse] = await Promise.all([
+                fetch('/api/prompts/SummarizerAgent/active'),
+                fetch('/api/prompts/DeciderAgent/active')
+            ]);
+            
+            if (summarizerResponse.ok && deciderResponse.ok) {
+                const summarizerPrompt = await summarizerResponse.json();
+                const deciderPrompt = await deciderResponse.json();
+                
+                const currentVersions = {
+                    SummarizerAgent: summarizerPrompt.version || summarizerPrompt.prompt_version,
+                    DeciderAgent: deciderPrompt.version || deciderPrompt.prompt_version
+                };
+                
+                // Update the prompt version displays
+                updatePromptVersionDisplays(currentVersions, summarizerPrompt, deciderPrompt);
+                
+                // Check if versions changed (indicating a reset or prompt update)
+                if (Object.keys(lastKnownPromptVersions).length > 0) {
+                    let versionChanged = false;
+                    for (const agent in currentVersions) {
+                        if (lastKnownPromptVersions[agent] !== currentVersions[agent]) {
+                            console.log(`📝 Detected prompt version change for ${agent}: v${lastKnownPromptVersions[agent]} → v${currentVersions[agent]}`);
+                            versionChanged = true;
+                            
+                            // Highlight the changed version
+                            highlightVersionChange(agent, currentVersions[agent]);
+                        }
+                    }
+                    
+                    if (versionChanged) {
+                        // Show notification about reset
+                        showResetNotification();
+                        // Refresh prompt comparison immediately
+                        loadPromptComparison();
+                    }
+                }
+                
+                lastKnownPromptVersions = currentVersions;
+            }
+        } catch (error) {
+            console.error('Error checking for prompt reset:', error);
+        }
+    }
+
+    function updatePromptVersionDisplays(versions, summarizerPrompt, deciderPrompt) {
+        // Update summarizer version
+        const summarizerEl = document.getElementById('summarizerVersion');
+        const summarizerDesc = summarizerPrompt.description || 'Active prompt';
+        summarizerEl.innerHTML = `v${versions.SummarizerAgent}<br><small style="font-size: 12px; opacity: 0.8;">${summarizerDesc}</small>`;
+        
+        // Update decider version
+        const deciderEl = document.getElementById('deciderVersion');
+        const deciderDesc = deciderPrompt.description || 'Active prompt';
+        deciderEl.innerHTML = `v${versions.DeciderAgent}<br><small style="font-size: 12px; opacity: 0.8;">${deciderDesc}</small>`;
+        
+        // Color code based on version (v4 = green baseline, others = blue)
+        const summarizerCard = document.getElementById('summarizerVersionCard');
+        const deciderCard = document.getElementById('deciderVersionCard');
+        
+        summarizerCard.style.backgroundColor = versions.SummarizerAgent === 4 ? '#d4edda' : '#d1ecf1';
+        summarizerCard.style.borderLeft = versions.SummarizerAgent === 4 ? '4px solid #28a745' : '4px solid #17a2b8';
+        
+        deciderCard.style.backgroundColor = versions.DeciderAgent === 4 ? '#d4edda' : '#d1ecf1';
+        deciderCard.style.borderLeft = versions.DeciderAgent === 4 ? '4px solid #28a745' : '4px solid #17a2b8';
+    }
+
+    function highlightVersionChange(agent, newVersion) {
+        const cardId = agent === 'SummarizerAgent' ? 'summarizerVersionCard' : 'deciderVersionCard';
+        const card = document.getElementById(cardId);
+        
+        // Add a brief highlight animation
+        card.style.transition = 'all 0.3s ease';
+        card.style.boxShadow = '0 0 20px rgba(255, 193, 7, 0.8)';
+        card.style.transform = 'scale(1.05)';
+        
+        // Remove highlight after 2 seconds
+        setTimeout(() => {
+            card.style.boxShadow = '';
+            card.style.transform = '';
+        }, 2000);
+    }
+
+    function showResetNotification() {
+        // Create a temporary notification
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            font-weight: bold;
+        `;
+        notification.innerHTML = '🔄 Portfolio reset detected - Prompts updated to v4 baseline';
+        
+        document.body.appendChild(notification);
+        
+        // Remove notification after 5 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 5000);
     }
 
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
         refreshData();
         
-        // Auto-refresh every 30 seconds
-        setInterval(refreshData, 30000);
+        // Auto-refresh every 10 seconds (more frequent to catch resets)
+        setInterval(refreshData, 10000);
     });
 </script>
 {% endblock %}
