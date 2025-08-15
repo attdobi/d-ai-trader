@@ -23,7 +23,7 @@
                 <td>{{ decision.get('action', 'N/A') }}</td>
                 <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
                 <td>{{ decision.get('reason', 'N/A') }}</td>
-                <td>{{ trade.timestamp }}</td>
+                <td class="timestamp-utc" data-timestamp="{{ trade.timestamp }}">{{ trade.timestamp }}</td>
             </tr>
             {% endfor %}
         {% endfor %}
@@ -31,6 +31,37 @@
 </table>
 
 <script>
+// Utility function to convert UTC timestamp to PST
+function formatTimestampToPST(utcTimestamp) {
+    try {
+        const date = new Date(utcTimestamp);
+        const options = {
+            timeZone: 'America/Los_Angeles',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        };
+        const pstString = date.toLocaleString('en-US', options);
+        return pstString + ' PST';
+    } catch (error) {
+        return utcTimestamp; // fallback to original if parsing fails
+    }
+}
+
+// Convert all timestamps to PST
+document.addEventListener('DOMContentLoaded', function() {
+    const timestampElements = document.querySelectorAll('.timestamp-utc');
+    timestampElements.forEach(element => {
+        const utcTimestamp = element.getAttribute('data-timestamp');
+        const pstTimestamp = formatTimestampToPST(utcTimestamp);
+        element.textContent = pstTimestamp;
+    });
+});
+
 // Display current configuration hash
 fetch('/api/configuration')
     .then(response => response.json())
