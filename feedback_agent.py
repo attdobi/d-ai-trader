@@ -865,10 +865,9 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 
                 # Try to get the specific version first
                 result = conn.execute(text("""
-                    SELECT user_prompt, system_prompt, prompt_version, description
-                    FROM ai_agent_prompts 
-                    WHERE agent_type = :agent_type AND prompt_version = :version
-                    ORDER BY prompt_version DESC
+                    SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description
+                    FROM prompt_versions
+                    WHERE agent_type = :agent_type AND version = :version
                     LIMIT 1
                 """), {"agent_type": agent_type, "version": forced_version})
                 
@@ -879,17 +878,17 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                         "user_prompt": row.user_prompt,
                         "system_prompt": row.system_prompt,
                         "prompt_version": row.prompt_version,
+                        "version": row.prompt_version,  # Add both for compatibility
                         "description": row.description
                     }
                 else:
                     print(f"⚠️  Version {forced_version} not found for {agent_type}, falling back to latest")
             
-            # Default behavior: get the latest active prompt
+            # Get the active prompt from the prompt_versions table
             result = conn.execute(text("""
-                SELECT user_prompt, system_prompt, prompt_version, description
-                FROM ai_agent_prompts 
+                SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description
+                FROM prompt_versions
                 WHERE agent_type = :agent_type AND is_active = TRUE
-                ORDER BY prompt_version DESC
                 LIMIT 1
             """), {"agent_type": agent_type})
             
@@ -901,6 +900,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                     "user_prompt": row.user_prompt,
                     "system_prompt": row.system_prompt,
                     "prompt_version": row.prompt_version,
+                    "version": row.prompt_version,  # Add both for compatibility
                     "description": row.description
                 }
             return None
@@ -945,13 +945,12 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         """Get prompt history for an agent type"""
         with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT p.id, p.prompt_version, p.timestamp, p.user_prompt, p.system_prompt, 
-                       p.description, p.is_active, p.created_by, p.triggered_by_feedback_id,
-                       f.ai_response as feedback_response
-                FROM ai_agent_prompts p
-                LEFT JOIN ai_agent_feedback_responses f ON p.triggered_by_feedback_id = f.id
-                WHERE p.agent_type = :agent_type
-                ORDER BY p.prompt_version DESC 
+                SELECT id, version as prompt_version, created_at as timestamp, 
+                       user_prompt_template as user_prompt, system_prompt, 
+                       description, is_active, created_by
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                ORDER BY version DESC 
                 LIMIT :limit
             """), {"agent_type": agent_type, "limit": limit})
             
@@ -966,8 +965,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                     "description": row.description,
                     "is_active": row.is_active,
                     "created_by": row.created_by,
-                    "triggered_by_feedback_id": row.triggered_by_feedback_id,
-                    "feedback_response": row.feedback_response
+                    "triggered_by_feedback_id": None,  # Not used in new system
+                    "feedback_response": None  # Not used in new system
                 })
             
             return prompts

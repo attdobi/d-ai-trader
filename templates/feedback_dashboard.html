@@ -2,6 +2,9 @@
 
 {% block content %}
 <h1>AI Trading Feedback Dashboard</h1>
+<div style="background: #e3f2fd; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 14px;">
+    <strong>📊 Configuration:</strong> <span id="currentConfigHash">Loading...</span>
+</div>
 
 <!-- Current Prompt Versions -->
 <div class="portfolio-summary">
@@ -806,9 +809,26 @@
     // Load data on page load
     document.addEventListener('DOMContentLoaded', function() {
         refreshData();
+        loadConfigInfo();
         
         // Auto-refresh every 10 seconds (more frequent to catch resets)
         setInterval(refreshData, 10000);
     });
+
+    function loadConfigInfo() {
+        // Display current configuration hash
+        fetch('/api/configuration')
+            .then(response => response.json())
+            .then(data => {
+                const configElement = document.getElementById('currentConfigHash');
+                const configHash = data.config_hash || 'Unknown';
+                const model = data.model || 'Unknown';
+                const promptMode = data.prompt_mode || 'Unknown';
+                configElement.innerHTML = `${configHash} (${model}, ${promptMode})`;
+            })
+            .catch(error => {
+                document.getElementById('currentConfigHash').textContent = 'Error loading config';
+            });
+    }
 </script>
 {% endblock %}
