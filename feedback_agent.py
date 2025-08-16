@@ -884,13 +884,17 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 else:
                     print(f"⚠️  Version {forced_version} not found for {agent_type}, falling back to latest")
             
-            # Get the active prompt from the prompt_versions table
+            # Get the active prompt from the prompt_versions table for current config
+            from config import get_current_config_hash
+            config_hash = get_current_config_hash()
+            
             result = conn.execute(text("""
                 SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description
                 FROM prompt_versions
-                WHERE agent_type = :agent_type AND is_active = TRUE
+                WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
+                ORDER BY version DESC
                 LIMIT 1
-            """), {"agent_type": agent_type})
+            """), {"agent_type": agent_type, "config_hash": config_hash})
             
             row = result.fetchone()
             if row:
@@ -939,17 +943,20 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             return version_row.version if version_row else None
     
     def get_prompt_history(self, agent_type, limit=10):
-        """Get prompt history for an agent type"""
+        """Get prompt history for an agent type and current config"""
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+        
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT id, version as prompt_version, created_at as timestamp, 
                        user_prompt_template as user_prompt, system_prompt, 
-                       description, is_active, created_by
+                       description, is_active, created_by, config_hash
                 FROM prompt_versions
-                WHERE agent_type = :agent_type
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
                 ORDER BY version DESC 
                 LIMIT :limit
-            """), {"agent_type": agent_type, "limit": limit})
+            """), {"agent_type": agent_type, "config_hash": config_hash, "limit": limit})
             
             prompts = []
             for row in result:
