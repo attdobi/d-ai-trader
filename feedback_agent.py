@@ -907,39 +907,36 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None):
         """Save a new version of prompts for an agent type"""
-        with engine.begin() as conn:
-            # Get the next version number
+        from prompt_manager import create_new_prompt_version
+        
+        # Map old agent type names to new ones
+        agent_type_mapping = {
+            'summarizer': 'SummarizerAgent',
+            'decider': 'DeciderAgent',
+            'feedback_analyzer': 'FeedbackAgent'
+        }
+        
+        mapped_agent_type = agent_type_mapping.get(agent_type, agent_type)
+        
+        # Use the new prompt versioning system
+        prompt_id = create_new_prompt_version(
+            agent_type=mapped_agent_type,
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt,
+            description=f"{description} (Auto-generated from feedback)",
+            created_by=created_by
+        )
+        
+        print(f"✅ Created new prompt version for {mapped_agent_type} (ID: {prompt_id})")
+        
+        # Get the version number that was created
+        with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT COALESCE(MAX(prompt_version), 0) + 1 as next_version
-                FROM ai_agent_prompts 
-                WHERE agent_type = :agent_type
-            """), {"agent_type": agent_type})
+                SELECT version FROM prompt_versions WHERE id = :id
+            """), {"id": prompt_id})
             
-            next_version = result.fetchone().next_version
-            
-            # Deactivate all existing prompts for this agent
-            conn.execute(text("""
-                UPDATE ai_agent_prompts 
-                SET is_active = FALSE 
-                WHERE agent_type = :agent_type
-            """), {"agent_type": agent_type})
-            
-            # Insert new prompt version
-            conn.execute(text("""
-                INSERT INTO ai_agent_prompts 
-                (agent_type, prompt_version, user_prompt, system_prompt, description, is_active, created_by, triggered_by_feedback_id)
-                VALUES (:agent_type, :prompt_version, :user_prompt, :system_prompt, :description, TRUE, :created_by, :triggered_by_feedback_id)
-            """), {
-                "agent_type": agent_type,
-                "prompt_version": next_version,
-                "user_prompt": user_prompt,
-                "system_prompt": system_prompt,
-                "description": description,
-                "created_by": created_by,
-                "triggered_by_feedback_id": triggered_by_feedback_id
-            })
-            
-            return next_version
+            version_row = result.fetchone()
+            return version_row.version if version_row else None
     
     def get_prompt_history(self, agent_type, limit=10):
         """Get prompt history for an agent type"""
