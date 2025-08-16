@@ -348,50 +348,85 @@ class DAITraderOrchestrator:
                 """), {"run_id": run_id})
     
     def run_feedback_agent(self):
-        """Run the feedback agent for daily analysis"""
-        from config import get_current_config_hash
-        
+        """Run the feedback agent for daily analysis across all active config hashes"""
         run_id = f"feedback_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        config_hash = get_current_config_hash()
-        logger.info(f"Starting feedback agent run: {run_id} (config: {config_hash})")
+        logger.info(f"Starting feedback agent run for all configs: {run_id}")
         
-        try:
-            # Record run start
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    INSERT INTO system_runs (run_type, details)
-                    VALUES ('feedback', :details)
-                """), {
-                    "details": json.dumps({
-                        "run_id": run_id, 
-                        "timestamp": datetime.now().isoformat(),
-                        "config_hash": config_hash
-                    })
-                })
+        # Get all config hashes that have had recent trading activity
+        active_configs = self._get_active_config_hashes()
+        
+        if not active_configs:
+            logger.info("No active config hashes found - skipping feedback")
+            return
             
-            # Run the feedback analysis
-            feedback_tracker = TradeOutcomeTracker()
-            feedback_tracker.analyze_recent_outcomes()
-            
-            logger.info(f"Feedback agent completed successfully: {run_id}")
-            
-            # Update run status
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'completed'
-                    WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
+        logger.info(f"Found {len(active_configs)} active config hashes: {active_configs}")
+        
+        for config_hash in active_configs:
+            try:
+                # Set environment for this config
+                os.environ['CURRENT_CONFIG_HASH'] = config_hash
                 
+                logger.info(f"Running feedback analysis for config {config_hash}")
+                
+                # Record run start for this config
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        INSERT INTO system_runs (run_type, details)
+                        VALUES ('feedback', :details)
+                    """), {
+                        "details": json.dumps({
+                            "run_id": f"{run_id}_{config_hash[:8]}", 
+                            "timestamp": datetime.now().isoformat(),
+                            "config_hash": config_hash
+                        })
+                    })
+                
+                # Run the feedback analysis for this config
+                feedback_tracker = TradeOutcomeTracker()
+                result = feedback_tracker.analyze_recent_outcomes()
+                
+                if result:
+                    logger.info(f"Feedback analysis completed for config {config_hash}")
+                else:
+                    logger.info(f"No feedback analysis needed for config {config_hash}")
+                
+                # Update run status to completed
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE system_runs 
+                        SET end_time = CURRENT_TIMESTAMP, status = 'completed'
+                        WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
+                    """), {"run_id": f"{run_id}_{config_hash[:8]}"})
+                    
+            except Exception as e:
+                logger.error(f"Error running feedback for config {config_hash}: {e}")
+                # Update run status to failed
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE system_runs 
+                        SET end_time = CURRENT_TIMESTAMP, status = 'failed'
+                        WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
+                    """), {"run_id": f"{run_id}_{config_hash[:8]}"})
+        
+        logger.info(f"Feedback agent run completed for all configs: {run_id}")
+    
+    def _get_active_config_hashes(self):
+        """Get config hashes that have had recent trading activity"""
+        try:
+            with engine.connect() as conn:
+                # Get config hashes that have had trades in the last 2 days
+                result = conn.execute(text("""
+                    SELECT DISTINCT config_hash
+                    FROM trade_decisions 
+                    WHERE timestamp >= NOW() - INTERVAL '2 days'
+                      AND config_hash IS NOT NULL
+                    ORDER BY config_hash
+                """))
+                
+                return [row.config_hash for row in result]
         except Exception as e:
-            logger.error(f"Error running feedback agent: {e}")
-            # Update run status to failed
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'failed'
-                    WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
+            logger.error(f"Error getting active config hashes: {e}")
+            return []
     
     def scheduled_summarizer_job(self):
         """Scheduled job for summarizer agents"""
