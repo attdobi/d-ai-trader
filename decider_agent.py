@@ -1260,7 +1260,32 @@ Make 1-3 specific trades. Return a JSON array with:
     
     return ai_response
 
+def extract_decision_info_from_text(text_content):
+    """Try to extract decision info from malformed text responses"""
+    import re
+    
+    # Look for common patterns like "buy AAPL", "sell TSLA", etc.
+    action_pattern = r'\b(buy|sell|hold)\s+([A-Z]{1,5})\b'
+    amount_pattern = r'\$(\d+(?:,\d{3})*(?:\.\d{2})?)'
+    
+    matches = re.findall(action_pattern, str(text_content), re.IGNORECASE)
+    amounts = re.findall(amount_pattern, str(text_content))
+    
+    if matches:
+        action, ticker = matches[0]
+        amount = float(amounts[0].replace(',', '')) if amounts else 1000
+        return {
+            "action": action.lower(),
+            "ticker": ticker.upper(),
+            "amount_usd": amount,
+            "reason": f"Extracted from malformed response: {str(text_content)[:100]}..."
+        }
+    return None
+
 def store_trade_decisions(decisions, run_id):
+    config_hash = get_current_config_hash()
+    print(f"🔍 Storing decisions for {config_hash}: {decisions}")
+    
     # Filter out error responses before storing
     valid_decisions = []
     for decision in decisions:
@@ -1270,19 +1295,39 @@ def store_trade_decisions(decisions, run_id):
         if isinstance(decision, dict) and decision.get('action') and decision.get('ticker'):
             valid_decisions.append(decision)
         else:
-            print(f"⚠️  Skipping invalid decision format: {decision}")
+            print(f"⚠️  Invalid decision format: {decision}")
+            # Try to extract info from malformed decision
+            extracted = extract_decision_info_from_text(decision)
+            if extracted:
+                print(f"✅ Extracted: {extracted}")
+                valid_decisions.append(extracted)
     
     # Only store if we have valid decisions
     if not valid_decisions:
         print("❌ No valid trade decisions to store - AI response was malformed")
-        # Store a proper N/A decision if market is closed
-        if not is_market_open():
-            valid_decisions = [{
-                "action": "N/A",
-                "ticker": "N/A", 
+        # Try to extract info from the entire response text
+        print(f"📋 Attempting to extract from full response: {decisions}")
+        extracted_from_full = extract_decision_info_from_text(str(decisions))
+        
+        if extracted_from_full:
+            print(f"✅ Extracted from full response: {extracted_from_full}")
+            # If market is closed, modify the reason
+            if not is_market_open():
+                extracted_from_full["reason"] = f"Market closed - execution deferred. {extracted_from_full['reason']}"
+            valid_decisions = [extracted_from_full]
+        else:
+            # Absolute fallback
+            fallback_decision = {
+                "action": "hold",
+                "ticker": "SPY",  # Use SPY instead of UNKNOWN
                 "amount_usd": 0,
-                "reason": "Market is closed - no trading action taken"
-            }]
+                "reason": "AI response was completely unparseable - defaulting to hold SPY"
+            }
+            
+            if not is_market_open():
+                fallback_decision["reason"] = "Market is closed - no trading action taken (AI response was unparseable)"
+            
+            valid_decisions = [fallback_decision]
     
     with engine.begin() as conn:
         conn.execute(text("""
