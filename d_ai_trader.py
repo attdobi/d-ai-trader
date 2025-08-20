@@ -352,6 +352,11 @@ class DAITraderOrchestrator:
         run_id = f"feedback_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Starting feedback agent run for all configs: {run_id}")
         
+        # PRESERVE the original configuration hash set during startup
+        from config import get_current_config_hash
+        original_config_hash = get_current_config_hash()
+        logger.info(f"Original configuration hash: {original_config_hash}")
+        
         # Get all config hashes that have had recent trading activity
         active_configs = self._get_active_config_hashes()
         
@@ -363,9 +368,6 @@ class DAITraderOrchestrator:
         
         for config_hash in active_configs:
             try:
-                # Set environment for this config
-                os.environ['CURRENT_CONFIG_HASH'] = config_hash
-                
                 logger.info(f"Running feedback analysis for config {config_hash}")
                 
                 # Record run start for this config
@@ -381,9 +383,10 @@ class DAITraderOrchestrator:
                         })
                     })
                 
-                # Run the feedback analysis for this config
+                # Run the feedback analysis for this specific config
+                # WITHOUT changing the global configuration hash
                 feedback_tracker = TradeOutcomeTracker()
-                result = feedback_tracker.analyze_recent_outcomes()
+                result = feedback_tracker.analyze_recent_outcomes_for_config(config_hash)
                 
                 if result:
                     logger.info(f"Feedback analysis completed for config {config_hash}")
@@ -408,6 +411,9 @@ class DAITraderOrchestrator:
                         WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
                     """), {"run_id": f"{run_id}_{config_hash[:8]}"})
         
+        # RESTORE the original configuration hash
+        os.environ['CURRENT_CONFIG_HASH'] = original_config_hash
+        logger.info(f"Restored original configuration hash: {original_config_hash}")
         logger.info(f"Feedback agent run completed for all configs: {run_id}")
     
     def _get_active_config_hashes(self):

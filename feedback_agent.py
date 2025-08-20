@@ -196,6 +196,10 @@ class TradeOutcomeTracker:
         """Analyze recent trade outcomes and generate feedback"""
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
+        return self.analyze_recent_outcomes_for_config(config_hash, days_back)
+    
+    def analyze_recent_outcomes_for_config(self, config_hash, days_back=FEEDBACK_LOOKBACK_DAYS):
+        """Analyze recent trade outcomes and generate feedback for a specific config"""
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         with engine.connect() as conn:
@@ -215,9 +219,9 @@ class TradeOutcomeTracker:
             outcomes = [dict(row._mapping) for row in result]
         
         if not outcomes:
-            print("No completed trades to analyze - checking decision patterns instead")
+            print(f"No completed trades to analyze for config {config_hash} - checking decision patterns instead")
             # If no completed trades, analyze decision patterns
-            return self._analyze_decision_patterns(days_back, config_hash)
+            return self._analyze_decision_patterns_for_config(days_back, config_hash)
         
         # Calculate metrics
         total_trades = len(outcomes)
@@ -229,14 +233,14 @@ class TradeOutcomeTracker:
         analysis = self._analyze_patterns(outcomes)
         
         # Generate AI feedback
-        feedback = self._generate_ai_feedback(outcomes, success_rate, avg_profit, analysis)
+        feedback = self._generate_ai_feedback_for_config(outcomes, success_rate, avg_profit, analysis, config_hash)
         
         # Store feedback
-        feedback_id = self._store_feedback(days_back, total_trades, success_rate, 
-                                         avg_profit, analysis, feedback)
+        feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
+                                                    avg_profit, analysis, feedback, config_hash)
         
-        # Automatically create new prompts based on feedback
-        self._auto_generate_prompts_from_feedback(feedback, feedback_id)
+        # Automatically create new prompts based on feedback for this config
+        self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
         
         return {
             "feedback_id": feedback_id,
@@ -466,6 +470,55 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                 })
             
             return trades
+
+    def _generate_ai_feedback_for_config(self, outcomes, success_rate, avg_profit, analysis, config_hash):
+        """Generate AI feedback for a specific config without changing global state"""
+        return self._generate_ai_feedback(outcomes, success_rate, avg_profit, analysis)
+    
+    def _store_feedback_for_config(self, lookback_days, total_trades, success_rate, avg_profit, analysis, feedback, config_hash):
+        """Store feedback for a specific config"""
+        with engine.begin() as conn:
+            result = conn.execute(text("""
+                INSERT INTO agent_feedback 
+                (config_hash, lookback_period_days, total_trades_analyzed, success_rate, avg_profit_percentage,
+                 top_performing_patterns, underperforming_patterns, recommended_adjustments,
+                 summarizer_feedback, decider_feedback)
+                VALUES (:config_hash, :lookback_days, :total_trades, :success_rate, :avg_profit,
+                        :top_patterns, :under_patterns, :adjustments, :summarizer_fb, :decider_fb)
+                RETURNING id
+            """), {
+                "config_hash": config_hash,
+                "lookback_days": lookback_days,
+                "total_trades": total_trades,
+                "success_rate": success_rate,
+                "avg_profit": avg_profit,
+                "top_patterns": json.dumps(analysis["successful_reasons"]),
+                "under_patterns": json.dumps(analysis["unsuccessful_reasons"]),
+                "adjustments": json.dumps(feedback),
+                "summarizer_fb": json.dumps(feedback.get("summarizer_feedback", "")),
+                "decider_fb": json.dumps(feedback.get("decider_feedback", ""))
+            })
+            return result.fetchone()[0]
+    
+    def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
+        """Generate prompts for a specific config without changing global state"""
+        # Temporarily set the config hash for prompt generation
+        import os
+        original_hash = os.environ.get('CURRENT_CONFIG_HASH')
+        os.environ['CURRENT_CONFIG_HASH'] = config_hash
+        
+        try:
+            self._auto_generate_prompts_from_feedback(feedback, feedback_id)
+        finally:
+            # Restore original hash
+            if original_hash:
+                os.environ['CURRENT_CONFIG_HASH'] = original_hash
+            elif 'CURRENT_CONFIG_HASH' in os.environ:
+                del os.environ['CURRENT_CONFIG_HASH']
+    
+    def _analyze_decision_patterns_for_config(self, days_back, config_hash):
+        """Analyze decision patterns for a specific config"""
+        return self._analyze_decision_patterns(days_back, config_hash)
 
     def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis):
         """Use AI to generate feedback for improving agent performance"""
