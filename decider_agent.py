@@ -74,12 +74,16 @@ def mark_summaries_processed(summary_ids):
     """Mark summaries as processed by the decider"""
     with engine.begin() as conn:
         for summary_id in summary_ids:
+            # Use Pacific time for run_id consistency
+            pacific_now = datetime.now(PACIFIC_TIMEZONE)
+            run_id_timestamp = pacific_now.strftime("%Y%m%dT%H%M%S")
+            
             conn.execute(text("""
                 INSERT INTO processed_summaries (summary_id, processed_by, run_id)
                 VALUES (:summary_id, 'decider', :run_id)
             """), {
                 "summary_id": summary_id,
-                "run_id": datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+                "run_id": run_id_timestamp
             })
 
 def update_all_current_prices():
@@ -493,7 +497,9 @@ def execute_real_world_trade(decision):
         return False
 
 def update_holdings(decisions):
-    timestamp = datetime.utcnow()
+    # Use Pacific time converted to UTC for consistency
+    pacific_now = datetime.now(PACIFIC_TIMEZONE)
+    timestamp = pacific_now.astimezone(pytz.UTC).replace(tzinfo=None)
     skipped_decisions = []
     trading_mode = get_trading_mode()
     config_hash = get_current_config_hash()
@@ -864,7 +870,9 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
         })
 
     if skipped_decisions:
-        run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+        # Use Pacific time for run_id consistency
+        pacific_now = datetime.now(PACIFIC_TIMEZONE)
+        run_id = pacific_now.strftime("%Y%m%dT%H%M%S")
         store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
         print(f"Stored {len(skipped_decisions)} skipped decisions due to price/data issues")
 
@@ -1329,6 +1337,12 @@ def store_trade_decisions(decisions, run_id):
             
             valid_decisions = [fallback_decision]
     
+    # Get current Pacific time and convert to UTC for storage
+    pacific_now = datetime.now(PACIFIC_TIMEZONE)
+    utc_timestamp = pacific_now.astimezone(pytz.UTC).replace(tzinfo=None)
+    
+    print(f"🕐 Storing timestamp: {pacific_now.strftime('%Y-%m-%d %H:%M:%S %Z')} → {utc_timestamp} UTC")
+    
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
@@ -1343,7 +1357,7 @@ def store_trade_decisions(decisions, run_id):
             INSERT INTO trade_decisions (run_id, timestamp, data, config_hash) VALUES (:run_id, :timestamp, :data, :config_hash)
         """), {
             "run_id": run_id,
-            "timestamp": datetime.utcnow(),
+            "timestamp": utc_timestamp,
             "data": json.dumps(valid_decisions),
             "config_hash": get_current_config_hash()
         })
@@ -1362,7 +1376,8 @@ if __name__ == "__main__":
             print(f"Failed to record initial snapshot: {e}")
         
         # Create empty run and proceed to decision making (will record N/A if market closed)
-        run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%S") + "_no_summaries"
+        pacific_now = datetime.now(PACIFIC_TIMEZONE)
+        run_id = pacific_now.strftime("%Y%m%dT%H%M%S") + "_no_summaries"
         unprocessed_summaries = []  # Empty list will trigger market status check
     else:
         print(f"Found {len(unprocessed_summaries)} unprocessed summaries")

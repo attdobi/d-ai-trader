@@ -34,7 +34,18 @@
 // Utility function to convert UTC timestamp to PST
 function formatTimestampToPST(utcTimestamp) {
     try {
-        const date = new Date(utcTimestamp);
+        // The timestamp from database is in UTC but doesn't have timezone info
+        // We need to explicitly treat it as UTC
+        let date;
+        
+        if (utcTimestamp.includes('T')) {
+            // ISO format: 2025-08-20T19:00:23.503962
+            date = new Date(utcTimestamp + 'Z'); // Add Z to indicate UTC
+        } else {
+            // Space format: 2025-08-20 19:00:23.503962
+            date = new Date(utcTimestamp.replace(' ', 'T') + 'Z'); // Convert to ISO and add Z
+        }
+        
         const options = {
             timeZone: 'America/Los_Angeles',
             year: 'numeric',
@@ -48,6 +59,7 @@ function formatTimestampToPST(utcTimestamp) {
         const pstString = date.toLocaleString('en-US', options);
         return pstString + ' PST';
     } catch (error) {
+        console.error('Timestamp conversion error:', error, 'for timestamp:', utcTimestamp);
         return utcTimestamp; // fallback to original if parsing fails
     }
 }
@@ -68,9 +80,18 @@ fetch('/api/configuration')
     .then(data => {
         const configElement = document.getElementById('currentConfigHash');
         const configHash = data.config_hash || 'Unknown';
-        const model = data.model || 'Unknown';
-        const promptMode = data.prompt_mode || 'Unknown';
-        configElement.innerHTML = `${configHash} (${model}, ${promptMode})`;
+        const model = data.gpt_model || 'Unknown';
+        const promptMode = data.prompt_config?.mode || 'Unknown';
+        const promptVersions = data.prompt_versions || {};
+        
+        let promptDisplay;
+        if (promptMode === 'auto') {
+            promptDisplay = `AUTO (v${promptVersions.summarizer_version || 0}/v${promptVersions.decider_version || 0})`;
+        } else {
+            promptDisplay = `FIXED v${data.prompt_config?.forced_version || 0}`;
+        }
+        
+        configElement.innerHTML = `${configHash} (${model}, ${promptDisplay})`;
     })
     .catch(error => {
         document.getElementById('currentConfigHash').textContent = 'Error loading config';
