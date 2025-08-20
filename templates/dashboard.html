@@ -40,7 +40,7 @@
             <h4>Prompt Mode</h4>
             <p class="config-value">
                 {% if current_config.prompt_config.mode == 'auto' %}
-                    AUTO (Latest)
+                    AUTO (v{{ current_config.prompt_versions.summarizer_version }}/v{{ current_config.prompt_versions.decider_version }})
                 {% else %}
                     FIXED v{{ current_config.prompt_config.forced_version }}
                 {% endif %}

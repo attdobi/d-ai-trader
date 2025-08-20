@@ -124,12 +124,26 @@ def dashboard():
         # Calculate percentage gain on invested amount (excluding cash)
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
 
-        # Get current system configuration
+        # Get current system configuration with prompt versions
+        try:
+            tracker = TradeOutcomeTracker()
+            summarizer_prompt = tracker.get_active_prompt('SummarizerAgent')
+            decider_prompt = tracker.get_active_prompt('DeciderAgent')
+            
+            prompt_versions = {
+                'summarizer_version': summarizer_prompt['version'] if summarizer_prompt else 0,
+                'decider_version': decider_prompt['version'] if decider_prompt else 0
+            }
+        except Exception as e:
+            print(f"Error getting prompt versions: {e}")
+            prompt_versions = {'summarizer_version': 0, 'decider_version': 0}
+        
         current_config = {
             'gpt_model': get_gpt_model(),
             'prompt_config': get_prompt_version_config(),
             'trading_mode': get_trading_mode(),
-            'config_hash': get_current_config_hash()
+            'config_hash': get_current_config_hash(),
+            'prompt_versions': prompt_versions
         }
 
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
@@ -255,11 +269,26 @@ def summaries():
 def api_configuration():
     """Get current system configuration"""
     try:
+        # Get current prompt versions
+        try:
+            tracker = TradeOutcomeTracker()
+            summarizer_prompt = tracker.get_active_prompt('SummarizerAgent')
+            decider_prompt = tracker.get_active_prompt('DeciderAgent')
+            
+            prompt_versions = {
+                'summarizer_version': summarizer_prompt['version'] if summarizer_prompt else 0,
+                'decider_version': decider_prompt['version'] if decider_prompt else 0
+            }
+        except Exception as e:
+            print(f"Error getting prompt versions: {e}")
+            prompt_versions = {'summarizer_version': 0, 'decider_version': 0}
+        
         current_config = {
             'gpt_model': get_gpt_model(),
             'prompt_config': get_prompt_version_config(),
             'trading_mode': get_trading_mode(),
-            'config_hash': get_current_config_hash()
+            'config_hash': get_current_config_hash(),
+            'prompt_versions': prompt_versions
         }
         return jsonify(current_config)
     except Exception as e:
