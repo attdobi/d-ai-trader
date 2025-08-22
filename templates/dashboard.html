@@ -845,6 +845,52 @@
             button.disabled = false;
         });
     }
+
+    function resetPrompts() {
+        // Show confirmation dialog
+        if (!confirm('Are you sure you want to reset prompts to v0? This will:\n\n• Reset both Summarizer and Decider prompts to v0 baseline\n• Deactivate all higher prompt versions\n• Only affect AUTO mode configurations\n\nFIXED mode configurations will not be changed.')) {
+            return;
+        }
+        
+        const statusDiv = document.getElementById('reset-prompts-status');
+        const button = document.querySelector('.reset-container button[onclick="resetPrompts()"]');
+        
+        // Show loading state
+        statusDiv.innerHTML = '🔄 Resetting prompts to v0...';
+        statusDiv.className = 'reset-status-small loading';
+        button.disabled = true;
+        
+        // Make API call
+        fetch('/api/reset-prompts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusDiv.innerHTML = `✅ ${data.message}`;
+                statusDiv.className = 'reset-status-small success';
+                
+                // Refresh the page after a short delay to show updated data
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                statusDiv.innerHTML = `❌ Error: ${data.error}`;
+                statusDiv.className = 'reset-status-small error';
+            }
+        })
+        .catch(error => {
+            statusDiv.innerHTML = `❌ Network error: ${error.message}`;
+            statusDiv.className = 'reset-status-small error';
+        })
+        .finally(() => {
+            // Re-enable button
+            button.disabled = false;
+        });
+    }
 </script>
 
 <!-- Price Update Button -->
@@ -863,5 +909,14 @@
         Reset Portfolio
     </button>
     <div id="reset-status" class="reset-status-small"></div>
+</div>
+
+<!-- Reset Prompts Button -->
+<div class="reset-container">
+    <button class="reset-btn-small" onclick="resetPrompts()" style="background: #ffc107; border-color: #ffc107; color: #212529;">
+        <span class="btn-icon">📝</span>
+        Reset Prompts to v0
+    </button>
+    <div id="reset-prompts-status" class="reset-status-small"></div>
 </div>
 {% endblock %}

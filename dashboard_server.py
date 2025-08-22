@@ -859,6 +859,65 @@ def get_run_status():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+@app.route('/api/reset-prompts', methods=['POST'])
+def reset_prompts():
+    """Reset prompts to v0 baseline for AUTO mode configurations"""
+    try:
+        config_hash = get_current_config_hash()
+        
+        # Check if this config is in AUTO mode
+        with engine.connect() as conn:
+            config_result = conn.execute(text("""
+                SELECT prompt_mode, forced_prompt_version
+                FROM run_configurations
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchone()
+            
+            if not config_result:
+                return jsonify({'error': 'Configuration not found'}), 400
+                
+            if config_result.prompt_mode != 'auto':
+                return jsonify({
+                    'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
+                }), 400
+        
+        with engine.begin() as conn:
+            # Deactivate all prompt versions first
+            conn.execute(text("""
+                UPDATE prompt_versions 
+                SET is_active = FALSE
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+            
+            # Activate only v0 prompts
+            updated_prompts = conn.execute(text("""
+                UPDATE prompt_versions 
+                SET is_active = TRUE
+                WHERE config_hash = :config_hash AND version = 0
+            """), {"config_hash": config_hash})
+            
+            if updated_prompts.rowcount == 0:
+                return jsonify({'error': 'No v0 baseline prompts found for this configuration'}), 400
+            
+            # Get the updated prompt versions for confirmation
+            active_prompts = conn.execute(text("""
+                SELECT agent_type, version
+                FROM prompt_versions
+                WHERE config_hash = :config_hash AND is_active = TRUE
+                ORDER BY agent_type
+            """), {"config_hash": config_hash}).fetchall()
+            
+            prompt_info = {row.agent_type: row.version for row in active_prompts}
+            
+            return jsonify({
+                'success': True,
+                'message': f'Prompts reset to v0 baseline. Summarizer: v{prompt_info.get("SummarizerAgent", "?")}, Decider: v{prompt_info.get("DeciderAgent", "?")}',
+                'prompt_versions': prompt_info
+            })
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/reset-portfolio', methods=['POST'])
 def reset_portfolio():
     """Reset portfolio to initial state with $10,000 cash"""
