@@ -768,12 +768,16 @@ def trigger_all():
         # Run all agents in sequence in a separate thread
         def run_all():
             try:
+                # Use the SAME config hash that's displayed on the website
+                # This was set when the .sh script started and should never change
+                thread_config_hash = config_hash  # Use the hash from the outer scope
+                
                 # Ensure config hash is available in this thread
                 import os
-                os.environ['CURRENT_CONFIG_HASH'] = config_hash
+                os.environ['CURRENT_CONFIG_HASH'] = thread_config_hash
                 
                 print("🚀 Starting manual run of all agents...")
-                print(f"🔧 Config hash in thread: {config_hash}")
+                print(f"🔧 Config hash in thread: {thread_config_hash} (from website display)")
                 
                 # 1. Run summarizer
                 print("📰 Step 1/3: Running summarizer agents...")
@@ -803,8 +807,6 @@ def trigger_all():
                 
                 # Store the error in the database so we can see it
                 try:
-                    from config import get_current_config_hash
-                    config_hash = get_current_config_hash()
                     with engine.begin() as conn:
                         conn.execute(text("""
                             INSERT INTO system_runs (run_type, status, details)
@@ -812,7 +814,7 @@ def trigger_all():
                         """), {
                             "details": json.dumps({
                                 "error": str(e),
-                                "config_hash": config_hash,
+                                "config_hash": thread_config_hash,
                                 "timestamp": datetime.now().isoformat()
                             })
                         })
