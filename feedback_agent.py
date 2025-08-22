@@ -344,6 +344,9 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     for i, insight in enumerate(historical_decider[:3], 1):
                         historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
                 
+                # Import trading constants for prompt formatting
+                from decider_agent import MAX_TRADES, MAX_FUNDS, MIN_BUFFER
+                
                 new_decider_user = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
 LATEST PERFORMANCE FEEDBACK: {decider_feedback}{historical_context}
@@ -353,8 +356,8 @@ SPECIFIC INSIGHTS TO APPLY:
 - Risk Management: {feedback.get('risk_management', 'Implement strict risk controls')}
 - Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}
 
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {{MAX_TRADES}} total trades, never allocate more than ${{MAX_FUNDS - MIN_BUFFER}} total.
-Retain at least ${{MIN_BUFFER}} in funds.'''
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+Retain at least ${MIN_BUFFER} in funds.'''
 
                 new_decider_system = f'''You are an aggressive day trading AI focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.
 
@@ -502,12 +505,25 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
     
     def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
         """Generate prompts for a specific config without changing global state"""
+        # Check if this config is in FIXED mode - if so, don't auto-update prompts
+        with engine.connect() as conn:
+            config_result = conn.execute(text("""
+                SELECT prompt_mode, forced_prompt_version
+                FROM run_configurations
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchone()
+            
+            if config_result and config_result.prompt_mode == 'fixed':
+                print(f"🔒 Config {config_hash} is in FIXED v{config_result.forced_prompt_version} mode - skipping auto-prompt updates")
+                return
+        
         # Temporarily set the config hash for prompt generation
         import os
         original_hash = os.environ.get('CURRENT_CONFIG_HASH')
         os.environ['CURRENT_CONFIG_HASH'] = config_hash
         
         try:
+            print(f"🔄 Config {config_hash} is in AUTO mode - generating updated prompts from feedback")
             self._auto_generate_prompts_from_feedback(feedback, feedback_id)
         finally:
             # Restore original hash
