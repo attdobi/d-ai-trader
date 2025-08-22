@@ -112,19 +112,33 @@ def get_active_prompt(agent_type):
                 raise ValueError(f"No prompts found for {agent_type}")
 
 def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system"):
-    """Create a new prompt version for the current config"""
+    """Create a new prompt version for the current config, reusing version numbers when possible"""
     from config import get_current_config_hash
     config_hash = get_current_config_hash()
     
     with engine.begin() as conn:
-        # Get the next version number for this config
-        result = conn.execute(text("""
-            SELECT COALESCE(MAX(version), 0) + 1 as next_version
+        # Check if we should reuse version numbers (when resetting from v0)
+        current_active = conn.execute(text("""
+            SELECT version
             FROM prompt_versions
-            WHERE agent_type = :agent_type AND config_hash = :config_hash
+            WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
         """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
         
-        next_version = result.next_version
+        # If currently at v0, reuse v1 instead of creating v4, v5, etc.
+        if current_active and current_active.version == 0:
+            # We're evolving from v0, so use v1 (overwrite if it exists)
+            target_version = 1
+            print(f"🔄 Evolving from v0 → reusing v{target_version} for {agent_type}")
+        else:
+            # Get the next version number for this config
+            result = conn.execute(text("""
+                SELECT COALESCE(MAX(version), 0) + 1 as next_version
+                FROM prompt_versions
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
+            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
+            
+            target_version = result.next_version
+            print(f"📈 Creating new version v{target_version} for {agent_type}")
         
         # Deactivate current prompts for this config
         conn.execute(text("""
@@ -133,22 +147,50 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             WHERE agent_type = :agent_type AND config_hash = :config_hash
         """), {"agent_type": agent_type, "config_hash": config_hash})
         
-        # Insert new version
-        result = conn.execute(text("""
-            INSERT INTO prompt_versions
-            (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
-            VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :description, :created_by, TRUE, :config_hash)
-            RETURNING id, version
-        """), {
-            "agent_type": agent_type,
-            "version": next_version,
-            "system_prompt": system_prompt,
-            "user_prompt_template": user_prompt_template,
-            "description": description,
-            "created_by": created_by,
-            "config_hash": config_hash
-        })
+        # Check if target version already exists - if so, update it; if not, insert it
+        existing_version = conn.execute(text("""
+            SELECT id FROM prompt_versions
+            WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
+        """), {"agent_type": agent_type, "config_hash": config_hash, "version": target_version}).fetchone()
         
-        new_prompt = result.fetchone()
-        print(f"✅ Created {agent_type} v{new_prompt.version} for config {config_hash[:8]}")
-        return new_prompt.id
+        if existing_version:
+            # Update existing version
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET system_prompt = :system_prompt,
+                    user_prompt_template = :user_prompt_template,
+                    description = :description,
+                    created_by = :created_by,
+                    is_active = TRUE,
+                    created_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            """), {
+                "system_prompt": system_prompt,
+                "user_prompt_template": user_prompt_template,
+                "description": description,
+                "created_by": created_by,
+                "id": existing_version.id
+            })
+            
+            print(f"✅ Updated {agent_type} v{target_version} for config {config_hash[:8]} (overwritten)")
+            return existing_version.id
+        else:
+            # Insert new version
+            result = conn.execute(text("""
+                INSERT INTO prompt_versions
+                (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
+                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :description, :created_by, TRUE, :config_hash)
+                RETURNING id, version
+            """), {
+                "agent_type": agent_type,
+                "version": target_version,
+                "system_prompt": system_prompt,
+                "user_prompt_template": user_prompt_template,
+                "description": description,
+                "created_by": created_by,
+                "config_hash": config_hash
+            })
+            
+            new_prompt = result.fetchone()
+            print(f"✅ Created {agent_type} v{new_prompt.version} for config {config_hash[:8]} (new)")
+            return new_prompt.id
