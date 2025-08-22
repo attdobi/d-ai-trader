@@ -299,8 +299,33 @@ class TradeOutcomeTracker:
                     for i, insight in enumerate(historical_summarizer[:3], 1):
                         historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
                 
-                new_summarizer_user = f'''You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages.
+                # FIXED TEMPLATE COMPONENTS (never change)
+                SUMMARIZER_BASE_INSTRUCTIONS = '''Analyze the following financial news and extract the most important actionable insights. Focus on:
+1. Major market-moving events
+2. Company-specific news that could impact stock prices
+3. Sector trends and momentum shifts
+4. Risk factors and warnings'''
 
+                SUMMARIZER_JSON_FORMAT = '''{{feedback_context}}
+
+Content: {{content}}
+
+🚨 CRITICAL JSON REQUIREMENT:
+Return ONLY valid JSON in this EXACT format:
+{{{{
+    "headlines": ["headline 1", "headline 2", "headline 3"],
+    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
+}}}}
+
+⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
+✅ ONLY pure JSON starting with {{{{ and ending with }}}}'''
+
+                SUMMARIZER_SYSTEM_BASE = '''You are a financial analysis assistant specialized in extracting actionable trading insights from news articles. Focus on concrete, time-sensitive information that could impact stock prices in the next 1-5 days.
+
+🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string as specified in the user prompt.'''
+
+                # MODIFIABLE COMPONENTS (updated based on feedback)
+                performance_guidance = f'''
 LATEST PERFORMANCE FEEDBACK: {summarizer_feedback}{historical_context}
 
 SPECIFIC INSIGHTS TO APPLY:
@@ -310,15 +335,16 @@ SPECIFIC INSIGHTS TO APPLY:
 
 Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation. Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
 
-Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.
+Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.'''
 
-You must ALWAYS respond with valid JSON format as specified in the prompt.'''
+                # COMBINE: Fixed template + Modifiable feedback + Fixed format
+                new_summarizer_user = f'''{SUMMARIZER_BASE_INSTRUCTIONS}
 
-                new_summarizer_system = f'''You are a financial summary agent helping a trading system. Your job is to extract concise and actionable insights from financial news pages.
-Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation
-Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
-Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.
-You must ALWAYS respond with valid JSON format as specified in the prompt.
+{performance_guidance}
+
+{SUMMARIZER_JSON_FORMAT}'''
+
+                new_summarizer_system = f'''{SUMMARIZER_SYSTEM_BASE}
 
 INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
 {summarizer_feedback}'''
@@ -328,10 +354,10 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     'summarizer', 
                     new_summarizer_user, 
                     new_summarizer_system,
-                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements',
+                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements with fixed JSON format',
                     'feedback_automation'
                 )
-                print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback')
+                print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback (with fixed JSON format)')
             
             if decider_feedback:
                 # Get historical feedback for context
@@ -347,19 +373,29 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                 # Import trading constants for prompt formatting
                 from decider_agent import MAX_TRADES, MAX_FUNDS, MIN_BUFFER
                 
-                new_decider_user = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+                # FIXED TEMPLATE COMPONENTS (never change)
+                DECIDER_BASE_INSTRUCTIONS = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+Retain at least ${MIN_BUFFER} in funds.'''
+
+                DECIDER_SYSTEM_BASE = '''You are an aggressive day trading AI focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
+
+                # MODIFIABLE COMPONENTS (updated based on feedback)
+                performance_guidance = f'''
 LATEST PERFORMANCE FEEDBACK: {decider_feedback}{historical_context}
 
 SPECIFIC INSIGHTS TO APPLY:
 - Timing Patterns: {feedback.get('timing_patterns', 'Focus on optimal entry/exit timing')}
 - Risk Management: {feedback.get('risk_management', 'Implement strict risk controls')}
-- Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}
+- Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}'''
 
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
-Retain at least ${MIN_BUFFER} in funds.'''
+                # COMBINE: Fixed template + Modifiable feedback
+                new_decider_user = f'''{DECIDER_BASE_INSTRUCTIONS}
 
-                new_decider_system = f'''You are an aggressive day trading AI focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.
+{performance_guidance}'''
+
+                new_decider_system = f'''{DECIDER_SYSTEM_BASE}
 
 INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
 {decider_feedback}'''
@@ -369,10 +405,10 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     'decider',
                     new_decider_user, 
                     new_decider_system,
-                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements',
+                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements with fixed format',
                     'feedback_automation'
                 )
-                print(f'✅ Auto-generated new decider prompt v{decider_version} from feedback')
+                print(f'✅ Auto-generated new decider prompt v{decider_version} from feedback (with fixed format)')
         
         except Exception as e:
             print(f"⚠️  Error auto-generating prompts from feedback: {e}")
