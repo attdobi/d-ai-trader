@@ -320,7 +320,7 @@ Return ONLY valid JSON in this EXACT format:
 ⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
 ✅ ONLY pure JSON starting with {{{{ and ending with }}}}'''
 
-                SUMMARIZER_SYSTEM_BASE = '''You are a financial analysis assistant specialized in extracting actionable trading insights from news articles. Focus on concrete, time-sensitive information that could impact stock prices in the next 1-5 days.
+                SUMMARIZER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You specialize in analyzing financial news articles and extracting actionable trading insights. Focus on concrete, time-sensitive information that could impact stock prices in the next 1-5 days.
 
 🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string as specified in the user prompt.'''
 
@@ -379,7 +379,7 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
 Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
 Retain at least ${MIN_BUFFER} in funds.'''
 
-                DECIDER_SYSTEM_BASE = '''You are an aggressive day trading AI focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
+                DECIDER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
 
                 # MODIFIABLE COMPONENTS (updated based on feedback)
                 performance_guidance = f'''

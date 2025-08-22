@@ -352,11 +352,22 @@ class PromptManager:
                     # Add response_format for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
                     
-                    # For GPT-5, simplify the system prompt to be compatible with JSON mode
-                    messages[0]["content"] = "You are a helpful assistant that responds in JSON format."
+                    # For GPT-5, ensure the system prompt starts with proper trading focus
+                    original_system = messages[0]["content"]
+                    
+                    # Ensure system prompt starts with the correct trading-focused introduction
+                    if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
+                        # Prepend the proper trading-focused system prompt
+                        enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
+                    else:
+                        enhanced_system = original_system
+                    
+                    # Add JSON emphasis while preserving all trading instructions
+                    messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown, just pure JSON."
                     
                     # Debug: Print token params for GPT-5
                     print(f"📊 GPT-5 token params: {token_params}")
+                    print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
                 
                 response = self.client.chat.completions.create(**api_params)
                 choice = response.choices[0]
