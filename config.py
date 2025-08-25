@@ -234,14 +234,42 @@ def initialize_configuration_hash():
     return config_hash
 
 def get_current_config_hash():
-    """Get the current configuration hash from environment or generate new one"""
+    """Get the current configuration hash from environment or find existing one"""
     # First try to get from environment variable (process-specific)
     config_hash = os.environ.get('CURRENT_CONFIG_HASH')
     if config_hash:
         return config_hash
     
-    # If not in environment, generate based on current settings
-    print("⚠️  Config hash not found in environment, generating from current settings")
+    # If not in environment, look for existing config in database that matches current settings
+    print("⚠️  Config hash not found in environment, looking for existing configuration")
+    try:
+        with engine.connect() as conn:
+            # Find existing config that matches current settings
+            result = conn.execute(text("""
+                SELECT config_hash FROM run_configurations
+                WHERE gpt_model = :gpt_model 
+                AND prompt_mode = :prompt_mode 
+                AND forced_prompt_version = :forced_prompt_version 
+                AND trading_mode = :trading_mode
+                ORDER BY last_used DESC
+                LIMIT 1
+            """), {
+                "gpt_model": GPT_MODEL,
+                "prompt_mode": PROMPT_VERSION_MODE, 
+                "forced_prompt_version": FORCED_PROMPT_VERSION,
+                "trading_mode": TRADING_MODE
+            }).fetchone()
+            
+            if result:
+                config_hash = result.config_hash
+                os.environ['CURRENT_CONFIG_HASH'] = config_hash
+                print(f"🔍 Found existing config hash: {config_hash}")
+                return config_hash
+    except Exception as e:
+        print(f"⚠️  Error looking up existing config: {e}")
+    
+    # Only generate new hash if no existing config found
+    print("🆕 No existing configuration found, generating new hash")
     config_hash = generate_configuration_hash()
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Generated and set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
