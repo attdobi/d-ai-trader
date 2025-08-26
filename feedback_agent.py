@@ -380,7 +380,7 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                 # FIXED TEMPLATE COMPONENTS (never change) - using hardcoded constants to avoid circular imports
                 DECIDER_BASE_INSTRUCTIONS = '''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed 5 total trades, never allocate more than $9900 total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than $9900 total.
 Retain at least $100 in funds.'''
 
                 DECIDER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
@@ -610,7 +610,7 @@ PERFORMANCE FEEDBACK: {decider_feedback}"""
 
                 new_decider_user = """You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed 5 total trades, never allocate more than $9900 total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than $9900 total.
 Retain at least $100 in funds.
 
 LATEST PERFORMANCE FEEDBACK: {decider_feedback}

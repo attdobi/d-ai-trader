@@ -15,15 +15,17 @@ def update_decider_prompt():
     # New day trading focused prompt
     new_user_prompt = """
 You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
 Retain at least ${MIN_BUFFER} in funds.
 
 DAY TRADING STRATEGY:
 - Take profits quickly: Sell positions with >3% gains
 - Cut losses fast: Sell positions with >5% losses  
+- MOMENTUM PLAYS: Buy stocks breaking above resistance with volume, trending higher on positive catalysts
+- OVERSOLD BOUNCES: Target stocks down >5% on temporary bad news that may recover quickly
+- EARNINGS PLAYS: Focus on stocks with upcoming earnings (within 1-3 days) or recent earnings surprises
 - Be aggressive: If you have conviction for a new buy, consider selling existing positions to fund it
 - Rotate capital: Don't hold positions too long, look for better opportunities
-- Use momentum: Buy stocks with positive news/momentum, sell those with negative news
 
 IMPORTANT: Before making buy decisions, evaluate if you should sell existing positions to free up cash. Consider:
 1. Which current positions have gains that can be locked in?
@@ -91,10 +93,13 @@ For each piece of news, identify:
 Return a structured analysis with:
 - **Headlines**: Key news items with ticker symbols
 - **Insights**: Trading implications for day trading strategy
+- **Momentum signals**: Stocks showing strong upward/downward momentum with volume
+- **Oversold opportunities**: Stocks down significantly that may bounce back quickly
+- **Earnings catalysts**: Companies with upcoming earnings or recent earnings surprises
 - **Risk factors**: Potential downside or uncertainty
 - **Opportunity rating**: 1-10 scale for day trading potential
 
-Focus on actionable insights for aggressive day trading with 1-3 day holding periods.
+Focus on actionable insights for aggressive INTRADAY trading with same-day to max 1-day holding periods. Prioritize momentum plays, oversold bounces, and earnings catalysts.
 """
 
     new_system_prompt = "You are a financial news analyst specializing in day trading opportunities. Extract actionable insights for short-term trading decisions."

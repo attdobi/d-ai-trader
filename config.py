@@ -362,8 +362,14 @@ class PromptManager:
                     else:
                         enhanced_system = original_system
                     
-                    # Add JSON emphasis while preserving all trading instructions
-                    messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown, just pure JSON."
+                    # Add JSON emphasis while preserving all trading instructions - simpler format for GPT-5
+                    messages[0]["content"] = f"{enhanced_system}\n\nIMPORTANT: Respond in valid JSON format only."
+                    
+                    # Also ensure user prompt emphasizes JSON format for GPT-5
+                    if len(messages) > 1:
+                        user_content = messages[1]["content"]
+                        if "JSON" not in user_content:
+                            messages[1]["content"] = f"{user_content}\n\nRespond in valid JSON format only."
                     
                     # Debug: Print token params for GPT-5
                     print(f"📊 GPT-5 token params: {token_params}")
