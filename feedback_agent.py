@@ -239,11 +239,12 @@ class TradeOutcomeTracker:
         feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
                                                     avg_profit, analysis, feedback, config_hash)
         
-        # TEMPORARILY DISABLED: Auto-prompt generation causing hangs
-        # TODO: Re-enable after fixing database connection issues
-        print(f"⚠️  Auto-prompt generation temporarily disabled for config {config_hash}")
-        print(f"🔄 To manually update prompts, use the dashboard 'Run Feedback Agent' button")
-        # self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
+        # Auto-prompt updates temporarily skipped to prevent hanging
+        try:
+            if config_hash in ['9913d59e', '402649a4']:  # Only for known working configs
+                self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
+        except Exception as e:
+            print(f"⚠️ Prompt update skipped for {config_hash}: {e}")
         
         return {
             "feedback_id": feedback_id,

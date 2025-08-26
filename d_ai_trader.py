@@ -49,29 +49,9 @@ WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
 class DAITraderOrchestrator:
     def __init__(self):
-        # Ensure proper configuration is available for automation
-        self._ensure_configuration()
-        
         self.feedback_tracker = TradeOutcomeTracker()
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
-    
-    def _ensure_configuration(self):
-        """Ensure proper configuration is available for automation"""
-        try:
-            from config import get_current_config_hash
-            config_hash = get_current_config_hash()
-            logger.info(f"🔧 Automation using config hash: {config_hash}")
-        except Exception as e:
-            logger.error(f"❌ Configuration error in automation: {e}")
-            # Try to initialize configuration if missing
-            try:
-                from config import initialize_configuration_hash
-                config_hash = initialize_configuration_hash()
-                logger.info(f"🔄 Initialized config hash for automation: {config_hash}")
-            except Exception as init_error:
-                logger.error(f"❌ Failed to initialize configuration: {init_error}")
-                raise
         self.initialize_database()
         
     def initialize_database(self):
