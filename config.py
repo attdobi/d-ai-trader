@@ -373,28 +373,28 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # GPT-5 specific handling with proper JSON mode
+                # Ensure proper JSON mode for ALL models
+                original_system = messages[0]["content"]
+                
+                # Ensure system prompt starts with the correct trading-focused introduction
+                if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
+                    enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
+                else:
+                    enhanced_system = original_system
+                
                 if _is_gpt5_model(GPT_MODEL):
                     print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
-                    
                     # Add response_format for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
-                    
-                    # For GPT-5, ensure the system prompt starts with proper trading focus
-                    original_system = messages[0]["content"]
-                    
-                    # Ensure system prompt starts with the correct trading-focused introduction
-                    if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
-                        # Prepend the proper trading-focused system prompt
-                        enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
-                    else:
-                        enhanced_system = original_system
-                    
-                    # Add JSON emphasis while preserving all trading instructions
+                    # Add explicit JSON formatting instruction for GPT-5
                     messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown, just pure JSON."
-                    
-                    # Debug: Print token params for GPT-5
                     print(f"📊 GPT-5 token params: {token_params}")
+                    print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
+                else:
+                    print(f"🤖 Using GPT-4 JSON mode for {agent_name}")
+                    # For GPT-4, add strong JSON formatting instruction
+                    messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown formatting, no code blocks - just pure JSON starting with {{ and ending with }}."
+                    print(f"📊 GPT-4 token params: {token_params}")
                     print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
                 
                 response = self.client.chat.completions.create(**api_params)

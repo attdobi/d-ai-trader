@@ -239,8 +239,11 @@ class TradeOutcomeTracker:
         feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
                                                     avg_profit, analysis, feedback, config_hash)
         
-        # Automatically create new prompts based on feedback for this config
-        self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
+        # TEMPORARILY DISABLED: Auto-prompt generation causing hangs
+        # TODO: Re-enable after fixing database connection issues
+        print(f"⚠️  Auto-prompt generation temporarily disabled for config {config_hash}")
+        print(f"🔄 To manually update prompts, use the dashboard 'Run Feedback Agent' button")
+        # self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
         
         return {
             "feedback_id": feedback_id,
@@ -254,7 +257,10 @@ class TradeOutcomeTracker:
         """Get and summarize historical feedback for an agent type"""
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
-        
+        return self._get_historical_feedback_summary_for_config(agent_type, config_hash, max_feedbacks)
+    
+    def _get_historical_feedback_summary_for_config(self, agent_type, config_hash, max_feedbacks=10):
+        """Get and summarize historical feedback for an agent type and specific config"""
         with engine.begin() as conn:
             result = conn.execute(text("""
                 SELECT summarizer_feedback, decider_feedback, analysis_timestamp
@@ -285,12 +291,16 @@ class TradeOutcomeTracker:
     def _auto_generate_prompts_from_feedback(self, feedback, feedback_id):
         """Automatically generate new prompts based on feedback analysis with historical context"""
         try:
+            # Get the config hash from environment (should be set by calling method)
+            from config import get_current_config_hash
+            config_hash = get_current_config_hash()
+            
             summarizer_feedback = feedback.get('summarizer_feedback', '')
             decider_feedback = feedback.get('decider_feedback', '')
             
             if summarizer_feedback:
-                # Get historical feedback for context
-                historical_summarizer = self._get_historical_feedback_summary('summarizer', max_feedbacks=5)
+                # Get historical feedback for context - use the specific config hash
+                historical_summarizer = self._get_historical_feedback_summary_for_config('summarizer', config_hash, max_feedbacks=5)
                 
                 # Create comprehensive summarizer prompt with historical context
                 historical_context = ""
@@ -360,8 +370,8 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                 print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback (with fixed JSON format)')
             
             if decider_feedback:
-                # Get historical feedback for context
-                historical_decider = self._get_historical_feedback_summary('decider', max_feedbacks=5)
+                # Get historical feedback for context - use the specific config hash
+                historical_decider = self._get_historical_feedback_summary_for_config('decider', config_hash, max_feedbacks=5)
                 
                 # Create comprehensive decider prompt with historical context
                 historical_context = ""
@@ -370,14 +380,11 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     for i, insight in enumerate(historical_decider[:3], 1):
                         historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
                 
-                # Import trading constants for prompt formatting
-                from decider_agent import MAX_TRADES, MAX_FUNDS, MIN_BUFFER
-                
-                # FIXED TEMPLATE COMPONENTS (never change)
-                DECIDER_BASE_INSTRUCTIONS = f'''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+                # FIXED TEMPLATE COMPONENTS (never change) - using hardcoded constants to avoid circular imports
+                DECIDER_BASE_INSTRUCTIONS = '''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
-Retain at least ${MIN_BUFFER} in funds.'''
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed 5 total trades, never allocate more than $9900 total.
+Retain at least $100 in funds.'''
 
                 DECIDER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
 
@@ -542,31 +549,126 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
     def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
         """Generate prompts for a specific config without changing global state"""
         # Check if this config is in FIXED mode - if so, don't auto-update prompts
-        with engine.connect() as conn:
-            config_result = conn.execute(text("""
-                SELECT prompt_mode, forced_prompt_version
-                FROM run_configurations
-                WHERE config_hash = :config_hash
-            """), {"config_hash": config_hash}).fetchone()
-            
-            if config_result and config_result.prompt_mode == 'fixed':
-                print(f"🔒 Config {config_hash} is in FIXED v{config_result.forced_prompt_version} mode - skipping auto-prompt updates")
-                return
-        
-        # Temporarily set the config hash for prompt generation
-        import os
-        original_hash = os.environ.get('CURRENT_CONFIG_HASH')
-        os.environ['CURRENT_CONFIG_HASH'] = config_hash
-        
         try:
-            print(f"🔄 Config {config_hash} is in AUTO mode - generating updated prompts from feedback")
-            self._auto_generate_prompts_from_feedback(feedback, feedback_id)
-        finally:
-            # Restore original hash
-            if original_hash:
-                os.environ['CURRENT_CONFIG_HASH'] = original_hash
-            elif 'CURRENT_CONFIG_HASH' in os.environ:
-                del os.environ['CURRENT_CONFIG_HASH']
+            with engine.connect() as conn:
+                config_result = conn.execute(text("""
+                    SELECT prompt_mode, forced_prompt_version
+                    FROM run_configurations
+                    WHERE config_hash = :config_hash
+                """), {"config_hash": config_hash}).fetchone()
+                
+                if config_result and config_result.prompt_mode == 'fixed':
+                    print(f"🔒 Config {config_hash} is in FIXED v{config_result.forced_prompt_version} mode - skipping auto-prompt updates")
+                    return
+        except Exception as e:
+            print(f"❌ Error checking config mode for {config_hash}: {e}")
+            return
+        
+        print(f"🔄 Config {config_hash} is in AUTO mode - generating simple prompt updates")
+        
+        # SIMPLIFIED: Generate basic prompt updates without complex historical context
+        try:
+            summarizer_feedback = feedback.get('summarizer_feedback', '')
+            decider_feedback = feedback.get('decider_feedback', '')
+            
+            if summarizer_feedback:
+                # Create simple updated summarizer prompt
+                new_summarizer_system = f"""You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You specialize in analyzing financial news articles and extracting actionable trading insights.
+
+🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string.
+
+PERFORMANCE FEEDBACK: {summarizer_feedback}"""
+
+                new_summarizer_user = """Analyze the following financial news and extract the most important actionable insights.
+
+{feedback_context}
+
+Content: {content}
+
+🚨 CRITICAL JSON REQUIREMENT:
+Return ONLY valid JSON in this EXACT format:
+{{
+    "headlines": ["headline 1", "headline 2", "headline 3"],
+    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
+}}
+
+⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
+✅ ONLY pure JSON starting with {{ and ending with }}"""
+
+                # Save the updated prompt directly
+                version = self._create_new_prompt_version_for_config(
+                    'SummarizerAgent', 
+                    new_summarizer_user, 
+                    new_summarizer_system,
+                    f'Auto-generated from feedback (ID: {feedback_id})',
+                    config_hash
+                )
+                print(f"✅ Created summarizer prompt v{version} for config {config_hash}")
+            
+            if decider_feedback:
+                # Create simple updated decider prompt
+                new_decider_system = f"""You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation.
+
+PERFORMANCE FEEDBACK: {decider_feedback}"""
+
+                new_decider_user = """You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+
+Focus on 1-3 day holding periods, maximize ROI through frequent trading. Do not exceed 5 total trades, never allocate more than $9900 total.
+Retain at least $100 in funds.
+
+LATEST PERFORMANCE FEEDBACK: {decider_feedback}
+
+Current Portfolio: {holdings}
+Available Cash: {available_cash}
+News Summaries: {summaries}
+
+🚨 CRITICAL: Respond ONLY with valid JSON in this format:
+{{
+    "action": "buy|sell|hold",
+    "ticker": "TICKER_SYMBOL",
+    "amount": dollar_amount,
+    "reasoning": "Brief explanation"
+}}"""
+
+                # Save the updated prompt directly
+                version = self._create_new_prompt_version_for_config(
+                    'DeciderAgent', 
+                    new_decider_user, 
+                    new_decider_system,
+                    f'Auto-generated from feedback (ID: {feedback_id})',
+                    config_hash
+                )
+                print(f"✅ Created decider prompt v{version} for config {config_hash}")
+                
+        except Exception as e:
+            print(f"❌ Error generating prompts for config {config_hash}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _create_new_prompt_version_for_config(self, agent_type, user_prompt, system_prompt, description, config_hash):
+        """Create a new prompt version for a specific config hash"""
+        try:
+            # Import here to avoid circular imports
+            from prompt_manager import create_new_prompt_version
+            
+            # Temporarily set the config hash in environment
+            import os
+            original_hash = os.environ.get('CURRENT_CONFIG_HASH')
+            os.environ['CURRENT_CONFIG_HASH'] = config_hash
+            
+            try:
+                version = create_new_prompt_version(agent_type, user_prompt, system_prompt, description)
+                return version
+            finally:
+                # Restore original hash
+                if original_hash:
+                    os.environ['CURRENT_CONFIG_HASH'] = original_hash
+                elif 'CURRENT_CONFIG_HASH' in os.environ:
+                    del os.environ['CURRENT_CONFIG_HASH']
+                    
+        except Exception as e:
+            print(f"❌ Error creating prompt version for {agent_type} in config {config_hash}: {e}")
+            return 0
     
     def _analyze_decision_patterns_for_config(self, days_back, config_hash):
         """Analyze decision patterns for a specific config"""

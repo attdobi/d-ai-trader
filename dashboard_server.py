@@ -329,6 +329,31 @@ def api_portfolio_history():
     """Get portfolio performance over time"""
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
+        # First check if current config has enough data for meaningful charts
+        current_count = conn.execute(text("""
+            SELECT COUNT(*) as count FROM portfolio_history WHERE config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone().count
+        
+        # If current config has less than 3 data points, find the config with the most data
+        if current_count < 3:
+            print(f"⚠️  Config {config_hash} has only {current_count} portfolio entries - using config with most data for charts")
+            
+            # Find config with most historical data
+            best_config = conn.execute(text("""
+                SELECT config_hash, COUNT(*) as count 
+                FROM portfolio_history 
+                GROUP BY config_hash 
+                ORDER BY count DESC 
+                LIMIT 1
+            """)).fetchone()
+            
+            if best_config and best_config.count >= 3:
+                print(f"📊 Using config {best_config.config_hash} with {best_config.count} entries for charts")
+                config_hash = best_config.config_hash
+            else:
+                print("❌ No config has enough data for charts")
+                return jsonify([])
+        
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, total_invested, 
                    total_profit_loss, percentage_gain, cash_balance
@@ -346,6 +371,31 @@ def api_portfolio_performance():
     config_hash = get_current_config_hash()
     
     with engine.connect() as conn:
+        # First check if current config has enough data for meaningful charts
+        current_count = conn.execute(text("""
+            SELECT COUNT(*) as count FROM portfolio_history WHERE config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone().count
+        
+        # If current config has less than 3 data points, find the config with the most data
+        if current_count < 3:
+            print(f"⚠️  Config {config_hash} has only {current_count} portfolio entries - using config with most data for performance chart")
+            
+            # Find config with most historical data
+            best_config = conn.execute(text("""
+                SELECT config_hash, COUNT(*) as count 
+                FROM portfolio_history 
+                GROUP BY config_hash 
+                ORDER BY count DESC 
+                LIMIT 1
+            """)).fetchone()
+            
+            if best_config and best_config.count >= 3:
+                print(f"📊 Using config {best_config.config_hash} with {best_config.count} entries for performance chart")
+                config_hash = best_config.config_hash
+            else:
+                print("❌ No config has enough data for performance chart")
+                return jsonify([])
+        
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, cash_balance,
                    (total_portfolio_value - :initial_investment) as net_gain_loss,

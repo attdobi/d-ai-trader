@@ -49,9 +49,29 @@ WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
 class DAITraderOrchestrator:
     def __init__(self):
+        # Ensure proper configuration is available for automation
+        self._ensure_configuration()
+        
         self.feedback_tracker = TradeOutcomeTracker()
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
+    
+    def _ensure_configuration(self):
+        """Ensure proper configuration is available for automation"""
+        try:
+            from config import get_current_config_hash
+            config_hash = get_current_config_hash()
+            logger.info(f"🔧 Automation using config hash: {config_hash}")
+        except Exception as e:
+            logger.error(f"❌ Configuration error in automation: {e}")
+            # Try to initialize configuration if missing
+            try:
+                from config import initialize_configuration_hash
+                config_hash = initialize_configuration_hash()
+                logger.info(f"🔄 Initialized config hash for automation: {config_hash}")
+            except Exception as init_error:
+                logger.error(f"❌ Failed to initialize configuration: {init_error}")
+                raise
         self.initialize_database()
         
     def initialize_database(self):
@@ -436,27 +456,45 @@ class DAITraderOrchestrator:
     
     def scheduled_summarizer_job(self):
         """Scheduled job for summarizer agents"""
-        if self.is_summarizer_time():
-            logger.info("Running scheduled summarizer job")
-            self.run_summarizer_agents()
-        else:
-            logger.info("Skipping summarizer job - outside of scheduled time")
+        try:
+            if self.is_summarizer_time():
+                logger.info("Running scheduled summarizer job")
+                self.run_summarizer_agents()
+                logger.info("✅ Scheduled summarizer job completed successfully")
+            else:
+                logger.info("Skipping summarizer job - outside of scheduled time")
+        except Exception as e:
+            logger.error(f"❌ Scheduled summarizer job failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def scheduled_decider_job(self):
         """Scheduled job for decider agent"""
-        if self.is_decider_time():
-            logger.info("Running scheduled decider job")
-            self.run_decider_agent()
-        else:
-            logger.info("Skipping decider job - market is closed")
+        try:
+            if self.is_decider_time():
+                logger.info("Running scheduled decider job")
+                self.run_decider_agent()
+                logger.info("✅ Scheduled decider job completed successfully")
+            else:
+                logger.info("Skipping decider job - market is closed")
+        except Exception as e:
+            logger.error(f"❌ Scheduled decider job failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def scheduled_feedback_job(self):
         """Scheduled job for feedback agent"""
-        if self.is_feedback_time():
-            logger.info("Running scheduled feedback job")
-            self.run_feedback_agent()
-        else:
-            logger.info("Skipping feedback job - outside of scheduled time")
+        try:
+            if self.is_feedback_time():
+                logger.info("Running scheduled feedback job")
+                self.run_feedback_agent()
+                logger.info("✅ Scheduled feedback job completed successfully")
+            else:
+                logger.info("Skipping feedback job - outside of scheduled time")
+        except Exception as e:
+            logger.error(f"❌ Scheduled feedback job failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs"""
