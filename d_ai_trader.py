@@ -49,7 +49,6 @@ WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
 class DAITraderOrchestrator:
     def __init__(self):
-        self.feedback_tracker = TradeOutcomeTracker()
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
         self.initialize_database()

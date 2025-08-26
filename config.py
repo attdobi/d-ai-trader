@@ -234,42 +234,14 @@ def initialize_configuration_hash():
     return config_hash
 
 def get_current_config_hash():
-    """Get the current configuration hash from environment or find existing one"""
+    """Get the current configuration hash from environment or generate new one"""
     # First try to get from environment variable (process-specific)
     config_hash = os.environ.get('CURRENT_CONFIG_HASH')
     if config_hash:
         return config_hash
     
-    # If not in environment, look for existing config in database that matches current settings
-    print("⚠️  Config hash not found in environment, looking for existing configuration")
-    try:
-        with engine.connect() as conn:
-            # Find existing config that matches current settings
-            result = conn.execute(text("""
-                SELECT config_hash FROM run_configurations
-                WHERE gpt_model = :gpt_model 
-                AND prompt_mode = :prompt_mode 
-                AND forced_prompt_version = :forced_prompt_version 
-                AND trading_mode = :trading_mode
-                ORDER BY last_used DESC
-                LIMIT 1
-            """), {
-                "gpt_model": GPT_MODEL,
-                "prompt_mode": PROMPT_VERSION_MODE, 
-                "forced_prompt_version": FORCED_PROMPT_VERSION,
-                "trading_mode": TRADING_MODE
-            }).fetchone()
-            
-            if result:
-                config_hash = result.config_hash
-                os.environ['CURRENT_CONFIG_HASH'] = config_hash
-                print(f"🔍 Found existing config hash: {config_hash}")
-                return config_hash
-    except Exception as e:
-        print(f"⚠️  Error looking up existing config: {e}")
-    
-    # Only generate new hash if no existing config found
-    print("🆕 No existing configuration found, generating new hash")
+    # If not in environment, generate based on current settings
+    print("⚠️  Config hash not found in environment, generating from current settings")
     config_hash = generate_configuration_hash()
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Generated and set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
@@ -373,28 +345,28 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # Ensure proper JSON mode for ALL models
-                original_system = messages[0]["content"]
-                
-                # Ensure system prompt starts with the correct trading-focused introduction
-                if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
-                    enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
-                else:
-                    enhanced_system = original_system
-                
+                # GPT-5 specific handling with proper JSON mode
                 if _is_gpt5_model(GPT_MODEL):
                     print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
+                    
                     # Add response_format for GPT-5 JSON mode
                     api_params["response_format"] = {"type": "json_object"}
-                    # Add explicit JSON formatting instruction for GPT-5
+                    
+                    # For GPT-5, ensure the system prompt starts with proper trading focus
+                    original_system = messages[0]["content"]
+                    
+                    # Ensure system prompt starts with the correct trading-focused introduction
+                    if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
+                        # Prepend the proper trading-focused system prompt
+                        enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
+                    else:
+                        enhanced_system = original_system
+                    
+                    # Add JSON emphasis while preserving all trading instructions
                     messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown, just pure JSON."
+                    
+                    # Debug: Print token params for GPT-5
                     print(f"📊 GPT-5 token params: {token_params}")
-                    print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
-                else:
-                    print(f"🤖 Using GPT-4 JSON mode for {agent_name}")
-                    # For GPT-4, add strong JSON formatting instruction
-                    messages[0]["content"] = f"{enhanced_system}\n\n🚨 CRITICAL: You must respond ONLY with valid JSON format as specified in the user prompt. No explanatory text, no markdown formatting, no code blocks - just pure JSON starting with {{ and ending with }}."
-                    print(f"📊 GPT-4 token params: {token_params}")
                     print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
                 
                 response = self.client.chat.completions.create(**api_params)

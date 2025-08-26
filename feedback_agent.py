@@ -239,12 +239,8 @@ class TradeOutcomeTracker:
         feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
                                                     avg_profit, analysis, feedback, config_hash)
         
-        # Auto-prompt updates temporarily skipped to prevent hanging
-        try:
-            if config_hash in ['9913d59e', '402649a4']:  # Only for known working configs
-                self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
-        except Exception as e:
-            print(f"⚠️ Prompt update skipped for {config_hash}: {e}")
+        # Automatically create new prompts based on feedback for this config
+        self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
         
         return {
             "feedback_id": feedback_id,
