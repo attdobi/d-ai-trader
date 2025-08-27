@@ -1293,8 +1293,46 @@ No explanatory text, no markdown, just pure JSON array."""
 def extract_decision_info_from_text(text_content):
     """Try to extract decision info from malformed text responses"""
     import re
+    import json
     
-    # Look for common patterns like "buy AAPL", "sell TSLA", etc.
+    # First try to extract JSON-like structures and fix common issues
+    try:
+        text_str = str(text_content)
+        
+        # Try to find JSON objects in the text
+        json_pattern = r'\{[^{}]*\}'
+        json_matches = re.findall(json_pattern, text_str)
+        
+        for json_str in json_matches:
+            try:
+                # Try to parse the JSON
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict):
+                    # Fix field name inconsistencies - 'reasoning' should be 'reason'
+                    if 'reasoning' in parsed and 'reason' not in parsed:
+                        parsed['reason'] = parsed.pop('reasoning')
+                    
+                    # Check if it has the required fields
+                    if 'action' in parsed and parsed.get('action'):
+                        # Set defaults for missing fields
+                        if 'ticker' not in parsed:
+                            parsed['ticker'] = 'SPY'  # Default to SPY if no ticker
+                        if 'amount_usd' not in parsed and 'amount' not in parsed:
+                            parsed['amount_usd'] = 0 if parsed['action'] == 'hold' else 1000
+                        elif 'amount' in parsed and 'amount_usd' not in parsed:
+                            parsed['amount_usd'] = parsed.pop('amount')
+                        if 'reason' not in parsed:
+                            parsed['reason'] = f"Extracted from response: {text_str[:50]}..."
+                        
+                        print(f"✅ Successfully parsed JSON with field fixes: {parsed}")
+                        return parsed
+                        
+            except json.JSONDecodeError:
+                continue
+    except Exception as e:
+        print(f"⚠️  Error in JSON extraction: {e}")
+    
+    # Fallback to regex pattern matching
     action_pattern = r'\b(buy|sell|hold)\s+([A-Z]{1,5})\b'
     amount_pattern = r'\$(\d+(?:,\d{3})*(?:\.\d{2})?)'
     
