@@ -916,16 +916,19 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             from math import floor
             shares = floor(amount / price)
             if shares == 0:
-                print(f"Skipping buy for {ticker} due to insufficient funds for 1 share.")
+                print(f"Skipping buy for {ticker} due to insufficient funds for 1 share (need ${price:.2f}, have ${amount:.2f}).")
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Insufficient funds for 1 share - no trade executed (Original: {reason})"
+                    "reason": f"Insufficient funds for 1 share (need ${price:.2f}, allocated ${amount:.2f}) - no trade executed (Original: {reason})"
                 })
                 continue
 
-            actual_spent = shares * price
+            # Calculate actual spend - prioritize using the requested dollar amount over exact shares
+            # If the AI requested $1000 for a $800 stock, buy 1 share for $800, not skip the trade
+            actual_spent = min(amount, shares * price)
+            shares = floor(actual_spent / price)  # Recalculate shares based on actual spend
             if available_cash - actual_spent < MIN_BUFFER:
                 print(f"Skipping buy for {ticker} - would exceed budget (need ${actual_spent:.2f}, available ${available_cash:.2f})")
                 skipped_decisions.append({
@@ -1124,15 +1127,29 @@ def ask_decision_agent(summaries, run_id, holdings):
             print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
             user_prompt_template += """
 
+🚨 CRITICAL TRADING INSTRUCTIONS:
+
+1. FIRST: Review each existing position and decide whether to SELL, providing explicit reasoning
+2. SECOND: Consider new BUY opportunities based on news analysis
+3. Think in DOLLAR amounts, not share counts - the system will calculate shares
+
+For each EXISTING holding, you MUST provide a sell decision or explicit reasoning why you're keeping it.
+
 🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
 [
   {
-    "action": "buy" or "sell" or "hold",
-    "ticker": "SYMBOL",
+    "action": "sell" or "buy" or "hold",
+    "ticker": "SYMBOL", 
     "amount_usd": dollar_amount_number,
-    "reason": "brief explanation"
+    "reason": "detailed explanation including sell analysis for existing positions"
   }
 ]
+
+IMPORTANT:
+- For SELL: amount_usd = 0 (we sell all shares)
+- For BUY: amount_usd = dollars to invest (think $500, $1000, $2000 etc.)
+- For HOLD: amount_usd = 0, but provide detailed reasoning why not selling
+
 No explanatory text, no markdown, just pure JSON array."""
         
     except Exception as e:
@@ -1141,22 +1158,35 @@ No explanatory text, no markdown, just pure JSON array."""
         system_prompt = "You are a day trading assistant making quick decisions based on current market news and momentum."
         user_prompt_template = """Based on the market analysis below, make specific trading decisions.
 
+🚨 CRITICAL TRADING INSTRUCTIONS:
+1. FIRST: Review each existing position and decide whether to SELL, providing explicit reasoning
+2. SECOND: Consider new BUY opportunities based on news analysis  
+3. Think in DOLLAR amounts, not share counts - the system will calculate shares
+
 Current Portfolio:
 - Available Cash: ${available_cash}
-- Holdings: {holdings}
+- Current Holdings: {holdings}
 
 Market Analysis:
 {summaries}
 
+For each EXISTING holding above, you MUST provide a sell decision or explicit reasoning why you're keeping it.
+
 🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
 [
   {
-    "action": "buy" or "sell" or "hold",
+    "action": "sell" or "buy" or "hold",
     "ticker": "SYMBOL", 
     "amount_usd": dollar_amount_number,
-    "reason": "brief explanation"
+    "reason": "detailed explanation including sell analysis for existing positions"
   }
 ]
+
+IMPORTANT:
+- For SELL: amount_usd = 0 (we sell all shares)
+- For BUY: amount_usd = dollars to invest (think $500, $1000, $2000 etc.)
+- For HOLD: amount_usd = 0, but provide detailed reasoning why not selling
+
 No explanatory text, no markdown, just pure JSON array."""
     
     # Check market status for later use
@@ -1231,10 +1261,22 @@ No explanatory text, no markdown, just pure JSON array."""
     cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
     stock_holdings = [h for h in holdings if h['ticker'] != 'CASH']
     
-    holdings_text = "\n".join([
-        f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']} → Current: ${h['current_price']} (Gain/Loss: ${h['gain_loss']:.2f}) (Reason: {h['reason']})"
-        for h in stock_holdings
-    ]) or "No current stock holdings."
+    # Enhanced holdings display with performance metrics
+    holdings_text = ""
+    if stock_holdings:
+        holdings_parts = []
+        for h in stock_holdings:
+            gain_loss_pct = (h['gain_loss'] / h['total_value'] * 100) if h['total_value'] > 0 else 0
+            holdings_parts.append(
+                f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']:.2f} "
+                f"→ Current: ${h['current_price']:.2f} "
+                f"(Gain/Loss: ${h['gain_loss']:.2f} / {gain_loss_pct:.1f}%) "
+                f"(Value: ${h['current_value']:.2f}) "
+                f"(Reason: {h['reason']})"
+            )
+        holdings_text = "\n".join(holdings_parts)
+    else:
+        holdings_text = "No current stock holdings."
     
     # Calculate available funds
     available_cash = cash_balance
@@ -1289,6 +1331,44 @@ No explanatory text, no markdown, just pure JSON array."""
                 decision['execution_status'] = 'deferred'
     
     return ai_response
+
+def log_sell_analysis(decisions, holdings):
+    """Log explicit reasoning for each existing position - sell or hold decision"""
+    print("\n" + "="*50)
+    print("📊 SELL ANALYSIS FOR EXISTING POSITIONS")
+    print("="*50)
+    
+    stock_holdings = [h for h in holdings if h['ticker'] != 'CASH']
+    
+    if not stock_holdings:
+        print("✅ No existing positions to analyze")
+        return
+    
+    # Create a map of decisions by ticker
+    decision_map = {d.get('ticker', '').upper(): d for d in decisions if isinstance(d, dict)}
+    
+    for holding in stock_holdings:
+        ticker = holding['ticker']
+        current_value = holding.get('current_value', 0)
+        gain_loss = holding.get('gain_loss', 0)
+        gain_loss_pct = (gain_loss / holding['total_value'] * 100) if holding.get('total_value', 0) > 0 else 0
+        
+        decision = decision_map.get(ticker.upper())
+        
+        if decision:
+            action = decision.get('action', 'unknown')
+            reason = decision.get('reason', 'No reason provided')
+            
+            if action == 'sell':
+                print(f"🔴 SELL {ticker}: {reason}")
+            elif action == 'hold':
+                print(f"🟡 HOLD {ticker}: {reason}")
+            else:
+                print(f"❓ {action.upper()} {ticker}: {reason}")
+        else:
+            print(f"⚠️  NO DECISION for {ticker} (Value: ${current_value:.2f}, G/L: {gain_loss_pct:.1f}%) - AI SHOULD HAVE PROVIDED SELL/HOLD REASONING")
+    
+    print("="*50 + "\n")
 
 def extract_decision_info_from_text(text_content):
     """Try to extract decision info from malformed text responses"""
@@ -1371,6 +1451,13 @@ def store_trade_decisions(decisions, run_id):
                 valid_decisions.append(extracted)
     
     # Only store if we have valid decisions
+    # Log sell analysis for transparency regardless of validity
+    try:
+        current_holdings = fetch_holdings()
+        log_sell_analysis(valid_decisions, current_holdings)
+    except Exception as e:
+        print(f"⚠️  Could not log sell analysis: {e}")
+    
     if not valid_decisions:
         print("❌ No valid trade decisions to store - AI response was malformed")
         # Try to extract info from the entire response text
