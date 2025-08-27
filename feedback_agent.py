@@ -235,8 +235,8 @@ class TradeOutcomeTracker:
                     # Store feedback and auto-generate new prompts
                     feedback_id = self._store_feedback_for_config(
                         days_back, 
-                        decision_analysis['total_attempts'], 
-                        decision_analysis['parsing_success_rate'], 
+                        decision_analysis.get('total_attempts', decision_analysis.get('total_decisions', 0)), 
+                        decision_analysis.get('parsing_success_rate', 1.0), 
                         0.0,  # No profit data 
                         decision_analysis, 
                         synthetic_feedback, 
