@@ -1118,6 +1118,23 @@ def ask_decision_agent(summaries, run_id, holdings):
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
         print(f"🔧 Using DeciderAgent prompt v{prompt_version}")
+        
+        # CRITICAL: Ensure ALL prompts end with proper JSON format requirements
+        if "JSON" not in user_prompt_template.upper():
+            print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
+            user_prompt_template += """
+
+🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
+[
+  {
+    "action": "buy" or "sell" or "hold",
+    "ticker": "SYMBOL",
+    "amount_usd": dollar_amount_number,
+    "reason": "brief explanation"
+  }
+]
+No explanatory text, no markdown, just pure JSON array."""
+        
     except Exception as e:
         print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
         # Fallback to basic prompt
@@ -1131,11 +1148,16 @@ Current Portfolio:
 Market Analysis:
 {summaries}
 
-Make 1-3 specific trades. Return a JSON array with:
-- "action": "buy" or "sell" or "hold"
-- "ticker": Stock symbol
-- "amount_usd": Dollar amount to trade
-- "reason": Brief explanation"""
+🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
+[
+  {
+    "action": "buy" or "sell" or "hold",
+    "ticker": "SYMBOL", 
+    "amount_usd": dollar_amount_number,
+    "reason": "brief explanation"
+  }
+]
+No explanatory text, no markdown, just pure JSON array."""
     
     # Check market status for later use
     market_open = is_market_open()

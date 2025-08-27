@@ -219,9 +219,44 @@ class TradeOutcomeTracker:
             outcomes = [dict(row._mapping) for row in result]
         
         if not outcomes:
-            print(f"No completed trades to analyze for config {config_hash} - checking decision patterns instead")
-            # If no completed trades, analyze decision patterns
-            return self._analyze_decision_patterns_for_config(days_back, config_hash)
+            print(f"No completed trades to analyze for config {config_hash} - analyzing decision patterns and generating feedback")
+            # If no completed trades, analyze decision patterns and generate feedback anyway
+            decision_analysis = self._analyze_decision_patterns_for_config(days_back, config_hash)
+            
+            # Generate feedback based on decision patterns even without trade outcomes
+            if decision_analysis.get('total_decisions', 0) > 0:
+                print(f"✅ Found {decision_analysis['total_decisions']} decisions to analyze for feedback")
+                
+                # Create synthetic feedback based on decision patterns
+                synthetic_feedback = self._generate_decision_pattern_feedback_for_config(decision_analysis, config_hash)
+                if synthetic_feedback:
+                    print(f"🔄 Generated feedback from decision patterns for config {config_hash}")
+                    
+                    # Store feedback and auto-generate new prompts
+                    feedback_id = self._store_feedback_for_config(
+                        days_back, 
+                        decision_analysis['total_attempts'], 
+                        decision_analysis['parsing_success_rate'], 
+                        0.0,  # No profit data 
+                        decision_analysis, 
+                        synthetic_feedback, 
+                        config_hash
+                    )
+                    
+                    # Auto-generate improved prompts from this feedback
+                    if feedback_id:
+                        print(f"🚀 Auto-generating improved prompts from decision pattern feedback...")
+                        self._auto_generate_prompts_from_feedback_for_config(synthetic_feedback, feedback_id, config_hash)
+                    
+                    return {
+                        'feedback_generated': True,
+                        'feedback_source': 'decision_patterns',
+                        'decisions_analyzed': decision_analysis['total_decisions'],
+                        'feedback_content': synthetic_feedback,
+                        'feedback_id': feedback_id
+                    }
+            
+            return decision_analysis
         
         # Calculate metrics
         total_trades = len(outcomes)
@@ -394,10 +429,25 @@ SPECIFIC INSIGHTS TO APPLY:
 - Risk Management: {feedback.get('risk_management', 'Implement strict risk controls')}
 - Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}'''
 
-                # COMBINE: Fixed template + Modifiable feedback
+                # COMBINE: Fixed template + Modifiable feedback + JSON format requirement
                 new_decider_user = f'''{DECIDER_BASE_INSTRUCTIONS}
 
-{performance_guidance}'''
+{performance_guidance}
+
+Current Portfolio: {{holdings}}
+Available Cash: {{available_cash}}
+News Summaries: {{summaries}}
+
+🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
+[
+  {{
+    "action": "buy" or "sell" or "hold",
+    "ticker": "SYMBOL",
+    "amount_usd": dollar_amount_number,
+    "reason": "brief explanation"
+  }}
+]
+No explanatory text, no markdown, just pure JSON array.'''
 
                 new_decider_system = f'''{DECIDER_SYSTEM_BASE}
 
@@ -619,13 +669,16 @@ Current Portfolio: {holdings}
 Available Cash: {available_cash}
 News Summaries: {summaries}
 
-🚨 CRITICAL: Respond ONLY with valid JSON in this format:
-{{
-    "action": "buy|sell|hold",
-    "ticker": "TICKER_SYMBOL",
-    "amount": dollar_amount,
-    "reasoning": "Brief explanation"
-}}"""
+🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
+[
+  {{
+    "action": "buy" or "sell" or "hold",
+    "ticker": "SYMBOL",
+    "amount_usd": dollar_amount_number,
+    "reason": "brief explanation"
+  }}
+]
+No explanatory text, no markdown, just pure JSON array."""
 
                 # Save the updated prompt directly
                 version = self._create_new_prompt_version_for_config(
@@ -689,49 +742,65 @@ News Summaries: {summaries}
         # Get recent individual trades for detailed analysis
         recent_trades = self._get_detailed_trade_analysis()
         
-        prompt = f"""
-Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
+        # FIXED TEMPLATE COMPONENTS (never change)
+        FEEDBACK_BASE_INSTRUCTIONS = '''Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
 
+Focus on:
+1. Key insights about what's working well and what isn't  
+2. Specific recommendations for the SUMMARIZER agents (how they should adjust their news analysis focus)
+3. Specific recommendations for the DECIDER agent (how it should adjust its trading strategy)
+4. Patterns in successful vs unsuccessful trades
+5. Timing and market context insights - especially entry/exit timing
+6. Specific trade examples of mistakes and successes'''
+
+        # MODIFIABLE COMPONENTS (updated based on context data)
+        performance_guidance = f'''
 Performance Data:
 {outcomes_summary}
 
 Recent Trade Details (for pattern analysis):
 {json.dumps(recent_trades, indent=2)}
 
-Please provide:
-1. Key insights about what's working well and what isn't
-2. Specific recommendations for the SUMMARIZER agents (how they should adjust their news analysis focus)
-3. Specific recommendations for the DECIDER agent (how it should adjust its trading strategy)
-4. Patterns in successful vs unsuccessful trades
-5. Timing and market context insights - especially focus on:
-   - Are we buying at market highs vs dips?
-   - Are we selling at lows vs highs?
-   - What technical indicators should we consider?
-6. Specific trade examples of mistakes (like buying CRLC at a high when we should have waited for a dip)
+ANALYSIS REQUIREMENTS:
+- Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic
+- Pay special attention to entry and exit timing to maximize profits
+- Create COMPREHENSIVE feedback that preserves important historical lessons
+- Group insights by categories: timing, risk management, sector analysis, technical patterns
+- Provide specific examples from the trade data
+- Make feedback cumulative - build upon previous lessons rather than replacing them'''
 
-Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic.
-Pay special attention to entry and exit timing to maximize profits.
-"""
-
-        system_prompt = """You are a trading performance analyst providing feedback to improve AI trading agents. 
-Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help agents make better decisions.
-
-CRITICAL INSTRUCTIONS:
-1. Create COMPREHENSIVE feedback that preserves important historical lessons
-2. Group insights by categories: timing, risk management, sector analysis, technical patterns
-3. Provide specific examples from the trade data
-4. Include both tactical improvements (immediate actions) and strategic insights (long-term patterns)
-5. Make feedback cumulative - build upon previous lessons rather than replacing them
-
-Please provide your response in the following JSON format:
+        FEEDBACK_JSON_FORMAT = '''
+🚨 CRITICAL JSON REQUIREMENT:
+Return ONLY valid JSON in this EXACT format:
 {
     "summarizer_feedback": "Comprehensive recommendations for the summarizer agent including historical context",
     "decider_feedback": "Comprehensive recommendations for the decider agent including historical context", 
     "key_insights": ["insight 1", "insight 2", "insight 3", "insight 4", "insight 5"],
     "timing_patterns": "Specific patterns about entry/exit timing",
-    "risk_management": "Risk management lessons learned",
-    "sector_insights": "Sector-specific trading patterns"
-}"""
+    "risk_management": "Risk management recommendations",
+    "sector_insights": "Sector-specific trading insights"
+}
+
+⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
+✅ ONLY pure JSON starting with { and ending with }'''
+
+        # COMBINE: Fixed template + Modifiable performance data + Fixed JSON format
+        prompt = f'''{FEEDBACK_BASE_INSTRUCTIONS}
+
+{performance_guidance}
+
+{FEEDBACK_JSON_FORMAT}'''
+
+        FEEDBACK_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent providing system-wide performance analysis. You are a trading performance analyst providing feedback to improve AI trading agents. Your analysis should be data-driven, specific, and actionable.'''
+
+        system_prompt = f'''{FEEDBACK_SYSTEM_BASE}
+
+CRITICAL INSTRUCTIONS:
+1. Create COMPREHENSIVE feedback that preserves important historical lessons
+2. Group insights by categories: timing, risk management, sector analysis, technical patterns  
+3. Provide specific examples from the trade data
+4. Include both tactical improvements (immediate actions) and strategic insights (long-term patterns)
+5. Make feedback cumulative - build upon previous lessons rather than replacing them'''
         
         try:
             # Get the AI response using the same method as the new feedback system
@@ -912,23 +981,50 @@ Focus on actionable improvements that can be incorporated into the decider's tra
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the decider agent make better decisions."""
                 
             elif agent_type == "feedback_analyzer":
-                user_prompt_template = """
-You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
+                # FIXED TEMPLATE COMPONENTS (never change)
+                FEEDBACK_BASE_INSTRUCTIONS = '''You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
 
-Context Data: {context_data}
-Performance Metrics: {performance_metrics}
-
-Please provide:
+Focus on:
 1. Overall system performance analysis
-2. Key strengths and weaknesses identified
+2. Key strengths and weaknesses identified  
 3. Specific recommendations for both summarizer and decider agents
 4. Market condition analysis and adaptation strategies
-5. Long-term improvement suggestions
+5. Long-term improvement suggestions'''
 
-Focus on comprehensive insights that can guide the entire trading system's evolution.
-"""
-                system_prompt = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
-Your analysis should be thorough, data-driven, and provide actionable insights for all system components."""
+                FEEDBACK_JSON_FORMAT = '''
+🚨 CRITICAL JSON REQUIREMENT:
+Return ONLY valid JSON in this EXACT format:
+{{
+    "summarizer_feedback": "Comprehensive recommendations for the summarizer agent",
+    "decider_feedback": "Comprehensive recommendations for the decider agent", 
+    "key_insights": ["insight 1", "insight 2", "insight 3", "insight 4", "insight 5"],
+    "timing_patterns": "Specific patterns about entry/exit timing",
+    "risk_management": "Risk management recommendations",
+    "sector_insights": "Sector-specific trading insights"
+}}
+
+⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
+✅ ONLY pure JSON starting with {{ and ending with }}'''
+
+                FEEDBACK_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent providing system-wide performance analysis. You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement.'''
+
+                # MODIFIABLE COMPONENTS (updated based on feedback - though feedback agent rarely gets feedback)
+                performance_guidance = f'''
+Context Data: {{context_data}}
+Performance Metrics: {{performance_metrics}}
+
+ANALYSIS FOCUS: Focus on comprehensive insights that can guide the entire trading system's evolution.'''
+
+                # COMBINE: Fixed template + Modifiable feedback + Fixed JSON format
+                user_prompt_template = f'''{FEEDBACK_BASE_INSTRUCTIONS}
+
+{performance_guidance}
+
+{FEEDBACK_JSON_FORMAT}'''
+
+                system_prompt = f'''{FEEDBACK_SYSTEM_BASE}
+
+Your analysis should be thorough, data-driven, and provide actionable insights for all system components.'''
             
             else:
                 raise ValueError(f"Unknown agent type: {agent_type}")
@@ -1184,17 +1280,35 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         with engine.connect() as conn:
-            # Get recent decisions (exclude pure N/A decisions but include deferred ones)
-            result = conn.execute(text("""
+            # Get ALL recent decisions to analyze parsing success rate
+            all_decisions_result = conn.execute(text("""
+                SELECT timestamp, data
+                FROM trade_decisions 
+                WHERE timestamp >= :cutoff_date
+                  AND config_hash = :config_hash
+                ORDER BY timestamp DESC
+            """), {"cutoff_date": cutoff_date, "config_hash": config_hash})
+            
+            all_decisions = [dict(row._mapping) for row in all_decisions_result]
+            
+            # Get successful decisions (exclude pure N/A and parsing errors)
+            successful_decisions_result = conn.execute(text("""
                 SELECT timestamp, data
                 FROM trade_decisions 
                 WHERE timestamp >= :cutoff_date
                   AND config_hash = :config_hash
                   AND data::text NOT LIKE '%"action": "N/A"%'
+                  AND data::text NOT LIKE '%Unable to parse%'
+                  AND data::text NOT LIKE '%completely unparseable%'
                 ORDER BY timestamp DESC
             """), {"cutoff_date": cutoff_date, "config_hash": config_hash})
             
-            decisions = [dict(row._mapping) for row in result]
+            decisions = [dict(row._mapping) for row in successful_decisions_result]
+            
+            # Calculate parsing success rate
+            total_attempts = len(all_decisions)
+            successful_parses = len(decisions)
+            parsing_success_rate = successful_parses / total_attempts if total_attempts > 0 else 0
         
         if not decisions:
             print("No recent decisions to analyze")
@@ -1228,9 +1342,17 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         buy_decisions = len([d for d in parsed_decisions if d['action'] == 'buy'])
         deferred_decisions = len([d for d in parsed_decisions if d['execution_status'] == 'deferred'])
         
-        # Analyze decision quality and patterns
+        # Analyze decision quality and patterns  
+        action_distribution = {}
+        for d in parsed_decisions:
+            action = d['action']
+            action_distribution[action] = action_distribution.get(action, 0) + 1
+        
         decision_analysis = {
             "total_decisions": total_decisions,
+            "total_attempts": total_attempts,
+            "parsing_success_rate": parsing_success_rate,
+            "action_distribution": action_distribution,
             "buy_decisions": buy_decisions,
             "deferred_decisions": deferred_decisions,
             "recent_tickers": list(set([d['ticker'] for d in parsed_decisions[:5]])),
@@ -1259,6 +1381,59 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             "feedback": feedback
         }
         
+    def _generate_decision_pattern_feedback_for_config(self, analysis, config_hash):
+        """Generate AI feedback on decision-making patterns for a specific config"""
+        try:
+            # Focus on JSON parsing and response quality issues
+            total_decisions = analysis.get('total_decisions', 0)
+            parsing_success_rate = analysis.get('parsing_success_rate', 0)
+            action_distribution = analysis.get('action_distribution', {})
+            
+            # Generate specific feedback for configs with parsing issues
+            if parsing_success_rate < 0.8:  # Less than 80% parsing success
+                feedback_text = f"""
+Configuration {config_hash} is experiencing significant JSON parsing failures ({parsing_success_rate:.1%} success rate).
+
+CRITICAL ISSUES IDENTIFIED:
+1. AI responses are returning markdown/text instead of valid JSON
+2. This causes "Unable to parse AI response" errors and defaults to hold
+3. No actual buy/sell decisions are being executed
+4. Prompt evolution is blocked due to lack of trade outcomes
+
+IMMEDIATE FIXES NEEDED:
+1. Enhance JSON formatting instructions in prompts
+2. Add retry logic with simplified instructions for parsing failures  
+3. Consider model-specific prompt templates (GPT-5 vs GPT-4)
+4. Strengthen system prompt JSON requirements
+
+DECISION PATTERN ANALYSIS:
+- Total decisions attempted: {total_decisions}
+- Parsing failures: {total_decisions * (1 - parsing_success_rate):.0f}
+- Action distribution: {action_distribution}
+
+RECOMMENDATIONS:
+- Add explicit JSON schema examples to prompts
+- Use clearer, simpler JSON format requirements
+- Implement model-specific handling for GPT-5 series
+- Test prompt modifications with sample data before deployment
+"""
+                return {
+                    'summarizer_feedback': feedback_text,
+                    'decider_feedback': feedback_text,
+                    'key_insights': [
+                        'JSON parsing failures preventing trade execution',
+                        'Model-specific prompt formatting needed',
+                        'Retry logic should include simplified instructions',
+                        'Prompt evolution blocked without trade outcomes'
+                    ]
+                }
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error generating decision pattern feedback: {e}")
+            return None
+
     def _generate_decision_pattern_feedback(self, decisions, analysis):
         """Generate AI feedback on decision-making patterns"""
         try:
