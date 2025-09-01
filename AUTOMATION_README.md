@@ -4,7 +4,7 @@ This document describes the unified automation system for the D-AI-Trader projec
 
 ## Overview
 
-The `d-ai-trader.py` script orchestrates the entire trading system with intelligent scheduling based on market hours and trading requirements.
+The `d-ai-trader.py` script orchestrates the entire trading system with **SEQUENTIAL EXECUTION** to ensure proper data flow.
 
 ## System Components
 
@@ -17,8 +17,8 @@ The `d-ai-trader.py` script orchestrates the entire trading system with intellig
 
 ### 2. Decider Agent (`decider_agent.py`)
 - **Purpose**: Analyze summaries and make trading decisions
-- **Schedule**: Every 30 minutes during market hours (9:30 AM - 4:00 PM ET, M-F)
-- **Key Feature**: Processes ALL unseen summaries, not just the latest batch
+- **Schedule**: Runs IMMEDIATELY after each summarizer cycle completes (during market hours only)
+- **Key Feature**: Always uses fresh summaries from the just-completed collection cycle
 - **Output**: Buy/sell decisions with reasoning
 
 ### 3. Feedback Agent (`feedback_agent.py`)
@@ -28,15 +28,21 @@ The `d-ai-trader.py` script orchestrates the entire trading system with intellig
 
 ## Key Features
 
+### Sequential Processing (Fixed Issue)
+- **STEP 1**: Summarizers collect fresh news data
+- **STEP 2**: Decider immediately analyzes the fresh summaries (market hours only)
+- **STEP 3**: Feedback runs after market close
+- This prevents the decider from running with stale data or while summarizers are still collecting
+
 ### Intelligent Summary Processing
-- The decider agent now processes all summaries that haven't been seen before
+- The decider agent processes all summaries that haven't been seen before
 - This means Monday morning decisions will include Friday evening, weekend, and Monday morning data
 - Prevents information loss and ensures comprehensive analysis
 
 ### Market Hours Awareness
 - System automatically detects market open/close times
 - Summarizers run during extended hours (8:25 AM - 5:25 PM ET)
-- Decider only runs during actual market hours (9:30 AM - 4:00 PM ET)
+- Decider only runs during actual market hours (9:30 AM - 4:00 PM ET) and ONLY after summaries are collected
 - Feedback runs after market close
 
 ### Robust Error Handling

@@ -2,10 +2,12 @@
 """
 D-AI-Trader Unified Automation System
 
-This script orchestrates the entire trading system:
-- Summarizer agents run hourly during market hours (8:25am-5:25pm ET) and once daily on weekends (3pm ET)
-- Decider agent runs during market hours (9:30am-4pm ET) using all unseen summaries
-- Feedback agent runs once daily after the final decider run
+This script orchestrates the entire trading system with SEQUENTIAL execution:
+- STEP 1: Summarizer agents run hourly (8:25am-5:25pm ET weekdays, 3pm ET weekends)
+- STEP 2: Decider agent runs immediately after Step 1 (during market hours only) using fresh summaries
+- STEP 3: Feedback agent runs once daily after market close (4:30pm ET)
+
+This ensures decider always uses the most recent summaries, not stale data.
 """
 
 import os
@@ -475,20 +477,42 @@ class DAITraderOrchestrator:
             import traceback
             logger.error(traceback.format_exc())
     
+    def scheduled_summarizer_and_decider_job(self):
+        """Sequential job: Run summarizers first, then decider with collected summaries"""
+        try:
+            # Step 1: Run summarizers (always when scheduled)
+            if self.is_summarizer_time():
+                logger.info("🔄 Step 1: Running summarizer agents")
+                self.run_summarizer_agents()
+                logger.info("✅ Step 1 completed: Summarizer agents finished")
+                
+                # Step 2: Run decider ONLY during market hours and ONLY after summaries are collected
+                if self.is_decider_time():
+                    logger.info("🔄 Step 2: Running decider agent with fresh summaries")
+                    self.run_decider_agent()
+                    logger.info("✅ Step 2 completed: Decider agent finished")
+                else:
+                    logger.info("⏸️  Step 2 skipped: Market is closed - summaries collected for future decisions")
+                
+                logger.info("✅ Sequential job completed successfully")
+            else:
+                logger.info("Skipping job - outside of summarizer time")
+                
+        except Exception as e:
+            logger.error(f"❌ Sequential job failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def setup_schedule(self):
         """Setup the scheduling for all jobs"""
         # Summarizer agents - every hour during market hours and once daily on weekends
-        schedule.every().hour.at(":25").do(self.scheduled_summarizer_job)  # Every hour at :25
-        
-        # Decider agent - every 30 minutes during market hours
-        schedule.every(30).minutes.do(self.scheduled_decider_job)
+        schedule.every().hour.at(":25").do(self.scheduled_summarizer_and_decider_job)  # Every hour at :25
         
         # Feedback agent - once daily after market close
         schedule.every().day.at("16:30").do(self.scheduled_feedback_job)  # 4:30pm ET
         
         logger.info("Schedule setup completed")
-        logger.info("Summarizer agents: Every hour at :25")
-        logger.info("Decider agent: Every 30 minutes during market hours")
+        logger.info("Summarizer + Decider: Every hour at :25 (sequential execution)")
         logger.info("Feedback agent: Daily at 4:30pm ET")
     
     def run(self):
@@ -498,9 +522,10 @@ class DAITraderOrchestrator:
         
         # Skip immediate cycle - rely on scheduled runs only
         logger.info("📅 System will run on schedule:")
-        logger.info("  - Summarizer: Every hour at :25")  
-        logger.info("  - Decider: Every 30 minutes during market hours")
-        logger.info("  - Feedback: Daily at 4:30pm ET")
+        logger.info("  - STEP 1: Summarizer agents collect news (every hour at :25)")  
+        logger.info("  - STEP 2: Decider agent analyzes summaries (immediately after Step 1, during market hours only)")
+        logger.info("  - STEP 3: Feedback agent (daily at 4:30pm ET)")
+        logger.info("🔄 Sequential execution ensures decider uses fresh summaries")
         logger.info("🕐 Waiting for next scheduled run...")
         try:
             while True:
