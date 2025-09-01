@@ -15,10 +15,10 @@ def configure_system():
                        initialize_configuration_hash)
     
     # Set the AI model
-    set_gpt_model("gpt-5-mini")
+    set_gpt_model("gpt-4.1")
     
     # Set prompt version configuration
-    prompt_version = "v0"
+    prompt_version = "auto"
     if prompt_version.lower() == "auto":
         set_prompt_version_mode("auto")
     else:
@@ -31,10 +31,10 @@ def configure_system():
     config_hash = initialize_configuration_hash()
     
     print(f"✅ System configured with:")
-    print(f"   - AI Model: gpt-5-mini")
-    print(f"   - Prompt Version: v0")
+    print(f"   - AI Model: gpt-4.1")
+    print(f"   - Prompt Version: auto")
     print(f"   - Trading Mode: simulation")
-    print(f"   - Dashboard Port: 8083")
+    print(f"   - Dashboard Port: 8080")
     print(f"   - Configuration Hash: {config_hash}")
     
     # Show warning for real world trading
@@ -54,7 +54,7 @@ def start_dashboard():
     import dashboard_server
     
     # Set the port for the dashboard
-    dashboard_server.app.run(debug=False, port=8083, host='0.0.0.0', threaded=True)
+    dashboard_server.app.run(debug=False, port=8080, host='0.0.0.0', threaded=True)
 
 def start_automation():
     """Start the automation system"""
@@ -82,7 +82,7 @@ def main():
         
         # Give dashboard time to start
         time.sleep(3)
-        print(f"✅ Dashboard started on http://localhost:8083")
+        print(f"✅ Dashboard started on http://localhost:8080")
         
         # Start automation system in main thread
         start_automation()
