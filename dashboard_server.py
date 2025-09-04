@@ -933,21 +933,67 @@ def reset_prompts():
                     'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
                 }), 400
         
-        # Emergency reset using existing prompt_versions table
+        # Reset BOTH prompt systems (main + feedback)
         with engine.begin() as conn:
-            # Deactivate all prompt versions first
+            # Reset main prompt_versions table
             conn.execute(text("""
                 UPDATE prompt_versions 
                 SET is_active = FALSE
                 WHERE config_hash = :config_hash
             """), {"config_hash": config_hash})
             
-            # Activate only v0 prompts
+            # Activate only v0 prompts in main table
             updated_prompts = conn.execute(text("""
                 UPDATE prompt_versions 
                 SET is_active = TRUE
                 WHERE config_hash = :config_hash AND version = 0
             """), {"config_hash": config_hash})
+            
+            # ALSO reset the feedback system table (ai_agent_prompts) with proper config isolation
+            try:
+                # Reset feedback system for this specific config (after schema fix)
+                feedback_reset = conn.execute(text("""
+                    UPDATE ai_agent_prompts 
+                    SET is_active = FALSE
+                    WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent') 
+                    AND config_hash = :config_hash
+                """), {"config_hash": config_hash})
+                
+                if feedback_reset.rowcount > 0:
+                    print(f"✅ Reset feedback system prompts for config {config_hash[:8]} ({feedback_reset.rowcount} prompts)")
+                else:
+                    print(f"⚠️  No feedback system prompts found for config {config_hash[:8]}")
+                    
+            except Exception as e:
+                # If config_hash column doesn't exist yet, fall back to global reset with warning
+                print(f"⚠️  Config-isolated reset failed: {e}")
+                print(f"🔧 Falling back to global reset (affects all parallel runs)")
+                try:
+                    conn.execute(text("""
+                        UPDATE ai_agent_prompts 
+                        SET is_active = FALSE
+                        WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent')
+                    """))
+                    print("✅ Reset feedback system prompts globally")
+                except Exception as e2:
+                    print(f"❌ Global reset also failed: {e2}")
+            
+            # Try unified table too (if it exists)
+            try:
+                conn.execute(text("""
+                    UPDATE unified_prompts 
+                    SET is_active = FALSE
+                    WHERE config_hash = :config_hash
+                """), {"config_hash": config_hash})
+                
+                conn.execute(text("""
+                    UPDATE unified_prompts 
+                    SET is_active = TRUE
+                    WHERE config_hash = :config_hash AND version = 0
+                """), {"config_hash": config_hash})
+                print("✅ Also reset unified prompts table")
+            except Exception as e:
+                print(f"⚠️  Unified table not available: {e}")
             
             if updated_prompts.rowcount == 0:
                 return jsonify({'error': 'No v0 baseline prompts found for this configuration'}), 400
