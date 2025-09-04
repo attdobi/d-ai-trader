@@ -271,16 +271,16 @@ def api_configuration():
     try:
         # Get current prompt versions
         try:
-            tracker = TradeOutcomeTracker()
-            summarizer_prompt = tracker.get_active_prompt('SummarizerAgent')
-            decider_prompt = tracker.get_active_prompt('DeciderAgent')
+            from prompt_manager import get_active_prompt_emergency_patch
+            summarizer_prompt = get_active_prompt_emergency_patch('SummarizerAgent')
+            decider_prompt = get_active_prompt_emergency_patch('DeciderAgent')
             
             prompt_versions = {
                 'summarizer_version': summarizer_prompt['version'] if summarizer_prompt else 0,
                 'decider_version': decider_prompt['version'] if decider_prompt else 0
             }
         except Exception as e:
-            print(f"Error getting prompt versions: {e}")
+            print(f"Error getting unified prompt versions: {e}")
             prompt_versions = {'summarizer_version': 0, 'decider_version': 0}
         
         current_config = {
@@ -933,6 +933,7 @@ def reset_prompts():
                     'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
                 }), 400
         
+        # Emergency reset using existing prompt_versions table
         with engine.begin() as conn:
             # Deactivate all prompt versions first
             conn.execute(text("""

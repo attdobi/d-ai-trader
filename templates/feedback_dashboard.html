@@ -822,9 +822,19 @@
             .then(data => {
                 const configElement = document.getElementById('currentConfigHash');
                 const configHash = data.config_hash || 'Unknown';
-                const model = data.model || 'Unknown';
-                const promptMode = data.prompt_mode || 'Unknown';
-                configElement.innerHTML = `${configHash} (${model}, ${promptMode})`;
+                const model = data.gpt_model || 'Unknown';  // Fixed: was data.model
+                const promptMode = data.prompt_config?.mode || 'Unknown';  // Fixed: was data.prompt_mode
+                
+                // Format prompt display like trades.html
+                let promptDisplay;
+                if (promptMode === 'auto') {
+                    const promptVersions = data.prompt_versions || {};
+                    promptDisplay = `AUTO (v${promptVersions.summarizer_version || 0}/v${promptVersions.decider_version || 0})`;
+                } else {
+                    promptDisplay = `FIXED v${data.prompt_config?.forced_version || 0}`;
+                }
+                
+                configElement.innerHTML = `${configHash} (${model}, ${promptDisplay})`;
             })
             .catch(error => {
                 document.getElementById('currentConfigHash').textContent = 'Error loading config';

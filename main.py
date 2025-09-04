@@ -88,9 +88,9 @@ def get_openai_summary(agent_name, html_content, image_paths):
         system_prompt_template = prompt_data["system_prompt"]
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
-        print(f"🔧 Using SummarizerAgent prompt v{prompt_version}")
+        print(f"🔧 Using SummarizerAgent prompt v{prompt_version} (UNIFIED)")
     except Exception as e:
-        print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
+        print(f"⚠️  Could not load unified prompt: {e}, using fallback")
         # Fallback to basic prompts
         system_prompt_template = "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles."
         user_prompt_template = """Analyze the following financial news and extract the most important actionable insights.
