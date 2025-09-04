@@ -592,8 +592,33 @@ def get_ai_feedback_responses():
 
 @app.route('/api/prompts/<agent_type>')
 def get_prompts(agent_type):
-    """Get prompt history for an agent type"""
+    """Get prompt history for an agent type using UNIFIED approach"""
     try:
+        from prompt_manager import get_active_prompt_emergency_patch
+        from config import get_current_config_hash
+        
+        config_hash = get_current_config_hash()
+        
+        # Get current active prompt using emergency patch
+        try:
+            current_prompt = get_active_prompt_emergency_patch(agent_type)
+            if current_prompt:
+                # Format as expected by frontend
+                prompts = [{
+                    "id": 1,
+                    "prompt_version": current_prompt["version"],
+                    "timestamp": "2025-01-01T00:00:00",  # Placeholder timestamp
+                    "user_prompt": current_prompt["user_prompt_template"],
+                    "system_prompt": current_prompt["system_prompt"],
+                    "description": f"Current active prompt v{current_prompt['version']} for config {config_hash[:8]}",
+                    "is_active": True,
+                    "created_by": "emergency_patch"
+                }]
+                return jsonify(prompts)
+        except Exception as e:
+            print(f"Emergency patch failed: {e}")
+        
+        # Fallback to original method
         from feedback_agent import TradeOutcomeTracker
         feedback_tracker = TradeOutcomeTracker()
         
@@ -606,14 +631,24 @@ def get_prompts(agent_type):
 
 @app.route('/api/prompts/<agent_type>/active')
 def get_active_prompt(agent_type):
-    """Get the currently active prompt for an agent type"""
+    """Get the currently active prompt for an agent type using UNIFIED approach"""
     try:
-        from feedback_agent import TradeOutcomeTracker
-        feedback_tracker = TradeOutcomeTracker()
+        from prompt_manager import get_active_prompt_emergency_patch
         
-        prompt = feedback_tracker.get_active_prompt(agent_type)
+        prompt = get_active_prompt_emergency_patch(agent_type)
         
-        return jsonify(prompt if prompt else {'error': 'No active prompt found'})
+        if prompt:
+            # Format as expected by frontend
+            formatted_prompt = {
+                "user_prompt": prompt["user_prompt_template"],
+                "system_prompt": prompt["system_prompt"],
+                "prompt_version": prompt["version"],
+                "version": prompt["version"],
+                "description": f"Active prompt v{prompt['version']}"
+            }
+            return jsonify(formatted_prompt)
+        else:
+            return jsonify({'error': 'No active prompt found'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -933,80 +968,76 @@ def reset_prompts():
                     'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
                 }), 400
         
-        # Reset BOTH prompt systems (main + feedback)
-        with engine.begin() as conn:
-            # Reset main prompt_versions table
-            conn.execute(text("""
-                UPDATE prompt_versions 
-                SET is_active = FALSE
-                WHERE config_hash = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # Activate only v0 prompts in main table
-            updated_prompts = conn.execute(text("""
-                UPDATE prompt_versions 
-                SET is_active = TRUE
-                WHERE config_hash = :config_hash AND version = 0
-            """), {"config_hash": config_hash})
-            
-            # ALSO reset the feedback system table (ai_agent_prompts) with proper config isolation
-            try:
-                # Reset feedback system for this specific config (after schema fix)
+        # Reset prompt systems with proper error handling
+        try:
+            with engine.begin() as conn:
+                # Reset main prompt_versions table
+                conn.execute(text("""
+                    UPDATE prompt_versions 
+                    SET is_active = FALSE
+                    WHERE config_hash = :config_hash
+                """), {"config_hash": config_hash})
+                
+                # Activate only v0 prompts in main table
+                updated_prompts = conn.execute(text("""
+                    UPDATE prompt_versions 
+                    SET is_active = TRUE
+                    WHERE config_hash = :config_hash AND version = 0
+                """), {"config_hash": config_hash})
+                
+                if updated_prompts.rowcount == 0:
+                    return jsonify({'error': 'No v0 baseline prompts found for this configuration'}), 400
+                
+                # Get the updated prompt versions for confirmation
+                active_prompts = conn.execute(text("""
+                    SELECT agent_type, version
+                    FROM prompt_versions
+                    WHERE config_hash = :config_hash AND is_active = TRUE
+                    ORDER BY agent_type
+                """), {"config_hash": config_hash}).fetchall()
+                
+                prompt_info = {row.agent_type: row.version for row in active_prompts}
+                
+        except Exception as e:
+            print(f"❌ Main prompt reset failed: {e}")
+            return jsonify({'error': f'Failed to reset main prompts: {str(e)}'}), 500
+        
+        # Reset feedback system in separate transaction to avoid conflicts
+        try:
+            with engine.begin() as conn:
+                # Try config-isolated reset first (if schema has been updated)
                 feedback_reset = conn.execute(text("""
                     UPDATE ai_agent_prompts 
                     SET is_active = FALSE
                     WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent') 
-                    AND config_hash = :config_hash
+                    AND (config_hash = :config_hash OR config_hash IS NULL)
                 """), {"config_hash": config_hash})
                 
-                if feedback_reset.rowcount > 0:
-                    print(f"✅ Reset feedback system prompts for config {config_hash[:8]} ({feedback_reset.rowcount} prompts)")
-                else:
-                    print(f"⚠️  No feedback system prompts found for config {config_hash[:8]}")
-                    
-            except Exception as e:
-                # If config_hash column doesn't exist yet, fall back to global reset with warning
-                print(f"⚠️  Config-isolated reset failed: {e}")
-                print(f"🔧 Falling back to global reset (affects all parallel runs)")
-                try:
-                    conn.execute(text("""
-                        UPDATE ai_agent_prompts 
-                        SET is_active = FALSE
-                        WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent')
-                    """))
-                    print("✅ Reset feedback system prompts globally")
-                except Exception as e2:
-                    print(f"❌ Global reset also failed: {e2}")
-            
-            # Try unified table too (if it exists)
-            try:
-                conn.execute(text("""
+                print(f"✅ Reset feedback system prompts ({feedback_reset.rowcount} affected)")
+                
+        except Exception as e:
+            print(f"⚠️  Feedback system reset failed: {e}")
+            # Don't fail the whole operation if feedback reset fails
+        
+        # Reset unified table in separate transaction
+        try:
+            with engine.begin() as conn:
+                unified_reset = conn.execute(text("""
                     UPDATE unified_prompts 
                     SET is_active = FALSE
                     WHERE config_hash = :config_hash
                 """), {"config_hash": config_hash})
                 
-                conn.execute(text("""
-                    UPDATE unified_prompts 
-                    SET is_active = TRUE
-                    WHERE config_hash = :config_hash AND version = 0
-                """), {"config_hash": config_hash})
-                print("✅ Also reset unified prompts table")
-            except Exception as e:
-                print(f"⚠️  Unified table not available: {e}")
-            
-            if updated_prompts.rowcount == 0:
-                return jsonify({'error': 'No v0 baseline prompts found for this configuration'}), 400
-            
-            # Get the updated prompt versions for confirmation
-            active_prompts = conn.execute(text("""
-                SELECT agent_type, version
-                FROM prompt_versions
-                WHERE config_hash = :config_hash AND is_active = TRUE
-                ORDER BY agent_type
-            """), {"config_hash": config_hash}).fetchall()
-            
-            prompt_info = {row.agent_type: row.version for row in active_prompts}
+                if unified_reset.rowcount > 0:
+                    conn.execute(text("""
+                        UPDATE unified_prompts 
+                        SET is_active = TRUE
+                        WHERE config_hash = :config_hash AND version = 0
+                    """), {"config_hash": config_hash})
+                    print(f"✅ Reset unified prompts table ({unified_reset.rowcount} prompts)")
+                    
+        except Exception as e:
+            print(f"⚠️  Unified table reset failed (table may not exist): {e}")
             
             return jsonify({
                 'success': True,
