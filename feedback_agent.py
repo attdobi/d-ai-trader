@@ -255,6 +255,36 @@ class TradeOutcomeTracker:
                         'feedback_content': synthetic_feedback,
                         'feedback_id': feedback_id
                     }
+            else:
+                print(f"⚠️  No decisions found for config {config_hash} - generating basic feedback for AUTO mode prompt evolution")
+                
+                # Even with no decisions, generate minimal feedback to trigger prompt evolution in AUTO mode
+                if self._is_config_in_auto_mode(config_hash):
+                    print(f"🔄 Config {config_hash} is in AUTO mode - generating minimal feedback to evolve prompts from v0")
+                    
+                    minimal_feedback = {
+                        'summarizer_feedback': 'Focus on identifying clear trading catalysts and actionable market insights.',
+                        'decider_feedback': 'Continue aggressive day trading approach with proper position sizing and sell analysis.',
+                        'key_insights': ['No trading data yet', 'System initialization phase', 'Ready for prompt evolution']
+                    }
+                    
+                    # Store minimal feedback
+                    feedback_id = self._store_feedback_for_config(
+                        days_back, 0, 1.0, 0.0, {'total_decisions': 0}, minimal_feedback, config_hash
+                    )
+                    
+                    # Generate v1 prompts from v0 baseline
+                    if feedback_id:
+                        print(f"🚀 Evolving prompts from v0 → v1 for AUTO mode config {config_hash}")
+                        self._auto_generate_prompts_from_feedback_for_config(minimal_feedback, feedback_id, config_hash)
+                    
+                    return {
+                        'feedback_generated': True,
+                        'feedback_source': 'auto_mode_evolution',
+                        'decisions_analyzed': 0,
+                        'feedback_content': minimal_feedback,
+                        'feedback_id': feedback_id
+                    }
             
             return decision_analysis
         
@@ -593,9 +623,8 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
             })
             return result.fetchone()[0]
     
-    def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
-        """Generate prompts for a specific config without changing global state"""
-        # Check if this config is in FIXED mode - if so, don't auto-update prompts
+    def _is_config_in_auto_mode(self, config_hash):
+        """Check if a config is in AUTO mode"""
         try:
             with engine.connect() as conn:
                 config_result = conn.execute(text("""
@@ -604,12 +633,29 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
                     WHERE config_hash = :config_hash
                 """), {"config_hash": config_hash}).fetchone()
                 
-                if config_result and config_result.prompt_mode == 'fixed':
-                    print(f"🔒 Config {config_hash} is in FIXED v{config_result.forced_prompt_version} mode - skipping auto-prompt updates")
-                    return
+                if config_result:
+                    return config_result.prompt_mode == 'auto'
+                else:
+                    # If no config found, assume AUTO mode (default)
+                    return True
         except Exception as e:
             print(f"❌ Error checking config mode for {config_hash}: {e}")
-            return
+            return True  # Default to AUTO if error
+
+    def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
+        """Generate prompts for a specific config without changing global state"""
+        # Check if this config is in FIXED mode - if so, don't auto-update prompts
+        if not self._is_config_in_auto_mode(config_hash):
+            with engine.connect() as conn:
+                config_result = conn.execute(text("""
+                    SELECT forced_prompt_version
+                    FROM run_configurations
+                    WHERE config_hash = :config_hash
+                """), {"config_hash": config_hash}).fetchone()
+                
+                forced_version = config_result.forced_prompt_version if config_result else "unknown"
+                print(f"🔒 Config {config_hash} is in FIXED v{forced_version} mode - skipping auto-prompt updates")
+                return
         
         print(f"🔄 Config {config_hash} is in AUTO mode - generating simple prompt updates")
         

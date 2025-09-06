@@ -418,15 +418,30 @@ class DAITraderOrchestrator:
         logger.info(f"Feedback agent run completed for all configs: {run_id}")
     
     def _get_active_config_hashes(self):
-        """Get config hashes that have had recent trading activity"""
+        """Get config hashes that have had recent activity (decisions OR summaries)"""
         try:
             with engine.connect() as conn:
-                # Get config hashes that have had trades in the last 2 days
+                # Get config hashes that have had ANY activity in the last 2 days
+                # This includes trade decisions, summaries, or just being actively used
                 result = conn.execute(text("""
                     SELECT DISTINCT config_hash
-                    FROM trade_decisions 
-                    WHERE timestamp >= NOW() - INTERVAL '2 days'
-                      AND config_hash IS NOT NULL
+                    FROM (
+                        -- Configs with trade decisions
+                        SELECT config_hash FROM trade_decisions 
+                        WHERE timestamp >= NOW() - INTERVAL '2 days' AND config_hash IS NOT NULL
+                        
+                        UNION
+                        
+                        -- Configs with recent summaries (shows active usage)
+                        SELECT config_hash FROM summaries 
+                        WHERE timestamp >= NOW() - INTERVAL '2 days' AND config_hash IS NOT NULL
+                        
+                        UNION
+                        
+                        -- Configs that were recently used (from run_configurations)
+                        SELECT config_hash FROM run_configurations 
+                        WHERE last_used >= NOW() - INTERVAL '2 days'
+                    ) AS active_configs
                     ORDER BY config_hash
                 """))
                 
