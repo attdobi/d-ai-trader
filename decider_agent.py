@@ -125,7 +125,10 @@ def update_all_current_prices():
             new_price = get_current_price(ticker)
             
             if new_price is None:
-                print(f"⚠️  Could not get price for {ticker}, using last known price: ${old_price:.2f}")
+                if market_open:
+                    print(f"⚠️  Could not get price for {ticker} during market hours, using last known price: ${old_price:.2f}")
+                else:
+                    print(f"⚠️  Could not get price for {ticker} after hours (normal), using last known price: ${old_price:.2f}")
                 api_failures.append(ticker)
                 continue
             
@@ -296,15 +299,49 @@ def validate_ticker_symbol(ticker):
     import yfinance as yf
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
-        # Check if we can get basic info (name, sector, etc.)
-        has_valid_data = info.get('symbol') == ticker.upper() or info.get('shortName') is not None
-        
-        return has_valid_data
-    except Exception as e:
-        print(f"⚠️  Ticker validation failed for {ticker}: {e}")
-        print(f"🚫 Skipping trade due to validation failure")
+
+        # Method 1: Try to get info (works during market hours)
+        try:
+            info = stock.info
+            has_valid_data = (
+                info.get('symbol') == ticker.upper() or
+                info.get('shortName') is not None or
+                info.get('longName') is not None
+            )
+            if has_valid_data:
+                return True
+        except Exception:
+            pass  # Continue to fallback methods
+
+        # Method 2: Try to get basic history (works after hours)
+        try:
+            # Get just 1 day of history to validate ticker exists
+            hist = stock.history(period="1d")
+            if not hist.empty:
+                return True
+        except Exception:
+            pass  # Continue to fallback methods
+
+        # Method 3: Check if ticker is in our known list
+        # For common ETFs and stocks that might have data availability issues
+        KNOWN_VALID_TICKERS = {
+            'GLD', 'SPY', 'QQQ', 'IWM', 'DIA',  # Major ETFs
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA',  # Major stocks
+            'BABA', 'AMD', 'INTC', 'NFLX', 'UBER', 'LYFT'  # Other common stocks
+        }
+
+        if ticker.upper() in KNOWN_VALID_TICKERS:
+            print(f"✅ {ticker}: Known valid ticker, proceeding despite API issues")
+            return True
+
+        print(f"⚠️  Ticker validation failed for {ticker}: No data available from yfinance")
         return False
+
+    except Exception as e:
+        print(f"⚠️  Ticker validation error for {ticker}: {e}")
+        # Don't completely fail - allow the price fetch to proceed and handle errors there
+        print(f"⚠️  Allowing {ticker} to proceed - price fetch will handle any remaining issues")
+        return True  # Be more permissive on validation failures
 
 def get_current_price(ticker):
     # Clean the ticker symbol first
@@ -315,7 +352,7 @@ def get_current_price(ticker):
     
     # Validate ticker exists before trying to get price
     if not validate_ticker_symbol(clean_ticker):
-        print(f"🚫 Ticker {clean_ticker} does not exist or is not tradeable")
+        print(f"🚫 Ticker {clean_ticker} validation failed - may not exist or be tradeable")
         return None
     
     try:
@@ -1127,22 +1164,38 @@ def ask_decision_agent(summaries, run_id, holdings):
             print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
             user_prompt_template += """
 
-🚨 CRITICAL TRADING INSTRUCTIONS:
+CRITICAL TRADING INSTRUCTIONS:
 
-1. FIRST: Review each existing position and decide whether to SELL, providing explicit reasoning
+1. FIRST: Analyze EACH AND EVERY existing position in your holdings INDIVIDUALLY:
+   - For BABA: Decide SELL or HOLD with detailed reasoning
+   - For GLD: Decide SELL or HOLD with detailed reasoning
+   - For EVERY OTHER POSITION: Decide SELL or HOLD with detailed reasoning
+
 2. SECOND: Consider new BUY opportunities based on news analysis
+
 3. Think in DOLLAR amounts, not share counts - the system will calculate shares
 
-For each EXISTING holding, you MUST provide a sell decision or explicit reasoning why you're keeping it.
+MANDATORY REQUIREMENTS:
+- You MUST provide a separate decision for EACH existing position
+- If you have 2 holdings, you MUST return 2 decisions (plus any buys)
+- If you have 5 holdings, you MUST return 5 decisions (plus any buys)
+- NO EXCEPTIONS - Every position listed above must have a decision
 
-🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
+EXAMPLE OUTPUT FORMAT:
 [
-  {
+  {{"action": "hold", "ticker": "BABA", "amount_usd": 0, "reason": "Strong momentum..."}},
+  {{"action": "sell", "ticker": "GLD", "amount_usd": 0, "reason": "Profit taking..."}},
+  {{"action": "buy", "ticker": "NVDA", "amount_usd": 3000, "reason": "New opportunity..."}}
+]
+
+CRITICAL: You must respond ONLY with valid JSON in this exact format:
+[
+  {{
     "action": "sell" or "buy" or "hold",
-    "ticker": "SYMBOL", 
+    "ticker": "SYMBOL",
     "amount_usd": dollar_amount_number,
     "reason": "detailed explanation including sell analysis for existing positions"
-  }
+  }}
 ]
 
 IMPORTANT:
@@ -1327,6 +1380,15 @@ No explanatory text, no markdown, just pure JSON array."""
         feedback=feedback_context,
         summaries=summarized_text
     )
+
+    # DEBUG: Verify holdings are included in the prompt
+    print(f"🔍 DEBUG: Holdings text in prompt: {holdings_text[:200]}...")
+    if 'BABA' not in prompt or 'GLD' not in prompt:
+        print("⚠️  WARNING: Holdings not found in prompt!")
+        print(f"   Looking for BABA: {'BABA' in prompt}")
+        print(f"   Looking for GLD: {'GLD' in prompt}")
+    else:
+        print("✅ Holdings found in prompt")
     
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
@@ -1347,11 +1409,24 @@ No explanatory text, no markdown, just pure JSON array."""
     if not market_open:
         print("🕒 Market closed - Decisions recorded but execution deferred")
         # Modify each decision to indicate deferred execution
-        for decision in ai_response:
-            if isinstance(decision, dict) and decision.get('action') not in ['N/A', 'hold']:
-                original_reason = decision.get('reason', '')
-                decision['reason'] = f"Market closed - execution deferred. Original: {original_reason}"
-                decision['execution_status'] = 'deferred'
+        for i, decision in enumerate(ai_response):
+            try:
+                if isinstance(decision, dict) and decision.get('action') not in ['N/A', 'hold']:
+                    original_reason = decision.get('reason', '')
+                    decision['reason'] = f"Market closed - execution deferred. Original: {original_reason}"
+                    decision['execution_status'] = 'deferred'
+                elif not isinstance(decision, dict):
+                    print(f"⚠️  Decision {i} is not a dict: {type(decision)} = {decision}")
+            except Exception as e:
+                print(f"⚠️  Error processing decision {i}: {e}")
+                print(f"   Decision content: {decision}")
+                # Replace with safe fallback
+                ai_response[i] = {
+                    "action": "hold",
+                    "ticker": "ERROR",
+                    "amount_usd": 0,
+                    "reason": f"Error processing decision: {e}"
+                }
     
     return ai_response
 

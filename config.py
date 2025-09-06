@@ -830,12 +830,16 @@ class PromptManager:
         
         elif agent_name and "Decider" in agent_name:
             # Create decider-style response (hold decision)
-            return [{
+            print(f"⚠️  Creating fallback response for Decider agent")
+            print(f"   Original content preview: {content[:200]}...")
+            fallback_decision = {
                 "action": "hold",
                 "ticker": "N/A",
                 "amount_usd": 0,
                 "reason": f"Unable to parse AI response - defaulting to hold. Original response: {content[:100]}..."
-            }]
+            }
+            print(f"   Fallback decision: {fallback_decision}")
+            return [fallback_decision]
         
         else:
             # Generic fallback

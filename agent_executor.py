@@ -162,17 +162,28 @@ class UnifiedAgentExecutor:
 
         except Exception as e:
             logger.error(f"Error executing decider agent: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
-            # Record failure
+            # Record failure with more details
             try:
                 with engine.begin() as conn:
                     conn.execute(text("""
                         UPDATE system_runs
-                        SET end_time = CURRENT_TIMESTAMP, status = 'failed'
+                        SET end_time = CURRENT_TIMESTAMP, status = 'failed',
+                            details = details || :error_details
                         WHERE run_type = 'decider' AND details->>'run_id' = :run_id
-                    """), {"run_id": run_id or "unknown"})
-            except:
-                pass
+                    """), {
+                        "run_id": run_id or "unknown",
+                        "error_details": json.dumps({
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "traceback": traceback.format_exc()
+                        })
+                    })
+            except Exception as db_error:
+                logger.error(f"Failed to record error details: {db_error}")
 
             return AgentExecutionResult("decider", False, f"Decider agent failed: {str(e)}")
 

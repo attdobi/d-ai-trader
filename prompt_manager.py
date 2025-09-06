@@ -52,11 +52,38 @@ def initialize_config_prompts(config_hash):
 
 def get_active_prompt(agent_type):
     """Get the currently active prompt for an agent type and config"""
-    from config import get_current_config_hash
+    from config import get_current_config_hash, get_prompt_version_config
     config_hash = get_current_config_hash()
-    
+    prompt_config = get_prompt_version_config()
+
     with engine.connect() as conn:
-        # First try to get config-specific prompt
+        # Check if we're in fixed prompt version mode
+        if prompt_config['mode'] == 'fixed' and prompt_config['forced_version'] is not None:
+            print(f"🔒 Fixed prompt mode: Looking for {agent_type} v{prompt_config['forced_version']}")
+            # In fixed mode, look for the specific version
+            result = conn.execute(text("""
+                SELECT system_prompt, user_prompt_template, version
+                FROM prompt_versions
+                WHERE agent_type = :agent_type AND version = :forced_version AND config_hash = :config_hash
+                LIMIT 1
+            """), {
+                "agent_type": agent_type,
+                "forced_version": prompt_config['forced_version'],
+                "config_hash": config_hash
+            }).fetchone()
+
+            if result:
+                print(f"✅ Found {agent_type} v{result.version} (FIXED mode)")
+                return {
+                    "system_prompt": result.system_prompt,
+                    "user_prompt_template": result.user_prompt_template,
+                    "version": result.version
+                }
+            else:
+                print(f"⚠️  Fixed version v{prompt_config['forced_version']} not found for {agent_type}, falling back to active")
+                # Fall back to active prompts if the fixed version doesn't exist
+
+        # Auto mode or fallback: get the latest active prompt
         result = conn.execute(text("""
             SELECT system_prompt, user_prompt_template, version
             FROM prompt_versions
@@ -66,43 +93,79 @@ def get_active_prompt(agent_type):
         """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
         
         if result:
+            print(f"✅ Found {agent_type} v{result.version} (AUTO mode)")
             return {
                 "system_prompt": result.system_prompt,
                 "user_prompt_template": result.user_prompt_template,
                 "version": result.version
             }
         else:
-            # Auto-initialize this config with v0 baseline if it doesn't exist
-            print(f"🔧 Config {config_hash[:8]} has no prompts, auto-initializing...")
-            initialized = initialize_config_prompts(config_hash)
+            # No active prompts found for this config
+            print(f"🔧 Config {config_hash[:8]} has no active prompts, checking initialization...")
+
+            # Check if this config has any prompts at all
+            config_prompts = conn.execute(text("""
+                SELECT COUNT(*) FROM prompt_versions
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchone()[0]
+
+            if config_prompts == 0:
+                # Auto-initialize this config with v0 baseline if it doesn't exist
+                print(f"🔧 Config {config_hash[:8]} has no prompts, auto-initializing...")
+                initialized = initialize_config_prompts(config_hash)
+
+                if initialized:
+                    # Try again to get the config-specific prompt
+                    result = conn.execute(text("""
+                        SELECT system_prompt, user_prompt_template, version
+                        FROM prompt_versions
+                        WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
+                        ORDER BY version DESC
+                        LIMIT 1
+                    """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
+
+                    if result:
+                        print(f"✅ Found {agent_type} v{result.version} after initialization")
+                        return {
+                            "system_prompt": result.system_prompt,
+                            "user_prompt_template": result.user_prompt_template,
+                            "version": result.version
+                        }
             
-            if initialized:
-                # Try again to get the config-specific prompt
+            # Final fallback logic
+            if prompt_config['mode'] == 'fixed' and prompt_config['forced_version'] is not None:
+                # In fixed mode, try to find the specific version in global prompts
                 result = conn.execute(text("""
                     SELECT system_prompt, user_prompt_template, version
                     FROM prompt_versions
-                    WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
-                    ORDER BY version DESC
+                    WHERE agent_type = :agent_type AND version = :forced_version AND (config_hash = 'global' OR config_hash IS NULL)
                     LIMIT 1
-                """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-                
+                """), {
+                    "agent_type": agent_type,
+                    "forced_version": prompt_config['forced_version']
+                }).fetchone()
+
                 if result:
+                    print(f"✅ Found global {agent_type} v{result.version} (FIXED mode)")
                     return {
                         "system_prompt": result.system_prompt,
                         "user_prompt_template": result.user_prompt_template,
                         "version": result.version
                     }
-            
-            # Final fallback to global v0 baseline
+                else:
+                    print(f"🚨 EMERGENCY: Fixed version v{prompt_config['forced_version']} not found for {agent_type}, using v0 baseline")
+            else:
+                print(f"🚨 EMERGENCY: Using hardcoded v0 baseline for {agent_type}")
+
+            # Ultimate fallback to global v0 baseline
             result = conn.execute(text("""
                 SELECT system_prompt, user_prompt_template, version
                 FROM prompt_versions
                 WHERE agent_type = :agent_type AND version = 0 AND (config_hash = 'global' OR config_hash IS NULL)
                 LIMIT 1
             """), {"agent_type": agent_type}).fetchone()
-            
+
             if result:
-                print(f"⚠️  Using global v0 baseline for {agent_type}")
                 return {
                     "system_prompt": result.system_prompt,
                     "user_prompt_template": result.user_prompt_template,
