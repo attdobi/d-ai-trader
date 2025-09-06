@@ -97,7 +97,8 @@ def dashboard():
     
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
-        result = conn.execute(text("""
+        # Get holdings list
+        holdings_result = conn.execute(text("""
             SELECT ticker, shares, purchase_price, current_price, purchase_timestamp, current_timestamp,
                    total_value, current_value, gain_loss, reason
             FROM holdings
@@ -105,16 +106,29 @@ def dashboard():
             ORDER BY CASE WHEN ticker = 'CASH' THEN 1 ELSE 0 END, ticker
         """), {"config_hash": config_hash}).fetchall()
 
-        holdings = [dict(row._mapping) for row in result]
+        holdings = [dict(row._mapping) for row in holdings_result]
 
-        # Calculate portfolio metrics
-        cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
-        stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
-        
-        total_current_value = sum(h["current_value"] for h in stock_holdings)
-        total_invested = sum(h["total_value"] for h in stock_holdings)
-        total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
-        total_portfolio_value = total_current_value + cash_balance
+        # Use optimized portfolio calculations view
+        portfolio_result = conn.execute(text("""
+            SELECT cash_balance, stock_value, total_invested, total_gain_loss, active_positions
+            FROM portfolio_calculations
+            WHERE config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone()
+
+        if portfolio_result:
+            cash_balance = float(portfolio_result.cash_balance or 0)
+            total_current_value = float(portfolio_result.stock_value or 0)
+            total_invested = float(portfolio_result.total_invested or 0)
+            total_profit_loss = float(portfolio_result.total_gain_loss or 0)
+            total_portfolio_value = cash_balance + total_current_value
+        else:
+            # Fallback to manual calculation
+            cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
+            stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
+            total_current_value = sum(h["current_value"] for h in stock_holdings)
+            total_invested = sum(h["total_value"] for h in stock_holdings)
+            total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+            total_portfolio_value = total_current_value + cash_balance
         
         # Calculate metrics relative to initial $10,000 investment
         initial_investment = 10000.0
@@ -692,22 +706,20 @@ def feedback_dashboard():
 # Manual trigger endpoints for testing
 @app.route('/api/trigger/summarizer', methods=['POST'])
 def trigger_summarizer():
-    """Manually trigger summarizer agents"""
+    """Manually trigger summarizer agents using unified executor"""
     try:
-        # Import the orchestrator to run summarizer
-        from d_ai_trader import DAITraderOrchestrator
-        orchestrator = DAITraderOrchestrator()
-        
-        # Run summarizer in a separate thread to avoid blocking
+        from agent_executor import run_summarizer_agents
+
         def run_summarizer():
             try:
-                orchestrator.run_summarizer_agents()
+                result = run_summarizer_agents()
+                print(f"Summarizer result: {'✅' if result.success else '❌'} {result.message}")
             except Exception as e:
                 print(f"Error in manual summarizer run: {e}")
-        
+
         thread = threading.Thread(target=run_summarizer, daemon=True)
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'Summarizer agents triggered successfully'
@@ -717,22 +729,20 @@ def trigger_summarizer():
 
 @app.route('/api/trigger/decider', methods=['POST'])
 def trigger_decider():
-    """Manually trigger decider agent"""
+    """Manually trigger decider agent using unified executor"""
     try:
-        # Import the orchestrator to run decider
-        from d_ai_trader import DAITraderOrchestrator
-        orchestrator = DAITraderOrchestrator()
-        
-        # Run decider in a separate thread to avoid blocking
+        from agent_executor import run_decider_agent
+
         def run_decider():
             try:
-                orchestrator.run_decider_agent()
+                result = run_decider_agent()
+                print(f"Decider result: {'✅' if result.success else '❌'} {result.message}")
             except Exception as e:
                 print(f"Error in manual decider run: {e}")
-        
+
         thread = threading.Thread(target=run_decider, daemon=True)
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'Decider agent triggered successfully'
@@ -742,22 +752,20 @@ def trigger_decider():
 
 @app.route('/api/trigger/feedback', methods=['POST'])
 def trigger_feedback():
-    """Manually trigger feedback agent"""
+    """Manually trigger feedback agent using unified executor"""
     try:
-        # Import the orchestrator to run feedback
-        from d_ai_trader import DAITraderOrchestrator
-        orchestrator = DAITraderOrchestrator()
-        
-        # Run feedback in a separate thread to avoid blocking
+        from agent_executor import run_feedback_agent
+
         def run_feedback():
             try:
-                orchestrator.run_feedback_agent()
+                result = run_feedback_agent()
+                print(f"Feedback result: {'✅' if result.success else '❌'} {result.message}")
             except Exception as e:
                 print(f"Error in manual feedback run: {e}")
-        
+
         thread = threading.Thread(target=run_feedback, daemon=True)
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'Feedback agent triggered successfully'
@@ -836,79 +844,41 @@ def trigger_agent(agent_type):
 
 @app.route('/api/trigger/all', methods=['POST'])
 def trigger_all():
-    """Manually trigger all agents in sequence"""
+    """Manually trigger all agents in sequence using unified executor"""
     try:
-        # Import the orchestrator to run all agents
-        from d_ai_trader import DAITraderOrchestrator
-        from config import get_current_config_hash
+        from agent_executor import run_all_agents
         import json
         from datetime import datetime
-        
-        # Ensure config hash is set before running
+
+        # Ensure config hash is set
         config_hash = get_current_config_hash()
         print(f"🔧 Running all agents for config: {config_hash}")
-        
-        orchestrator = DAITraderOrchestrator()
-        
-        # Run all agents in sequence in a separate thread
+
         def run_all():
             try:
-                # Use the SAME config hash that's displayed on the website
-                # This was set when the .sh script started and should never change
-                thread_config_hash = config_hash  # Use the hash from the outer scope
-                
-                # Ensure config hash is available in this thread
-                import os
-                os.environ['CURRENT_CONFIG_HASH'] = thread_config_hash
-                
                 print("🚀 Starting manual run of all agents...")
-                print(f"🔧 Config hash in thread: {thread_config_hash} (from website display)")
-                
-                # 1. Run summarizer
-                print("📰 Step 1/3: Running summarizer agents...")
-                orchestrator.run_summarizer_agents()
-                print("✅ Summarizer completed")
-                
-                # Small delay to ensure summarizer data is committed
-                import time
-                time.sleep(2)
-                
-                # 2. Run decider
-                print("🤖 Step 2/3: Running decider agent...")
-                orchestrator.run_decider_agent()
-                print("✅ Decider completed")
-                
-                # 3. Run feedback
-                print("📊 Step 3/3: Running feedback agent...")
-                orchestrator.run_feedback_agent()
-                print("✅ Feedback completed")
-                
-                print("🎉 All agents completed successfully!")
-                
+
+                # Run all agents using unified executor
+                results = run_all_agents()
+
+                # Log results
+                success_count = sum(1 for r in results if r.success)
+                total_count = len(results)
+
+                print(f"🎉 All agents completed: {success_count}/{total_count} successful")
+
+                for result in results:
+                    status = "✅" if result.success else "❌"
+                    print(f"{status} {result.agent_type}: {result.message}")
+
             except Exception as e:
                 print(f"❌ Error in manual all agents run: {type(e).__name__}: {e}")
                 import traceback
                 traceback.print_exc()
-                
-                # Store the error in the database so we can see it
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            INSERT INTO system_runs (run_type, status, details)
-                            VALUES ('run_all_agents', 'failed', :details)
-                        """), {
-                            "details": json.dumps({
-                                "error": str(e),
-                                "config_hash": thread_config_hash,
-                                "timestamp": datetime.now().isoformat()
-                            })
-                        })
-                except:
-                    pass  # Don't let error logging cause more errors
-        
+
         thread = threading.Thread(target=run_all, daemon=True)
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'All agents triggered successfully (running in background)'
@@ -1019,25 +989,7 @@ def reset_prompts():
             print(f"⚠️  Feedback system reset failed: {e}")
             # Don't fail the whole operation if feedback reset fails
         
-        # Reset unified table in separate transaction
-        try:
-            with engine.begin() as conn:
-                unified_reset = conn.execute(text("""
-                    UPDATE unified_prompts 
-                    SET is_active = FALSE
-                    WHERE config_hash = :config_hash
-                """), {"config_hash": config_hash})
-                
-                if unified_reset.rowcount > 0:
-                    conn.execute(text("""
-                        UPDATE unified_prompts 
-                        SET is_active = TRUE
-                        WHERE config_hash = :config_hash AND version = 0
-                    """), {"config_hash": config_hash})
-                    print(f"✅ Reset unified prompts table ({unified_reset.rowcount} prompts)")
-                    
-        except Exception as e:
-            print(f"⚠️  Unified table reset failed (table may not exist): {e}")
+        # Skip unified table reset - table doesn't exist
             
             return jsonify({
                 'success': True,
@@ -1045,6 +997,65 @@ def reset_prompts():
                 'prompt_versions': prompt_info
             })
             
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/parallel-runs', methods=['GET'])
+def get_parallel_runs():
+    """Get status of parallel runs"""
+    try:
+        from config import parallel_manager
+        runs = parallel_manager.list_active_runs()
+        return jsonify(runs)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/parallel-runs', methods=['POST'])
+def start_parallel_run():
+    """Start a new parallel run"""
+    try:
+        data = request.get_json()
+        port = data.get('port')
+        model = data.get('model')
+        prompt_version = data.get('prompt_version', 'auto')
+        trading_mode = data.get('trading_mode', 'simulation')
+
+        if not all([port, model]):
+            return jsonify({'error': 'Missing required parameters: port, model'}), 400
+
+        from config import parallel_manager
+        run_id = parallel_manager.start_parallel_run(port, model, prompt_version, trading_mode)
+
+        if run_id:
+            return jsonify({'success': True, 'run_id': run_id, 'message': f'Started parallel run {run_id}'})
+        else:
+            return jsonify({'error': 'Failed to start parallel run'}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/parallel-runs/<run_id>', methods=['DELETE'])
+def stop_parallel_run(run_id):
+    """Stop a parallel run"""
+    try:
+        from config import parallel_manager
+        success = parallel_manager.stop_parallel_run(run_id)
+
+        if success:
+            return jsonify({'success': True, 'message': f'Stopped parallel run {run_id}'})
+        else:
+            return jsonify({'error': f'Failed to stop parallel run {run_id}'}), 404
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/parallel-performance', methods=['GET'])
+def get_parallel_performance():
+    """Get performance metrics for all parallel runs"""
+    try:
+        from config import parallel_manager
+        performance = parallel_manager.get_run_performance()
+        return jsonify(performance)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -40,6 +40,8 @@ An intelligent trading system that uses AI agents to analyze financial news from
 - **Configuration Hashing**: Unique identifiers ensure data separation and screenshot isolation
 - **Comprehensive Tracking**: All trades, decisions, and outcomes tracked per configuration
 - **Isolated Screenshots**: Each configuration saves screenshots to separate directories
+- **🚀 Parallel Manager**: Automated process management for multiple instances
+- **📊 Performance Dashboard**: Real-time comparison of parallel configurations
 
 ### Advanced Profit Tracking
 - **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
@@ -480,7 +482,7 @@ python test_feedback_system.py
 
 ### News Analysis
 1. **Web Scraping**: Captures screenshots and HTML from financial news sites
-2. **AI Processing**: GPT-4 analyzes both visual and text content
+2. **AI Processing**: GPT-4/GPT-5 analyzes both visual and text content
 3. **Sentiment Extraction**: Identifies market sentiment and actionable insights
 4. **Summary Generation**: Creates structured summaries with headlines and insights
 
@@ -490,6 +492,22 @@ python test_feedback_system.py
 3. **Risk Management**: Enforces position limits and cash reserves
 4. **Decision Generation**: AI creates specific buy/sell recommendations with reasoning
 5. **🆕 Enhanced Processing**: Processes ALL unseen summaries, not just the latest batch
+
+## 🏗️ **STREAMLINED ARCHITECTURE**
+
+### Core Improvements
+- **🎯 Unified Agent Execution**: Single framework for running agents manually or automatically
+- **⚙️ Streamlined Configuration**: Centralized configuration management with caching
+- **🔄 Parallel Architecture**: Enhanced support for multiple simultaneous configurations
+- **📊 Database Optimization**: Indexed queries and optimized portfolio calculations
+- **🛡️ Centralized Error Handling**: Consistent logging and error reporting
+- **🎨 Simplified Orchestrator**: Cleaner agent scheduling and execution
+
+### Key Components
+- **`agent_executor.py`**: Unified execution framework for all agents
+- **`config.py`**: Streamlined configuration with ConfigurationManager class
+- **`error_handler.py`**: Centralized error handling and logging system
+- **`parallel_manager`**: Process isolation for multiple configurations
 
 ## 💰 Profit Tracking Implementation
 

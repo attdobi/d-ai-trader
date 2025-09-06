@@ -50,9 +50,9 @@ SUMMARIZER_END_TIME = "17:25"
 WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
 class DAITraderOrchestrator:
+    """Simplified orchestrator using unified agent execution framework"""
+
     def __init__(self):
-        self.prompt_manager = PromptManager(client=openai, session=session)
-        self.last_processed_summary_id = None
         self.initialize_database()
         
     def initialize_database(self):
@@ -159,338 +159,102 @@ class DAITraderOrchestrator:
             logger.warning(f"Could not check if feedback ran today: {e}")
             return False  # If we can't check, allow it to run
     
+    # Database management methods (kept for compatibility)
     def get_unprocessed_summaries(self):
-        """Get all summaries that haven't been processed by the decider yet"""
-        from config import get_current_config_hash
-        config_hash = get_current_config_hash()
-        
-        with engine.connect() as conn:
-            # Get all summaries that haven't been processed (filtered by config_hash)
-            result = conn.execute(text("""
-                SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
-                FROM summaries s
-                LEFT JOIN processed_summaries ps ON s.id = ps.summary_id AND ps.processed_by = 'decider'
-                WHERE ps.summary_id IS NULL AND s.config_hash = :config_hash
-                ORDER BY s.timestamp ASC
-            """), {"config_hash": config_hash})
-            return [row._mapping for row in result]
-    
-    def get_recent_summaries(self, hours_back=6):
-        """Get summaries from the latest run (processed or not)"""
-        from config import get_current_config_hash
-        config_hash = get_current_config_hash()
-        
-        with engine.connect() as conn:
-            # First, get the latest run_id
-            latest_run_result = conn.execute(text("""
-                SELECT run_id 
-                FROM summaries 
-                WHERE config_hash = :config_hash
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            """), {"config_hash": config_hash})
-            
-            latest_run_row = latest_run_result.fetchone()
-            if not latest_run_row:
-                return []
-            
-            latest_run_id = latest_run_row.run_id
-            
-            # Get all summaries from the latest run
-            result = conn.execute(text("""
-                SELECT s.id, s.agent, s.timestamp, s.run_id, s.data
-                FROM summaries s
-                WHERE s.run_id = :run_id
-                  AND s.config_hash = :config_hash
-                ORDER BY s.timestamp DESC
-            """), {"run_id": latest_run_id, "config_hash": config_hash})
-            return [row._mapping for row in result]
-    
+        """Legacy method - now handled by unified executor"""
+        from agent_executor import agent_executor
+        return agent_executor._get_unprocessed_summaries()
+
     def mark_summaries_processed(self, summary_ids, processed_by):
-        """Mark summaries as processed"""
-        with engine.begin() as conn:
-            for summary_id in summary_ids:
-                conn.execute(text("""
-                    INSERT INTO processed_summaries (summary_id, processed_by, run_id)
-                    VALUES (:summary_id, :processed_by, :run_id)
-                """), {
-                    "summary_id": summary_id,
-                    "processed_by": processed_by,
-                    "run_id": datetime.now().strftime("%Y%m%dT%H%M%S")
-                })
+        """Legacy method - now handled by unified executor"""
+        from agent_executor import agent_executor
+        return agent_executor._mark_summaries_processed(summary_ids, processed_by)
     
     def run_summarizer_agents(self):
-        """Run the summarizer agents"""
-        # Create both the internal run_id and the timestamp for main.py
-        internal_run_id = f"summarizer_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        timestamp = datetime.now().strftime('%Y%m%dT%H%M%S')
-        logger.info(f"Starting summarizer agents run: {internal_run_id}")
-        
-        try:
-            # Record run start
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    INSERT INTO system_runs (run_type, details)
-                    VALUES ('summarizer', :details)
-                """), {
-                    "details": json.dumps({"run_id": internal_run_id, "timestamp": datetime.now().isoformat()})
-                })
-            
-            # Run the summarizer agents with the correct timestamp format
-            summarizer_main.RUN_TIMESTAMP = timestamp
-            summarizer_main.RUN_DIR = os.path.join(summarizer_main.SCREENSHOT_DIR, timestamp)
-            os.makedirs(summarizer_main.RUN_DIR, exist_ok=True)
-            summarizer_main.run_summary_agents()
-            
-            logger.info(f"Summarizer agents completed successfully: {internal_run_id}")
-            
-            # Update run status
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'completed'
-                    WHERE run_type = 'summarizer' AND details->>'run_id' = :run_id
-                """), {"run_id": internal_run_id})
-                
-        except Exception as e:
-            logger.error(f"Error running summarizer agents: {e}")
-            # Update run status to failed
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'failed'
-                    WHERE run_type = 'summarizer' AND details->>'run_id' = :run_id
-                """), {"run_id": internal_run_id})
+        """Run the summarizer agents using unified executor"""
+        from agent_executor import run_summarizer_agents as unified_summarizer
+
+        run_id = f"summarizer_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+        logger.info(f"Starting summarizer agents run: {run_id}")
+
+        result = unified_summarizer(run_id)
+
+        if result.success:
+            logger.info(f"Summarizer agents completed successfully: {result.message}")
+        else:
+            logger.error(f"Summarizer agents failed: {result.message}")
     
     def run_decider_agent(self):
-        """Run the decider agent with all unprocessed summaries"""
+        """Run the decider agent using unified executor"""
+        from agent_executor import run_decider_agent as unified_decider
+
         run_id = f"decider_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Starting decider agent run: {run_id}")
-        
-        try:
-            # Record run start
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    INSERT INTO system_runs (run_type, details)
-                    VALUES ('decider', :details)
-                """), {
-                    "details": json.dumps({"run_id": run_id, "timestamp": datetime.now().isoformat()})
-                })
-            
-            # Get unprocessed summaries
-            unprocessed_summaries = self.get_unprocessed_summaries()
-            
-            if not unprocessed_summaries:
-                logger.info("No unprocessed summaries found for decider - using latest run summaries")
-                # Get summaries from the latest run instead of empty list
-                unprocessed_summaries = self.get_recent_summaries()
-                if unprocessed_summaries:
-                    latest_run_id = unprocessed_summaries[0]['run_id']
-                    logger.info(f"Using {len(unprocessed_summaries)} summaries from latest run {latest_run_id}")
-                else:
-                    logger.info("No summaries available - will record market status only")
-                    unprocessed_summaries = []
-            else:
-                logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
-            
-            # Create a mock run_id for the decider to use
-            # We'll use the latest timestamp from the summaries, or current time if no summaries
-            if unprocessed_summaries:
-                latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
-                mock_run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
-            else:
-                # No summaries, use current time for run_id
-                mock_run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
-            
-            # Temporarily override the get_latest_run_id function
-            original_get_latest_run_id = decider.get_latest_run_id
-            
-            def mock_get_latest_run_id():
-                return mock_run_id
-            
-            decider.get_latest_run_id = mock_get_latest_run_id
-            
-            # Update current prices before making decisions
-            decider.update_all_current_prices()
-            
-            # Run the decider agent
-            summaries = unprocessed_summaries
-            holdings = decider.fetch_holdings()
-            decisions = decider.ask_decision_agent(summaries, mock_run_id, holdings)
-            decider.store_trade_decisions(decisions, mock_run_id)
-            decider.update_holdings(decisions)
-            decider.record_portfolio_snapshot()
-            
-            # Mark summaries as processed
-            summary_ids = [s['id'] for s in unprocessed_summaries]
-            self.mark_summaries_processed(summary_ids, 'decider')
-            
-            # Restore original function
-            decider.get_latest_run_id = original_get_latest_run_id
-            
-            logger.info(f"Decider agent completed successfully: {run_id}")
-            
-            # Update run status
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'completed'
-                    WHERE run_type = 'decider' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
-                
-        except Exception as e:
-            logger.error(f"Error running decider agent: {e}")
-            # Update run status to failed
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    UPDATE system_runs 
-                    SET end_time = CURRENT_TIMESTAMP, status = 'failed'
-                    WHERE run_type = 'decider' AND details->>'run_id' = :run_id
-                """), {"run_id": run_id})
+
+        result = unified_decider(run_id)
+
+        if result.success:
+            logger.info(f"Decider agent completed successfully: {result.message}")
+        else:
+            logger.error(f"Decider agent failed: {result.message}")
     
     def run_feedback_agent(self):
-        """Run the feedback agent for daily analysis across all active config hashes"""
+        """Run the feedback agent using unified executor"""
+        from agent_executor import run_feedback_agent as unified_feedback
+
         run_id = f"feedback_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
-        logger.info(f"Starting feedback agent run for all configs: {run_id}")
-        
-        # PRESERVE the original configuration hash set during startup
-        from config import get_current_config_hash
-        original_config_hash = get_current_config_hash()
-        logger.info(f"Original configuration hash: {original_config_hash}")
-        
-        # Get all config hashes that have had recent trading activity
-        active_configs = self._get_active_config_hashes()
-        
-        if not active_configs:
-            logger.info("No active config hashes found - skipping feedback")
-            return
-            
-        logger.info(f"Found {len(active_configs)} active config hashes: {active_configs}")
-        
-        for config_hash in active_configs:
-            try:
-                logger.info(f"Running feedback analysis for config {config_hash}")
-                
-                # Record run start for this config
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        INSERT INTO system_runs (run_type, details)
-                        VALUES ('feedback', :details)
-                    """), {
-                        "details": json.dumps({
-                            "run_id": f"{run_id}_{config_hash[:8]}", 
-                            "timestamp": datetime.now().isoformat(),
-                            "config_hash": config_hash
-                        })
-                    })
-                
-                # Run the feedback analysis for this specific config
-                # WITHOUT changing the global configuration hash
-                feedback_tracker = TradeOutcomeTracker()
-                result = feedback_tracker.analyze_recent_outcomes_for_config(config_hash)
-                
-                if result:
-                    logger.info(f"Feedback analysis completed for config {config_hash}")
-                else:
-                    logger.info(f"No feedback analysis needed for config {config_hash}")
-                
-                # Update run status to completed
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        UPDATE system_runs 
-                        SET end_time = CURRENT_TIMESTAMP, status = 'completed'
-                        WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
-                    """), {"run_id": f"{run_id}_{config_hash[:8]}"})
-                    
-            except Exception as e:
-                logger.error(f"Error running feedback for config {config_hash}: {e}")
-                # Update run status to failed
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        UPDATE system_runs 
-                        SET end_time = CURRENT_TIMESTAMP, status = 'failed'
-                        WHERE run_type = 'feedback' AND details->>'run_id' = :run_id
-                    """), {"run_id": f"{run_id}_{config_hash[:8]}"})
-        
-        # RESTORE the original configuration hash
-        os.environ['CURRENT_CONFIG_HASH'] = original_config_hash
-        logger.info(f"Restored original configuration hash: {original_config_hash}")
-        logger.info(f"Feedback agent run completed for all configs: {run_id}")
+        logger.info(f"Starting feedback agent run: {run_id}")
+
+        result = unified_feedback(run_id)
+
+        if result.success:
+            logger.info(f"Feedback agent completed successfully: {result.message}")
+        else:
+            logger.error(f"Feedback agent failed: {result.message}")
     
+    # Legacy methods for compatibility (now handled by unified executor)
     def _get_active_config_hashes(self):
-        """Get config hashes that have had recent activity (decisions OR summaries)"""
-        try:
-            with engine.connect() as conn:
-                # Get config hashes that have had ANY activity in the last 2 days
-                # This includes trade decisions, summaries, or just being actively used
-                result = conn.execute(text("""
-                    SELECT DISTINCT config_hash
-                    FROM (
-                        -- Configs with trade decisions
-                        SELECT config_hash FROM trade_decisions 
-                        WHERE timestamp >= NOW() - INTERVAL '2 days' AND config_hash IS NOT NULL
-                        
-                        UNION
-                        
-                        -- Configs with recent summaries (shows active usage)
-                        SELECT config_hash FROM summaries 
-                        WHERE timestamp >= NOW() - INTERVAL '2 days' AND config_hash IS NOT NULL
-                        
-                        UNION
-                        
-                        -- Configs that were recently used (from run_configurations)
-                        SELECT config_hash FROM run_configurations 
-                        WHERE last_used >= NOW() - INTERVAL '2 days'
-                    ) AS active_configs
-                    ORDER BY config_hash
-                """))
-                
-                return [row.config_hash for row in result]
-        except Exception as e:
-            logger.error(f"Error getting active config hashes: {e}")
-            return []
+        """Legacy method - feedback now handled per configuration"""
+        return []
     
     def scheduled_summarizer_job(self):
-        """Scheduled job for summarizer agents"""
+        """Scheduled job for summarizer agents using unified executor"""
         try:
             if self.is_summarizer_time():
                 logger.info("Running scheduled summarizer job")
-                self.run_summarizer_agents()
-                logger.info("✅ Scheduled summarizer job completed successfully")
+                from agent_executor import run_summarizer_agents
+                result = run_summarizer_agents()
+                logger.info(f"✅ Scheduled summarizer job: {'completed' if result.success else 'failed'}")
             else:
                 logger.info("Skipping summarizer job - outside of scheduled time")
         except Exception as e:
             logger.error(f"❌ Scheduled summarizer job failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
+
     def scheduled_decider_job(self):
-        """Scheduled job for decider agent"""
+        """Scheduled job for decider agent using unified executor"""
         try:
             if self.is_decider_time():
                 logger.info("Running scheduled decider job")
-                self.run_decider_agent()
-                logger.info("✅ Scheduled decider job completed successfully")
+                from agent_executor import run_decider_agent
+                result = run_decider_agent()
+                logger.info(f"✅ Scheduled decider job: {'completed' if result.success else 'failed'}")
             else:
                 logger.info("Skipping decider job - market is closed")
         except Exception as e:
             logger.error(f"❌ Scheduled decider job failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-    
+
     def scheduled_feedback_job(self):
-        """Scheduled job for feedback agent"""
+        """Scheduled job for feedback agent using unified executor"""
         try:
             if self.is_feedback_time():
                 logger.info("Running scheduled feedback job")
-                self.run_feedback_agent()
-                logger.info("✅ Scheduled feedback job completed successfully")
+                from agent_executor import run_feedback_agent
+                result = run_feedback_agent()
+                logger.info(f"✅ Scheduled feedback job: {'completed' if result.success else 'failed'}")
             else:
                 logger.info("Skipping feedback job - outside of scheduled time")
         except Exception as e:
             logger.error(f"❌ Scheduled feedback job failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
     
     def scheduled_summarizer_and_decider_job(self):
         """Sequential job: Run summarizers first, then decider with collected summaries"""
@@ -498,25 +262,25 @@ class DAITraderOrchestrator:
             # Step 1: Run summarizers (always when scheduled)
             if self.is_summarizer_time():
                 logger.info("🔄 Step 1: Running summarizer agents")
-                self.run_summarizer_agents()
-                logger.info("✅ Step 1 completed: Summarizer agents finished")
-                
+                from agent_executor import run_summarizer_agents
+                summarizer_result = run_summarizer_agents()
+                logger.info(f"✅ Step 1: {'completed' if summarizer_result.success else 'failed'}")
+
                 # Step 2: Run decider ONLY during market hours and ONLY after summaries are collected
                 if self.is_decider_time():
                     logger.info("🔄 Step 2: Running decider agent with fresh summaries")
-                    self.run_decider_agent()
-                    logger.info("✅ Step 2 completed: Decider agent finished")
+                    from agent_executor import run_decider_agent
+                    decider_result = run_decider_agent()
+                    logger.info(f"✅ Step 2: {'completed' if decider_result.success else 'failed'}")
                 else:
                     logger.info("⏸️  Step 2 skipped: Market is closed - summaries collected for future decisions")
-                
+
                 logger.info("✅ Sequential job completed successfully")
             else:
                 logger.info("Skipping job - outside of summarizer time")
-                
+
         except Exception as e:
             logger.error(f"❌ Sequential job failed: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs"""

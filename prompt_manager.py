@@ -119,26 +119,7 @@ def get_active_prompt_emergency_patch(agent_type):
     config_hash = get_current_config_hash()
     
     with engine.connect() as conn:
-        # Try unified_prompts first (if it exists)
-        try:
-            result = conn.execute(text("""
-                SELECT system_prompt, user_prompt_template, version
-                FROM unified_prompts
-                WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
-                ORDER BY version DESC LIMIT 1
-            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-            
-            if result:
-                print(f"🔧 Using {agent_type} v{result.version} from UNIFIED table")
-                return {
-                    "system_prompt": result.system_prompt,
-                    "user_prompt_template": result.user_prompt_template,
-                    "version": result.version
-                }
-        except Exception as e:
-            print(f"⚠️  Unified table not available: {e}")
-        
-        # Fall back to prompt_versions
+        # Use prompt_versions table directly (unified_prompts table doesn't exist)
         try:
             result = conn.execute(text("""
                 SELECT system_prompt, user_prompt_template, version
