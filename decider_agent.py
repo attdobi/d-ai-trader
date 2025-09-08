@@ -1472,60 +1472,120 @@ def extract_decision_info_from_text(text_content):
     """Try to extract decision info from malformed text responses"""
     import re
     import json
-    
+
+    text_str = str(text_content).strip()
+    print(f"🔍 Attempting to extract decisions from: {text_str[:200]}...")
+
     # First try to extract JSON-like structures and fix common issues
     try:
-        text_str = str(text_content)
-        
-        # Try to find JSON objects in the text
+        # Look for JSON arrays (multiple decisions) first
+        array_pattern = r'\[.*?\]'
+        array_match = re.search(array_pattern, text_str, re.DOTALL)
+        if array_match:
+            try:
+                parsed_array = json.loads(array_match.group())
+                if isinstance(parsed_array, list) and len(parsed_array) > 0:
+                    print(f"✅ Successfully extracted JSON array with {len(parsed_array)} decisions")
+                    # Return the first valid decision from the array
+                    for item in parsed_array:
+                        if isinstance(item, dict) and 'action' in item:
+                            return item
+            except json.JSONDecodeError:
+                pass
+
+        # Try to find individual JSON objects in the text
         json_pattern = r'\{[^{}]*\}'
         json_matches = re.findall(json_pattern, text_str)
-        
+
         for json_str in json_matches:
             try:
+                # Clean up the JSON string
+                cleaned_json = json_str.replace("'", '"')  # Replace single quotes with double quotes
+
                 # Try to parse the JSON
-                parsed = json.loads(json_str)
+                parsed = json.loads(cleaned_json)
                 if isinstance(parsed, dict):
-                    # Fix field name inconsistencies - 'reasoning' should be 'reason'
+                    # Fix field name inconsistencies
                     if 'reasoning' in parsed and 'reason' not in parsed:
                         parsed['reason'] = parsed.pop('reasoning')
-                    
+
                     # Check if it has the required fields
                     if 'action' in parsed and parsed.get('action'):
+                        # Normalize action to lowercase
+                        parsed['action'] = parsed['action'].lower()
+
                         # Set defaults for missing fields
                         if 'ticker' not in parsed:
                             parsed['ticker'] = 'SPY'  # Default to SPY if no ticker
                         if 'amount_usd' not in parsed and 'amount' not in parsed:
-                            parsed['amount_usd'] = 0 if parsed['action'] == 'hold' else 1000
+                            parsed['amount_usd'] = 0 if parsed['action'] in ['sell', 'hold'] else 2000
                         elif 'amount' in parsed and 'amount_usd' not in parsed:
                             parsed['amount_usd'] = parsed.pop('amount')
                         if 'reason' not in parsed:
-                            parsed['reason'] = f"Extracted from response: {text_str[:50]}..."
-                        
+                            parsed['reason'] = f"Extracted from malformed response: {text_str[:50]}..."
+
+                        # Ensure amount_usd is a number
+                        if isinstance(parsed.get('amount_usd'), str):
+                            try:
+                                parsed['amount_usd'] = float(parsed['amount_usd'].replace('$', '').replace(',', ''))
+                            except:
+                                parsed['amount_usd'] = 0 if parsed['action'] in ['sell', 'hold'] else 2000
+
                         print(f"✅ Successfully parsed JSON with field fixes: {parsed}")
                         return parsed
-                        
+
             except json.JSONDecodeError:
                 continue
     except Exception as e:
         print(f"⚠️  Error in JSON extraction: {e}")
-    
-    # Fallback to regex pattern matching
-    action_pattern = r'\b(buy|sell|hold)\s+([A-Z]{1,5})\b'
-    amount_pattern = r'\$(\d+(?:,\d{3})*(?:\.\d{2})?)'
-    
-    matches = re.findall(action_pattern, str(text_content), re.IGNORECASE)
-    amounts = re.findall(amount_pattern, str(text_content))
-    
-    if matches:
-        action, ticker = matches[0]
-        amount = float(amounts[0].replace(',', '')) if amounts else 1000
-        return {
+
+    # Enhanced fallback to regex pattern matching
+    # Look for trading decision patterns
+    decision_patterns = [
+        r'\b(buy|sell|hold)\s+([A-Z]{1,5})\b',  # Simple action + ticker
+        r'\b(buy|sell|hold)\s+\$?(\d+(?:,\d{3})*(?:\.\d{2})?)\s+(?:shares?\s+of\s+)?([A-Z]{1,5})\b',  # Action + amount + ticker
+        r'([A-Z]{1,5})\s*:\s*(buy|sell|hold)\b',  # Ticker: action
+    ]
+
+    for pattern in decision_patterns:
+        matches = re.findall(pattern, text_str, re.IGNORECASE)
+        if matches:
+            if len(matches[0]) == 2:  # Simple action + ticker
+                action, ticker = matches[0]
+                amount = 0 if action.lower() in ['sell', 'hold'] else 2000
+            elif len(matches[0]) == 3:  # Action + amount + ticker
+                action, amount_str, ticker = matches[0]
+                try:
+                    amount = float(amount_str.replace(',', ''))
+                except:
+                    amount = 0 if action.lower() in ['sell', 'hold'] else 2000
+            else:  # Ticker: action
+                ticker, action = matches[0]
+                amount = 0 if action.lower() in ['sell', 'hold'] else 2000
+
+            decision = {
+                "action": action.lower(),
+                "ticker": ticker.upper(),
+                "amount_usd": amount,
+                "reason": f"Extracted from malformed response: {text_str[:100]}..."
+            }
+            print(f"✅ Extracted decision via regex: {decision}")
+            return decision
+
+    # Last resort: look for any mention of buy/sell/hold with a ticker
+    simple_action_ticker = re.search(r'(buy|sell|hold).*?([A-Z]{2,5})', text_str, re.IGNORECASE)
+    if simple_action_ticker:
+        action, ticker = simple_action_ticker.groups()
+        decision = {
             "action": action.lower(),
             "ticker": ticker.upper(),
-            "amount_usd": amount,
-            "reason": f"Extracted from malformed response: {str(text_content)[:100]}..."
+            "amount_usd": 0 if action.lower() in ['sell', 'hold'] else 2000,
+            "reason": f"Basic extraction from response: {text_str[:100]}..."
         }
+        print(f"✅ Basic extraction successful: {decision}")
+        return decision
+
+    print("❌ No decision patterns found in text")
     return None
 
 def store_trade_decisions(decisions, run_id):
@@ -1569,18 +1629,51 @@ def store_trade_decisions(decisions, run_id):
                 extracted_from_full["reason"] = f"Market closed - execution deferred. {extracted_from_full['reason']}"
             valid_decisions = [extracted_from_full]
         else:
-            # Absolute fallback
-            fallback_decision = {
-                "action": "hold",
-                "ticker": "SPY",  # Use SPY instead of UNKNOWN
-                "amount_usd": 0,
-                "reason": "AI response was completely unparseable - defaulting to hold SPY"
-            }
-            
-            if not is_market_open():
-                fallback_decision["reason"] = "Market is closed - no trading action taken (AI response was unparseable)"
-            
-            valid_decisions = [fallback_decision]
+            # Absolute fallback - create decisions for all existing holdings
+            print("🚨 AI response completely unparseable, creating fallback decisions for existing holdings")
+
+            # Get current holdings to create proper fallback decisions
+            try:
+                current_holdings = fetch_holdings()
+                stock_holdings = [h for h in current_holdings if h['ticker'] != 'CASH']
+
+                if stock_holdings:
+                    valid_decisions = []
+                    for holding in stock_holdings:
+                        decision = {
+                            "action": "hold",
+                            "ticker": holding['ticker'],
+                            "amount_usd": 0,
+                            "reason": f"AI response unparseable - holding existing position (fallback)"
+                        }
+
+                        if not is_market_open():
+                            decision["reason"] = f"Market closed - holding {holding['ticker']} (AI response unparseable)"
+
+                        valid_decisions.append(decision)
+
+                    print(f"✅ Created {len(valid_decisions)} fallback hold decisions for existing holdings")
+                else:
+                    # No holdings, just create a safe fallback
+                    fallback_decision = {
+                        "action": "hold",
+                        "ticker": "CASH",
+                        "amount_usd": 0,
+                        "reason": "AI response was completely unparseable - no active holdings to manage"
+                    }
+                    valid_decisions = [fallback_decision]
+                    print("✅ Created fallback decision (no active holdings)")
+
+            except Exception as e:
+                print(f"❌ Error creating fallback decisions: {e}")
+                # Ultimate fallback
+                fallback_decision = {
+                    "action": "hold",
+                    "ticker": "ERROR",
+                    "amount_usd": 0,
+                    "reason": f"Critical error in fallback logic: {e}"
+                }
+                valid_decisions = [fallback_decision]
     
     # Get current Pacific time and convert to UTC for storage
     pacific_now = datetime.now(PACIFIC_TIMEZONE)

@@ -215,12 +215,12 @@ class ConfigurationManager:
     def get_configuration(self):
         """Get current configuration as dict"""
         return {
-            "gpt_model": GPT_MODEL,
-            "prompt_mode": PROMPT_VERSION_MODE,
-            "forced_prompt_version": FORCED_PROMPT_VERSION,
-            "trading_mode": TRADING_MODE
-        }
-
+        "gpt_model": GPT_MODEL,
+        "prompt_mode": PROMPT_VERSION_MODE,
+        "forced_prompt_version": FORCED_PROMPT_VERSION,
+        "trading_mode": TRADING_MODE
+    }
+    
     def generate_config_hash(self):
         """Generate a unique hash for the current configuration"""
         import hashlib
@@ -263,17 +263,17 @@ class ConfigurationManager:
                 # Insert or update configuration
                 conn.execute(text("""
                     INSERT INTO run_configurations
-                    (config_hash, gpt_model, prompt_mode, forced_prompt_version, trading_mode, last_used)
-                    VALUES (:config_hash, :gpt_model, :prompt_mode, :forced_prompt_version, :trading_mode, CURRENT_TIMESTAMP)
-                    ON CONFLICT (config_hash) DO UPDATE SET
-                        last_used = CURRENT_TIMESTAMP
-                """), {
-                    "config_hash": config_hash,
-                    "gpt_model": GPT_MODEL,
-                    "prompt_mode": PROMPT_VERSION_MODE,
-                    "forced_prompt_version": FORCED_PROMPT_VERSION,
-                    "trading_mode": TRADING_MODE
-                })
+                        (config_hash, gpt_model, prompt_mode, forced_prompt_version, trading_mode, last_used)
+                        VALUES (:config_hash, :gpt_model, :prompt_mode, :forced_prompt_version, :trading_mode, CURRENT_TIMESTAMP)
+                        ON CONFLICT (config_hash) DO UPDATE SET
+                            last_used = CURRENT_TIMESTAMP
+                    """), {
+                        "config_hash": config_hash,
+                        "gpt_model": GPT_MODEL,
+                        "prompt_mode": PROMPT_VERSION_MODE,
+                        "forced_prompt_version": FORCED_PROMPT_VERSION,
+                        "trading_mode": TRADING_MODE
+                    })
 
         except Exception as e:
             print(f"⚠️  Could not initialize config in database: {e}")
@@ -507,7 +507,7 @@ def optimize_database():
 
             print("✅ Database optimization completed")
             return True
-
+        
     except Exception as e:
         print(f"❌ Database optimization failed: {e}")
         return False
@@ -568,7 +568,7 @@ def get_current_config_hash():
     config_hash = os.environ.get('CURRENT_CONFIG_HASH')
     if config_hash:
         return config_hash
-
+    
     # If not in environment, use config manager
     print("⚠️  Config hash not found in environment, using config manager")
     return config_manager.get_config_hash()
@@ -729,6 +729,15 @@ class PromptManager:
                     parsed_json = json.loads(content)
                     return parsed_json
                 except json.JSONDecodeError as e:
+                    # Try to clean up common JSON issues before giving up
+                    cleaned_content = self._clean_json_response(content)
+                    if cleaned_content != content:
+                        try:
+                            parsed_json = json.loads(cleaned_content)
+                            print(f"✅ Successfully parsed JSON after cleaning")
+                            return parsed_json
+                        except json.JSONDecodeError:
+                            pass  # Continue with original error handling
                     print(f"JSON Decode Error (attempt {retries + 1}/{max_retries}): {e}")
                     print(f"Response was: {content[:300]}...")
                     
@@ -765,12 +774,16 @@ class PromptManager:
                     
                     # Try aggressive JSON extraction
                     import re
-                    # Try to find JSON object in the response
+                    # Try to find JSON object in the response - improved patterns
                     json_patterns = [
+                        r'\[.*?\]',  # JSON array (for decider) - try this first
+                        r'\{[^{}]*"action"[^{}]*"ticker"[^{}]*\}',  # Decider decision pattern
                         r'\{[^{}]*"headlines"[^{}]*"insights"[^{}]*\}',  # Specific to summarizer
                         r'\{.*?"headlines".*?\}',  # Look for headlines key
+                        r'\{[^{}]*"action".*?\}',  # Any decision object
+                        r'\{[^{}]*"ticker".*?\}',  # Any ticker object
                         r'\{.*?\}',  # Any JSON object
-                        r'\[.*?\]'   # JSON array (for decider)
+                        r'\[.*?\]'   # JSON array again as fallback
                     ]
                     
                     for pattern in json_patterns:
@@ -806,6 +819,51 @@ class PromptManager:
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
 
         return {"headlines": ["Max retries reached"], "insights": "Failed to get valid response after multiple attempts"}
+
+    def _clean_json_response(self, content):
+        """Clean up common JSON formatting issues from AI responses"""
+        if not content:
+            return content
+
+        original_content = content
+        content = content.strip()
+
+        # Remove common prefixes/suffixes that GPT might add
+        prefixes_to_remove = [
+            "Here is the JSON response:",
+            "Here's the response:",
+            "Response:",
+            "JSON:",
+            "```json",
+            "```",
+        ]
+
+        for prefix in prefixes_to_remove:
+            if content.upper().startswith(prefix.upper()):
+                content = content[len(prefix):].strip()
+                break
+
+        # Remove trailing markdown code blocks
+        if content.endswith("```"):
+            content = content[:-3].strip()
+
+        # Fix common JSON issues
+        # 1. Replace single quotes with double quotes (but be careful with contractions)
+        import re
+        # Replace single quotes around property names and string values
+        content = re.sub(r"'([^']*)':", r'"\1":', content)  # 'key': -> "key":
+        content = re.sub(r":\s*'([^']*)'", r': "\1"', content)  # : 'value' -> : "value"
+        content = re.sub(r":\s*'([^']*)',", r': "\1",', content)  # : 'value', -> : "value",
+        content = re.sub(r":\s*'([^']*)'\s*}", r': "\1" }', content)  # : 'value' } -> : "value" }
+        content = re.sub(r":\s*'([^']*)'\s*]", r': "\1" ]', content)  # : 'value' ] -> : "value" ]
+
+        # 2. Fix trailing commas before closing braces/brackets
+        content = re.sub(r',(\s*[}\]])', r'\1', content)
+
+        # 3. Ensure proper JSON structure
+        content = content.strip()
+
+        return content
 
     def _create_fallback_response(self, content, agent_name):
         """Create a structured fallback response when JSON parsing fails"""
