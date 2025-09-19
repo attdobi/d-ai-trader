@@ -474,16 +474,36 @@ def get_current_price(ticker):
         except Exception as e:
             print(f"⚠️  {clean_ticker}: Method 7 failed: {e}")
 
-        # If all attempts fail, do not use fallback prices - skip trading instead
-        print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
-        print(f"💡 This may be due to:")
-        print(f"   - After market hours or weekend/holiday")
-        print(f"   - Temporary Yahoo Finance API issues/rate limits")
-        print(f"   - Symbol may be invalid or delisted")
-        print(f"🚫 Yahoo Finance rate limit exceeded - skipping trade to ensure accurate pricing")
-        print(f"💡 API rate limits typically clear within 1 hour")
-        
-        return None
+        # Use fallback prices in simulation mode, skip in real-world mode
+        from config import get_trading_mode
+        trading_mode = get_trading_mode()
+
+        if trading_mode == "simulation":
+            # In simulation mode, use fallback prices to test trading logic
+            fallback_prices = {
+                'NVDA': 145.50, 'AMD': 165.25, 'TSLA': 245.80, 'AAPL': 195.50,
+                'MSFT': 430.25, 'GOOGL': 165.75, 'META': 525.30, 'BABA': 163.53,
+                'GLD': 215.40, 'SPY': 560.75, 'QQQ': 480.20, 'INTC': 22.85
+            }
+
+            fallback_price = fallback_prices.get(clean_ticker.upper())
+            if fallback_price:
+                print(f"🎮 SIMULATION MODE: Using fallback price \${fallback_price:.2f} for {clean_ticker}")
+                return float(fallback_price)
+            else:
+                print(f"⚠️  SIMULATION MODE: No fallback price for {clean_ticker}, using estimated price")
+                return 100.0  # Generic fallback for unknown tickers
+        else:
+            # In real-world mode, skip trading to ensure accurate pricing
+            print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
+            print(f"💡 This may be due to:")
+            print(f"   - After market hours or weekend/holiday")
+            print(f"   - Temporary Yahoo Finance API issues/rate limits")
+            print(f"   - Symbol may be invalid or delisted")
+            print(f"🚫 Yahoo Finance rate limit exceeded - skipping trade to ensure accurate pricing")
+            print(f"💡 API rate limits typically clear within 1 hour")
+
+            return None
 
     except Exception as e:
         print(f"❌ Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
@@ -634,14 +654,19 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 continue
 
             if not is_market_open():
-                print(f"Market closed - recording sell decision for {ticker} but deferring execution.")
-                skipped_decisions.append({
-                    "action": "sell",
-                    "ticker": ticker,
-                    "amount_usd": amount,
-                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
-                })
-                continue
+                # In simulation mode, allow trades even when market is closed
+                from config import get_trading_mode
+                if get_trading_mode() == "simulation":
+                    print(f"🎮 SIMULATION MODE: Executing {ticker} sell despite market being closed")
+                else:
+                    print(f"Market closed - recording sell decision for {ticker} but deferring execution.")
+                    skipped_decisions.append({
+                        "action": "sell",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
+                    })
+                    continue
 
             holding = conn.execute(
                 text("SELECT shares, purchase_price, purchase_timestamp, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash AND is_active = TRUE AND shares > 0"),
@@ -941,14 +966,19 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
 
             if not is_market_open():
-                print(f"Market closed - recording buy decision for {ticker} but deferring execution.")
-                skipped_decisions.append({
-                    "action": "buy",
-                    "ticker": ticker,
-                    "amount_usd": amount,
-                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
-                })
-                continue
+                # In simulation mode, allow trades even when market is closed
+                from config import get_trading_mode
+                if get_trading_mode() == "simulation":
+                    print(f"🎮 SIMULATION MODE: Executing {ticker} buy despite market being closed")
+                else:
+                    print(f"Market closed - recording buy decision for {ticker} but deferring execution.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": amount,
+                        "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
+                    })
+                    continue
 
             from math import floor
             shares = floor(amount / price)
@@ -1342,7 +1372,9 @@ No explanatory text, no markdown, just pure JSON array."""
     if stock_holdings:
         holdings_parts = []
         for h in stock_holdings:
-            gain_loss_pct = (h['gain_loss'] / h['total_value'] * 100) if h['total_value'] > 0 else 0
+            # Safely calculate gain/loss percentage with fallback for missing total_value
+            total_value = h.get('total_value', h.get('current_value', 0))
+            gain_loss_pct = (h['gain_loss'] / total_value * 100) if total_value > 0 else 0
             holdings_parts.append(
                 f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']:.2f} "
                 f"→ Current: ${h['current_price']:.2f} "
