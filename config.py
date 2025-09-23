@@ -345,12 +345,12 @@ class PromptManager:
                     **temperature_params  # Use temperature or omit for GPT-5
                 }
                 
-                # GPT-5 specific handling with proper JSON mode
+                # GPT-5 specific handling - NO response_format as it's too restrictive
                 if _is_gpt5_model(GPT_MODEL):
-                    print(f"🤖 Using GPT-5 JSON mode for {agent_name}")
+                    print(f"🤖 Using GPT-5 model for {agent_name}")
                     
-                    # Add response_format for GPT-5 JSON mode
-                    api_params["response_format"] = {"type": "json_object"}
+                    # DON'T use response_format for GPT-5 - it's too restrictive
+                    # Just emphasize JSON in the prompts
                     
                     # For GPT-5, ensure the system prompt starts with proper trading focus
                     original_system = messages[0]["content"]
@@ -362,14 +362,14 @@ class PromptManager:
                     else:
                         enhanced_system = original_system
                     
-                    # Add JSON emphasis while preserving all trading instructions - simpler format for GPT-5
-                    messages[0]["content"] = f"{enhanced_system}\n\nIMPORTANT: Respond in valid JSON format only."
+                    # Add JSON emphasis while preserving all trading instructions
+                    messages[0]["content"] = f"{enhanced_system}\n\nCRITICAL: You must respond with valid JSON only. No explanatory text."
                     
                     # Also ensure user prompt emphasizes JSON format for GPT-5
                     if len(messages) > 1:
                         user_content = messages[1]["content"]
-                        if "JSON" not in user_content:
-                            messages[1]["content"] = f"{user_content}\n\nRespond in valid JSON format only."
+                        if "JSON" not in user_content.upper():
+                            messages[1]["content"] = f"{user_content}\n\nRespond ONLY with valid JSON. No other text."
                     
                     # Debug: Print token params for GPT-5
                     print(f"📊 GPT-5 token params: {token_params}")

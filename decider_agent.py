@@ -1338,7 +1338,18 @@ No explanatory text, no markdown, just pure JSON array."""
     
     # Ensure response is always a list
     if isinstance(ai_response, dict):
-        ai_response = [ai_response]
+        # Check if it's an error response first
+        if 'error' in ai_response:
+            print(f"❌ AI returned error: {ai_response.get('error')}")
+            ai_response = []
+        # Check if GPT-5 returned {"decisions": [...]} format
+        elif 'decisions' in ai_response and isinstance(ai_response['decisions'], list):
+            print(f"📦 Extracting decisions array from GPT-5 response object")
+            ai_response = ai_response['decisions']
+        else:
+            # Convert single dict to list (sometimes returns single decision as dict)
+            print(f"📦 Converting single decision dict to list format")
+            ai_response = [ai_response]
     elif not isinstance(ai_response, list):
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
