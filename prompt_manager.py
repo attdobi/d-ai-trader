@@ -112,33 +112,14 @@ def get_active_prompt(agent_type):
                 raise ValueError(f"No prompts found for {agent_type}")
 
 def get_active_prompt_emergency_patch(agent_type):
-    """Emergency patch to get prompts from either table"""
+    """Emergency patch to get prompts - just use prompt_versions table directly"""
     from config import get_current_config_hash, engine
     from sqlalchemy import text
     
     config_hash = get_current_config_hash()
     
     with engine.connect() as conn:
-        # Try unified_prompts first (if it exists)
-        try:
-            result = conn.execute(text("""
-                SELECT system_prompt, user_prompt_template, version
-                FROM unified_prompts
-                WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
-                ORDER BY version DESC LIMIT 1
-            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-            
-            if result:
-                print(f"🔧 Using {agent_type} v{result.version} from UNIFIED table")
-                return {
-                    "system_prompt": result.system_prompt,
-                    "user_prompt_template": result.user_prompt_template,
-                    "version": result.version
-                }
-        except Exception as e:
-            print(f"⚠️  Unified table not available: {e}")
-        
-        # Fall back to prompt_versions
+        # Use prompt_versions table directly
         try:
             result = conn.execute(text("""
                 SELECT system_prompt, user_prompt_template, version
@@ -148,7 +129,6 @@ def get_active_prompt_emergency_patch(agent_type):
             """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
             
             if result:
-                print(f"🔧 Using {agent_type} v{result.version} from OLD prompt_versions table")
                 return {
                     "system_prompt": result.system_prompt,
                     "user_prompt_template": result.user_prompt_template,
