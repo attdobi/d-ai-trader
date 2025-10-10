@@ -1,373 +1,74 @@
-{% extends "tabs.html" %}
+{% extends "base.html" %}
 
 {% block content %}
 <h1>Schwab Live Portfolio</h1>
+{% include "partials/_config_banner.html" %}
 
-<!-- Connection Status -->
 <div id="connection-status" class="connection-status">
-    <div class="status-indicator">
-        <span id="status-icon">🔄</span>
-        <span id="status-text">Checking connection...</span>
-    </div>
-    <button id="refresh-btn" class="refresh-btn" onclick="refreshSchwabData()">
-        <span>🔄</span> Refresh
-    </button>
+  <div class="status-indicator">
+    <span id="status-icon">🔄</span>
+    <span id="status-text">Checking connection...</span>
+  </div>
+  <button id="refresh-btn" class="refresh-btn" onclick="refreshSchwabData()">
+    <span>🔄</span> Refresh
+  </button>
 </div>
 
-<!-- Portfolio Summary -->
 <div id="schwab-summary" class="portfolio-summary" style="display: none;">
-    <div class="metric-card">
-        <h3>Total Portfolio Value</h3>
-        <p id="total-value" class="value">$0.00</p>
-    </div>
-    <div class="metric-card">
-        <h3>Cash Balance</h3>
-        <p id="cash-balance" class="value">$0.00</p>
-    </div>
-    <div class="metric-card">
-        <h3>Buying Power</h3>
-        <p id="buying-power" class="value">$0.00</p>
-    </div>
-    <div class="metric-card">
-        <h3>Day Trading Power</h3>
-        <p id="day-trading-power" class="value">$0.00</p>
-    </div>
+  <div class="metric-card">
+    <h3>Total Portfolio Value</h3>
+    <p id="total-value" class="value">$0.00</p>
+  </div>
+  <div class="metric-card">
+    <h3>Cash Balance</h3>
+    <p id="cash-balance" class="value">$0.00</p>
+  </div>
+  <div class="metric-card">
+    <h3>Buying Power</h3>
+    <p id="buying-power" class="value">$0.00</p>
+  </div>
+  <div class="metric-card">
+    <h3>Day Trading Power</h3>
+    <p id="day-trading-power" class="value">$0.00</p>
+  </div>
 </div>
 
-<!-- Holdings Table -->
 <div id="holdings-section" style="display: none;">
-    <h2>Current Holdings</h2>
-    <div class="table-container">
-        <table id="holdings-table" class="holdings-table">
-            <thead>
-                <tr>
-                    <th>Symbol</th>
-                    <th>Shares</th>
-                    <th>Avg Price</th>
-                    <th>Current Price</th>
-                    <th>Market Value</th>
-                    <th>Total Cost</th>
-                    <th>Gain/Loss</th>
-                    <th>Gain/Loss %</th>
-                </tr>
-            </thead>
-            <tbody id="holdings-body">
-            </tbody>
-        </table>
-    </div>
+  <h2>Current Holdings</h2>
+  <div class="table-container">
+    <table id="holdings-table" class="holdings-table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Shares</th>
+          <th>Avg Price</th>
+          <th>Current Price</th>
+          <th>Market Value</th>
+          <th>Total Cost</th>
+          <th>Gain/Loss</th>
+          <th>Gain/Loss %</th>
+        </tr>
+      </thead>
+      <tbody id="holdings-body"></tbody>
+    </table>
+  </div>
 </div>
 
-<!-- Error Display -->
 <div id="error-section" class="error-section" style="display: none;">
-    <h3>⚠️ Connection Error</h3>
-    <p id="error-message"></p>
-    <div class="error-actions">
-        <button onclick="refreshSchwabData()" class="retry-btn">🔄 Retry</button>
-    </div>
+  <h3>⚠️ Connection Error</h3>
+  <p id="error-message"></p>
+  <div class="error-actions">
+    <button onclick="refreshSchwabData()" class="retry-btn">🔄 Retry</button>
+  </div>
 </div>
 
-<!-- Warning for Simulation Mode -->
 <div id="simulation-warning" class="warning-section" style="display: none;">
-    <h3>ℹ️ Simulation Mode</h3>
-    <p>Schwab API is configured but system is in simulation mode. Live trading is disabled.</p>
-    <p>To enable live trading, set <code>TRADING_MODE=live</code> in your environment variables.</p>
+  <h3>ℹ️ Simulation Mode</h3>
+  <p>Schwab API is configured but system is in simulation mode. Live trading is disabled.</p>
+  <p>To enable live trading, set <code>TRADING_MODE=live</code> in your environment variables.</p>
 </div>
+{% endblock %}
 
-<style>
-.connection-status {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #f8f9fa;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    border-left: 4px solid #007bff;
-}
-
-.status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 500;
-}
-
-.refresh-btn {
-    background: #007bff;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.refresh-btn:hover {
-    background: #0056b3;
-}
-
-.refresh-btn:disabled {
-    background: #6c757d;
-    cursor: not-allowed;
-}
-
-.portfolio-summary {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.metric-card {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    text-align: center;
-}
-
-.metric-card h3 {
-    margin: 0 0 10px 0;
-    color: #666;
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.metric-card .value {
-    margin: 0;
-    font-size: 24px;
-    font-weight: bold;
-    color: #333;
-}
-
-.holdings-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: white;
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.holdings-table th,
-.holdings-table td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #eee;
-}
-
-.holdings-table th {
-    background: #f8f9fa;
-    font-weight: 600;
-    color: #333;
-}
-
-.holdings-table tr:hover {
-    background: #f8f9fa;
-}
-
-.gain {
-    color: #28a745;
-}
-
-.loss {
-    color: #dc3545;
-}
-
-.error-section {
-    background: #f8d7da;
-    color: #721c24;
-    padding: 20px;
-    border-radius: 8px;
-    border-left: 4px solid #dc3545;
-}
-
-.warning-section {
-    background: #fff3cd;
-    color: #856404;
-    padding: 20px;
-    border-radius: 8px;
-    border-left: 4px solid #ffc107;
-}
-
-.error-actions {
-    margin-top: 15px;
-}
-
-.retry-btn {
-    background: #dc3545;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.retry-btn:hover {
-    background: #c82333;
-}
-
-.table-container {
-    overflow-x: auto;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.spinning {
-    animation: spin 1s linear infinite;
-}
-</style>
-
-<script>
-let isLoading = false;
-
-function updateStatus(icon, text, color = '#007bff') {
-    document.getElementById('status-icon').textContent = icon;
-    document.getElementById('status-text').textContent = text;
-    document.querySelector('.connection-status').style.borderLeftColor = color;
-}
-
-function setLoading(loading) {
-    isLoading = loading;
-    const refreshBtn = document.getElementById('refresh-btn');
-    const statusIcon = document.getElementById('status-icon');
-    
-    refreshBtn.disabled = loading;
-    
-    if (loading) {
-        statusIcon.classList.add('spinning');
-        updateStatus('🔄', 'Loading...', '#ffc107');
-    } else {
-        statusIcon.classList.remove('spinning');
-    }
-}
-
-function formatCurrency(amount) {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD'
-    }).format(amount);
-}
-
-function formatPercentage(value) {
-    const sign = value >= 0 ? '+' : '';
-    return `${sign}${value.toFixed(2)}%`;
-}
-
-function refreshSchwabData() {
-    if (isLoading) return;
-    
-    setLoading(true);
-    hideAllSections();
-    
-    fetch('/api/schwab/holdings')
-        .then(response => response.json())
-        .then(data => {
-            setLoading(false);
-            
-            if (!data.enabled) {
-                showError('Schwab integration is not available. Please check your configuration.');
-                return;
-            }
-            
-            if (data.status === 'error') {
-                showError(data.message || 'Failed to retrieve Schwab data');
-                return;
-            }
-            
-            if (data.status === 'disabled') {
-                updateStatus('ℹ️', 'Schwab API disabled', '#ffc107');
-                document.getElementById('simulation-warning').style.display = 'block';
-                return;
-            }
-            
-            if (data.status === 'success') {
-                updateStatus('✅', 'Connected to Schwab', '#28a745');
-                displaySchwabData(data);
-            } else {
-                showError('Unexpected response from Schwab API');
-            }
-        })
-        .catch(error => {
-            setLoading(false);
-            showError(`Connection failed: ${error.message}`);
-        });
-}
-
-function hideAllSections() {
-    document.getElementById('schwab-summary').style.display = 'none';
-    document.getElementById('holdings-section').style.display = 'none';
-    document.getElementById('error-section').style.display = 'none';
-    document.getElementById('simulation-warning').style.display = 'none';
-}
-
-function showError(message) {
-    updateStatus('❌', 'Connection Error', '#dc3545');
-    document.getElementById('error-message').textContent = message;
-    document.getElementById('error-section').style.display = 'block';
-}
-
-function displaySchwabData(data) {
-    // Update summary metrics
-    document.getElementById('total-value').textContent = formatCurrency(data.total_portfolio_value || 0);
-    document.getElementById('cash-balance').textContent = formatCurrency(data.cash_balance || 0);
-    
-    if (data.account_info) {
-        document.getElementById('buying-power').textContent = formatCurrency(data.account_info.buying_power || 0);
-        document.getElementById('day-trading-power').textContent = formatCurrency(data.account_info.day_trading_buying_power || 0);
-    }
-    
-    // Show summary
-    document.getElementById('schwab-summary').style.display = 'grid';
-    
-    // Update holdings table
-    const tbody = document.getElementById('holdings-body');
-    tbody.innerHTML = '';
-    
-    if (data.positions && data.positions.length > 0) {
-        data.positions.forEach(position => {
-            const row = document.createElement('tr');
-            const gainLossClass = position.gain_loss >= 0 ? 'gain' : 'loss';
-            
-            row.innerHTML = `
-                <td><strong>${position.symbol}</strong></td>
-                <td>${position.shares.toFixed(0)}</td>
-                <td>${formatCurrency(position.average_price)}</td>
-                <td>${formatCurrency(position.current_price)}</td>
-                <td><strong>${formatCurrency(position.market_value)}</strong></td>
-                <td>${formatCurrency(position.total_value)}</td>
-                <td class="${gainLossClass}"><strong>${formatCurrency(position.gain_loss)}</strong></td>
-                <td class="${gainLossClass}"><strong>${formatPercentage(position.gain_loss_percentage)}</strong></td>
-            `;
-            tbody.appendChild(row);
-        });
-        
-        document.getElementById('holdings-section').style.display = 'block';
-    } else {
-        // Show empty state
-        const row = document.createElement('tr');
-        row.innerHTML = '<td colspan="8" style="text-align: center; color: #666; padding: 40px;">No positions found</td>';
-        tbody.appendChild(row);
-        document.getElementById('holdings-section').style.display = 'block';
-    }
-}
-
-// Auto-refresh every 30 seconds
-setInterval(() => {
-    if (!isLoading) {
-        refreshSchwabData();
-    }
-}, 30000);
-
-// Initial load
-document.addEventListener('DOMContentLoaded', function() {
-    refreshSchwabData();
-});
-</script>
+{% block scripts %}
+<script defer src="{{ url_for('static', filename='js/schwab.js') }}"></script>
 {% endblock %}

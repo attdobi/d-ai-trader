@@ -1,0 +1,22 @@
+<div class="banner banner-info" id="config-banner">
+  <strong>📊 Configuration:</strong>
+  <span id="currentConfigHash">Loading...</span>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const data = await fetchJSON('/api/configuration');
+      const configEl = document.getElementById('currentConfigHash');
+      const configHash = data.config_hash || 'Unknown';
+      const model = data.gpt_model || 'Unknown';
+      const promptMode = data.prompt_config?.mode || 'Unknown';
+      const pv = data.prompt_versions || {};
+      const promptDisplay = promptMode === 'auto'
+        ? `AUTO (v${pv.summarizer_version ?? 0}/v${pv.decider_version ?? 0})`
+        : `FIXED v${data.prompt_config?.forced_version ?? 0}`;
+      configEl.textContent = `${configHash} (${model}, ${promptDisplay})`;
+    } catch {
+      document.getElementById('currentConfigHash').textContent = 'Error loading config';
+    }
+  });
+</script>

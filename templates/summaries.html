@@ -1,79 +1,19 @@
-{% extends "tabs.html" %}
+{% extends "base.html" %}
 
 {% block content %}
 <h1>Latest Summaries</h1>
-<div style="background: #e3f2fd; padding: 10px; border-radius: 5px; margin-bottom: 20px; font-size: 14px;">
-    <strong>📊 Configuration:</strong> <span id="currentConfigHash">Loading...</span>
-</div>
+{% include "partials/_config_banner.html" %}
 
 {% for summary in summaries %}
-    <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px;">
-        <h3>{{ summary.agent }} — <span class="timestamp-utc" data-timestamp="{{ summary.timestamp }}">{{ summary.timestamp }}</span></h3>
-        <p><strong>Headlines:</strong></p>
-        <ul>
-            {% for headline in summary.headlines %}
-                <li>{{ headline }}</li>
-            {% endfor %}
-        </ul>
-        <p><strong>Insights:</strong> {{ summary.insights }}</p>
-    </div>
+  <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px;">
+    <h3>{{ summary.agent }} — <span class="timestamp-utc" data-timestamp="{{ summary.timestamp }}">{{ summary.timestamp }}</span></h3>
+    <p><strong>Headlines:</strong></p>
+    <ul>
+      {% for headline in summary.headlines %}
+        <li>{{ headline }}</li>
+      {% endfor %}
+    </ul>
+    <p><strong>Insights:</strong> {{ summary.insights }}</p>
+  </div>
 {% endfor %}
-
-<script>
-// Utility function to convert UTC timestamp to PST
-function formatTimestampToPST(utcTimestamp) {
-    try {
-        const date = new Date(utcTimestamp);
-        const options = {
-            timeZone: 'America/Los_Angeles',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        };
-        const pstString = date.toLocaleString('en-US', options);
-        return pstString + ' PST';
-    } catch (error) {
-        return utcTimestamp; // fallback to original if parsing fails
-    }
-}
-
-// Convert all timestamps to PST and load config
-document.addEventListener('DOMContentLoaded', function() {
-    // Convert timestamps
-    const timestampElements = document.querySelectorAll('.timestamp-utc');
-    timestampElements.forEach(element => {
-        const utcTimestamp = element.getAttribute('data-timestamp');
-        const pstTimestamp = formatTimestampToPST(utcTimestamp);
-        element.textContent = pstTimestamp;
-    });
-
-    // Display current configuration hash
-    fetch('/api/configuration')
-        .then(response => response.json())
-        .then(data => {
-            const configElement = document.getElementById('currentConfigHash');
-            const configHash = data.config_hash || 'Unknown';
-            const model = data.gpt_model || 'Unknown';  // Fixed: was data.model
-            const promptMode = data.prompt_config?.mode || 'Unknown';  // Fixed: was data.prompt_mode
-            
-            // Format prompt display like trades.html
-            let promptDisplay;
-            if (promptMode === 'auto') {
-                const promptVersions = data.prompt_versions || {};
-                promptDisplay = `AUTO (v${promptVersions.summarizer_version || 0}/v${promptVersions.decider_version || 0})`;
-            } else {
-                promptDisplay = `FIXED v${data.prompt_config?.forced_version || 0}`;
-            }
-            
-            configElement.innerHTML = `${configHash} (${model}, ${promptDisplay})`;
-        })
-        .catch(error => {
-            document.getElementById('currentConfigHash').textContent = 'Error loading config';
-        });
-});
-</script>
 {% endblock %}
