@@ -1,3 +1,16 @@
+# --- D-AI-Trader bootstrap (auto-inserted) ---
+import os as _os, sys as _sys
+_repo_root = _os.environ.get("DAI_TRADER_ROOT") or _os.path.dirname(_os.path.abspath(__file__))
+_os.environ.setdefault("DAI_TRADER_ROOT", _repo_root)
+if _repo_root not in _sys.path:
+    _sys.path.insert(0, _repo_root)
+_os.environ.setdefault("DAI_DISABLE_UC", "1")
+try:
+    import sitecustomize  # noqa: F401
+except Exception:
+    pass
+# --- end bootstrap ---
+
 import os
 import time
 import json
@@ -367,7 +380,7 @@ def run_summary_agents():
     try:
         # Create a fresh Chrome driver for this run
         print("Creating new Chrome driver for summarizer run")
-        current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
+        current_driver = uc.Chrome(options=create_chrome_options())
         print("Chrome driver created successfully")
         
         for agent_name, url in URLS:
@@ -381,7 +394,7 @@ def run_summary_agents():
                         current_driver.quit()
                     except:
                         pass
-                    current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
+                    current_driver = uc.Chrome(options=create_chrome_options())
                     print(f"New driver created for {agent_name}")
                 
                 summary = summarize_page(agent_name, url, current_driver)
@@ -399,7 +412,7 @@ def run_summary_agents():
                 except:
                     pass
                 try:
-                    current_driver = uc.Chrome(options=create_chrome_options(), version_main=138)
+                    current_driver = uc.Chrome(options=create_chrome_options())
                     print(f"Created new driver after {agent_name} error")
                 except Exception as driver_error:
                     print(f"Failed to create new driver: {driver_error}")

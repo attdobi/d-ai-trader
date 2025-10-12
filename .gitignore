@@ -46,3 +46,17 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+# System directories (don't commit)
+usr/
+home/
+
+# Backup files from cleanup attempts
+*.bak.*
+*.new
+
+# Temporary/generated files
+sitecustomize.py
+run_dashboard_patched.py
+requirements.fragment.txt
+startup_config.py

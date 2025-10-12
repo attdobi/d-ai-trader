@@ -1,3 +1,16 @@
+# --- D-AI-Trader bootstrap (auto-inserted) ---
+import os as _os, sys as _sys
+_repo_root = _os.environ.get("DAI_TRADER_ROOT") or _os.path.dirname(_os.path.abspath(__file__))
+_os.environ.setdefault("DAI_TRADER_ROOT", _repo_root)
+if _repo_root not in _sys.path:
+    _sys.path.insert(0, _repo_root)
+_os.environ.setdefault("DAI_DISABLE_UC", "1")
+try:
+    import sitecustomize  # noqa: F401
+except Exception:
+    pass
+# --- end bootstrap ---
+
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
