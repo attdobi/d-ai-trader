@@ -636,12 +636,12 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 continue
 
             if not is_market_open():
-                print(f"Market closed - recording sell decision for {ticker} but deferring execution.")
+                print(f"⛔ Market closed - recording sell decision for {ticker} but NO execution.")
                 skipped_decisions.append({
                     "action": "sell",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
+                    "reason": f"⛔ MARKET CLOSED - No action taken. AI suggested sell at ${price:.2f}. Original: {reason}"
                 })
                 continue
 
@@ -759,12 +759,12 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     continue
 
                 if not is_market_open():
-                    print(f"Skipping buy for {ticker} - market is closed.")
+                    print(f"⛔ Skipping buy for {ticker} - market is closed.")
                     skipped_decisions.append({
                         "action": "buy",
                         "ticker": ticker,
                         "amount_usd": amount,
-                        "reason": f"Market closed - no trade executed (Original: {reason})"
+                        "reason": f"⛔ MARKET CLOSED - No action taken. AI suggested buy. Original: {reason}"
                     })
                     continue
 
@@ -943,12 +943,12 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
 
             if not is_market_open():
-                print(f"Market closed - recording buy decision for {ticker} but deferring execution.")
+                print(f"⛔ Market closed - recording buy decision for {ticker} but NO execution.")
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Market closed - execution deferred (Price: ${price:.2f}) (Original: {reason})"
+                    "reason": f"⛔ MARKET CLOSED - No action taken. AI suggested buy at ${price:.2f}. Original: {reason}"
                 })
                 continue
 
@@ -1400,8 +1400,8 @@ No explanatory text, no markdown, just pure JSON array."""
         for decision in ai_response:
             if isinstance(decision, dict) and decision.get('action') not in ['N/A', 'hold']:
                 original_reason = decision.get('reason', '')
-                decision['reason'] = f"Market closed - execution deferred. Original: {original_reason}"
-                decision['execution_status'] = 'deferred'
+                decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                decision['execution_status'] = 'market_closed'
     
     return ai_response
 
@@ -1507,6 +1507,13 @@ def store_trade_decisions(decisions, run_id):
     config_hash = get_current_config_hash()
     print(f"🔍 Storing decisions for {config_hash}: {decisions}")
     
+    # CRITICAL: Check market hours and modify decisions BEFORE storing
+    market_open = is_market_open()
+    if not market_open:
+        pacific_now = datetime.now(PACIFIC_TIMEZONE)
+        eastern_now = pacific_now.astimezone(EASTERN_TIMEZONE)
+        print(f"⛔ MARKET CLOSED at {eastern_now.strftime('%I:%M %p ET')} - Marking all decisions as deferred")
+    
     # Filter out error responses before storing
     valid_decisions = []
     for decision in decisions:
@@ -1514,6 +1521,15 @@ def store_trade_decisions(decisions, run_id):
             print(f"⚠️  Skipping error response: {decision.get('error', 'Unknown error')}")
             continue
         if isinstance(decision, dict) and decision.get('action') and decision.get('ticker'):
+            # MODIFY decision if market is closed
+            if not market_open:
+                action = decision.get('action', '').lower()
+                if action in ['buy', 'sell']:
+                    original_reason = decision.get('reason', 'No reason provided')
+                    decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    decision['execution_status'] = 'market_closed'
+                    print(f"   Modified {action.upper()} {decision.get('ticker')} → MARKET CLOSED")
+            
             valid_decisions.append(decision)
         else:
             print(f"⚠️  Invalid decision format: {decision}")
@@ -1521,6 +1537,11 @@ def store_trade_decisions(decisions, run_id):
             extracted = extract_decision_info_from_text(decision)
             if extracted:
                 print(f"✅ Extracted: {extracted}")
+                # Also mark extracted decisions if market closed
+                if not market_open and extracted.get('action', '').lower() in ['buy', 'sell']:
+                    original_reason = extracted.get('reason', '')
+                    extracted['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    extracted['execution_status'] = 'market_closed'
                 valid_decisions.append(extracted)
     
     # Only store if we have valid decisions
@@ -1540,8 +1561,12 @@ def store_trade_decisions(decisions, run_id):
         if extracted_from_full:
             print(f"✅ Extracted from full response: {extracted_from_full}")
             # If market is closed, modify the reason
-            if not is_market_open():
-                extracted_from_full["reason"] = f"Market closed - execution deferred. {extracted_from_full['reason']}"
+            if not market_open:
+                action = extracted_from_full.get('action', '').lower()
+                if action in ['buy', 'sell']:
+                    original_reason = extracted_from_full.get('reason', '')
+                    extracted_from_full["reason"] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    extracted_from_full['execution_status'] = 'market_closed'
             valid_decisions = [extracted_from_full]
         else:
             # Absolute fallback
@@ -1552,8 +1577,8 @@ def store_trade_decisions(decisions, run_id):
                 "reason": "AI response was completely unparseable - defaulting to hold SPY"
             }
             
-            if not is_market_open():
-                fallback_decision["reason"] = "Market is closed - no trading action taken (AI response was unparseable)"
+            if not market_open:
+                fallback_decision["reason"] = "⛔ MARKET CLOSED - No action taken (AI response was unparseable)"
             
             valid_decisions = [fallback_decision]
     
