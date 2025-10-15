@@ -514,9 +514,9 @@ def execute_real_world_trade(decision):
         return False
 
 def update_holdings(decisions):
-    # Use Pacific time for consistency across the application
+    # Use Pacific time as naive timestamp (database stores as-is, dashboard formats correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
-    timestamp = pacific_now  # Keep timezone-aware
+    timestamp = pacific_now.replace(tzinfo=None)  # Store as naive Pacific time
     skipped_decisions = []
     trading_mode = get_trading_mode()
     config_hash = get_current_config_hash()
@@ -1367,6 +1367,22 @@ No explanatory text, no markdown, just pure JSON array."""
         summaries=summarized_text
     )
     
+    # Add a final reminder about output format
+    prompt += """\n\n🎯 YOUR OUTPUT MUST BE:
+A JSON array of trading decisions (not a summary of the data I sent you).
+
+CORRECT OUTPUT EXAMPLE:
+[
+  {{"action": "hold", "ticker": "BA", "amount_usd": 0, "reason": "Waiting for EU approval news to settle"}},
+  {{"action": "sell", "ticker": "AMD", "amount_usd": 0, "reason": "Taking profits, AI sector showing weakness"}},
+  {{"action": "buy", "ticker": "NVDA", "amount_usd": 2500, "reason": "Strong momentum in AI chips"}}
+]
+
+RESPOND WITH ONLY THE JSON ARRAY. NO explanatory text before or after."""
+    
+    # Debug: Print first 300 chars of prompt
+    print(f"📝 Prompt preview: {prompt[:300]}...")
+    
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
     ai_response = prompt_manager.ask_openai(
@@ -1582,12 +1598,12 @@ def store_trade_decisions(decisions, run_id):
             
             valid_decisions = [fallback_decision]
     
-    # Get current Pacific time (store as Pacific for correct display)
+    # Get current Pacific time as NAIVE timestamp (dashboard will format it correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
-    # Store as timezone-aware Pacific timestamp
-    pacific_timestamp = pacific_now
+    # Remove timezone info so PostgreSQL stores it as-is without converting to UTC
+    naive_pacific_timestamp = pacific_now.replace(tzinfo=None)
     
-    print(f"🕐 Storing timestamp: {pacific_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
+    print(f"🕐 Storing timestamp (naive Pacific): {pacific_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
     
     with engine.begin() as conn:
         conn.execute(text("""
@@ -1595,7 +1611,7 @@ def store_trade_decisions(decisions, run_id):
                 id SERIAL PRIMARY KEY,
                 config_hash VARCHAR(50) NOT NULL,
                 run_id TEXT,
-                timestamp TIMESTAMP WITH TIME ZONE,
+                timestamp TIMESTAMP,
                 data JSONB
             )
         """))
@@ -1603,7 +1619,7 @@ def store_trade_decisions(decisions, run_id):
             INSERT INTO trade_decisions (run_id, timestamp, data, config_hash) VALUES (:run_id, :timestamp, :data, :config_hash)
         """), {
             "run_id": run_id,
-            "timestamp": pacific_timestamp,
+            "timestamp": naive_pacific_timestamp,
             "data": json.dumps(valid_decisions),
             "config_hash": get_current_config_hash()
         })
