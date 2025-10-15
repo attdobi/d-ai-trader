@@ -79,15 +79,26 @@ if not api_key:
 openai.api_key = api_key
 
 # Define the global model to use
-# Available models for trading (all support system messages + JSON mode):
-#   - gpt-5: Latest GPT-5 (best overall)
-#   - gpt-5-mini: GPT-5 mini variant (fast & affordable)
-#   - gpt-4o: Most capable GPT-4 series, best for real money trading ($2.50/$10 per 1M tokens)
-#   - gpt-4o-mini: Fast & cheap, good for testing ($0.15/$0.60 per 1M tokens)
-#   - gpt-4-turbo: Older "GPT-4.1" equivalent ($10/$30 per 1M tokens)
-#   - gpt-4: Original GPT-4 (slower, more expensive)
-# Note: o1/o3 reasoning models NOT supported - they don't support system messages or JSON mode
-GPT_MODEL = "gpt-5-mini"  # Default model (good balance of speed/cost/quality)
+# Available models for trading:
+#
+# RECOMMENDED FOR REAL MONEY (GPT-4 series):
+#   - gpt-4o: BEST CHOICE for trading ($2.50/$10 per 1M tokens)
+#     • Supports custom temperature (0.3 for consistency)
+#     • Reliable JSON mode
+#     • Fast and cost-effective
+#   - gpt-4o-mini: Good for testing/development ($0.15/$0.60 per 1M tokens)
+#   - gpt-4-turbo: "GPT-4.1" equivalent (older, more expensive)
+#
+# EXPERIMENTAL (GPT-5 reasoning models):
+#   - gpt-5 / gpt-5-mini: REASONING MODELS (like o1)
+#     ⚠️  WARNING: Uses tokens for internal "thinking" - can hit limits!
+#     • No custom temperature (fixed at 1.0)
+#     • Needs 8000+ tokens (vs 2000 for GPT-4o)
+#     • May exhaust tokens during reasoning, leaving no output
+#     • NOT RECOMMENDED for production trading yet
+#
+# Note: o1/o3 models NOT supported (no system messages or JSON mode)
+GPT_MODEL = "gpt-4o"  # Default: GPT-4o (most reliable for trading)
 
 def set_gpt_model(model_name):
     """Update the global GPT model"""
@@ -345,11 +356,18 @@ class PromptManager:
                         })
 
                 # Get the correct parameters based on model type
-                # Increase token limit for newer models to prevent truncation in JSON mode
-                if _is_gpt5_model(GPT_MODEL):
-                    max_tokens = 2000  # GPT-4o and newer need more tokens for JSON mode
+                # GPT-5 is a reasoning model and needs MUCH more tokens (uses tokens for thinking)
+                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                if model_lower.startswith('gpt-5'):
+                    # GPT-5 uses tokens for internal reasoning, needs 4-8x more tokens
+                    max_tokens = 8000  # GPT-5 needs lots of tokens for reasoning + output
+                elif _is_gpt5_model(GPT_MODEL):
+                    # GPT-4o and newer (but not GPT-5)
+                    max_tokens = 2000
                 else:
-                    max_tokens = 1000
+                    # GPT-4-turbo and earlier
+                    max_tokens = 1500
+                
                 token_params = get_model_token_params(GPT_MODEL, max_tokens)
                 temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
                 
@@ -361,52 +379,81 @@ class PromptManager:
                     **temperature_params
                 }
                 
-                # GPT-4o specific handling - NO response_format as it's too restrictive
-                if _is_gpt5_model(GPT_MODEL):
+                # Model-specific handling
+                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                
+                if model_lower.startswith('gpt-5'):
+                    # GPT-5 is a REASONING model - needs different approach
+                    print(f"🤖 Using {GPT_MODEL} (REASONING MODEL) for {agent_name}")
+                    print(f"📊 GPT-5 Token limit: {max_tokens} (includes reasoning tokens)")
+                    
+                    # GPT-5: SIMPLE, DIRECT prompts (reasoning models don't need verbose instructions)
+                    # Don't add extra JSON emphasis - keeps prompt short so more tokens for reasoning
+                    messages[0]["content"] = system_prompt_final  # Keep it simple
+                    messages[1]["content"] = user_prompt_final    # No extra fluff
+                    
+                elif _is_gpt5_model(GPT_MODEL):
+                    # GPT-4o and newer (but not GPT-5 reasoning models)
                     print(f"🤖 Using {GPT_MODEL} for {agent_name}")
                     
-                    # DON'T use response_format for GPT-4o - it's too restrictive
-                    # Just emphasize JSON in the prompts
-                    
-                    # For GPT-4o, ensure the system prompt starts with proper trading focus
+                    # Add JSON emphasis for GPT-4o
                     original_system = messages[0]["content"]
                     
-                    # Ensure system prompt starts with the correct trading-focused introduction
                     if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
-                        # Prepend the proper trading-focused system prompt
                         enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
                     else:
                         enhanced_system = original_system
                     
-                    # Add JSON emphasis while preserving all trading instructions
                     messages[0]["content"] = f"{enhanced_system}\n\nCRITICAL: You must respond with valid JSON only. No explanatory text."
                     
-                    # Also ensure user prompt emphasizes JSON format for GPT-4o
                     if len(messages) > 1:
                         user_content = messages[1]["content"]
                         if "JSON" not in user_content.upper():
                             messages[1]["content"] = f"{user_content}\n\nRespond ONLY with valid JSON. No other text."
                     
-                    # Debug: Print token params
                     print(f"📊 Token params: {token_params}")
-                    print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
                 
                 response = self.client.chat.completions.create(**api_params)
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
                 
-                # GPT-4o specific handling with finish_reason checking
-                if _is_gpt5_model(GPT_MODEL):
+                # Model-specific response handling
+                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                
+                if model_lower.startswith('gpt-5'):
+                    # GPT-5 reasoning model handling
+                    print(f"🔍 GPT-5 Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
+                    
+                    # GPT-5 specific: 'length' means reasoning tokens were exhausted
+                    if finish_reason == "length":
+                        print(f"⚠️  GPT-5 hit token limit during reasoning! Need more tokens.")
+                        print(f"💡 Recommendation: Use GPT-4o instead, or increase max_completion_tokens to 16000")
+                        if retries < max_retries - 1:
+                            retries += 1
+                            time.sleep(2)
+                            continue
+                        else:
+                            return {"error": f"GPT-5 exhausted reasoning tokens. Use GPT-4o instead.", "agent": agent_name}
+                    
+                    # Empty content is a failure
+                    if not content:
+                        print(f"⚠️  GPT-5 returned empty content: finish_reason={finish_reason}")
+                        if retries < max_retries - 1:
+                            retries += 1
+                            time.sleep(2)
+                            continue
+                        else:
+                            return {"error": f"GPT-5 failed: {finish_reason}", "agent": agent_name}
+                
+                elif _is_gpt5_model(GPT_MODEL):
+                    # GPT-4o handling
                     print(f"🔍 Response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
-                    # Check for problematic finish reasons or empty content
                     if finish_reason == "content_filter" or not content:
                         print(f"⚠️  {agent_name} failed: finish_reason={finish_reason}, empty_content={not content}")
                         if retries < max_retries - 1:
                             retries += 1
-                            # Add delay before retry
-                            import time
                             time.sleep(1)
                             continue
                         else:

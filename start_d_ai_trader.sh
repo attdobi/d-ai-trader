@@ -9,14 +9,18 @@ usage() {
 Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE]
 
   -p, --port            Dashboard port (default: 8080)
-  -m, --model           AI model (default: gpt-5-mini)
-                        Trading models (support system messages + JSON):
-                          • gpt-5           - Latest GPT-5 (best for real money)
-                          • gpt-5-mini      - GPT-5 mini (good balance)
-                          • gpt-4o          - GPT-4o (very capable)
-                          • gpt-4o-mini     - Fast & cheap (testing)
-                          • gpt-4-turbo     - "GPT-4.1" equivalent
-                        Note: o1/o3 reasoning models NOT supported
+  -m, --model           AI model (default: gpt-4o)
+                        RECOMMENDED (GPT-4 series):
+                          • gpt-4o          - BEST for trading (reliable, fast)
+                          • gpt-4o-mini     - Good for testing (cheap)
+                          • gpt-4-turbo     - "GPT-4.1" equivalent (older)
+                        
+                        EXPERIMENTAL (GPT-5 reasoning models):
+                          • gpt-5 / gpt-5-mini - ⚠️  May hit token limits
+                            (Uses tokens for "thinking" - needs 8000+ tokens)
+                            NOT recommended for production yet
+                        
+                        Note: o1/o3 models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
   --help                Show this help
@@ -30,7 +34,7 @@ USAGE
 }
 
 PORT=8080
-MODEL="gpt-5-mini"
+MODEL="gpt-4o"
 PROMPT_VERSION="auto"
 TRADING_MODE="simulation"
 
