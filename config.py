@@ -79,13 +79,14 @@ if not api_key:
 openai.api_key = api_key
 
 # Define the global model to use
-# Available models: gpt-4.1, gpt-4.1-mini, o3, o3-mini, gpt-5, gpt-5-mini
-GPT_MODEL = "gpt-4.1"  # Default model
+# Available models: gpt-4o-mini (default), gpt-4o, chatgpt-4o-latest
+# Note: o1/o3 models not supported - they don't support system messages or JSON mode
+GPT_MODEL = "gpt-4o-mini"  # Default model (reliable and cost-effective)
 
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-4.1", "gpt-4.1-mini", "o3", "o3-mini", "gpt-5", "gpt-5-mini"]
+    valid_models = ["gpt-4o-mini", "gpt-4o", "chatgpt-4o-latest", "gpt-4-turbo"]
     if model_name in valid_models:
         GPT_MODEL = model_name
         print(f"Updated GPT model to: {GPT_MODEL}")
@@ -249,9 +250,9 @@ def get_current_config_hash():
 
 def _is_gpt5_model(model_name):
     """
-    Determine if a model is a GPT-5 series model that requires special API handling.
-    GPT-5 models use different parameter names and restrictions.
-    Uses regex patterns to catch variations like gpt-5-mini, gpt-5-nano, etc.
+    Determine if a model is a GPT-4o/newer series model that uses max_completion_tokens.
+    GPT-4o and later models use different parameter names and restrictions.
+    Note: gpt-4-turbo is older and uses max_tokens; gpt-4o is newer and uses max_completion_tokens.
     """
     if not model_name:
         return False
@@ -259,15 +260,16 @@ def _is_gpt5_model(model_name):
     import re
     model_lower = model_name.lower()
     
-    # Regex patterns for GPT-5 family models
-    gpt5_patterns = [
-        r'^gpt-5(-.*)?$',        # gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-turbo, etc.
-        r'^o1(-.*)?$',           # o1, o1-mini, o1-preview, etc.
-        r'^o3(-.*)?$'            # o3, o3-mini, o3-preview, etc.
+    # Models that use max_completion_tokens (GPT-4o series and newer)
+    # Exclude gpt-4-turbo which still uses the old max_tokens
+    new_model_patterns = [
+        r'^gpt-4o(-.*)?$',       # gpt-4o, gpt-4o-mini, etc.
+        r'^chatgpt-4o(-.*)?$',   # chatgpt-4o-latest, etc.
+        r'^gpt-5(-.*)?$',        # gpt-5 (future-proofing)
     ]
     
-    # Check if model matches any GPT-5 pattern
-    for pattern in gpt5_patterns:
+    # Check if model matches any new model pattern
+    for pattern in new_model_patterns:
         if re.match(pattern, model_lower):
             return True
     
@@ -276,27 +278,27 @@ def _is_gpt5_model(model_name):
 def get_model_token_params(model_name, max_tokens_value):
     """
     Get the correct token parameter for different OpenAI models.
-    GPT-5 series uses 'max_completion_tokens' while GPT-4 and earlier use 'max_tokens'
+    GPT-4o and newer use 'max_completion_tokens' while GPT-4-turbo and earlier use 'max_tokens'
     """
     if _is_gpt5_model(model_name):
         return {"max_completion_tokens": max_tokens_value}
     else:
-        # GPT-4 and earlier models use max_tokens
+        # GPT-4-turbo and earlier models use max_tokens
         return {"max_tokens": max_tokens_value}
 
 def get_model_temperature_params(model_name, temperature_value):
     """
     Get the correct temperature parameter for different OpenAI models.
-    GPT-5 series only supports default temperature (1.0), while GPT-4 and earlier support custom values
+    GPT-4o and newer support custom temperature, older models too
     """
     if _is_gpt5_model(model_name):
-        return {}  # Don't include temperature parameter for GPT-5
+        return {"temperature": temperature_value}  # GPT-4o supports temperature
     else:
-        # GPT-4 and earlier models support custom temperature
+        # GPT-4-turbo and earlier models support custom temperature
         return {"temperature": temperature_value}
 
 # JSON schema functions removed - now using strong system prompts instead
-# as structured response_format was unreliable with GPT-5 models
+# as structured response_format was unreliable with GPT-4o and newer models
 
 class PromptManager:
     def __init__(self, client, session, run_id=None):
@@ -329,9 +331,9 @@ class PromptManager:
                         })
 
                 # Get the correct parameters based on model type
-                # Increase token limit for GPT-5 models to prevent truncation in JSON mode
+                # Increase token limit for newer models to prevent truncation in JSON mode
                 if _is_gpt5_model(GPT_MODEL):
-                    max_tokens = 2000  # GPT-5 needs more tokens for JSON mode
+                    max_tokens = 2000  # GPT-4o and newer need more tokens for JSON mode
                 else:
                     max_tokens = 1000
                 token_params = get_model_token_params(GPT_MODEL, max_tokens)
@@ -342,17 +344,17 @@ class PromptManager:
                     "model": GPT_MODEL,
                     "messages": messages,
                     **token_params,  # Use max_tokens or max_completion_tokens based on model
-                    **temperature_params  # Use temperature or omit for GPT-5
+                    **temperature_params
                 }
                 
-                # GPT-5 specific handling - NO response_format as it's too restrictive
+                # GPT-4o specific handling - NO response_format as it's too restrictive
                 if _is_gpt5_model(GPT_MODEL):
-                    print(f"🤖 Using GPT-5 model for {agent_name}")
+                    print(f"🤖 Using {GPT_MODEL} for {agent_name}")
                     
-                    # DON'T use response_format for GPT-5 - it's too restrictive
+                    # DON'T use response_format for GPT-4o - it's too restrictive
                     # Just emphasize JSON in the prompts
                     
-                    # For GPT-5, ensure the system prompt starts with proper trading focus
+                    # For GPT-4o, ensure the system prompt starts with proper trading focus
                     original_system = messages[0]["content"]
                     
                     # Ensure system prompt starts with the correct trading-focused introduction
@@ -365,14 +367,14 @@ class PromptManager:
                     # Add JSON emphasis while preserving all trading instructions
                     messages[0]["content"] = f"{enhanced_system}\n\nCRITICAL: You must respond with valid JSON only. No explanatory text."
                     
-                    # Also ensure user prompt emphasizes JSON format for GPT-5
+                    # Also ensure user prompt emphasizes JSON format for GPT-4o
                     if len(messages) > 1:
                         user_content = messages[1]["content"]
                         if "JSON" not in user_content.upper():
                             messages[1]["content"] = f"{user_content}\n\nRespond ONLY with valid JSON. No other text."
                     
-                    # Debug: Print token params for GPT-5
-                    print(f"📊 GPT-5 token params: {token_params}")
+                    # Debug: Print token params
+                    print(f"📊 Token params: {token_params}")
                     print(f"📝 Enhanced system prompt for JSON mode: {agent_name}")
                 
                 response = self.client.chat.completions.create(**api_params)
@@ -380,13 +382,13 @@ class PromptManager:
                 finish_reason = choice.finish_reason
                 content = choice.message.content
                 
-                # GPT-5 specific handling with finish_reason checking
+                # GPT-4o specific handling with finish_reason checking
                 if _is_gpt5_model(GPT_MODEL):
-                    print(f"🔍 GPT-5 response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
+                    print(f"🔍 Response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
                     # Check for problematic finish reasons or empty content
                     if finish_reason == "content_filter" or not content:
-                        print(f"⚠️  GPT-5 {agent_name} failed: finish_reason={finish_reason}, empty_content={not content}")
+                        print(f"⚠️  {agent_name} failed: finish_reason={finish_reason}, empty_content={not content}")
                         if retries < max_retries - 1:
                             retries += 1
                             # Add delay before retry
@@ -394,7 +396,7 @@ class PromptManager:
                             time.sleep(1)
                             continue
                         else:
-                            return {"error": f"GPT-5 failed after retries: {finish_reason}", "agent": agent_name}
+                            return {"error": f"Model failed after retries: {finish_reason}", "agent": agent_name}
                 
                 content = content.strip() if content else ""
 

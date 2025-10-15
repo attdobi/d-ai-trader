@@ -18,9 +18,13 @@ import time
 from math import floor
 import concurrent.futures
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode
+from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
+
+# Apply model from environment if specified
+if _os.environ.get("DAI_GPT_MODEL"):
+    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Timezone configuration
 PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')

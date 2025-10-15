@@ -32,8 +32,12 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai
+from config import engine, PromptManager, session, openai, set_gpt_model
 from feedback_agent import TradeOutcomeTracker
+
+# Apply model from environment if specified
+if _os.environ.get("DAI_GPT_MODEL"):
+    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Import the existing modules
 import main as summarizer_main

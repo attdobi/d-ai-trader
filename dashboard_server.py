@@ -13,7 +13,11 @@ except Exception:
 
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
-from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash
+from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model
+
+# Apply model from environment if specified
+if _os.environ.get("DAI_GPT_MODEL"):
+    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 import json
 import pandas as pd
 import threading
@@ -339,34 +343,9 @@ def api_history():
 
 @app.route("/api/portfolio-history")
 def api_portfolio_history():
-    """Get portfolio performance over time"""
+    """Get portfolio performance over time - strictly filtered by current config"""
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
-        # First check if current config has enough data for meaningful charts
-        current_count = conn.execute(text("""
-            SELECT COUNT(*) as count FROM portfolio_history WHERE config_hash = :config_hash
-        """), {"config_hash": config_hash}).fetchone().count
-        
-        # If current config has less than 3 data points, find the config with the most data
-        if current_count < 3:
-            print(f"⚠️  Config {config_hash} has only {current_count} portfolio entries - using config with most data for charts")
-            
-            # Find config with most historical data
-            best_config = conn.execute(text("""
-                SELECT config_hash, COUNT(*) as count 
-                FROM portfolio_history 
-                GROUP BY config_hash 
-                ORDER BY count DESC 
-                LIMIT 1
-            """)).fetchone()
-            
-            if best_config and best_config.count >= 3:
-                print(f"📊 Using config {best_config.config_hash} with {best_config.count} entries for charts")
-                config_hash = best_config.config_hash
-            else:
-                print("❌ No config has enough data for charts")
-                return jsonify([])
-        
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, total_invested, 
                    total_profit_loss, percentage_gain, cash_balance
@@ -379,36 +358,11 @@ def api_portfolio_history():
 
 @app.route("/api/portfolio-performance")
 def api_portfolio_performance():
-    """Get portfolio performance relative to initial $10,000 investment"""
+    """Get portfolio performance relative to initial $10,000 investment - strictly filtered by current config"""
     initial_investment = 10000.0
     config_hash = get_current_config_hash()
     
     with engine.connect() as conn:
-        # First check if current config has enough data for meaningful charts
-        current_count = conn.execute(text("""
-            SELECT COUNT(*) as count FROM portfolio_history WHERE config_hash = :config_hash
-        """), {"config_hash": config_hash}).fetchone().count
-        
-        # If current config has less than 3 data points, find the config with the most data
-        if current_count < 3:
-            print(f"⚠️  Config {config_hash} has only {current_count} portfolio entries - using config with most data for performance chart")
-            
-            # Find config with most historical data
-            best_config = conn.execute(text("""
-                SELECT config_hash, COUNT(*) as count 
-                FROM portfolio_history 
-                GROUP BY config_hash 
-                ORDER BY count DESC 
-                LIMIT 1
-            """)).fetchone()
-            
-            if best_config and best_config.count >= 3:
-                print(f"📊 Using config {best_config.config_hash} with {best_config.count} entries for performance chart")
-                config_hash = best_config.config_hash
-            else:
-                print("❌ No config has enough data for performance chart")
-                return jsonify([])
-        
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, cash_balance,
                    (total_portfolio_value - :initial_investment) as net_gain_loss,

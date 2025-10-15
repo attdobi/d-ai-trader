@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Robust launcher for d-ai-trader (dashboard + automation)
 # Usage:
-#   ./start_d_ai_trader.sh -p 8080 -m gpt-4.1 -v auto -t simulation
+#   ./start_d_ai_trader.sh -p 8080 -m gpt-4o-mini -v auto -t simulation
 set -Eeuo pipefail
 
 usage() {
@@ -9,7 +9,9 @@ usage() {
 Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE]
 
   -p, --port            Dashboard port (default: 8080)
-  -m, --model           AI model (default: gpt-4.1)
+  -m, --model           AI model (default: gpt-4o-mini)
+                        Options: gpt-4o-mini (fast & cheap), gpt-4o (balanced),
+                                 chatgpt-4o-latest (latest features), gpt-4-turbo
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
   --help                Show this help
@@ -23,7 +25,7 @@ USAGE
 }
 
 PORT=8080
-MODEL="gpt-4.1"
+MODEL="gpt-4o-mini"
 PROMPT_VERSION="auto"
 TRADING_MODE="simulation"
 

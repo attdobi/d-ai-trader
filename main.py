@@ -23,11 +23,15 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from sqlalchemy import text
-from config import engine, api_key, PromptManager, session, get_current_config_hash
+from config import engine, api_key, PromptManager, session, get_current_config_hash, set_gpt_model
 import chromedriver_autoinstaller
 import openai
 import undetected_chromedriver as uc
 from feedback_agent import TradeOutcomeTracker
+
+# Apply model from environment if specified
+if _os.environ.get("DAI_GPT_MODEL"):
+    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 from bs4 import BeautifulSoup
 
 # Configuration
