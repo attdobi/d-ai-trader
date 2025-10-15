@@ -179,6 +179,16 @@ Return a JSON object with:
         feedback_context=feedback_context
     )
     
+    # Add instruction to ignore popups and extract visible content
+    prompt += """\n
+IMPORTANT: If you see privacy notices, cookie consent dialogs, login prompts, or "Press and Hold" overlays in the screenshots:
+- IGNORE the popup overlay completely
+- Look BEHIND/AROUND the popup to the visible webpage content
+- Extract headlines and news that are visible on the page
+- Focus on the financial news content that is readable despite any overlays
+
+Most financial news websites still show headlines and articles even with popups visible."""
+    
     # Use versioned system prompt with feedback context
     system_prompt = system_prompt_template + f"\n\n{feedback_context}"
     
