@@ -1373,21 +1373,40 @@ def start_price_updater():
 
 @app.route('/api/schwab/holdings')
 def get_schwab_holdings():
-    """Get current Schwab holdings and portfolio data"""
+    """Get current Schwab holdings and portfolio data (READ-ONLY)"""
+    import pytz
+    
+    # Check if we're in read-only test mode
+    readonly_mode = os.environ.get('DAI_SCHWAB_READONLY', '0') == '1'
+    
     if not SCHWAB_ENABLED:
         return jsonify({
-            'error': 'Schwab integration not available',
-            'enabled': False
+            'error': 'Schwab integration not available. Run: pip install schwab-api',
+            'enabled': False,
+            'readonly_mode': readonly_mode
         })
     
     try:
+        # Get Schwab account data (read-only operation)
         schwab_data = trading_interface.sync_schwab_positions()
         schwab_data['enabled'] = True
+        schwab_data['readonly_mode'] = readonly_mode
+        
+        # Add safety warning if in read-only mode
+        if readonly_mode:
+            schwab_data['warning'] = '🔒 READ-ONLY MODE: No trades will be executed'
+        
+        # Add timestamp
+        pacific_tz = pytz.timezone('US/Pacific')
+        now = datetime.now(pacific_tz)
+        schwab_data['last_updated'] = now.strftime('%m/%d/%Y, %I:%M:%S %p %Z')
+        
         return jsonify(schwab_data)
     except Exception as e:
         return jsonify({
             'error': str(e),
             'enabled': True,
+            'readonly_mode': readonly_mode,
             'status': 'error'
         })
 

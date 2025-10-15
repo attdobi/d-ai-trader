@@ -470,11 +470,35 @@ def get_current_price(ticker):
         return None
 
 def execute_real_world_trade(decision):
-    """Execute a real trade through Schwab API when in real_world mode"""
-    trading_mode = get_trading_mode()
+    """
+    Execute a real trade through Schwab API when in real_world mode.
     
+    MULTI-LAYER SAFETY PROTECTION:
+    1. DAI_SCHWAB_READONLY flag check (for testing)
+    2. Trading mode check (must be 'real_world')
+    3. Market hours check
+    4. Safety manager validation
+    """
+    import os
+    
+    # SAFETY LAYER 1: Read-only mode check (for safe API testing)
+    readonly_mode = os.environ.get('DAI_SCHWAB_READONLY', '0') == '1'
+    if readonly_mode:
+        print("🔒 SCHWAB READ-ONLY MODE ACTIVE")
+        print("   ⛔ ALL TRADE EXECUTION DISABLED FOR SAFETY")
+        print(f"   Decision would be: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')} ${decision.get('amount_usd', 0)}")
+        print("   To enable trades: Remove DAI_SCHWAB_READONLY flag")
+        return False
+    
+    # SAFETY LAYER 2: Trading mode check
+    trading_mode = get_trading_mode()
     if trading_mode != "real_world":
         return True  # Skip real execution in simulation mode
+    
+    # SAFETY LAYER 3: Market hours check
+    if not is_market_open():
+        print(f"⛔ Cannot execute real trade - market is closed")
+        return False
     
     try:
         # Import trading interface (only when needed)
@@ -483,6 +507,15 @@ def execute_real_world_trade(decision):
         action = decision.get('action', '').lower()
         ticker = decision.get('ticker', '')
         amount_usd = decision.get('amount_usd', 0)
+        
+        # SAFETY LAYER 4: Action validation
+        if action not in ['buy', 'sell']:
+            return True  # Hold decisions don't require real execution
+        
+        print(f"💰 EXECUTING REAL TRADE via Schwab API:")
+        print(f"   Action: {action.upper()}")
+        print(f"   Ticker: {ticker}")
+        print(f"   Amount: ${amount_usd}")
         
         if action == 'buy':
             result = trading_interface.execute_buy_order(ticker, amount_usd)
@@ -495,14 +528,14 @@ def execute_real_world_trade(decision):
             else:
                 print(f"⚠️  Cannot sell {ticker} - no shares found in holdings")
                 return False
-        else:
-            return True  # Hold decisions don't require real execution
         
         if result.get('success'):
-            print(f"💰 REAL TRADE EXECUTED: {action.upper()} {ticker} for ${amount_usd}")
+            print(f"✅ REAL TRADE EXECUTED: {action.upper()} {ticker} for ${amount_usd}")
+            print(f"   Order ID: {result.get('order_id', 'N/A')}")
             return True
         else:
-            print(f"❌ REAL TRADE FAILED: {action.upper()} {ticker} - {result.get('error', 'Unknown error')}")
+            print(f"❌ REAL TRADE FAILED: {action.upper()} {ticker}")
+            print(f"   Error: {result.get('error', 'Unknown error')}")
             return False
             
     except ImportError:
@@ -511,6 +544,8 @@ def execute_real_world_trade(decision):
         return True
     except Exception as e:
         print(f"❌ Real trade execution error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def update_holdings(decisions):
@@ -1444,8 +1479,10 @@ RESPOND WITH ONLY THE JSON ARRAY. NO explanatory text before or after."""
         for decision in ai_response:
             if isinstance(decision, dict) and decision.get('action') not in ['N/A', 'hold']:
                 original_reason = decision.get('reason', '')
-                decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
-                decision['execution_status'] = 'market_closed'
+                # Only add prefix if not already present (avoid double prefix)
+                if not original_reason.startswith('⛔ MARKET CLOSED'):
+                    decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    decision['execution_status'] = 'market_closed'
     
     return ai_response
 
@@ -1565,14 +1602,18 @@ def store_trade_decisions(decisions, run_id):
             print(f"⚠️  Skipping error response: {decision.get('error', 'Unknown error')}")
             continue
         if isinstance(decision, dict) and decision.get('action') and decision.get('ticker'):
-            # MODIFY decision if market is closed
+            # MODIFY decision if market is closed (only if not already marked)
             if not market_open:
                 action = decision.get('action', '').lower()
                 if action in ['buy', 'sell']:
                     original_reason = decision.get('reason', 'No reason provided')
-                    decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
-                    decision['execution_status'] = 'market_closed'
-                    print(f"   Modified {action.upper()} {decision.get('ticker')} → MARKET CLOSED")
+                    # Only add prefix if not already present (avoid double prefix)
+                    if not original_reason.startswith('⛔ MARKET CLOSED'):
+                        decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                        decision['execution_status'] = 'market_closed'
+                        print(f"   Modified {action.upper()} {decision.get('ticker')} → MARKET CLOSED")
+                    else:
+                        print(f"   Already marked: {action.upper()} {decision.get('ticker')}")
             
             valid_decisions.append(decision)
         else:

@@ -34,13 +34,16 @@ if _os.environ.get("DAI_GPT_MODEL"):
     set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 from bs4 import BeautifulSoup
 
-# Configuration
+# Configuration - Optimized for day trading (6 sources max for cost efficiency)
+# Using sites with minimal popups and real-time trading news
 URLS = [
-    ("Agent_CNBC", "https://www.cnbc.com"),
-    ("Agent_CNN_Money", "https://money.cnn.com"),
-    ("Agent_SeekingAlpha", "https://seekingalpha.com"),
-    ("Agent_Fox_Business", "https://www.foxbusiness.com"),
-    ("Agent_Yahoo_Finance", "https://finance.yahoo.com")
+    ("Agent_CNBC", "https://www.cnbc.com"),                    # Breaking news, market movers
+    ("Agent_Benzinga", "https://www.benzinga.com"),            # ⭐ Best for day trading - real-time catalysts
+    ("Agent_MarketWatch", "https://www.marketwatch.com"),      # Market trends, sector rotation
+    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),      # Stock-specific news, earnings
+    ("Agent_Finviz", "https://finviz.com/news.ashx"),          # Top gainers/losers, market heat map
+    ("Agent_Fox_Business", "https://www.foxbusiness.com")      # Market sentiment, trading ideas
+    # Removed: Bloomberg (paywall), SeekingAlpha (login popups), CNN Money (consent overlays)
 ]
 
 # Use absolute path for screenshot directory to avoid working directory issues
