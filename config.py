@@ -79,20 +79,24 @@ if not api_key:
 openai.api_key = api_key
 
 # Define the global model to use
-# Available models: gpt-4o-mini (default), gpt-4o, chatgpt-4o-latest
-# Note: o1/o3 models not supported - they don't support system messages or JSON mode
-GPT_MODEL = "gpt-4o-mini"  # Default model (reliable and cost-effective)
+# Available models for trading (all support system messages + JSON mode):
+#   - gpt-4o: Most capable, best for real money trading ($2.50/$10 per 1M tokens)
+#   - gpt-4o-mini: Fast & cheap, good for testing ($0.15/$0.60 per 1M tokens)
+#   - gpt-4-turbo: Older "GPT-4.1" equivalent ($10/$30 per 1M tokens)
+#   - gpt-4: Original GPT-4 (slower, more expensive)
+# Note: o1/o3 reasoning models NOT supported - they don't support system messages or JSON mode
+GPT_MODEL = "gpt-4o-mini"  # Default model (good for testing/development)
 
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-4o-mini", "gpt-4o", "chatgpt-4o-latest", "gpt-4-turbo"]
+    valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
     if model_name in valid_models:
         GPT_MODEL = model_name
-        print(f"Updated GPT model to: {GPT_MODEL}")
+        print(f"✅ Updated GPT model to: {GPT_MODEL}")
     else:
-        print(f"Invalid model '{model_name}'. Valid models are: {valid_models}")
-        print(f"Keeping current model: {GPT_MODEL}")
+        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models}")
+        print(f"⚠️  Keeping current model: {GPT_MODEL}")
 
 def get_gpt_model():
     """Get the current GPT model"""

@@ -10,8 +10,12 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
 
   -p, --port            Dashboard port (default: 8080)
   -m, --model           AI model (default: gpt-4o-mini)
-                        Options: gpt-4o-mini (fast & cheap), gpt-4o (balanced),
-                                 chatgpt-4o-latest (latest features), gpt-4-turbo
+                        Trading models (support system messages + JSON):
+                          • gpt-4o          - Best for real money (most capable)
+                          • gpt-4o-mini     - Fast & cheap (good for testing)
+                          • gpt-4-turbo     - "GPT-4.1" equivalent (older)
+                          • gpt-4           - Original GPT-4
+                        Note: o1/o3 reasoning models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
   --help                Show this help

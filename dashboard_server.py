@@ -671,8 +671,12 @@ def trigger_summarizer():
                 orchestrator.run_summarizer_agents()
             except Exception as e:
                 print(f"Error in manual summarizer run: {e}")
+            finally:
+                # Clean up resources
+                import gc
+                gc.collect()
         
-        thread = threading.Thread(target=run_summarizer, daemon=True)
+        thread = threading.Thread(target=run_summarizer, daemon=True, name="ManualSummarizer")
         thread.start()
         
         return jsonify({
@@ -696,8 +700,12 @@ def trigger_decider():
                 orchestrator.run_decider_agent()
             except Exception as e:
                 print(f"Error in manual decider run: {e}")
+            finally:
+                # Clean up resources
+                import gc
+                gc.collect()
         
-        thread = threading.Thread(target=run_decider, daemon=True)
+        thread = threading.Thread(target=run_decider, daemon=True, name="ManualDecider")
         thread.start()
         
         return jsonify({
@@ -721,8 +729,12 @@ def trigger_feedback():
                 orchestrator.run_feedback_agent()
             except Exception as e:
                 print(f"Error in manual feedback run: {e}")
+            finally:
+                # Clean up resources
+                import gc
+                gc.collect()
         
-        thread = threading.Thread(target=run_feedback, daemon=True)
+        thread = threading.Thread(target=run_feedback, daemon=True, name="ManualFeedback")
         thread.start()
         
         return jsonify({
@@ -872,8 +884,12 @@ def trigger_all():
                         })
                 except:
                     pass  # Don't let error logging cause more errors
+            finally:
+                # Clean up resources to prevent semaphore leaks
+                import gc
+                gc.collect()
         
-        thread = threading.Thread(target=run_all, daemon=True)
+        thread = threading.Thread(target=run_all, daemon=True, name="ManualAllAgents")
         thread.start()
         
         return jsonify({
