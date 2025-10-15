@@ -1397,4 +1397,6 @@ def schwab_dashboard():
 
 if __name__ == "__main__":
     start_price_updater()
-    app.run(debug=True, port=8080)
+    port = int(os.environ.get('DAI_PORT', 8080))
+    print(f"🚀 Starting dashboard server on port {port}")
+    app.run(debug=True, port=port)

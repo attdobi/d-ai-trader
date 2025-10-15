@@ -9,12 +9,13 @@ usage() {
 Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE]
 
   -p, --port            Dashboard port (default: 8080)
-  -m, --model           AI model (default: gpt-4o-mini)
+  -m, --model           AI model (default: gpt-5-mini)
                         Trading models (support system messages + JSON):
-                          • gpt-4o          - Best for real money (most capable)
-                          • gpt-4o-mini     - Fast & cheap (good for testing)
-                          • gpt-4-turbo     - "GPT-4.1" equivalent (older)
-                          • gpt-4           - Original GPT-4
+                          • gpt-5           - Latest GPT-5 (best for real money)
+                          • gpt-5-mini      - GPT-5 mini (good balance)
+                          • gpt-4o          - GPT-4o (very capable)
+                          • gpt-4o-mini     - Fast & cheap (testing)
+                          • gpt-4-turbo     - "GPT-4.1" equivalent
                         Note: o1/o3 reasoning models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
@@ -29,7 +30,7 @@ USAGE
 }
 
 PORT=8080
-MODEL="gpt-4o-mini"
+MODEL="gpt-5-mini"
 PROMPT_VERSION="auto"
 TRADING_MODE="simulation"
 
@@ -86,6 +87,9 @@ else
   echo "UC Shim:           ENABLED (DAI_ENABLE_UC=${DAI_ENABLE_UC:-0})"
 fi
 echo "========================================"
+echo ""
+echo "🌐 Dashboard will be available at: http://localhost:${PORT}"
+echo ""
 
 # Start the dashboard and automation concurrently.
 # Avoid passing CLI flags that may not exist in your local files;

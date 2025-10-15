@@ -1,7 +1,30 @@
 let chart, performanceChart, breakdownChart;
 
 function renderChart(data, label = 'Portfolio Value') {
-  const ctx = document.getElementById('historyChart').getContext('2d');
+  const el = document.getElementById('historyChart');
+  const canvas = el;
+  
+  // Handle empty data for new configs
+  if (!data || data.length === 0) {
+    if (chart) chart.destroy();
+    const parent = canvas.parentElement;
+    canvas.style.display = 'none';
+    const msg = document.createElement('div');
+    msg.id = 'historyChartNoData';
+    msg.style.cssText = 'display:flex;align-items:center;justify-content:center;height:200px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;margin:10px 0;';
+    msg.innerHTML = '<div style="text-align:center;color:#6c757d;"><p>📊 No historical data yet for this configuration</p><p style="font-size:0.9em;">Data will appear after running the system</p></div>';
+    const existing = parent.querySelector('#historyChartNoData');
+    if (existing) existing.remove();
+    parent.appendChild(msg);
+    return;
+  }
+  
+  // Remove no-data message if exists
+  const noDataMsg = canvas.parentElement.querySelector('#historyChartNoData');
+  if (noDataMsg) noDataMsg.remove();
+  canvas.style.display = 'block';
+  
+  const ctx = canvas.getContext('2d');
   const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
   const values = data.map(row => row.total_portfolio_value);
   if (chart) chart.destroy();
@@ -59,7 +82,30 @@ function renderPerformanceChart(data) {
 }
 
 function renderBreakdownChart(data) {
-  const ctx = document.getElementById('breakdownChart').getContext('2d');
+  const el = document.getElementById('breakdownChart');
+  const canvas = el;
+  
+  // Handle empty data for new configs
+  if (!data || data.length === 0) {
+    if (breakdownChart) breakdownChart.destroy();
+    const parent = canvas.parentElement;
+    canvas.style.display = 'none';
+    const msg = document.createElement('div');
+    msg.id = 'breakdownChartNoData';
+    msg.style.cssText = 'display:flex;align-items:center;justify-content:center;height:200px;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;margin:10px 0;';
+    msg.innerHTML = '<div style="text-align:center;color:#6c757d;"><p>📊 No breakdown data yet for this configuration</p><p style="font-size:0.9em;">Data will appear after running the system</p></div>';
+    const existing = parent.querySelector('#breakdownChartNoData');
+    if (existing) existing.remove();
+    parent.appendChild(msg);
+    return;
+  }
+  
+  // Remove no-data message if exists
+  const noDataMsg = canvas.parentElement.querySelector('#breakdownChartNoData');
+  if (noDataMsg) noDataMsg.remove();
+  canvas.style.display = 'block';
+  
+  const ctx = canvas.getContext('2d');
   const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
   const cashBalance = data.map(row => row.cash_balance);
   const totalInvested = data.map(row => row.total_invested);

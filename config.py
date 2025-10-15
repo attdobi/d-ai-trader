@@ -80,17 +80,19 @@ openai.api_key = api_key
 
 # Define the global model to use
 # Available models for trading (all support system messages + JSON mode):
-#   - gpt-4o: Most capable, best for real money trading ($2.50/$10 per 1M tokens)
+#   - gpt-5: Latest GPT-5 (best overall)
+#   - gpt-5-mini: GPT-5 mini variant (fast & affordable)
+#   - gpt-4o: Most capable GPT-4 series, best for real money trading ($2.50/$10 per 1M tokens)
 #   - gpt-4o-mini: Fast & cheap, good for testing ($0.15/$0.60 per 1M tokens)
 #   - gpt-4-turbo: Older "GPT-4.1" equivalent ($10/$30 per 1M tokens)
 #   - gpt-4: Original GPT-4 (slower, more expensive)
 # Note: o1/o3 reasoning models NOT supported - they don't support system messages or JSON mode
-GPT_MODEL = "gpt-4o-mini"  # Default model (good for testing/development)
+GPT_MODEL = "gpt-5-mini"  # Default model (good balance of speed/cost/quality)
 
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
     if model_name in valid_models:
         GPT_MODEL = model_name
         print(f"✅ Updated GPT model to: {GPT_MODEL}")
@@ -264,12 +266,13 @@ def _is_gpt5_model(model_name):
     import re
     model_lower = model_name.lower()
     
-    # Models that use max_completion_tokens (GPT-4o series and newer)
+    # Models that use max_completion_tokens (GPT-4o series and GPT-5)
     # Exclude gpt-4-turbo which still uses the old max_tokens
+    # Note: GPT-5 also doesn't support custom temperature (reasoning model behavior)
     new_model_patterns = [
+        r'^gpt-5(-.*)?$',        # gpt-5, gpt-5-mini, etc.
         r'^gpt-4o(-.*)?$',       # gpt-4o, gpt-4o-mini, etc.
         r'^chatgpt-4o(-.*)?$',   # chatgpt-4o-latest, etc.
-        r'^gpt-5(-.*)?$',        # gpt-5 (future-proofing)
     ]
     
     # Check if model matches any new model pattern
@@ -293,12 +296,19 @@ def get_model_token_params(model_name, max_tokens_value):
 def get_model_temperature_params(model_name, temperature_value):
     """
     Get the correct temperature parameter for different OpenAI models.
-    GPT-4o and newer support custom temperature, older models too
+    GPT-5 models only support temperature=1.0 (default), like reasoning models.
+    GPT-4o and earlier support custom temperature.
     """
-    if _is_gpt5_model(model_name):
-        return {"temperature": temperature_value}  # GPT-4o supports temperature
+    if not model_name:
+        return {"temperature": temperature_value}
+    
+    model_lower = model_name.lower()
+    
+    # GPT-5 series doesn't support custom temperature (only default 1.0)
+    if model_lower.startswith('gpt-5'):
+        return {}  # Don't send temperature parameter for GPT-5
     else:
-        # GPT-4-turbo and earlier models support custom temperature
+        # GPT-4o, GPT-4-turbo, and earlier models support custom temperature
         return {"temperature": temperature_value}
 
 # JSON schema functions removed - now using strong system prompts instead

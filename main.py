@@ -45,9 +45,13 @@ URLS = [
 
 # Use absolute path for screenshot directory to avoid working directory issues
 import os
+import pytz
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_DIR = os.path.join(SCRIPT_DIR, "screenshots")
-RUN_TIMESTAMP = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+
+# Use Pacific Time for timestamps
+PACIFIC_TZ = pytz.timezone('US/Pacific')
+RUN_TIMESTAMP = datetime.now(PACIFIC_TZ).strftime("%Y%m%dT%H%M%S")
 
 # Include configuration hash to isolate screenshots for parallel runs
 CONFIG_HASH = get_current_config_hash()
@@ -367,12 +371,22 @@ def summarize_page(agent_name, url, web_driver):
 def store_summary(summary):
     config_hash = get_current_config_hash()
     with engine.begin() as conn:
+        # Parse timestamp and ensure it's timezone-aware (Pacific)
+        timestamp_str = summary['timestamp']
+        try:
+            timestamp_dt = datetime.strptime(timestamp_str, "%Y%m%dT%H%M%S")
+            # Make it timezone-aware in Pacific time
+            timestamp_dt = PACIFIC_TZ.localize(timestamp_dt)
+        except:
+            # Fallback to current Pacific time
+            timestamp_dt = datetime.now(PACIFIC_TZ)
+        
         conn.execute(text(
             "INSERT INTO summaries (config_hash, agent, timestamp, run_id, data) VALUES (:config_hash, :agent, :timestamp, :run_id, :data)"
         ), {
             "config_hash": config_hash,
             "agent": summary['agent'],
-            "timestamp": datetime.strptime(summary['timestamp'], "%Y%m%dT%H%M%S"),
+            "timestamp": timestamp_dt,
             "run_id": summary['run_id'],
             "data": json.dumps(summary)
         })
@@ -410,17 +424,39 @@ def run_summary_agents():
             except Exception as e:
                 print(f"Error processing {agent_name} ({url}): {e}")
                 
-                # Try to create a new driver for the next agent if this one failed
+                # Store error summary so we know what failed
                 try:
-                    current_driver.quit()
+                    error_summary = {
+                        "agent": agent_name,
+                        "timestamp": RUN_TIMESTAMP,
+                        "run_id": RUN_TIMESTAMP,
+                        "summary": {
+                            "headlines": [],
+                            "insights": f"API error: {str(e)}"
+                        }
+                    }
+                    store_summary(error_summary)
+                    print(f"Stored error summary for {agent_name}")
                 except:
                     pass
+                
+                # Try to create a new driver for the next agent if this one failed
+                try:
+                    if current_driver:
+                        current_driver.quit()
+                except:
+                    pass
+                
+                # Wait a bit before recreating driver to let system recover
+                time.sleep(2)
+                
                 try:
                     current_driver = uc.Chrome(options=create_chrome_options())
                     print(f"Created new driver after {agent_name} error")
                 except Exception as driver_error:
                     print(f"Failed to create new driver: {driver_error}")
-                    # Continue with next agent - maybe the driver will work
+                    # Set to None so we don't try to use it
+                    current_driver = None
                 continue
                 
     except Exception as e:
