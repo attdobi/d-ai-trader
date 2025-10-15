@@ -552,30 +552,114 @@ class DAITraderOrchestrator:
             import traceback
             logger.error(traceback.format_exc())
     
+    def market_open_job(self):
+        """
+        Special job that runs at market open (9:30:05 AM ET).
+        Runs summarizers at 9:25 AM ET, then waits until exactly 9:30:05 AM ET to execute trades.
+        """
+        try:
+            now_pacific = datetime.now(PACIFIC_TIMEZONE)
+            now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
+            
+            # Only run on weekdays
+            if now_eastern.weekday() >= 5:
+                logger.info("Skipping market open job - weekend")
+                return
+            
+            logger.info("🔔 MARKET OPEN SEQUENCE STARTING")
+            logger.info(f"   Current time: {now_eastern.strftime('%I:%M:%S %p ET')}")
+            
+            # Step 1: Run summarizers at 9:25 AM ET (5 min before open)
+            logger.info("📰 Step 1: Pre-market news analysis (9:25 AM ET)")
+            self.run_summarizer_agents()
+            logger.info("✅ Pre-market analysis complete")
+            
+            # Step 2: Wait until exactly 9:30:05 AM ET
+            now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
+            market_open_time = now_eastern.replace(hour=9, minute=30, second=5, microsecond=0)
+            
+            if now_eastern < market_open_time:
+                wait_seconds = (market_open_time - now_eastern).total_seconds()
+                logger.info(f"⏰ Waiting {wait_seconds:.0f} seconds until market opens at 9:30:05 AM ET...")
+                time.sleep(wait_seconds)
+            
+            # Step 3: Execute trades at market open
+            now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
+            logger.info(f"🚀 EXECUTING OPENING TRADES at {now_eastern.strftime('%I:%M:%S %p ET')}")
+            self.run_decider_agent()
+            logger.info("✅ Opening trades executed!")
+            
+        except Exception as e:
+            logger.error(f"❌ Market open job failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def setup_schedule(self):
-        """Setup the scheduling for all jobs"""
-        # Summarizer agents - every hour during market hours and once daily on weekends
-        schedule.every().hour.at(":25").do(self.scheduled_summarizer_and_decider_job)  # Every hour at :25
+        """Setup the scheduling for all jobs with configurable cadence"""
+        # Get cadence from environment (default: 60 minutes)
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
+        
+        # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
+        schedule.every().day.at("09:25").do(self.market_open_job)  # 9:25 AM ET = 6:25 AM PT
+        
+        # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
+        # This avoids overlap with the market open job
+        start_time_et = "09:35"  # 5 minutes after market opens
+        schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
         
         # Feedback agent - once daily after market close
         schedule.every().day.at("16:30").do(self.scheduled_feedback_job)  # 4:30pm ET
         
+        logger.info("="*60)
         logger.info("Schedule setup completed")
-        logger.info("Summarizer + Decider: Every hour at :25 (sequential execution)")
-        logger.info("Feedback agent: Daily at 4:30pm ET")
+        logger.info(f"📊 DAY TRADING MODE:")
+        logger.info(f"   🔔 Market Open (9:25-9:30:05 AM ET):")
+        logger.info(f"      - 9:25:00 AM: Analyze pre-market news")
+        logger.info(f"      - 9:30:05 AM: Execute opening trades (5 sec after bell)")
+        logger.info(f"   📈 Regular Cadence:")
+        logger.info(f"      - Every {cadence_minutes} minutes starting at 9:35 AM ET")
+        logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
+        logger.info(f"   📊 Feedback: Daily at 4:30 PM ET (after market close)")
+        if cadence_minutes <= 15:
+            # 390 minutes of trading (9:30 AM - 4:00 PM) minus opening trade
+            cycles = int(390 / cadence_minutes)
+            logger.info(f"   ⚡ AGGRESSIVE: Up to {cycles + 1} trading cycles per day!")
+        logger.info("="*60)
     
     def run(self):
         """Main run loop"""
         logger.info("Starting D-AI-Trader automation system")
         self.setup_schedule()
         
+        # Get cadence for display
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
+        
         # Skip immediate cycle - rely on scheduled runs only
-        logger.info("📅 System will run on schedule:")
-        logger.info("  - STEP 1: Summarizer agents collect news (every hour at :25)")  
-        logger.info("  - STEP 2: Decider agent analyzes summaries (immediately after Step 1, during market hours only)")
-        logger.info("  - STEP 3: Feedback agent (daily at 4:30pm ET)")
-        logger.info("🔄 Sequential execution ensures decider uses fresh summaries")
-        logger.info("🕐 Waiting for next scheduled run...")
+        logger.info("")
+        logger.info("="*60)
+        logger.info("📅 DAY TRADING SYSTEM ACTIVE")
+        logger.info("="*60)
+        logger.info("")
+        logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
+        logger.info("   9:25:00 AM ET (6:25 AM PT) - Analyze pre-market news")
+        logger.info("   9:30:05 AM ET (6:30 AM PT) - Execute opening trades (5 sec after bell)")
+        logger.info("")
+        logger.info(f"📈 INTRADAY TRADING CYCLE:")
+        logger.info(f"   Every {cadence_minutes} minutes from 9:35 AM - 4:00 PM ET")
+        if cadence_minutes <= 15:
+            cycles_per_day = int(390 / cadence_minutes) + 1  # +1 for opening bell
+            logger.info(f"   ⚡ AGGRESSIVE MODE: Up to {cycles_per_day} trades/day!")
+        logger.info("")
+        logger.info("📊 END OF DAY:")
+        logger.info("   4:30 PM ET - Performance feedback & strategy refinement")
+        logger.info("")
+        logger.info("⛔ AFTER HOURS:")
+        logger.info("   Decisions recorded but marked 'MARKET CLOSED' (no execution)")
+        logger.info("")
+        logger.info("="*60)
+        logger.info("🕐 System initialized. Waiting for next scheduled run...")
+        logger.info("="*60)
+        logger.info("")
         try:
             while True:
                 schedule.run_pending()

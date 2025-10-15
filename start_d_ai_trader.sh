@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE]
+Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE] [-c CADENCE]
 
   -p, --port            Dashboard port (default: 8080)
   -m, --model           AI model (default: gpt-4o)
@@ -23,13 +23,17 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                         Note: o1/o3 models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
+  -c, --cadence         How often to run (in minutes, default: 60)
+                        Examples:
+                          • 15  - Every 15 minutes (aggressive day trading)
+                          • 30  - Every 30 minutes (active trading)
+                          • 60  - Every hour (default, conservative)
   --help                Show this help
 
 Tips:
   • To run Selenium with stock Chrome (recommended on macOS), keep UC disabled:
       export DAI_DISABLE_UC=1
-  • Ensure repo root is on PYTHONPATH:
-      export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
+  • For day trading, use: -c 15 (runs every 15 minutes during market hours)
 USAGE
 }
 
@@ -37,6 +41,7 @@ PORT=8080
 MODEL="gpt-4o"
 PROMPT_VERSION="auto"
 TRADING_MODE="simulation"
+CADENCE_MINUTES=60
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     -m|--model) MODEL="$2"; shift 2;;
     -v|--prompt-version) PROMPT_VERSION="$2"; shift 2;;
     -t|--trading-mode) TRADING_MODE="$2"; shift 2;;
+    -c|--cadence) CADENCE_MINUTES="$2"; shift 2;;
     --help|-h) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -77,6 +83,7 @@ export DAI_PORT="${PORT}"
 export DAI_GPT_MODEL="${MODEL}"
 export DAI_PROMPT_VERSION="${PROMPT_VERSION}"
 export TRADING_MODE="${TRADING_MODE}"
+export DAI_CADENCE_MINUTES="${CADENCE_MINUTES}"
 
 echo "========================================"
 echo "D-AI-Trader Startup Configuration"
@@ -85,6 +92,7 @@ echo "Dashboard Port:    ${PORT}"
 echo "AI Model:          ${MODEL}"
 echo "Prompt Version:    ${PROMPT_VERSION}"
 echo "Trading Mode:      ${TRADING_MODE}"
+echo "Run Cadence:       Every ${CADENCE_MINUTES} minutes"
 if [[ "${DAI_DISABLE_UC}" == "1" ]]; then
   echo "UC Shim:           DISABLED"
 else
@@ -92,7 +100,12 @@ else
 fi
 echo "========================================"
 echo ""
-echo "🌐 Dashboard will be available at: http://localhost:${PORT}"
+echo "🌐 Dashboard URL: http://localhost:${PORT}"
+echo ""
+echo "📊 DAY TRADING SCHEDULE:"
+echo "   🔔 Opening Bell: 6:25 AM PT (analyzes news, trades at 6:30:05 AM PT)"
+echo "   📈 Intraday:     Every ${CADENCE_MINUTES} min (6:35 AM - 1:00 PM PT)"
+echo "   📊 Feedback:     1:30 PM PT (daily performance analysis)"
 echo ""
 
 # Start the dashboard and automation concurrently.
