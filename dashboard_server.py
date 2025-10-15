@@ -180,7 +180,10 @@ def from_json_filter(s):
 
 @app.route("/trades")
 def trade_decisions():
+    import pytz
     config_hash = get_current_config_hash()
+    pacific_tz = pytz.timezone('US/Pacific')
+    
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM trade_decisions 
@@ -193,6 +196,17 @@ def trade_decisions():
         trades = []
         for row in result:
             trade_dict = dict(row._mapping)
+            
+            # Format timestamp in Pacific time
+            timestamp = trade_dict.get('timestamp')
+            if timestamp:
+                if timestamp.tzinfo is None:
+                    timestamp = pacific_tz.localize(timestamp)
+                else:
+                    timestamp = timestamp.astimezone(pacific_tz)
+                # Format with correct timezone abbreviation (PDT or PST)
+                tz_abbr = timestamp.strftime("%Z")
+                trade_dict['timestamp'] = timestamp.strftime(f"%m/%d/%Y, %I:%M:%S %p {tz_abbr}")
             
             # Parse JSON if data is a string
             if isinstance(trade_dict['data'], str):
@@ -243,7 +257,10 @@ def trade_decisions():
 
 @app.route("/summaries")
 def summaries():
+    import pytz
     config_hash = get_current_config_hash()
+    pacific_tz = pytz.timezone('US/Pacific')
+    
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT * FROM summaries 
@@ -269,9 +286,24 @@ def summaries():
                 elif not isinstance(summary_data, dict):
                     summary_data = {"headlines": [], "insights": str(summary_data)}
 
+                # Format timestamp in Pacific time
+                timestamp = row.timestamp
+                if timestamp:
+                    # If timestamp is naive, assume it's Pacific time
+                    if timestamp.tzinfo is None:
+                        timestamp = pacific_tz.localize(timestamp)
+                    else:
+                        # Convert to Pacific time if it's in another timezone
+                        timestamp = timestamp.astimezone(pacific_tz)
+                    # Format as readable Pacific time (PDT or PST depending on season)
+                    tz_abbr = timestamp.strftime("%Z")  # Gets PDT or PST automatically
+                    formatted_timestamp = timestamp.strftime(f"%m/%d/%Y, %I:%M:%S %p {tz_abbr}")
+                else:
+                    formatted_timestamp = "Unknown"
+
                 summaries.append({
                     "agent": row.agent,
-                    "timestamp": row.timestamp,
+                    "timestamp": formatted_timestamp,
                     "headlines": summary_data.get("headlines", []),
                     "insights": summary_data.get("insights", "")
                 })

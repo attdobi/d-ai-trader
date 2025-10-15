@@ -335,129 +335,145 @@ class PromptManager:
         retries = 0
         while retries < max_retries:
             try:
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-
-                if image_paths:
-                    for image_path in image_paths:
-                        with open(image_path, "rb") as img_file:
-                            image_bytes = img_file.read()
-                        encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                        messages.append({
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
-                                }
-                            ]
-                        })
-
-                # Get the correct parameters based on model type
-                # GPT-5 is a reasoning model and needs MUCH more tokens (uses tokens for thinking)
-                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
-                if model_lower.startswith('gpt-5'):
-                    # GPT-5 uses tokens for internal reasoning, needs 4-8x more tokens
-                    max_tokens = 8000  # GPT-5 needs lots of tokens for reasoning + output
-                elif _is_gpt5_model(GPT_MODEL):
-                    # GPT-4o and newer (but not GPT-5)
-                    max_tokens = 2000
-                else:
-                    # GPT-4-turbo and earlier
-                    max_tokens = 1500
-                
-                token_params = get_model_token_params(GPT_MODEL, max_tokens)
-                temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
-                
-                # Build API call parameters
-                api_params = {
-                    "model": GPT_MODEL,
-                    "messages": messages,
-                    **token_params,  # Use max_tokens or max_completion_tokens based on model
-                    **temperature_params
-                }
-                
-                # Model-specific handling
                 model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
                 
+                # ============================================
+                # PARALLEL PATH 1: GPT-5 (Reasoning Model)
+                # ============================================
                 if model_lower.startswith('gpt-5'):
-                    # GPT-5 is a REASONING model - needs different approach
                     print(f"🤖 Using {GPT_MODEL} (REASONING MODEL) for {agent_name}")
-                    print(f"📊 GPT-5 Token limit: {max_tokens} (includes reasoning tokens)")
                     
-                    # GPT-5: SIMPLE, DIRECT prompts (reasoning models don't need verbose instructions)
-                    # Don't add extra JSON emphasis - keeps prompt short so more tokens for reasoning
-                    messages[0]["content"] = system_prompt_final  # Keep it simple
-                    messages[1]["content"] = user_prompt_final    # No extra fluff
+                    # GPT-5 config: Simple messages, no extra fluff
+                    messages = [
+                        {"role": "system", "content": system_prompt}
+                    ]
                     
+                    if image_paths:
+                        user_content = [{"type": "text", "text": prompt}]
+                        for image_path in image_paths:
+                            with open(image_path, "rb") as img_file:
+                                image_bytes = img_file.read()
+                            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+                            user_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
+                            })
+                        messages.append({"role": "user", "content": user_content})
+                    else:
+                        messages.append({"role": "user", "content": prompt})
+                    
+                    # GPT-5 parameters: Lots of tokens, NO temperature
+                    api_params = {
+                        "model": GPT_MODEL,
+                        "messages": messages,
+                        "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
+                        # No temperature - GPT-5 only supports default (1.0)
+                    }
+                    print(f"📊 GPT-5 Token limit: 8000 (includes reasoning tokens)")
+                
+                # ============================================
+                # PARALLEL PATH 2: GPT-4o (Standard Vision Model)
+                # ============================================
                 elif _is_gpt5_model(GPT_MODEL):
-                    # GPT-4o and newer (but not GPT-5 reasoning models)
                     print(f"🤖 Using {GPT_MODEL} for {agent_name}")
                     
-                    # Add JSON emphasis for GPT-4o
-                    original_system = messages[0]["content"]
+                    # GPT-4o config: Standard vision format (WORKING - DON'T CHANGE!)
+                    messages = [
+                        {"role": "system", "content": system_prompt}
+                    ]
                     
-                    if not original_system.startswith("You are an intelligent, machiavellian day trading agent"):
-                        enhanced_system = f"You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. {original_system}"
+                    if image_paths:
+                        user_content = [{"type": "text", "text": prompt}]
+                        for image_path in image_paths:
+                            with open(image_path, "rb") as img_file:
+                                image_bytes = img_file.read()
+                            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+                            user_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
+                            })
+                        messages.append({"role": "user", "content": user_content})
                     else:
-                        enhanced_system = original_system
+                        messages.append({"role": "user", "content": prompt})
                     
-                    messages[0]["content"] = f"{enhanced_system}\n\nCRITICAL: You must respond with valid JSON only. No explanatory text."
-                    
-                    if len(messages) > 1:
-                        user_content = messages[1]["content"]
-                        if "JSON" not in user_content.upper():
-                            messages[1]["content"] = f"{user_content}\n\nRespond ONLY with valid JSON. No other text."
-                    
-                    print(f"📊 Token params: {token_params}")
+                    # GPT-4o parameters: Normal tokens, custom temperature
+                    api_params = {
+                        "model": GPT_MODEL,
+                        "messages": messages,
+                        "max_completion_tokens": 2000,
+                        "temperature": 0.3
+                    }
+                    print(f"📊 Token params: max_completion_tokens=2000, temperature=0.3")
                 
+                # ============================================
+                # PARALLEL PATH 3: GPT-4-turbo and older
+                # ============================================
+                else:
+                    print(f"🤖 Using {GPT_MODEL} (older model) for {agent_name}")
+                    
+                    # Older models: Use max_tokens instead of max_completion_tokens
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ]
+                    
+                    # Note: GPT-4-turbo doesn't have vision support in this path
+                    api_params = {
+                        "model": GPT_MODEL,
+                        "messages": messages,
+                        "max_tokens": 1500,
+                        "temperature": 0.3
+                    }
+                    print(f"📊 Token params: max_tokens=1500, temperature=0.3")
+                
+                # Make API call
                 response = self.client.chat.completions.create(**api_params)
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
                 
-                # Model-specific response handling
-                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                # ============================================
+                # Response Handling - Separate Paths
+                # ============================================
                 
+                # GPT-5 response handling
                 if model_lower.startswith('gpt-5'):
-                    # GPT-5 reasoning model handling
                     print(f"🔍 GPT-5 Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
-                    # GPT-5 specific: 'length' means reasoning tokens were exhausted
+                    # GPT-5 specific: 'length' means reasoning tokens exhausted
                     if finish_reason == "length":
-                        print(f"⚠️  GPT-5 hit token limit during reasoning! Need more tokens.")
-                        print(f"💡 Recommendation: Use GPT-4o instead, or increase max_completion_tokens to 16000")
+                        print(f"⚠️  GPT-5 hit token limit during reasoning!")
+                        print(f"💡 Use GPT-4o instead for reliable results")
                         if retries < max_retries - 1:
                             retries += 1
                             time.sleep(2)
                             continue
-                        else:
-                            return {"error": f"GPT-5 exhausted reasoning tokens. Use GPT-4o instead.", "agent": agent_name}
+                        return {"error": f"GPT-5 exhausted reasoning tokens. Switch to GPT-4o.", "agent": agent_name}
                     
-                    # Empty content is a failure
-                    if not content:
-                        print(f"⚠️  GPT-5 returned empty content: finish_reason={finish_reason}")
+                    if not content or finish_reason != "stop":
+                        print(f"⚠️  GPT-5 failed: finish_reason={finish_reason}")
                         if retries < max_retries - 1:
                             retries += 1
                             time.sleep(2)
                             continue
-                        else:
-                            return {"error": f"GPT-5 failed: {finish_reason}", "agent": agent_name}
+                        return {"error": f"GPT-5 failed: {finish_reason}", "agent": agent_name}
                 
+                # GPT-4o response handling (SIMPLE - this was working!)
                 elif _is_gpt5_model(GPT_MODEL):
-                    # GPT-4o handling
-                    print(f"🔍 Response for {agent_name}: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
+                    print(f"🔍 GPT-4o Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
-                    if finish_reason == "content_filter" or not content:
-                        print(f"⚠️  {agent_name} failed: finish_reason={finish_reason}, empty_content={not content}")
+                    # Only retry on actual failures
+                    if not content or finish_reason == "content_filter":
+                        print(f"⚠️  GPT-4o failed: finish_reason={finish_reason}")
                         if retries < max_retries - 1:
                             retries += 1
                             time.sleep(1)
                             continue
-                        else:
-                            return {"error": f"Model failed after retries: {finish_reason}", "agent": agent_name}
+                        return {"error": f"GPT-4o failed: {finish_reason}", "agent": agent_name}
+                
+                # Older models response handling
+                else:
+                    print(f"🔍 Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                 
                 content = content.strip() if content else ""
                 

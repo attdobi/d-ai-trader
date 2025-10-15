@@ -6,7 +6,7 @@
 
 {% for summary in summaries %}
   <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px;">
-    <h3>{{ summary.agent }} — <span class="timestamp-utc" data-timestamp="{{ summary.timestamp }}">{{ summary.timestamp }}</span></h3>
+    <h3>{{ summary.agent }} — {{ summary.timestamp }}</h3>
     <p><strong>Headlines:</strong></p>
     <ul>
       {% for headline in summary.headlines %}

@@ -22,7 +22,7 @@
         <td>{{ decision.get('action', 'N/A') }}</td>
         <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
         <td>{{ decision.get('reason', 'N/A') }}</td>
-        <td class="timestamp-utc" data-timestamp="{{ trade.timestamp }}">{{ trade.timestamp }}</td>
+        <td>{{ trade.timestamp }}</td>
       </tr>
       {% endfor %}
     {% endfor %}
