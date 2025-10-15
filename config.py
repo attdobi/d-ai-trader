@@ -460,6 +460,17 @@ class PromptManager:
                             return {"error": f"Model failed after retries: {finish_reason}", "agent": agent_name}
                 
                 content = content.strip() if content else ""
+                
+                # Remove markdown code blocks if present (```json ... ```)
+                if content.startswith('```'):
+                    # Remove opening ```json or ```
+                    lines = content.split('\n')
+                    if lines[0].startswith('```'):
+                        lines = lines[1:]  # Remove first line
+                    # Remove closing ```
+                    if lines and lines[-1].strip() == '```':
+                        lines = lines[:-1]  # Remove last line
+                    content = '\n'.join(lines).strip()
 
                 # Try parsing JSON with enhanced error handling
                 try:
