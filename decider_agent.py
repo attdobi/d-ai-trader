@@ -523,6 +523,28 @@ def update_holdings(decisions):
     
     print(f"🔄 Updating holdings in {trading_mode.upper()} mode (config: {config_hash})")
     
+    # CRITICAL: Check market hours BEFORE executing ANY trades
+    if not is_market_open():
+        eastern_now = pacific_now.astimezone(EASTERN_TIMEZONE)
+        print(f"⛔ MARKET CLOSED - No trades will be executed")
+        print(f"   Current time: {eastern_now.strftime('%I:%M %p %Z')}")
+        print(f"   Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday")
+        print(f"   Decisions recorded for review only")
+        
+        # Record decisions but don't execute
+        print(f"📝 Recording {len(decisions)} decisions without execution:")
+        for decision in decisions:
+            action = decision.get('action', 'N/A')
+            ticker = decision.get('ticker', 'N/A')
+            print(f"   - {action.upper()} {ticker} (deferred until market open)")
+        
+        # DO NOT call process_sell_decisions or process_buy_decisions
+        # Just return - decisions are already stored by store_trade_decisions()
+        return
+    
+    # Market is open - proceed with execution
+    print(f"✅ Market is OPEN - Proceeding with trade execution")
+    
     # Execute real trades if in real_world mode
     if trading_mode == "real_world":
         print("💰 Executing real trades through Schwab API...")

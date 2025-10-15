@@ -201,45 +201,130 @@ Return a JSON object with:
     )
 
 def try_click_popup(web_driver, agent_name):
-
+    """
+    Try to dismiss privacy popups and consent dialogs.
+    Returns True if a popup was dismissed, False otherwise.
+    """
     def click_button(button):
         try:
             web_driver.execute_script("arguments[0].click();", button)
-            print(f"Clicked button via JS: '{button.text.strip()}'")
+            print(f"✅ Clicked button via JS: '{button.text.strip()}'")
+            time.sleep(2)  # Wait for popup to close
             return True
         except Exception as e:
             print(f"JavaScript click failed: {e}")
             return False
 
-    keywords = ["agree", "accept", "ok", "got it", "understand", "continue"]
+    keywords = ["agree", "accept", "ok", "got it", "understand", "continue", "allow", "dismiss"]
 
     if agent_name == "Agent_Fox_Business":
         print("Skipping popup checks for Fox Business.")
-        return
+        return False
 
     try:
+        # Try multiple strategies for different sites
+        
+        # Strategy 1: Site-specific handling
         if agent_name == "Agent_CNN_Money":
+            print("🔍 CNN Money: Looking for consent buttons...")
+            xpaths = [
+                "//button[contains(., 'Agree')]",
+                "//button[contains(., 'Accept')]",
+                "//button[contains(., 'Continue')]",
+                "//button[@data-testid='agree-button']",
+                "//button[@class='consent-button']"
+            ]
+            for xpath in xpaths:
+                try:
+                    buttons = web_driver.find_elements(By.XPATH, xpath)
+                    for button in buttons:
+                        try:
+                            # Try both regular click and JS click
+                            if button.is_displayed():
+                                button.click()
+                                print(f"✅ CNN Money: Clicked '{button.text.strip()}' via regular click")
+                                time.sleep(5)
+                                return True
+                        except:
+                            if click_button(button):
+                                print(f"✅ CNN Money: Clicked via JS")
+                                time.sleep(5)
+                                return True
+                except:
+                    continue
+        
+        if agent_name == "Agent_SeekingAlpha":
+            print("🔍 SeekingAlpha: Looking for login/consent overlays...")
+            # SeekingAlpha often has "Press and Hold" or sign-in overlays
+            selectors = [
+                "//button[contains(., 'Maybe later')]",
+                "//button[contains(., 'Not now')]",
+                "//button[contains(., 'Skip')]",
+                "//a[contains(., 'Continue')]",
+                "//button[contains(@aria-label, 'close')]",
+                "//button[@class*='close']"
+            ]
+            for selector in selectors:
+                try:
+                    buttons = web_driver.find_elements(By.XPATH, selector)
+                    for button in buttons[:3]:  # Try first 3 matches
+                        try:
+                            if button.is_displayed():
+                                button.click()
+                                print(f"✅ SeekingAlpha: Dismissed overlay via '{button.text.strip()}'")
+                                time.sleep(5)
+                                return True
+                        except:
+                            pass
+                except:
+                    continue
+        
+        # Strategy 2: Find all buttons and click consent-related ones
+        try:
+            buttons = WebDriverWait(web_driver, 3).until(
+                EC.presence_of_all_elements_located((By.TAG_NAME, 'button'))
+            )
+            
+            for btn in buttons:
+                try:
+                    text = btn.text.lower().strip()
+                    if text and any(keyword in text for keyword in keywords):
+                        if click_button(btn):
+                            print(f"✅ Popup dismissed via button: '{btn.text.strip()}'")
+                            time.sleep(3)  # Wait for content to load
+                            return True
+                except:
+                    continue
+        except:
+            pass
+        
+        # Strategy 3: Try common CSS selectors for consent buttons
+        selectors = [
+            "button[data-testid*='accept']",
+            "button[data-testid*='agree']",
+            "button[id*='accept']",
+            "button[id*='consent']",
+            ".consent-button",
+            ".cookie-accept"
+        ]
+        
+        for selector in selectors:
             try:
-                button = WebDriverWait(web_driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'agree')]"))
-                )
-                WebDriverWait(web_driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Agree')]")))
-                if click_button(button):
-                    print("CNN Money popup dismissed.")
-                    return
-            except Exception as e:
-                print("Failed to dismiss CNN popup via XPath:", e)
+                button = web_driver.find_element(By.CSS_SELECTOR, selector)
+                if button.is_displayed() and button.is_enabled():
+                    if click_button(button):
+                        print(f"✅ Popup dismissed via selector: {selector}")
+                        time.sleep(3)
+                        return True
+            except:
+                continue
 
-        buttons = web_driver.find_elements(By.TAG_NAME, 'button')
-        for btn in buttons:
-            text = btn.text.lower()
-            if any(keyword in text for keyword in keywords):
-                if click_button(btn):
-                    return
-
-        print("No popup matched or was clickable.")
+        print("ℹ️  No popup found or already dismissed.")
+        return False
+        
     except Exception as e:
-        print(f"Unexpected error in try_click_popup for {agent_name}: {e}")
+        print(f"Error in try_click_popup for {agent_name}: {e}")
+        return False
 
 def summarize_page(agent_name, url, web_driver):
     """
@@ -287,7 +372,15 @@ def summarize_page(agent_name, url, web_driver):
     except:
         pass
 
-    try_click_popup(web_driver, agent_name)
+    popup_dismissed = try_click_popup(web_driver, agent_name)
+    
+    # If popup was dismissed, wait for content to fully load
+    if popup_dismissed:
+        print(f"⏳ Waiting for content to load after popup dismissal...")
+        time.sleep(5)
+        # Scroll to load dynamic content
+        web_driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+        time.sleep(2)
 
     screenshot_path_1 = os.path.join(RUN_DIR, f"{agent_name}_1.png")
     screenshot_saved_1 = False
