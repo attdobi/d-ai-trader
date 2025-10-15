@@ -493,6 +493,18 @@ class PromptManager:
                     parsed_json = json.loads(content)
                     return parsed_json
                 except json.JSONDecodeError as e:
+                    # Special case: GPT returned multiple objects separated by commas without outer []
+                    # Example: {"action":"sell",...},\n{"action":"buy",...}
+                    if '},{' in content or '},\n{' in content:
+                        print(f"🔧 Detected multiple JSON objects without array brackets, fixing...")
+                        # Try wrapping in array brackets
+                        try:
+                            wrapped = f"[{content}]"
+                            parsed_json = json.loads(wrapped)
+                            print(f"✅ Successfully parsed after adding array brackets")
+                            return parsed_json
+                        except:
+                            pass  # Fall through to retry logic below
                     print(f"JSON Decode Error (attempt {retries + 1}/{max_retries}): {e}")
                     print(f"Response was: {content[:300]}...")
                     

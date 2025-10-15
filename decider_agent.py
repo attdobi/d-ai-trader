@@ -514,9 +514,9 @@ def execute_real_world_trade(decision):
         return False
 
 def update_holdings(decisions):
-    # Use Pacific time converted to UTC for consistency
+    # Use Pacific time for consistency across the application
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
-    timestamp = pacific_now.astimezone(pytz.UTC).replace(tzinfo=None)
+    timestamp = pacific_now  # Keep timezone-aware
     skipped_decisions = []
     trading_mode = get_trading_mode()
     config_hash = get_current_config_hash()
@@ -1176,12 +1176,12 @@ For each EXISTING holding, you MUST provide a sell decision or explicit reasonin
 
 🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
 [
-  {
+  {{
     "action": "sell" or "buy" or "hold",
     "ticker": "SYMBOL", 
     "amount_usd": dollar_amount_number,
     "reason": "detailed explanation including sell analysis for existing positions"
-  }
+  }}
 ]
 
 IMPORTANT:
@@ -1582,11 +1582,12 @@ def store_trade_decisions(decisions, run_id):
             
             valid_decisions = [fallback_decision]
     
-    # Get current Pacific time and convert to UTC for storage
+    # Get current Pacific time (store as Pacific for correct display)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
-    utc_timestamp = pacific_now.astimezone(pytz.UTC).replace(tzinfo=None)
+    # Store as timezone-aware Pacific timestamp
+    pacific_timestamp = pacific_now
     
-    print(f"🕐 Storing timestamp: {pacific_now.strftime('%Y-%m-%d %H:%M:%S %Z')} → {utc_timestamp} UTC")
+    print(f"🕐 Storing timestamp: {pacific_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
     
     with engine.begin() as conn:
         conn.execute(text("""
@@ -1594,7 +1595,7 @@ def store_trade_decisions(decisions, run_id):
                 id SERIAL PRIMARY KEY,
                 config_hash VARCHAR(50) NOT NULL,
                 run_id TEXT,
-                timestamp TIMESTAMP,
+                timestamp TIMESTAMP WITH TIME ZONE,
                 data JSONB
             )
         """))
@@ -1602,7 +1603,7 @@ def store_trade_decisions(decisions, run_id):
             INSERT INTO trade_decisions (run_id, timestamp, data, config_hash) VALUES (:run_id, :timestamp, :data, :config_hash)
         """), {
             "run_id": run_id,
-            "timestamp": utc_timestamp,
+            "timestamp": pacific_timestamp,
             "data": json.dumps(valid_decisions),
             "config_hash": get_current_config_hash()
         })
