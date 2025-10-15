@@ -130,8 +130,12 @@ class DAITraderOrchestrator:
             return abs((now_eastern - weekend_time).total_seconds()) < 300  # Within 5 minutes of 3pm
     
     def is_decider_time(self):
-        """Check if it's time to run decider (market hours only)"""
-        return self.is_market_open()
+        """
+        Check if it's time to run decider.
+        Decider ALWAYS runs when summaries are available (even after hours).
+        Market hours check happens during execution - decisions are marked as 'MARKET CLOSED' if after hours.
+        """
+        return True  # Always run decider to analyze summaries and record decisions
     
     def is_feedback_time(self):
         """Check if it's time to run feedback (after market close)"""
@@ -333,10 +337,23 @@ class DAITraderOrchestrator:
             # Run the decider agent
             summaries = unprocessed_summaries
             holdings = decider.fetch_holdings()
-            decisions = decider.ask_decision_agent(summaries, mock_run_id, holdings)
-            decider.store_trade_decisions(decisions, mock_run_id)
-            decider.update_holdings(decisions)
-            decider.record_portfolio_snapshot()
+            
+            try:
+                decisions = decider.ask_decision_agent(summaries, mock_run_id, holdings)
+                logger.info(f"✅ Decider AI returned {len(decisions) if isinstance(decisions, list) else 1} decisions")
+            except Exception as e:
+                logger.error(f"❌ Decider AI call failed: {e}")
+                import traceback
+                logger.error(f"Traceback:\n{traceback.format_exc()}")
+                # Use empty decisions list if AI fails
+                decisions = []
+            
+            if decisions:
+                decider.store_trade_decisions(decisions, mock_run_id)
+                decider.update_holdings(decisions)
+                decider.record_portfolio_snapshot()
+            else:
+                logger.warning("⚠️  No decisions to process - AI returned empty or failed")
             
             # Mark summaries as processed
             summary_ids = [s['id'] for s in unprocessed_summaries]
@@ -357,6 +374,8 @@ class DAITraderOrchestrator:
                 
         except Exception as e:
             logger.error(f"Error running decider agent: {e}")
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             # Update run status to failed
             with engine.begin() as conn:
                 conn.execute(text("""
@@ -482,14 +501,15 @@ class DAITraderOrchestrator:
             logger.error(traceback.format_exc())
     
     def scheduled_decider_job(self):
-        """Scheduled job for decider agent"""
+        """
+        Scheduled job for decider agent.
+        Decider ALWAYS runs to analyze summaries and record decisions.
+        Market hours check happens during execution to prevent actual trading after hours.
+        """
         try:
-            if self.is_decider_time():
-                logger.info("Running scheduled decider job")
-                self.run_decider_agent()
-                logger.info("✅ Scheduled decider job completed successfully")
-            else:
-                logger.info("Skipping decider job - market is closed")
+            logger.info("Running scheduled decider job (will mark as 'MARKET CLOSED' if after hours)")
+            self.run_decider_agent()
+            logger.info("✅ Scheduled decider job completed successfully")
         except Exception as e:
             logger.error(f"❌ Scheduled decider job failed: {e}")
             import traceback
@@ -518,13 +538,10 @@ class DAITraderOrchestrator:
                 self.run_summarizer_agents()
                 logger.info("✅ Step 1 completed: Summarizer agents finished")
                 
-                # Step 2: Run decider ONLY during market hours and ONLY after summaries are collected
-                if self.is_decider_time():
-                    logger.info("🔄 Step 2: Running decider agent with fresh summaries")
-                    self.run_decider_agent()
-                    logger.info("✅ Step 2 completed: Decider agent finished")
-                else:
-                    logger.info("⏸️  Step 2 skipped: Market is closed - summaries collected for future decisions")
+                # Step 2: Run decider ALWAYS after summaries (market check happens during execution)
+                logger.info("🔄 Step 2: Running decider agent with fresh summaries")
+                self.run_decider_agent()
+                logger.info("✅ Step 2 completed: Decider agent finished (decisions marked if market closed)")
                 
                 logger.info("✅ Sequential job completed successfully")
             else:
