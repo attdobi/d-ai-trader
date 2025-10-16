@@ -377,78 +377,27 @@ class TradeOutcomeTracker:
             summarizer_feedback = feedback.get('summarizer_feedback', '')
             decider_feedback = feedback.get('decider_feedback', '')
             
-            if summarizer_feedback:
-                # Get historical feedback for context - use the specific config hash
-                historical_summarizer = self._get_historical_feedback_summary_for_config('summarizer', config_hash, max_feedbacks=5)
-                
-                # Create comprehensive summarizer prompt with historical context
-                historical_context = ""
-                if historical_summarizer:
-                    historical_context = "\n\nHISTORICAL LESSONS LEARNED:\n"
-                    for i, insight in enumerate(historical_summarizer[:3], 1):
-                        historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
-                
-                # FIXED TEMPLATE COMPONENTS (never change)
-                SUMMARIZER_BASE_INSTRUCTIONS = '''Analyze the following financial news and extract the most important actionable insights. Focus on:
-1. Major market-moving events
-2. Company-specific news that could impact stock prices
-3. Sector trends and momentum shifts
-4. Risk factors and warnings'''
-
-                SUMMARIZER_JSON_FORMAT = '''{{feedback_context}}
-
-Content: {{content}}
-
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY valid JSON in this EXACT format:
-{{{{
-    "headlines": ["headline 1", "headline 2", "headline 3"],
-    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
-}}}}
-
-⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
-✅ ONLY pure JSON starting with {{{{ and ending with }}}}'''
-
-                SUMMARIZER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You specialize in analyzing financial news articles and extracting actionable trading insights. Focus on concrete, time-sensitive information that could impact stock prices in the next 1-5 days.
-
-🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string as specified in the user prompt.'''
-
-                # MODIFIABLE COMPONENTS (updated based on feedback)
-                performance_guidance = f'''
-LATEST PERFORMANCE FEEDBACK: {summarizer_feedback}{historical_context}
-
-SPECIFIC INSIGHTS TO APPLY:
-- Timing Patterns: {feedback.get('timing_patterns', 'Focus on market timing')}
-- Risk Management: {feedback.get('risk_management', 'Maintain risk awareness')}
-- Sector Analysis: {feedback.get('sector_insights', 'Monitor sector trends')}
-
-Pay special attention to the images that portray positive or negative sentiment. Remember in some cases a new story and image could be shown for market manipulation. Though it is good to buy on optimism and sell on negative news it could also be a good time to sell and buy, respectively.
-
-Learn from feedback to improve your analysis quality and focus on information that leads to profitable trades.'''
-
-                # COMBINE: Fixed template + Modifiable feedback + Fixed format
-                new_summarizer_user = f'''{SUMMARIZER_BASE_INSTRUCTIONS}
-
-{performance_guidance}
-
-{SUMMARIZER_JSON_FORMAT}'''
-
-                new_summarizer_system = f'''{SUMMARIZER_SYSTEM_BASE}
-
-INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
-{summarizer_feedback}'''
-
-                # Save the new summarizer prompt
-                summarizer_version = self.save_prompt_version(
-                    'summarizer', 
-                    new_summarizer_user, 
-                    new_summarizer_system,
-                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements with fixed JSON format',
-                    'feedback_automation'
-                )
-                print(f'✅ Auto-generated new summarizer prompt v{summarizer_version} from feedback (with fixed JSON format)')
+            # DISABLED: Auto-prompt generation is too aggressive
+            # Instead, feedback is stored in database for manual review
             
+            print("📊 Feedback Analysis Complete:")
+            if summarizer_feedback:
+                # Extract just 2-3 key lessons (high-level only)
+                lessons = str(summarizer_feedback)[:200]  # First 200 chars only
+                print(f"   📰 Summarizer: {lessons}...")
             if decider_feedback:
+                lessons = str(decider_feedback)[:200]  # First 200 chars only
+                print(f"   🎯 Decider: {lessons}...")
+            
+            print("   ✅ Feedback saved to database")
+            print("   💡 Review on Feedback tab and manually adjust prompts if needed")
+            print("   ⚠️  Prompts remain stable - only change if critical issues found")
+            
+            # All feedback logic is now disabled - prompts remain stable
+            return
+            
+            # LEGACY CODE BELOW - DISABLED
+            if False and decider_feedback:
                 # Get historical feedback for context - use the specific config hash
                 historical_decider = self._get_historical_feedback_summary_for_config('decider', config_hash, max_feedbacks=5)
                 

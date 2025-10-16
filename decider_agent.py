@@ -1196,6 +1196,11 @@ def ask_decision_agent(summaries, run_id, holdings):
         prompt_version = prompt_data["version"]
         print(f"🔧 Using DeciderAgent prompt v{prompt_version} (UNIFIED)")
         
+        # DEBUG: Check if prompt is confusing the AI
+        if "holdings" in user_prompt_template.lower() and "json array" not in user_prompt_template.lower():
+            print(f"⚠️  WARNING: Prompt v{prompt_version} might confuse AI - using fallback instead")
+            raise Exception("Prompt appears to confuse AI - using fallback")
+        
         # CRITICAL: Ensure ALL prompts end with proper JSON format requirements
         if "JSON" not in user_prompt_template.upper():
             print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
@@ -1430,18 +1435,44 @@ No explanatory text, no markdown, just pure JSON array."""
         summaries=summarized_text
     )
     
-    # Add a final reminder about output format
-    prompt += """\n\n🎯 YOUR OUTPUT MUST BE:
-A JSON array of trading decisions (not a summary of the data I sent you).
+    # Build explicit list of required decisions for current holdings
+    current_tickers = [h['ticker'] for h in stock_holdings] if stock_holdings else []
+    
+    # Show what AI is being told
+    if current_tickers:
+        print(f"💼 Current Holdings AI MUST Analyze: {', '.join(current_tickers)}")
+    else:
+        print(f"💼 Portfolio: NO positions (cash only)")
+    
+    # Create clear instructions with actual ticker examples
+    holdings_instructions = ""
+    if current_tickers:
+        holdings_instructions = f"\n🚨 YOU CURRENTLY OWN: {', '.join(current_tickers)}\n"
+        holdings_instructions += "For EACH of these stocks, you MUST decide: SELL (take profits/cut losses) or HOLD (keep position)\n"
+    else:
+        holdings_instructions = "\n✅ You have NO current positions - only consider new BUYS\n"
+    
+    prompt += holdings_instructions
+    prompt += """\n
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 OUTPUT FORMAT: JSON ARRAY ONLY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CORRECT OUTPUT EXAMPLE:
+Your response must be ONLY a JSON array of decisions. Nothing else.
+
+Format:
 [
-  {{"action": "hold", "ticker": "BA", "amount_usd": 0, "reason": "Waiting for EU approval news to settle"}},
-  {{"action": "sell", "ticker": "AMD", "amount_usd": 0, "reason": "Taking profits, AI sector showing weakness"}},
-  {{"action": "buy", "ticker": "NVDA", "amount_usd": 2500, "reason": "Strong momentum in AI chips"}}
+  {{"action": "sell", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
+  {{"action": "hold", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
+  {{"action": "buy", "ticker": "TICKER", "amount_usd": 2500, "reason": "why"}}
 ]
 
-RESPOND WITH ONLY THE JSON ARRAY. NO explanatory text before or after."""
+Rules:
+- Provide SELL or HOLD for EVERY stock you own (listed above)
+- Can suggest BUY for new stocks
+- amount_usd: 0 for sell/hold, $1500-4000 for buy
+
+START YOUR JSON ARRAY NOW (begin with [ ):"""
     
     # Debug: Print first 300 chars of prompt
     print(f"📝 Prompt preview: {prompt[:300]}...")

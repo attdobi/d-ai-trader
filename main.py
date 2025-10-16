@@ -43,7 +43,7 @@ URLS = [
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),      # Stock-specific news, earnings
     ("Agent_Finviz", "https://finviz.com/news.ashx"),          # Top gainers/losers, market heat map
     ("Agent_Fox_Business", "https://www.foxbusiness.com")      # Market sentiment, trading ideas
-    # Removed: Bloomberg (paywall), SeekingAlpha (login popups), CNN Money (consent overlays)
+    # Removed for cost/reliability: Bloomberg (paywall), SeekingAlpha (login), CNN Money (popups)
 ]
 
 # Use absolute path for screenshot directory to avoid working directory issues
