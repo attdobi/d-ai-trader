@@ -510,26 +510,45 @@ def run_summary_agents():
         
         for agent_idx, (agent_name, url) in enumerate(URLS, 1):
             try:
-                # Check if driver is still alive before each agent
-                try:
-                    current_driver.current_url
-                except Exception as session_error:
-                    print(f"Driver session lost before {agent_name}, creating new driver: {session_error}")
+                # ROBUST driver check - verify it's actually usable
+                driver_ok = False
+                max_driver_attempts = 3
+                
+                for attempt in range(max_driver_attempts):
                     try:
-                        current_driver.quit()
-                    except:
-                        pass
-                    
-                    # Add extra delay before recreating driver (let system stabilize)
-                    time.sleep(3)
-                    current_driver = uc.Chrome(options=create_chrome_options())
-                    print(f"New driver created for {agent_name}")
+                        # Test if driver is really alive
+                        current_driver.current_url
+                        current_driver.title  # Extra check
+                        driver_ok = True
+                        break
+                    except Exception as session_error:
+                        print(f"⚠️  Driver not usable (attempt {attempt + 1}/{max_driver_attempts}): {session_error}")
+                        
+                        # Kill old driver
+                        try:
+                            current_driver.quit()
+                        except:
+                            pass
+                        
+                        # Wait and recreate
+                        time.sleep(2)
+                        try:
+                            current_driver = uc.Chrome(options=create_chrome_options())
+                            print(f"✅ New driver created for {agent_name}")
+                        except Exception as create_error:
+                            print(f"❌ Failed to create driver: {create_error}")
+                            if attempt == max_driver_attempts - 1:
+                                raise  # Give up after max attempts
+                
+                if not driver_ok:
+                    print(f"❌ Could not get working driver for {agent_name}, skipping")
+                    continue
                 
                 print(f"📰 Processing agent {agent_idx}/{len(URLS)}: {agent_name}")
                 
                 summary = summarize_page(agent_name, url, current_driver)
                 store_summary(summary)
-                print(f"Stored summary for {agent_name}")
+                print(f"✅ Stored summary for {agent_name}")
                 # Small delay between agents to prevent overwhelming the system
                 time.sleep(3)
                 

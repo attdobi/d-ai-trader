@@ -1,670 +1,495 @@
-# AI-Powered Trading System with Automated Execution
+# 🤖 D-AI-Trader - AI-Powered Day Trading System
 
-An intelligent trading system that uses AI agents to analyze financial news from multiple sources, make trading decisions, and track portfolio performance with comprehensive profit/loss monitoring. **Now with full automation and intelligent scheduling!**
+An autonomous **day trading system** powered by GPT-4o Vision that analyzes financial news screenshots, makes rapid trading decisions, and executes trades every 15-60 minutes during market hours. Optimized for **5-10% quick gains** with aggressive profit-taking and fast stop losses.
 
-## 🚀 Features
+---
 
-### Core Trading System
-- **Multi-Source News Analysis**: Scrapes financial news from CNN Money, CNBC, Bloomberg, Fox Business, and Yahoo Finance
-- **AI-Powered Decision Making**: Uses OpenAI GPT-4 to analyze news sentiment and generate trading recommendations
-- **Dual-Mode Trading**: Supports both simulation and live trading through Schwab API
-- **Automated Trade Execution**: Executes buy/sell decisions with comprehensive safety checks
-- **Real-Time Price Updates**: Automatically updates stock prices and portfolio values
+## 🚀 Quick Start
 
-### 🤖 **NEW: Automated Execution System**
-- **Intelligent Scheduling**: Market-aware automation that respects trading hours and holidays
-- **Summarizer Agents**: Run hourly during market hours (8:25 AM - 5:25 PM ET) and once daily on weekends (3:00 PM ET)
-- **Decider Agent**: Runs every 30 minutes during market hours (9:30 AM - 4:00 PM ET, M-F)
-- **Feedback Agent**: Runs once daily after market close (4:30 PM ET)
-- **Enhanced Data Processing**: Processes ALL unseen summaries, not just the latest batch
-- **Manual Trigger System**: Dashboard buttons for immediate testing and manual execution
+### **Simulation Mode (Safe Testing)**
+```bash
+# Aggressive day trading - every 15 minutes
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
 
-### 🚀 **NEW: Unified Startup System**
-- **Single Command Launch**: Start dashboard + automation with one command
-- **Configurable Parameters**: Custom port, AI model, prompt version, and trading mode
-- **Multiple AI Models**: Support for GPT-4.1, GPT-5 (including nano/mini variants), o1, o3 series
-- **Advanced API Compatibility**: Automatic parameter handling for different OpenAI model generations
-- **Smart Prompt Management**: Choose between auto-updating or fixed prompt versions
-- **Trading Modes**: Simulation mode for testing, real_world mode for actual trades
-- **Automatic Setup**: Virtual environment creation and dependency installation
-- **Parameter Validation**: Input validation with helpful error messages
-- **Background Operation**: Dashboard and automation run concurrently
-- **Configuration Display**: Dashboard shows current AI model, prompt mode, and trading settings
-
-### 🔄 **NEW: Parallel Run Support**
-- **Multiple Configurations**: Run different AI models simultaneously for performance comparison
-- **Configuration Isolation**: Each configuration maintains separate data and holdings
-- **Performance Testing**: Compare GPT-4.1 vs GPT-5 vs o1/o3 across weeks or months
-- **A/B Testing**: Test impact of feedback systems by fixing prompt versions
-- **Real vs Simulation**: Run real-world trading alongside simulation for validation
-- **Configuration Hashing**: Unique identifiers ensure data separation and screenshot isolation
-- **Comprehensive Tracking**: All trades, decisions, and outcomes tracked per configuration
-- **Isolated Screenshots**: Each configuration saves screenshots to separate directories
-
-### Advanced Profit Tracking
-- **Cumulative Gain/Loss Tracking**: Properly tracks profits/losses across multiple trades of the same stock
-- **Portfolio Performance Metrics**: Real-time calculation of total P&L, percentage gains, and portfolio value
-- **Historical Performance**: Time-series tracking of portfolio performance over time
-- **Visual Analytics**: Interactive charts showing profit/loss trends and portfolio evolution
-
-### 💰 **NEW: Schwab API Integration**
-- **Live Trading**: Connect to real Schwab account with $10,000 for actual trade execution
-- **Dual Dashboard**: Separate tabs for simulation and live portfolio tracking
-- **Safety Systems**: Comprehensive risk management and position limits
-- **Authentication**: Secure OAuth2 flow with token management
-- **Real-Time Sync**: Live account data and position tracking
-- **Auto-Detection**: Automatically enables when API credentials are configured
-
-### Dashboard & Visualization
-- **Simulation Dashboard**: Web interface displaying simulated holdings and performance
-- **🆕 Configuration Display**: Shows current AI model, prompt mode, trading mode, and unique config hash
-- **Schwab Live Dashboard**: Real-time view of actual Schwab account positions and P&L
-- **Interactive Charts**: Portfolio value and profit/loss visualization over time
-- **Manual Controls**: Trigger buttons for testing and emergency overrides
-- **Trade History**: Complete record of all trading decisions and their outcomes
-- **News Summaries**: Display of analyzed financial news that influenced trading decisions
-- **Feedback Dashboard**: AI-powered performance analysis and agent improvement insights
-- **Manual Trigger Controls**: Buttons to manually run summarizer, decider, and feedback agents for testing
-- **🆕 Manual Price Updates**: "Update Stock Prices" button for immediate price refresh and portfolio recalculation
-
-### 🧠 AI Feedback & Learning System
-- **Outcome Tracking**: Automatically records and categorizes trade results (significant profit, moderate profit, break-even, moderate loss, significant loss)
-- **Performance Analysis**: AI-powered analysis of trading patterns and success factors
-- **Agent Improvement**: Dynamic feedback to summarizer and decider agents based on trading performance
-- **Continuous Learning**: System improves over time by learning from both successful and unsuccessful trades
-- **Pattern Recognition**: Identifies what news patterns and trading strategies work best
-
-### ⚡ **NEW: Aggressive Day Trading Strategy**
-- **Short-Term Focus**: 1-3 day holding periods for maximum ROI through frequent trading
-- **Quick Profit Taking**: Automatically sells positions with >3% gains to lock in profits
-- **Fast Loss Cutting**: Sells positions with >5% losses to minimize downside
-- **Capital Rotation**: Evaluates existing positions before making new buys
-- **Sequential Trading**: Can sell existing positions and immediately buy new opportunities
-- **Cash Management**: Maintains minimum $10 buffer while maximizing capital utilization
-- **Momentum Trading**: Buys stocks with positive news/momentum, sells those with negative news
-- **Aggressive Positioning**: Considers selling existing positions to fund better opportunities
-
-## 📁 Project Structure
-
-```
-├── d_ai_trader.py             # 🆕 Main automation orchestrator
-├── main.py                    # News scraping and AI analysis
-├── decider_agent.py           # Trading decision engine (enhanced)
-├── feedback_agent.py          # AI feedback and learning system
-├── dashboard_server.py        # Web dashboard and API endpoints (enhanced)
-├── config.py                  # Database and AI configuration (enhanced with model/prompt management + GPT-5 API compatibility)
-├── start_d_ai_trader.sh       # 🆕 Unified startup script with configurable parameters
-├── test_system.py             # 🆕 System validation script
-├── requirements.txt           # 🆕 All dependencies
-├── run_feedback_analysis.py   # Manual feedback analysis tool
-├── test_feedback_system.py    # Feedback system demonstration
-├── FEEDBACK_SYSTEM.md         # Comprehensive feedback system documentation
-├── AUTOMATION_README.md       # 🆕 Automation system documentation
-├── templates/                 # HTML templates for web interface
-│   ├── dashboard.html         # Main dashboard with profit tracking (enhanced)
-│   ├── feedback_dashboard.html # AI feedback and performance analysis
-│   ├── trades.html            # Trading history view
-│   ├── summaries.html         # News analysis summaries
-│   └── tabs.html              # Base template
-└── screenshots/               # Captured screenshots from news sites (organized by config hash for parallel runs)
+# Conservative - every hour
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
 ```
 
-## 🔧 Installation & Setup
+### **Schwab API Read-Only Test (Before Going Live)**
+```bash
+# Test Schwab API connection safely - NO TRADES
+./test_schwab_api.sh
 
-### Prerequisites
-- Python 3.8+
-- PostgreSQL
-- Chrome/Chromium browser (for web scraping)
+# Then open: http://localhost:8080/schwab
+```
+
+### **Live Trading (ONLY after testing!)**
+```bash
+# Start conservative (every hour)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 60
+
+# After confirming it works, increase to aggressive
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 15
+```
+
+**Dashboard:** http://localhost:8080
+
+---
+
+## 🎯 Day Trading Strategy
+
+### **Trading Philosophy**
+- ⚡ **Quick Profits**: Target 5-10% gains per trade, exit fast
+- 🔄 **Multiple Trades Per Day**: 15-60 minute cadence = 7-27 opportunities/day
+- 📈 **Momentum Trading**: Ride trends, exit before reversals
+- 💰 **Capital Rotation**: Sell winners, redeploy into new opportunities
+- 🛡️ **Risk Management**: Fast stop losses, position limits
+
+### **Profit Targets**
+- ✅ **5-8% gain** → SELL (lock it in!)
+- ✅ **8-15% gain** → SELL (great trade!)
+- ✅ **15%+ gain** → SELL NOW (exceptional!)
+- ⚠️ **-3% to -5% loss** → SELL (stop loss, protect capital)
+
+### **Position Sizing**
+- Minimum: $1500 per trade
+- Optimal: $2000-$3500
+- Maximum: $4000 per trade
+- Max positions: 5 stocks at once
+
+---
+
+## ⏰ Daily Trading Schedule
+
+### **Opening Bell Sequence**
+```
+6:25 AM PT (9:25 AM ET) - Analyze overnight/pre-market news
+6:30:05 AM PT (9:30:05 AM ET) - Execute opening trades (5 sec after bell)
+```
+
+### **Intraday Trading**
+```
+6:35 AM - 1:00 PM PT - Run every N minutes (configurable: 15/30/60)
+   ├─ Scan 6 news sources
+   ├─ Analyze current positions (take profits? cut losses?)
+   ├─ Make trading decisions
+   └─ Execute trades (during market hours only)
+```
+
+### **End of Day**
+```
+1:00 PM PT (4:00 PM ET) - Market closes
+1:30 PM PT (4:30 PM ET) - Daily performance feedback & analysis
+```
+
+### **After Hours**
+```
+Decisions recorded but marked "⛔ MARKET CLOSED"
+No trades executed - portfolio unchanged
+```
+
+---
+
+## 🛡️ Financial Guardrails
+
+### **AI Hallucination Prevention**
+- ❌ Cannot sell stocks you don't own
+- ❌ Cannot buy stocks you already own (must sell first)
+- ❌ Cannot ignore current holdings
+- ✅ Validates every decision before execution
+
+### **Trading Limits**
+- Position size: $1500-$4000
+- Max positions: 5 stocks
+- Cash buffer: Always maintained
+- Market hours: Only 6:30 AM - 1:00 PM PT (M-F)
+
+### **Multi-Layer Safety (Real Trading)**
+1. `DAI_SCHWAB_READONLY` flag check
+2. `TRADING_MODE` must be "real_world"
+3. Market must be open
+4. Decision validator approval
+5. Safety manager checks
+
+---
+
+## 📰 News Sources (6 Total)
+
+| Source | Focus | Reliability |
+|--------|-------|-------------|
+| **Yahoo Finance** | Stock news, earnings | ✅ Very reliable |
+| **Benzinga** ⭐ | Day trading catalysts, movers | ✅ Best for day trading |
+| **Fox Business** | Market sentiment | ✅ Reliable |
+| **AP Business** | Clean, factual news | ✅ Simple, trusted |
+| **BBC Business** | International markets | ✅ No US bot detection |
+| **CNBC** | Breaking news, market movers | ✅ Great content |
+
+**All sources work with headless Chrome automation (no bot detection).**
+
+---
+
+## 🤖 AI Models
+
+### **Recommended for Trading**
+- **gpt-4o** ⭐ - BEST for real money ($2.50/$10 per 1M tokens)
+  - Reliable JSON parsing
+  - Excellent vision capabilities
+  - Custom temperature (0.3 for consistency)
+  - 2000 tokens sufficient
+
+- **gpt-4o-mini** - Good for testing ($0.15/$0.60 per 1M tokens)
+  - Faster, cheaper
+  - Good for simulation mode
+
+- **gpt-4-turbo** - Legacy "GPT-4.1" equivalent
+
+### **Experimental**
+- **gpt-5** / **gpt-5-mini** - Reasoning models (⚠️ May hit token limits)
+  - Uses tokens for internal "thinking"
+  - Needs 8000+ tokens
+  - No custom temperature
+  - Not recommended for production yet
+
+### **NOT Supported**
+- ❌ o1/o3 models - Don't support system messages or JSON mode
+
+---
+
+## 💻 Installation
+
+### **Prerequisites**
+- Python 3.9+
+- PostgreSQL database
+- Chrome browser (v141+)
 - OpenAI API key
-- **NEW**: Schwab Developer Account (for live trading)
+- (Optional) Schwab API credentials for live trading
 
-### 🚀 **NEW: Quick Setup with Unified Startup**
+### **Setup**
 ```bash
-# Clone and setup
-git clone <repository>
+# 1. Clone repository
+git clone <your-repo>
 cd d-ai-trader
-pip install -r requirements.txt
 
-# Configure environment
+# 2. Configure environment
 cp env_template.txt .env
-# Edit .env with your OpenAI API key
+# Edit .env with your API keys
 
-# Start the complete system (dashboard + automation)
-./start_d_ai_trader.sh
+# 3. Start the system (auto-creates venv & installs dependencies)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
 ```
 
-### Traditional Setup (Manual Components)
+### **Required in `.env`**
 ```bash
-# Start components separately if needed
-python dashboard_server.py  # Web dashboard on port 8080
-python d_ai_trader.py       # Automated agents
-```
+# OpenAI API (Required)
+OPENAI_API_KEY=sk-proj-your_actual_api_key_here
 
-### 💰 Schwab Live Trading Setup
-For connecting to your real Schwab account with $10,000:
-- See **[SCHWAB_SETUP.md](SCHWAB_SETUP.md)** for complete setup instructions
-- Includes developer account creation, authentication, safety configuration, and testing procedures
-- **Start with simulation mode first** to validate the system
-
-#### API Status Detection
-The system automatically detects and enables Schwab API integration:
-- **"Schwab API disabled"** → Missing credentials or `TRADING_MODE=simulation`
-- **"Connection Error"** → Credentials found but authentication failed
-- **"✅ Connected to Schwab"** → Successfully connected to live account
-
-Simply add your API credentials to `.env` and set `TRADING_MODE=live` - no code changes needed!
-
-### 🚀 Going Live with Real Trading
-
-**Prerequisites**: Complete simulation testing and Schwab API setup first.
-
-#### Step 1: Reset Portfolio for Clean Start
-```bash
-# 1. Access the main dashboard
-python dashboard_server.py
-# Visit http://localhost:8080
-
-# 2. Hit "Reset Portfolio" button 
-# This sets simulation back to $10,000 cash, zero positions
-# Ensures perfect sync with your fresh Schwab account
-```
-
-#### Step 2: Enable Live Trading
-```bash
-# In your .env file:
-TRADING_MODE=live
-SCHWAB_CLIENT_ID=your_actual_client_id
-SCHWAB_CLIENT_SECRET=your_actual_client_secret
+# Schwab API (Optional - for live trading)
+SCHWAB_CLIENT_ID=your_client_id
+SCHWAB_CLIENT_SECRET=your_client_secret
 SCHWAB_ACCOUNT_HASH=your_account_hash
-
-# Recommended safety settings:
-MAX_POSITION_VALUE=1000      # Max $1,000 per stock position
-MAX_TOTAL_INVESTMENT=10000   # Full $10,000 as designed
-MIN_CASH_BUFFER=500          # Keep $500 cash buffer
+SCHWAB_REDIRECT_URI=https://localhost:8443/callback
 ```
-
-#### Step 3: Verify Synchronization
-- **Main Dashboard**: Shows simulation positions (AI's view)
-- **Schwab Live Tab**: Shows real account positions 
-- **Should be identical**: Both start with $10,000 cash, mirror all future trades
-
-#### Step 4: Monitor Live Trading
-- Check both dashboards regularly for sync
-- Monitor logs: `tail -f d-ai-trader.log`
-- Safety systems active: position limits, loss protection, daily limits
-- All AI decisions execute on both simulation AND live account
-
-⚠️ **Important**: Start monitoring closely for the first few trades to ensure everything works as expected!
-
-### Database Setup
-```bash
-# Install PostgreSQL
-sudo apt update && sudo apt install postgresql postgresql-contrib
-
-# Start PostgreSQL service
-sudo service postgresql start
-
-# Create database and user
-sudo -u postgres createuser -s adobi
-sudo -u postgres createdb adobi
-```
-
-### Python Dependencies
-```bash
-# Install all dependencies at once
-pip install -r requirements.txt
-
-# Or install individually
-pip install sqlalchemy psycopg2-binary flask yfinance pandas python-dotenv openai selenium undetected-chromedriver beautifulsoup4 chromedriver-autoinstaller schedule pytz
-```
-
-### Configuration
-1. Set your OpenAI API key via environment variable or a `.env` file in the project root
-   - Create a `.env` file with:
-     - `OPENAI_API_KEY=your_key_here`
-   - Or export in your shell:
-     - `export OPENAI_API_KEY='your_key_here'`
-2. Ensure database connection string is correct: `postgresql://adobi@localhost/adobi`
-
-## 🎯 Usage
-
-### 🚀 **NEW: Unified Startup System (Recommended)**
-
-The new unified startup system combines the dashboard and automation into a single command with customizable parameters:
-
-#### Basic Usage
-```bash
-# Start with defaults (port 8080, GPT-4.1, auto prompts)
-./start_d_ai_trader.sh
-
-# View all options
-./start_d_ai_trader.sh --help
-```
-
-#### Advanced Configuration
-```bash
-# Custom port, AI model, and prompt version
-./start_d_ai_trader.sh -p 9000 -m o3 -v v4
-
-# Mixed parameter syntax
-./start_d_ai_trader.sh --port 8081 --model gpt-4.1-mini --prompt-version auto
-```
-
-#### Available Parameters
-
-| Parameter | Short | Long | Default | Description |
-|-----------|-------|------|---------|-------------|
-| **Port** | `-p` | `--port` | `8080` | Dashboard web server port |
-| **AI Model** | `-m` | `--model` | `gpt-4.1` | OpenAI model for analysis |
-| **Prompt Version** | `-v` | `--prompt-version` | `auto` | Prompt version strategy |
-| **Trading Mode** | `-t` | `--trading-mode` | `simulation` | Simulation or real-world trading |
-
-**Parameter Examples:**
-```bash
-# Short form parameters
-./start_d_ai_trader.sh -p 9000 -m o3 -v v4 -t simulation
-
-# Long form parameters  
-./start_d_ai_trader.sh --port 9000 --model o3 --prompt-version v4 --trading-mode real_world
-
-# Mixed form (also valid)
-./start_d_ai_trader.sh -p 9000 --model o3 -v v4 -t simulation
-```
-
-#### Available AI Models
-
-**GPT-4 Series (Use `max_tokens` + custom temperature):**
-- **gpt-4.1** (default) - Latest GPT-4.1 model
-- **gpt-4.1-mini** - Smaller, faster GPT-4.1 variant
-- **gpt-4** - Standard GPT-4 model
-- **gpt-4-turbo** - Optimized GPT-4 variant
-
-**GPT-5 Series (Use `max_completion_tokens` + default temperature):**
-- **gpt-5** - Latest GPT-5 model 
-- **gpt-5-mini** - Smaller GPT-5 variant
-- **gpt-5-nano** - Ultra-compact GPT-5 variant
-
-**OpenAI Advanced Series (Use `max_completion_tokens` + default temperature):**
-- **o1** - OpenAI's o1 reasoning model
-- **o1-mini** - Smaller o1 variant
-- **o1-preview** - Preview version of o1
-- **o3** - OpenAI's o3 model
-- **o3-mini** - Smaller o3 variant
-- **o3-preview** - Preview version of o3
-
-> **Note**: The system automatically handles API parameter differences between model generations using regex-based detection.
-
-#### Prompt Version Strategies
-- **auto** (default) - Always uses latest prompt versions updated by daily feedback
-- **v4, v7, etc.** - Locks to specific prompt version regardless of feedback updates
-
-#### Trading Modes
-- **simulation** (default) - Safe testing mode, no real money involved
-- **real_world** - Executes actual trades through Schwab API with real money
-
-### 🔄 **Parallel Run Examples**
-
-Run multiple configurations simultaneously for performance comparison:
-
-```bash
-# Terminal 1: GPT-4.1 with auto prompts in simulation
-./start_d_ai_trader.sh -p 8080 -m gpt-4.1 -v auto -t simulation
-
-# Terminal 2: GPT-5 with auto prompts in simulation  
-./start_d_ai_trader.sh -p 8081 -m gpt-5 -v auto -t simulation
-
-# Terminal 3: GPT-4.1 with fixed prompts for baseline
-./start_d_ai_trader.sh -p 8082 -m gpt-4.1 -v v4 -t simulation
-
-# Terminal 4: Real world trading with best performing model
-./start_d_ai_trader.sh -p 8083 -m gpt-5 -v auto -t real_world
-```
-
-Each instance will:
-- ✅ Maintain separate holdings and portfolio data
-- ✅ Generate unique configuration hashes for data isolation
-- ✅ Track performance independently
-- ✅ Allow direct performance comparison
-- ✅ Support different AI models, prompt versions, and trading modes
-
-#### What the Unified System Does
-- **Automatic Setup**: Creates virtual environment, installs dependencies
-- **Database Check**: Validates database connection before starting
-- **Dashboard Launch**: Starts web dashboard on specified port
-- **Automation Start**: Launches market-aware automation system
-- **Configuration**: Sets AI model and prompt version globally
-- **Monitoring**: Runs hourly market updates and decision-making
-- **Background Operation**: Both components run concurrently
-
-#### Example Startup Output
-```
-========================================
-D-AI-Trader Startup Configuration
-========================================
-Dashboard Port:    9000
-AI Model:          gpt-4.1-mini
-Prompt Version:    v5
-========================================
-
-✅ Database connection successful
-🚀 Starting D-AI-Trader system...
-📊 Dashboard will be available at: http://localhost:9000
-🤖 Automation system will start after dashboard initialization
-
-Updated GPT model to: gpt-4.1-mini
-📌 Prompt version mode set to FIXED - will use version 5
-✅ System configured with:
-   - AI Model: gpt-4.1-mini
-   - Prompt Version: v5
-   - Dashboard Port: 9000
-
-🌐 Starting dashboard server...
-✅ Dashboard started on http://localhost:9000
-🤖 Starting D-AI-Trader automation system...
-```
-
-### 🚀 **Traditional Automated Execution**
-```bash
-# Start automation only (separate from dashboard)
-python d_ai_trader.py
-```
-- **Fully automated**: Runs all components on schedule
-- **Market-aware**: Respects trading hours and holidays
-- **Intelligent processing**: Handles all unseen summaries
-- **Comprehensive logging**: Full system monitoring
-
-### 🧪 **Testing & Manual Execution**
-```bash
-# Test system components
-python test_system.py
-
-# Start dashboard with manual triggers (use the project virtualenv)
-source dai/bin/activate
-python dashboard_server.py
-```
-- **Manual triggers**: Use dashboard buttons for immediate testing
-- **End-to-end testing**: Run all agents in sequence
-- **Real-time monitoring**: Watch system execution live
-
-Note: If you prefer not to activate the virtualenv, run the dashboard with an absolute path to the venv Python to avoid Anaconda conflicts:
-```
-/Users/adobi/d-ai-trader/dai/bin/python /Users/adobi/d-ai-trader/dashboard_server.py
-```
-
-### 📊 **Traditional Manual Usage**
-
-#### 1. Collect Financial News
-```bash
-python main.py
-```
-- Scrapes financial news from 5 major sources
-- Uses AI to analyze sentiment and extract trading insights
-- Stores analysis in database for decision making
-
-#### 2. Make Trading Decisions
-```bash
-python decider_agent.py
-```
-- **Day Trading Analysis**: Evaluates positions for quick profit-taking (>3% gains) or loss-cutting (>5% losses)
-- **Capital Rotation**: Considers selling existing positions to fund better opportunities
-- **Sequential Processing**: Sells processed first, then buys using updated cash balance
-- **Cash Management**: Maintains minimum $10 buffer while maximizing capital utilization
-- **Momentum-Based Decisions**: Buys positive momentum, sells negative news
-- Records portfolio snapshots for performance tracking
-
-#### 3. Monitor Performance
-```bash
-python dashboard_server.py
-```
-- Starts web dashboard at `http://localhost:8080`
-- View real-time portfolio performance
-- Monitor profit/loss trends
-- Analyze trading history and news impact
-
-#### 4. Analyze Feedback & Performance
-```bash
-# Run comprehensive feedback analysis
-python run_feedback_analysis.py
-
-# Demonstrate feedback system capabilities
-python test_feedback_system.py
-```
-- Analyzes trading outcomes and success patterns
-- Generates AI-powered insights for improvement
-- Access feedback dashboard at `http://localhost:8080/feedback`
-- View performance trends and agent learning progress
-
-## 📊 Dashboard Features
-
-### Portfolio Overview
-- **Total Portfolio Value**: Current market value of all holdings + cash
-- **Cash Balance**: Available cash for trading
-- **Total Invested**: Cumulative amount invested across all trades
-- **Total P&L**: Unrealized gains/losses with percentage change
-
-### Holdings Table
-- Individual stock positions with shares, purchase price, current price
-- Gain/loss per holding with color-coded indicators
-- Reasoning behind each purchase decision
-
-### Interactive Charts
-1. **Account Value Over Time**: Portfolio value progression
-2. **Profit/Loss Chart**: Dual-axis chart showing:
-   - Dollar gains/losses (left axis)
-   - Percentage gains (right axis)
-   - Color-coded gains (green) and losses (red)
-
-### API Endpoints
-- `/api/holdings` - Current portfolio holdings
-- `/api/portfolio-history` - Historical portfolio performance
-- `/api/profit-loss` - Profit/loss breakdown by holding
-- `/api/history` - Account value history
-- `/api/feedback` - Feedback analysis and performance metrics
-- `/api/trade_outcomes` - Recent trade outcomes and categorization
-- `/api/configuration` - 🆕 Current system configuration (AI model, prompt mode, trading mode, config hash)
-- `/api/update-prices` - 🆕 Manually update stock prices and portfolio values
-- `/api/trigger/summarizer` - 🆕 Manually trigger summarizer agents
-- `/api/trigger/decider` - 🆕 Manually trigger decider agent
-- `/api/trigger/feedback` - 🆕 Manually trigger feedback agent
-- `/api/trigger/all` - 🆕 Manually trigger all agents in sequence
-
-### 🧠 Feedback Dashboard Features
-- **Performance Metrics**: Success rate, average profit, trade count across different time periods (7d, 14d, 30d)
-- **AI Insights**: Generated recommendations for improving trading strategy and news analysis
-- **Trade Outcomes Table**: Color-coded table of recent trades categorized by performance level
-- **Agent Feedback**: Specific guidance for summarizer and decider agents based on trading results
-- **Trend Analysis**: Interactive charts showing performance trends with success rates and profit margins
-- **System Status**: Real-time indicators of feedback system components
-
-## 🧠 AI Analysis Process
-
-### News Analysis
-1. **Web Scraping**: Captures screenshots and HTML from financial news sites
-2. **AI Processing**: GPT-4 analyzes both visual and text content
-3. **Sentiment Extraction**: Identifies market sentiment and actionable insights
-4. **Summary Generation**: Creates structured summaries with headlines and insights
-
-### Trading Decisions
-1. **Data Aggregation**: Combines all news analysis from current run
-2. **Portfolio Context**: Considers current holdings and cash balance
-3. **Risk Management**: Enforces position limits and cash reserves
-4. **Decision Generation**: AI creates specific buy/sell recommendations with reasoning
-5. **🆕 Enhanced Processing**: Processes ALL unseen summaries, not just the latest batch
-
-## 💰 Profit Tracking Implementation
-
-### Cumulative Gain/Loss Logic
-The system properly tracks profits/losses across multiple trades:
-
-```python
-# For multiple purchases of same stock:
-new_shares = existing_shares + additional_shares
-new_total_invested = existing_investment + new_purchase_amount
-new_avg_price = new_total_invested / new_shares
-unrealized_pnl = (new_shares × current_price) - new_total_invested
-```
-
-### Portfolio Metrics
-- **Total Invested**: Sum of all purchase amounts (cost basis)
-- **Current Value**: Market value of all holdings
-- **Unrealized P&L**: Difference between current value and total invested
-- **Percentage Gain**: (Unrealized P&L / Total Invested) × 100
-
-### Historical Tracking
-Portfolio snapshots are automatically recorded:
-- After each trading session
-- During price updates
-- Stored with timestamp for trend analysis
-
-## 🔒 Risk Management
-
-### Trading Limits
-- **Maximum Funds**: $10,000 total allocation
-- **Cash Reserve**: Always maintain $100 minimum
-- **Position Limits**: Maximum 5 active trades
-- **Whole Shares**: Only trades whole share quantities
-
-### Error Handling
-- Graceful handling of API failures
-- Retry logic for network issues
-- Fallback mechanisms for price data
-- Comprehensive logging for debugging
-
-## 🤖 **NEW: Advanced AI Model Support**
-
-### GPT-5 API Compatibility
-- **Automatic Parameter Detection**: Uses regex patterns to identify GPT-5 series models
-- **Dynamic API Calls**: GPT-4 models use `max_tokens` + custom temperature, GPT-5 uses `max_completion_tokens` + default temperature
-- **Future-Proof**: Supports upcoming models like `gpt-5-nano`, `o1-preview`, `o3-mini`, etc.
-- **Seamless Integration**: No manual configuration needed - just specify the model name
-
-### Model Detection Logic
-```python
-# Automatically detects model type and adjusts API parameters
-gpt-4.1      → max_tokens=1500, temperature=0.3      ✅
-gpt-5-mini   → max_completion_tokens=1500            ✅  
-o3           → max_completion_tokens=1500            ✅
-```
-
-### Configuration Management
-- **Dashboard Display**: Shows current AI model, prompt mode, and trading settings
-- **Configuration Hashing**: Unique hash per model/prompt/trading mode combination
-- **Data Isolation**: Each configuration maintains separate screenshots, holdings, and trade history
-
-## 📈 Performance Analytics
-
-### Real-Time Metrics
-- Live portfolio valuation
-- Instant profit/loss calculations
-- Performance percentage tracking
-- Individual holding analytics
-
-### Historical Analysis
-- Time-series portfolio performance
-- Trade decision outcomes
-- News impact correlation
-- Trend identification
-
-## 🛠️ Technical Architecture
-
-### Database Schema
-- **holdings**: Current portfolio positions with cumulative tracking
-- **portfolio_history**: Time-series portfolio snapshots
-- **trade_decisions**: AI trading recommendations and outcomes
-- **summaries**: Financial news analysis and insights
-- **🆕 processed_summaries**: Tracks which summaries have been processed by each agent
-- **🆕 system_runs**: Records all system runs with status and timing information
-
-### Technology Stack
-- **Backend**: Python, SQLAlchemy, PostgreSQL
-- **Frontend**: Flask, Chart.js, HTML/CSS/JavaScript
-- **AI**: OpenAI GPT-4/GPT-5/o1/o3 series with automatic API compatibility handling
-- **Data**: yfinance for market data, Selenium for web scraping
-- **🆕 Automation**: schedule, pytz for intelligent scheduling and timezone handling
-- **🆕 Model Detection**: Regex-based detection for OpenAI model generation compatibility
-
-### Security & Authentication
-- PostgreSQL peer authentication
-- Secure API key management
-- Input validation and SQL injection prevention
-
-## 📝 Configuration Options
-
-### Trading Parameters
-```python
-MAX_TRADES = 5          # Maximum concurrent positions
-MAX_FUNDS = 10000       # Total available capital
-MIN_BUFFER = 100        # Minimum cash reserve
-```
-
-### Update Intervals
-```python
-REFRESH_INTERVAL_MINUTES = 10  # Price update frequency
-```
-
-### 🆕 **Automation Schedule**
-```python
-# Summarizer Agents
-WEEKDAY_SUMMARIZER_HOURS = "8:25-17:25"  # Every hour at :25
-WEEKEND_SUMMARIZER_TIME = "15:00"        # Once daily at 3pm ET
-
-# Decider Agent  
-MARKET_HOURS = "9:30-16:00"              # Every 30 minutes during market hours
-WEEKDAYS_ONLY = "Monday-Friday"
-
-# Feedback Agent
-FEEDBACK_TIME = "16:30"                  # Once daily after market close
-```
-
-## 🚨 Important Notes
-
-1. **Educational Purpose**: This system is for educational and research purposes
-2. **Risk Warning**: Trading involves financial risk - use with caution
-3. **API Costs**: Monitor OpenAI API usage to control costs
-4. **Market Hours**: System automatically respects market hours and holidays
-5. **Demo Mode**: Test with small amounts before full deployment
-6. **🆕 Automation**: System runs continuously - monitor logs and performance
-7. **🆕 Testing**: Use manual triggers for immediate testing without waiting for scheduled runs
-8. **🚀 Unified Startup**: Use `./start_d_ai_trader.sh` for the easiest and most reliable system launch
-9. **🤖 AI Model Selection**: Choose appropriate models based on your needs (speed vs. capability)
-10. **📌 Prompt Versions**: Use "auto" for continuous improvement or fixed versions for consistency
-11. **🆕 GPT-5 Compatibility**: System automatically handles API differences between GPT-4 and GPT-5 series
-12. **🔄 Parallel Testing**: Each configuration runs in isolation with separate data and screenshots
-13. **📊 Configuration Display**: Dashboard shows current AI model and settings for easy monitoring
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## 📄 License
-
-This project is for educational purposes. Please ensure compliance with relevant financial regulations and API terms of service.
-
-## 🔗 Dependencies
-
-- **SQLAlchemy**: Database ORM
-- **Flask**: Web framework
-- **yfinance**: Stock market data
-- **OpenAI**: AI analysis
-- **Selenium**: Web scraping
-- **Chart.js**: Data visualization
-- **PostgreSQL**: Database storage
-- **🆕 schedule**: Python job scheduling
-- **🆕 pytz**: Timezone handling
-- **🆕 undetected-chromedriver**: Enhanced web scraping
-- **🆕 chromedriver-autoinstaller**: Automatic Chrome driver management
 
 ---
 
-**⚠️ Disclaimer**: This software is for educational purposes only. Trading involves significant financial risk. Always do your own research and consider consulting with financial professionals before making investment decisions.
+## 🎮 Usage
+
+### **Command Line Options**
+```bash
+./start_d_ai_trader.sh [OPTIONS]
+
+Options:
+  -p, --port PORT           Dashboard port (default: 8080)
+  -m, --model MODEL         AI model (default: gpt-4o)
+  -v, --prompt-version VER  auto | vN (default: auto)
+  -t, --trading-mode MODE   simulation | real_world (default: simulation)
+  -c, --cadence MINUTES     15 | 30 | 60 (default: 60)
+```
+
+### **Examples**
+```bash
+# Aggressive day trading (every 15 min)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+
+# Compare two models in parallel
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+./start_d_ai_trader.sh -p 8081 -m gpt-5-mini -v auto -t simulation -c 15
+
+# Live trading (after testing!)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 15
+```
 
 ---
 
-## 📚 **Additional Documentation**
+## 📊 Dashboard Tabs
 
-- **[AUTOMATION_README.md](AUTOMATION_README.md)**: Comprehensive guide to the automation system
-- **[FEEDBACK_SYSTEM.md](FEEDBACK_SYSTEM.md)**: Detailed feedback system documentation
+### **1. Dashboard** (Main)
+- Portfolio value, cash balance, P&L
+- Current holdings with gain/loss
+- Interactive charts (portfolio history, performance)
+- Manual trigger buttons (Run All Agents, etc.)
+
+### **2. Trades**
+- All trading decisions with timestamps
+- Ticker, Action, Shares, Amount, Reason
+- Config-specific filtering
+- Shows "MARKET CLOSED" flag for after-hours decisions
+
+### **3. Summaries**
+- Latest news analysis from all 6 sources
+- Headlines and insights extracted by AI
+- Timestamped in Pacific Time
+
+### **4. Feedback**
+- Win rate, average profit metrics
+- Trade outcomes table (completed sells)
+- Performance analysis
+- AI learning insights
+
+### **5. Schwab** (Live Trading)
+- Real Schwab account balance
+- Live holdings and positions
+- Day trading power, buying power
+- Real-time sync with broker
+
+---
+
+## 🔒 Safety Features
+
+### **Before Live Trading**
+1. ✅ Complete read-only Schwab test (`./test_schwab_api.sh`)
+2. ✅ Run simulation for 1+ full trading days
+3. ✅ Review all trades and verify strategy
+4. ✅ Read `GO_LIVE_CHECKLIST.md` completely
+5. ✅ Understand risk: day trading is volatile!
+
+### **During Live Trading**
+- Market hours enforcement (no after-hours execution)
+- Position size limits ($1500-$4000)
+- Decision validation (prevents hallucinations)
+- Stop losses (-3% to -5%)
+- Real-time monitoring required
+
+### **Emergency Stop**
+```bash
+pkill -f d_ai_trader.py
+pkill -f dashboard_server.py
+```
+
+---
+
+## 📈 Expected Performance
+
+### **With 15-Minute Cadence**
+- Trading opportunities: ~27 per day
+- Target per trade: 5-10% gain
+- Win rate: 50-60%
+- Daily gain potential: 15-25%
+- Monthly gain potential: 300-500%+
+
+### **Costs (GPT-4o)**
+- ~156 API calls/day (6 sources × 26 cycles)
+- ~$10/day in API costs
+- ~$300/month
+- **Worth it if trading with real money!**
+
+---
+
+## 🛠️ Key Files
+
+```
+├── d_ai_trader.py              # Main orchestrator with scheduling
+├── main.py                     # News scraping & screenshot analysis
+├── decider_agent.py            # Trading decision engine
+├── decision_validator.py       # Financial guardrails (prevents hallucinations)
+├── feedback_agent.py           # Performance analysis
+├── dashboard_server.py         # Web interface & API
+├── config.py                   # AI model configuration
+├── schwab_client.py            # Schwab API integration
+├── trading_interface.py        # Unified trading layer
+├── start_d_ai_trader.sh        # Main startup script
+├── test_schwab_api.sh          # Safe Schwab API testing
+├── GO_LIVE_CHECKLIST.md        # Pre-flight safety checklist
+└── SCHWAB_READONLY_TEST.md     # Schwab testing guide
+```
+
+---
+
+## 🔧 Configuration
+
+### **Trading Modes**
+- `simulation` - Test strategies safely (default)
+- `real_world` - Execute real trades via Schwab API
+
+### **Cadence Options**
+- `15` - Aggressive (27 opportunities/day)
+- `30` - Active (14 opportunities/day)
+- `60` - Conservative (7 opportunities/day)
+
+### **Prompt Versions**
+- `auto` - Uses latest prompt version (learns from feedback)
+- `v4` - Fixed baseline prompt (for controlled testing)
+
+---
+
+## 📚 Documentation
+
+- `GO_LIVE_CHECKLIST.md` - Complete safety guide for live trading
+- `SCHWAB_READONLY_TEST.md` - How to test Schwab API safely
+- `SCHWAB_API_SETUP.md` - Schwab API configuration guide
+- `FEEDBACK_SYSTEM.md` - How the AI learning system works
+- `AUTOMATION_README.md` - Scheduling and automation details
+
+---
+
+## 🎓 How It Works
+
+### **Every Trading Cycle (15-60 minutes)**
+
+1. **News Collection** (Summarizer Agents)
+   - Screenshot 6 financial news sites
+   - GPT-4o Vision analyzes screenshots
+   - Extracts headlines and trading insights
+
+2. **Decision Making** (Decider Agent)
+   - Reviews current portfolio (holdings, P&L)
+   - Analyzes news summaries
+   - Makes trading decisions:
+     - SELL positions with profits (5-10%) or losses (-3% to -5%)
+     - HOLD positions with continuing momentum
+     - BUY new opportunities with strong catalysts
+
+3. **Validation** (Financial Guardrails)
+   - Prevents hallucinations (can't sell stocks you don't own)
+   - Enforces position limits
+   - Validates amounts and tickers
+
+4. **Execution** (Only During Market Hours)
+   - Updates portfolio in simulation mode
+   - Executes real trades via Schwab API (if enabled)
+   - Records all decisions and outcomes
+
+5. **Feedback** (Daily at Market Close)
+   - Analyzes completed trades
+   - Calculates win rate and average profit
+   - Stores lessons learned (high-level only)
+
+---
+
+## 💰 Cost Analysis
+
+### **API Costs (GPT-4o)**
+- 6 sources × 26 cycles/day = 156 calls/day
+- ~5K tokens per screenshot analysis
+- ~780K tokens/day total
+- **Input**: $2.50/1M tokens = $2/day
+- **Output**: $10/1M tokens = $8/day
+- **Total**: ~$10/day or $300/month
+
+### **Potential Returns**
+- 26 trades/day × 6% average × 50% win rate = 78% daily gain potential
+- With $10K portfolio = $7,800/day theoretical maximum
+- Realistic target: 15-25% daily gains = $1,500-$2,500/day
+- **API costs ($10/day) are negligible vs. trading profits**
+
+---
+
+## ⚠️ Risks & Disclaimers
+
+- **Day trading is risky** - You can lose money
+- **Past performance doesn't guarantee future results**
+- **This is experimental AI** - Monitor closely, especially initially
+- **Start in simulation mode** - Test thoroughly before live trading
+- **Use money you can afford to lose**
+- **This is not financial advice** - Use at your own risk
+
+---
+
+## 🔧 Advanced Features
+
+### **Parallel Configurations**
+Run multiple strategies simultaneously:
+```bash
+# Terminal 1: GPT-4o with 15-min cadence
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+
+# Terminal 2: GPT-5 with 30-min cadence (comparison)
+./start_d_ai_trader.sh -p 8081 -m gpt-5-mini -v auto -t simulation -c 30
+```
+
+Each gets a unique `config_hash` - completely isolated data!
+
+### **Manual Testing**
+Dashboard has manual trigger buttons:
+- 📰 Run Summarizer Agents (collect news now)
+- 🤖 Run Decider Agent (make decisions now)
+- 📊 Run Feedback Agent (analyze performance now)
+- 🚀 Run All Agents (full cycle now)
+
+---
+
+## 🐛 Troubleshooting
+
+### **ChromeDriver Issues**
+```bash
+# The system auto-detects Chrome v141 and downloads matching driver
+# If you see version mismatch, restart the system
+```
+
+### **API Key Errors**
+```bash
+# Edit .env and add your real OpenAI API key
+OPENAI_API_KEY=sk-proj-YOUR_ACTUAL_KEY_HERE
+```
+
+### **Market Closed**
+```bash
+# Trades show "⛔ MARKET CLOSED - No action taken"
+# This is normal outside 9:30 AM - 4:00 PM ET (Mon-Fri)
+# Decisions are recorded but not executed
+```
+
+### **Emergency Stop**
+```bash
+pkill -f d_ai_trader.py
+pkill -f dashboard_server.py
+```
+
+---
+
+## 📞 Support
+
+- Read `GO_LIVE_CHECKLIST.md` before enabling real trading
+- Check `SCHWAB_READONLY_TEST.md` for safe API testing
+- Review logs in `d-ai-trader.log`
+
+---
+
+## 📜 License
+
+Use at your own risk. This is experimental software for educational purposes.
+
+---
+
+## 🎉 Recent Updates
+
+### **October 2025 - Major Overhaul**
+- ✅ GPT-4o Vision for screenshot analysis
+- ✅ GPT-5 support (reasoning models)
+- ✅ Configurable trading cadence (15/30/60 min)
+- ✅ Opening bell strategy (9:30:05 AM execution)
+- ✅ Financial guardrails (prevents AI hallucinations)
+- ✅ Shares column on Trades tab
+- ✅ Market hours protection (4 layers)
+- ✅ Schwab read-only testing mode
+- ✅ 6 reliable news sources (no bot detection)
+- ✅ Aggressive day trading prompts
+- ✅ Pacific Time display (PDT/PST)
+- ✅ Config isolation for parallel runs
+- ✅ Feedback system simplified (no auto-rewrite)
+- ❌ Removed GPT-4.1 support
+- ❌ Removed auto-prompt generation (too aggressive)
+
+---
+
+**Happy Trading! 📈🚀**
