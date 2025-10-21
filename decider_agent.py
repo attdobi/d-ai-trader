@@ -1233,8 +1233,16 @@ No explanatory text, no markdown, just pure JSON array."""
         
     except Exception as e:
         print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
+        # Build system prompt with ACTUAL holdings list
+        current_tickers_for_system = [h['ticker'] for h in stock_holdings] if stock_holdings else []
+        holdings_list = ', '.join(current_tickers_for_system) if current_tickers_for_system else 'NONE'
+        
         # Fallback to AGGRESSIVE DAY TRADING prompt
-        system_prompt = """You are an AGGRESSIVE day trading AI optimized for SHORT-TERM PROFITS.
+        system_prompt = f"""You are an AGGRESSIVE day trading AI optimized for SHORT-TERM PROFITS.
+
+🚨 CRITICAL - YOUR CURRENT PORTFOLIO:
+You currently own ONLY these stocks: {holdings_list}
+You can ONLY sell stocks you own. You CANNOT sell stocks not in the list above.
 
 DAY TRADING PHILOSOPHY:
 - Multiple trades per day is GOOD (this system runs every 15-60 minutes)
@@ -1618,6 +1626,54 @@ def extract_decision_info_from_text(text_content):
 def store_trade_decisions(decisions, run_id):
     config_hash = get_current_config_hash()
     print(f"🔍 Storing decisions for {config_hash}: {decisions}")
+    
+    # CRITICAL: VALIDATE decisions to prevent AI hallucinations
+    from decision_validator import DecisionValidator
+    
+    # Get current portfolio state for validation
+    current_holdings = fetch_holdings()
+    stock_holdings = [h for h in current_holdings if h['ticker'] != 'CASH']
+    cash_balance = next((h['current_value'] for h in current_holdings if h['ticker'] == 'CASH'), 0)
+    
+    # Validate all decisions
+    validator = DecisionValidator(stock_holdings, cash_balance)
+    validated_decisions, rejected_decisions = validator.validate_decisions(decisions)
+    
+    # Check if AI missed any holdings
+    missing_holdings = validator.get_missing_holdings_decisions(validated_decisions)
+    
+    # Log rejected decisions
+    if rejected_decisions:
+        print(f"⚠️  REJECTED {len(rejected_decisions)} INVALID DECISIONS:")
+        for rej in rejected_decisions:
+            print(f"   ❌ {rej['validation_error']}")
+    
+    # Use validated decisions only
+    decisions = validated_decisions
+    
+    # Enrich decisions with shares and total_value for better display
+    for decision in decisions:
+        if isinstance(decision, dict):
+            action = decision.get('action', '').lower()
+            ticker = decision.get('ticker', '').upper()
+            
+            if action == 'sell' or action == 'hold':
+                # Look up current holding to get shares and value
+                holding = next((h for h in stock_holdings if h['ticker'].upper() == ticker), None)
+                if holding:
+                    decision['shares'] = holding.get('shares', 0)
+                    decision['total_value'] = holding.get('current_value', 0)
+                    if action == 'sell':
+                        decision['amount_usd'] = holding.get('current_value', 0)  # Selling full position
+            elif action == 'buy':
+                # For buys, calculate estimated shares
+                amount = decision.get('amount_usd', 0)
+                if amount > 0:
+                    price = get_current_price(ticker)
+                    if price:
+                        estimated_shares = int(amount / price)
+                        decision['shares'] = estimated_shares
+                        decision['total_value'] = amount
     
     # CRITICAL: Check market hours and modify decisions BEFORE storing
     market_open = is_market_open()

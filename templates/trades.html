@@ -9,6 +9,7 @@
     <tr>
       <th>Ticker</th>
       <th>Action</th>
+      <th>Shares</th>
       <th>Amount (USD)</th>
       <th>Reason</th>
       <th>Timestamp</th>
@@ -20,7 +21,22 @@
       <tr>
         <td>{{ decision.get('ticker', 'N/A') }}</td>
         <td>{{ decision.get('action', 'N/A') }}</td>
-        <td>${{ '%.2f'|format(decision.get('amount_usd', 0)) if decision.get('amount_usd') else 'N/A' }}</td>
+        <td>
+          {% if decision.get('shares') %}
+            {{ '%.2f'|format(decision.get('shares')) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if decision.get('total_value') %}
+            ${{ '%.2f'|format(decision.get('total_value')) }}
+          {% elif decision.get('amount_usd') %}
+            ${{ '%.2f'|format(decision.get('amount_usd')) }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
         <td>{{ decision.get('reason', 'N/A') }}</td>
         <td>{{ trade.timestamp }}</td>
       </tr>

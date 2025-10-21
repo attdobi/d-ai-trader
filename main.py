@@ -35,15 +35,17 @@ if _os.environ.get("DAI_GPT_MODEL"):
 from bs4 import BeautifulSoup
 
 # Configuration - Optimized for day trading (6 sources max for cost efficiency)
-# Using sites with minimal popups and real-time trading news
+# TESTED: These sites work with headless Chrome without bot detection
 URLS = [
-    ("Agent_CNBC", "https://www.cnbc.com"),                    # Breaking news, market movers
-    ("Agent_Benzinga", "https://www.benzinga.com"),            # ⭐ Best for day trading - real-time catalysts
-    ("Agent_MarketWatch", "https://www.marketwatch.com"),      # Market trends, sector rotation
-    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),      # Stock-specific news, earnings
-    ("Agent_Finviz", "https://finviz.com/news.ashx"),          # Top gainers/losers, market heat map
-    ("Agent_Fox_Business", "https://www.foxbusiness.com")      # Market sentiment, trading ideas
-    # Removed for cost/reliability: Bloomberg (paywall), SeekingAlpha (login), CNN Money (popups)
+    ("Agent_CNBC", "https://www.cnbc.com"),                           # ⭐ Breaking news, market movers
+    ("Agent_Benzinga", "https://www.benzinga.com"),                   # ⭐ Day trading catalysts  
+    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # Stock news, earnings
+    ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
+    ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news, no US bot detection
+    ("Agent_Fox_Business", "https://www.foxbusiness.com")             # Market sentiment
+    # WORKS: CNBC, Benzinga, Yahoo, Fox Business (confirmed)
+    # TESTING: AP News, BBC (should work - simpler sites)
+    # BLOCKED: Reuters, TheStreet, Investing.com (Cloudflare), MarketWatch, Finviz
 ]
 
 # Use absolute path for screenshot directory to avoid working directory issues

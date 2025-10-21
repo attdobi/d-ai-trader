@@ -1,0 +1,138 @@
+"""
+Decision Validator - Prevents AI hallucinations and invalid trades
+
+FINANCIAL GUARDRAILS:
+- Can only sell stocks you actually own
+- Cannot buy stocks you already own (must sell first)
+- Amounts must be within valid ranges
+- All required fields must be present
+- Tickers must be valid symbols
+
+This is critical for real-money trading - no AI hallucinations allowed!
+"""
+
+from typing import List, Dict, Any, Tuple
+
+class DecisionValidator:
+    """Validates trading decisions to prevent hallucinations and errors"""
+    
+    def __init__(self, current_holdings: List[Dict], available_cash: float):
+        """
+        Initialize validator with current portfolio state
+        
+        Args:
+            current_holdings: List of current holdings (excluding CASH)
+            available_cash: Available cash balance
+        """
+        self.current_tickers = set(h['ticker'].upper() for h in current_holdings if h['ticker'] != 'CASH')
+        self.holdings_map = {h['ticker'].upper(): h for h in current_holdings if h['ticker'] != 'CASH'}
+        self.available_cash = available_cash
+        
+        print(f"🛡️  Decision Validator Initialized:")
+        print(f"   Current Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'}")
+        print(f"   Available Cash: ${available_cash:.2f}")
+    
+    def validate_decisions(self, decisions: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Validate all decisions and separate valid from invalid
+        
+        Returns:
+            (valid_decisions, invalid_decisions_with_reasons)
+        """
+        valid = []
+        invalid = []
+        
+        for i, decision in enumerate(decisions, 1):
+            is_valid, reason = self._validate_single_decision(decision, i)
+            
+            if is_valid:
+                valid.append(decision)
+                print(f"   ✅ Decision {i}: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')}")
+            else:
+                invalid.append({
+                    'decision': decision,
+                    'validation_error': reason
+                })
+                print(f"   ❌ Decision {i} REJECTED: {reason}")
+        
+        print(f"🛡️  Validation Complete: {len(valid)} valid, {len(invalid)} rejected")
+        return valid, invalid
+    
+    def _validate_single_decision(self, decision: Dict, index: int) -> Tuple[bool, str]:
+        """
+        Validate a single decision
+        
+        Returns:
+            (is_valid, error_reason)
+        """
+        # Rule 1: Must be a dict
+        if not isinstance(decision, dict):
+            return False, f"Not a dict: {type(decision)}"
+        
+        # Rule 2: Must have required fields
+        action = decision.get('action', '').lower()
+        ticker = decision.get('ticker', '').upper().strip()
+        amount_usd = decision.get('amount_usd', 0)
+        reason = decision.get('reason', '')
+        
+        if not action:
+            return False, "Missing 'action' field"
+        if not ticker:
+            return False, "Missing 'ticker' field"
+        if not reason:
+            return False, "Missing 'reason' field"
+        
+        # Rule 3: Action must be valid
+        if action not in ['buy', 'sell', 'hold']:
+            return False, f"Invalid action '{action}' (must be buy/sell/hold)"
+        
+        # Rule 4: Ticker must be valid format (1-5 uppercase letters)
+        if not ticker.isalpha() or len(ticker) > 5:
+            return False, f"Invalid ticker format: '{ticker}'"
+        
+        # Rule 5: SELL validation - can only sell stocks you own
+        if action == 'sell':
+            if ticker not in self.current_tickers:
+                return False, f"AI HALLUCINATION: Cannot sell {ticker} - you don't own it! (Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'})"
+        
+        # Rule 6: BUY validation - cannot buy stocks you already own
+        if action == 'buy':
+            if ticker in self.current_tickers:
+                return False, f"Cannot buy {ticker} - you already own it! Must SELL first before re-buying"
+            
+            # Rule 7: Amount validation for buys
+            try:
+                amount = float(amount_usd)
+                if amount < 1500:
+                    return False, f"Buy amount ${amount:.2f} too small (minimum $1500)"
+                if amount > 4000:
+                    return False, f"Buy amount ${amount:.2f} too large (maximum $4000)"
+                if amount > self.available_cash:
+                    return False, f"Buy amount ${amount:.2f} exceeds available cash ${self.available_cash:.2f}"
+            except (ValueError, TypeError):
+                return False, f"Invalid amount_usd: {amount_usd}"
+        
+        # Rule 8: HOLD validation - can only hold stocks you own
+        if action == 'hold':
+            if ticker not in self.current_tickers:
+                return False, f"AI HALLUCINATION: Cannot hold {ticker} - you don't own it! (Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'})"
+        
+        # All validation passed
+        return True, ""
+    
+    def get_missing_holdings_decisions(self, decisions: List[Dict]) -> List[str]:
+        """
+        Check if AI provided decisions for ALL current holdings
+        
+        Returns:
+            List of tickers that were not analyzed (AI should have provided sell/hold)
+        """
+        decision_tickers = set(d.get('ticker', '').upper() for d in decisions if isinstance(d, dict))
+        missing = self.current_tickers - decision_tickers
+        
+        if missing:
+            print(f"⚠️  AI FAILED to analyze these holdings: {', '.join(sorted(missing))}")
+            print(f"   AI should have provided SELL or HOLD decision for each!")
+        
+        return list(missing)
+
