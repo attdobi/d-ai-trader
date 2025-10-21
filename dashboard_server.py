@@ -222,15 +222,19 @@ def trade_decisions():
                 trade_dict['data'] = []
             else:
                 # Clean up each decision to ensure it's a dict with proper fields
+                # IMPORTANT: Preserve ALL fields including shares, total_value for display
                 cleaned_data = []
                 for decision in trade_dict['data']:
                     if isinstance(decision, dict):
-                        # Ensure all required fields exist
+                        # Preserve all fields from database (including shares, total_value)
                         cleaned_decision = {
                             'ticker': decision.get('ticker', 'N/A'),
                             'action': decision.get('action', 'N/A'),
                             'amount_usd': decision.get('amount_usd', 0),
-                            'reason': decision.get('reason', 'N/A')
+                            'shares': decision.get('shares'),  # ← ADDED
+                            'total_value': decision.get('total_value'),  # ← ADDED
+                            'reason': decision.get('reason', 'N/A'),
+                            'execution_status': decision.get('execution_status')  # For market closed flag
                         }
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
@@ -242,6 +246,8 @@ def trade_decisions():
                                     'ticker': parsed_decision.get('ticker', 'N/A'),
                                     'action': parsed_decision.get('action', 'N/A'),
                                     'amount_usd': parsed_decision.get('amount_usd', 0),
+                                    'shares': parsed_decision.get('shares'),  # ← ADDED
+                                    'total_value': parsed_decision.get('total_value'),  # ← ADDED
                                     'reason': parsed_decision.get('reason', 'N/A')
                                 }
                                 cleaned_data.append(cleaned_decision)

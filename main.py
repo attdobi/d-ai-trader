@@ -35,16 +35,15 @@ if _os.environ.get("DAI_GPT_MODEL"):
 from bs4 import BeautifulSoup
 
 # Configuration - Optimized for day trading (6 sources max for cost efficiency)
-# TESTED: These sites work with headless Chrome without bot detection
+# Ordered: Most reliable first (helps driver warm-up), complex sites later
 URLS = [
-    ("Agent_CNBC", "https://www.cnbc.com"),                           # ⭐ Breaking news, market movers
-    ("Agent_Benzinga", "https://www.benzinga.com"),                   # ⭐ Day trading catalysts  
-    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # Stock news, earnings
+    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # ✅ Most reliable, simple
+    ("Agent_Benzinga", "https://www.benzinga.com"),                   # ⭐ Day trading catalysts - very reliable
+    ("Agent_Fox_Business", "https://www.foxbusiness.com"),            # ✅ Reliable, good content
     ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
-    ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news, no US bot detection
-    ("Agent_Fox_Business", "https://www.foxbusiness.com")             # Market sentiment
-    # WORKS: CNBC, Benzinga, Yahoo, Fox Business (confirmed)
-    # TESTING: AP News, BBC (should work - simpler sites)
+    ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news
+    ("Agent_CNBC", "https://www.cnbc.com")                            # ⭐ Great content but can crash driver initially
+    # Order matters: Simple sites first warm up driver, complex sites later
     # BLOCKED: Reuters, TheStreet, Investing.com (Cloudflare), MarketWatch, Finviz
 ]
 
@@ -509,7 +508,7 @@ def run_summary_agents():
         current_driver = uc.Chrome(options=create_chrome_options())
         print("Chrome driver created successfully")
         
-        for agent_name, url in URLS:
+        for agent_idx, (agent_name, url) in enumerate(URLS, 1):
             try:
                 # Check if driver is still alive before each agent
                 try:
@@ -520,8 +519,13 @@ def run_summary_agents():
                         current_driver.quit()
                     except:
                         pass
+                    
+                    # Add extra delay before recreating driver (let system stabilize)
+                    time.sleep(3)
                     current_driver = uc.Chrome(options=create_chrome_options())
                     print(f"New driver created for {agent_name}")
+                
+                print(f"📰 Processing agent {agent_idx}/{len(URLS)}: {agent_name}")
                 
                 summary = summarize_page(agent_name, url, current_driver)
                 store_summary(summary)

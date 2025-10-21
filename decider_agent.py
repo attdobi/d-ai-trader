@@ -1652,6 +1652,7 @@ def store_trade_decisions(decisions, run_id):
     decisions = validated_decisions
     
     # Enrich decisions with shares and total_value for better display
+    print("💎 Enriching decisions with shares and dollar values...")
     for decision in decisions:
         if isinstance(decision, dict):
             action = decision.get('action', '').lower()
@@ -1661,10 +1662,15 @@ def store_trade_decisions(decisions, run_id):
                 # Look up current holding to get shares and value
                 holding = next((h for h in stock_holdings if h['ticker'].upper() == ticker), None)
                 if holding:
-                    decision['shares'] = holding.get('shares', 0)
-                    decision['total_value'] = holding.get('current_value', 0)
+                    shares = holding.get('shares', 0)
+                    value = holding.get('current_value', 0)
+                    decision['shares'] = shares
+                    decision['total_value'] = value
                     if action == 'sell':
-                        decision['amount_usd'] = holding.get('current_value', 0)  # Selling full position
+                        decision['amount_usd'] = value  # Selling full position
+                    print(f"   ✅ {action.upper()} {ticker}: {shares} shares, ${value:.2f}")
+                else:
+                    print(f"   ⚠️  {action.upper()} {ticker}: No holding found to enrich")
             elif action == 'buy':
                 # For buys, calculate estimated shares
                 amount = decision.get('amount_usd', 0)
@@ -1674,6 +1680,9 @@ def store_trade_decisions(decisions, run_id):
                         estimated_shares = int(amount / price)
                         decision['shares'] = estimated_shares
                         decision['total_value'] = amount
+                        print(f"   ✅ BUY {ticker}: {estimated_shares} shares (est.), ${amount:.2f}")
+                    else:
+                        print(f"   ⚠️  BUY {ticker}: Cannot get price for share calculation")
     
     # CRITICAL: Check market hours and modify decisions BEFORE storing
     market_open = is_market_open()
@@ -1761,6 +1770,16 @@ def store_trade_decisions(decisions, run_id):
     
     print(f"🕐 Storing timestamp (naive Pacific): {pacific_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
     
+    # Debug: Show what's being stored
+    print(f"💾 Storing {len(valid_decisions)} decisions to database:")
+    for vd in valid_decisions:
+        ticker = vd.get('ticker', 'N/A')
+        action = vd.get('action', 'N/A')
+        shares = vd.get('shares', 'NO_SHARES_FIELD')
+        amount = vd.get('amount_usd', 'NO_AMOUNT')
+        total_val = vd.get('total_value', 'NO_TOTAL')
+        print(f"   - {action.upper()} {ticker}: shares={shares}, amount_usd={amount}, total_value={total_val}")
+    
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
@@ -1779,6 +1798,7 @@ def store_trade_decisions(decisions, run_id):
             "data": json.dumps(valid_decisions),
             "config_hash": get_current_config_hash()
         })
+        print(f"✅ Stored to trade_decisions table with enriched data")
 
 if __name__ == "__main__":
     # Get unprocessed summaries instead of just the latest run
