@@ -3,12 +3,19 @@ Safety checks and risk management for live trading
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from math import isfinite
+from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from config import (
-    engine, MAX_POSITION_VALUE, MAX_TOTAL_INVESTMENT, 
-    MIN_CASH_BUFFER, DEBUG_TRADING, get_current_config_hash
+    engine,
+    MAX_POSITION_VALUE,
+    MAX_POSITION_FRACTION,
+    MAX_TOTAL_INVESTMENT,
+    MAX_TOTAL_INVESTMENT_FRACTION,
+    MIN_CASH_BUFFER,
+    DEBUG_TRADING,
+    get_current_config_hash,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,7 +27,9 @@ class TradingSafetyManager:
     
     def __init__(self):
         self.max_position_value = MAX_POSITION_VALUE
+        self.max_position_fraction = MAX_POSITION_FRACTION
         self.max_total_investment = MAX_TOTAL_INVESTMENT
+        self.max_total_investment_fraction = MAX_TOTAL_INVESTMENT_FRACTION
         self.min_cash_buffer = MIN_CASH_BUFFER
         
         # Additional safety limits
@@ -30,10 +39,51 @@ class TradingSafetyManager:
         self.max_loss_percentage = 0.15  # Stop if daily loss exceeds 15%
         
         logger.info(f"TradingSafetyManager initialized with limits:")
-        logger.info(f"  Max position value: ${self.max_position_value}")
-        logger.info(f"  Max total investment: ${self.max_total_investment}")
+        logger.info(f"  Max position value floor: ${self.max_position_value}")
+        if self.max_position_fraction > 0:
+            logger.info(f"  Max position fraction: {self.max_position_fraction:.0%} of account value")
+        logger.info(f"  Max total investment floor: ${self.max_total_investment}")
+        if self.max_total_investment_fraction > 0:
+            logger.info(f"  Max total investment fraction: {self.max_total_investment_fraction:.0%} of account value")
         logger.info(f"  Min cash buffer: ${self.min_cash_buffer}")
-    
+
+    def _account_value(self, portfolio_value: float, current_cash: float) -> float:
+        """
+        Resolve account value for limit calculations. Portfolio value already includes
+        cash for most runs; fall back to cash when portfolio value is unavailable.
+        """
+        if portfolio_value and portfolio_value > 0:
+            return portfolio_value
+        return max(current_cash, 0.0)
+
+    def _resolve_position_limit(self, portfolio_value: float, current_cash: float) -> float:
+        """
+        Determine the active maximum position value, combining absolute and fractional limits.
+        """
+        limits = []
+        if self.max_position_value > 0:
+            limits.append(self.max_position_value)
+
+        account_value = self._account_value(portfolio_value, current_cash)
+        if self.max_position_fraction > 0 and account_value > 0:
+            limits.append(account_value * self.max_position_fraction)
+
+        return max(limits) if limits else float("inf")
+
+    def _resolve_total_investment_limit(self, portfolio_value: float, current_cash: float) -> float:
+        """
+        Determine the active maximum total investment, combining absolute and fractional limits.
+        """
+        limits = []
+        if self.max_total_investment > 0:
+            limits.append(self.max_total_investment)
+
+        account_value = self._account_value(portfolio_value, current_cash)
+        if self.max_total_investment_fraction > 0 and account_value > 0:
+            limits.append(account_value * self.max_total_investment_fraction)
+
+        return max(limits) if limits else float("inf")
+
     def validate_trade_decision(self, 
                               decision: Dict, 
                               current_portfolio_value: float,
@@ -94,9 +144,10 @@ class TradingSafetyManager:
         if current_cash < amount_usd + self.min_cash_buffer:
             return False, f"Insufficient cash: ${current_cash:.2f} available, need ${amount_usd + self.min_cash_buffer:.2f}"
         
-        # Check maximum position value
-        if amount_usd > self.max_position_value:
-            return False, f"Position value ${amount_usd:.2f} exceeds maximum ${self.max_position_value}"
+        # Check maximum position value (dynamic with fraction support)
+        position_limit = self._resolve_position_limit(portfolio_value, current_cash)
+        if isfinite(position_limit) and amount_usd > position_limit:
+            return False, f"Position value ${amount_usd:.2f} exceeds maximum ${position_limit:.2f}"
         
         # Check position concentration (percentage of portfolio)
         if portfolio_value > 0:
@@ -108,13 +159,14 @@ class TradingSafetyManager:
         existing_position = next((p for p in positions if p.get("symbol") == ticker), None)
         if existing_position:
             total_position_value = existing_position.get("market_value", 0) + amount_usd
-            if total_position_value > self.max_position_value:
-                return False, f"Total position value would be ${total_position_value:.2f} (max ${self.max_position_value})"
+            if isfinite(position_limit) and total_position_value > position_limit:
+                return False, f"Total position value would be ${total_position_value:.2f} (max ${position_limit:.2f})"
         
         # Check total investment limit
         total_invested = sum(p.get("market_value", 0) for p in positions) + amount_usd
-        if total_invested > self.max_total_investment:
-            return False, f"Total investment would be ${total_invested:.2f} (max ${self.max_total_investment})"
+        total_limit = self._resolve_total_investment_limit(portfolio_value, current_cash)
+        if isfinite(total_limit) and total_invested > total_limit:
+            return False, f"Total investment would be ${total_invested:.2f} (max ${total_limit:.2f})"
         
         # Check daily trade limit
         if not self._check_daily_trade_limit():
@@ -246,14 +298,20 @@ class TradingSafetyManager:
                 """), {"today": today, "config_hash": get_current_config_hash()})
                 trades_row = trades_result.fetchone()
                 daily_trades = trades_row.trade_count if trades_row else 0
-            
+            position_limit = self._resolve_position_limit(total_value, cash_balance)
+            total_limit = self._resolve_total_investment_limit(total_value, cash_balance)
+
             return {
                 "portfolio_value": total_value,
                 "cash_balance": cash_balance,
                 "daily_trades": daily_trades,
                 "limits": {
-                    "max_position_value": self.max_position_value,
-                    "max_total_investment": self.max_total_investment,
+                    "max_position_value": position_limit if isfinite(position_limit) else None,
+                    "max_total_investment": total_limit if isfinite(total_limit) else None,
+                    "max_position_value_floor": self.max_position_value if self.max_position_value > 0 else None,
+                    "max_position_fraction": self.max_position_fraction if self.max_position_fraction > 0 else None,
+                    "max_total_investment_floor": self.max_total_investment if self.max_total_investment > 0 else None,
+                    "max_total_investment_fraction": self.max_total_investment_fraction if self.max_total_investment_fraction > 0 else None,
                     "min_cash_buffer": self.min_cash_buffer,
                     "max_daily_trades": self.max_daily_trades,
                     "max_position_percentage": self.max_position_percentage * 100,

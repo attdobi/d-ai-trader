@@ -16,9 +16,17 @@ except ImportError:
     SCHWAB_AVAILABLE = False
     SchwabAPI = None
 from config import (
-    SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET, SCHWAB_REDIRECT_URI, 
-    SCHWAB_ACCOUNT_HASH, TRADING_MODE, DEBUG_TRADING,
-    MAX_POSITION_VALUE, MAX_TOTAL_INVESTMENT, MIN_CASH_BUFFER
+    SCHWAB_CLIENT_ID,
+    SCHWAB_CLIENT_SECRET,
+    SCHWAB_REDIRECT_URI,
+    SCHWAB_ACCOUNT_HASH,
+    TRADING_MODE,
+    DEBUG_TRADING,
+    MAX_POSITION_VALUE,
+    MAX_POSITION_FRACTION,
+    MAX_TOTAL_INVESTMENT,
+    MAX_TOTAL_INVESTMENT_FRACTION,
+    MIN_CASH_BUFFER,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,11 +46,21 @@ class SchwabAPIClient:
         
         # Safety limits
         self.max_position_value = MAX_POSITION_VALUE
+        self.max_position_fraction = MAX_POSITION_FRACTION
         self.max_total_investment = MAX_TOTAL_INVESTMENT
+        self.max_total_investment_fraction = MAX_TOTAL_INVESTMENT_FRACTION
         self.min_cash_buffer = MIN_CASH_BUFFER
         
         if DEBUG_TRADING:
             logger.info(f"SchwabAPIClient initialized in {self.trading_mode} mode")
+            logger.info(
+                "Safety floors: position=$%s (fraction=%s), total=$%s (fraction=%s), cash buffer=$%s",
+                self.max_position_value,
+                f"{self.max_position_fraction:.0%}" if self.max_position_fraction > 0 else "disabled",
+                self.max_total_investment,
+                f"{self.max_total_investment_fraction:.0%}" if self.max_total_investment_fraction > 0 else "disabled",
+                self.min_cash_buffer,
+            )
     
     def authenticate(self) -> bool:
         """

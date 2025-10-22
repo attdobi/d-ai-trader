@@ -49,8 +49,10 @@ SCHWAB_ACCOUNT_HASH=your_account_hash_here
 
 # Trading Configuration
 TRADING_MODE=simulation  # Start with simulation, change to 'live' when ready
-MAX_POSITION_VALUE=1000  # Maximum value per position in USD
-MAX_TOTAL_INVESTMENT=10000  # Maximum total investment
+MAX_POSITION_VALUE=2000  # Floor for per-position limit in USD
+MAX_POSITION_FRACTION=0.0  # Optional: fraction of account value for per-position limit (e.g., 0.15 = 15%)
+MAX_TOTAL_INVESTMENT=10000  # Floor for total invested capital
+MAX_TOTAL_INVESTMENT_FRACTION=0.0  # Optional: fraction of account value for total invested capital (e.g., 0.60 = 60%)
 MIN_CASH_BUFFER=500  # Minimum cash to keep in account
 
 # Debug Configuration
@@ -116,8 +118,10 @@ print('Trading Status:', status)
 ```bash
 # In .env file, change:
 TRADING_MODE=live
-MAX_POSITION_VALUE=1000  # Matches original design
-MAX_TOTAL_INVESTMENT=10000  # Full $10,000 as intended
+MAX_POSITION_VALUE=2000  # Floor for per-position limit in USD
+MAX_POSITION_FRACTION=0.0  # Override with your target fraction (e.g., 0.15 for 15%)
+MAX_TOTAL_INVESTMENT=10000  # Floor for total invested capital
+MAX_TOTAL_INVESTMENT_FRACTION=0.0  # Override with your target fraction (e.g., 0.60 for 60%)
 MIN_CASH_BUFFER=500  # Keep minimum buffer
 ```
 
