@@ -15,6 +15,7 @@ import os
 import time
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -46,6 +47,8 @@ URLS = [
     # Order matters: Simple sites first warm up driver, complex sites later
     # BLOCKED: Reuters, TheStreet, Investing.com (Cloudflare), MarketWatch, Finviz
 ]
+
+SUMMARY_MAX_WORKERS = max(1, int(os.getenv("SUMMARY_MAX_WORKERS", "2")))
 
 # Use absolute path for screenshot directory to avoid working directory issues
 import os
@@ -498,64 +501,72 @@ def store_summary(summary):
             "data": json.dumps(summary)
         })
 
-def run_summary_agents():
-    initialize_database()
-    current_driver = None
+def _process_agent_sequence(agent_sequence, worker_id):
+    """Process a sequence of agents using a dedicated Chrome driver"""
+    if not agent_sequence:
+        return
     
+    current_driver = None
     try:
-        # Create a fresh Chrome driver for this run
-        print("Creating new Chrome driver for summarizer run")
-        current_driver = uc.Chrome(options=create_chrome_options())
-        print("Chrome driver created successfully")
-        
-        for agent_idx, (agent_name, url) in enumerate(URLS, 1):
+        for agent_idx, (agent_name, url) in enumerate(agent_sequence, 1):
             try:
-                # ROBUST driver check - verify it's actually usable
                 driver_ok = False
                 max_driver_attempts = 3
                 
                 for attempt in range(max_driver_attempts):
+                    if current_driver:
+                        try:
+                            current_driver.current_url
+                            current_driver.title
+                            driver_ok = True
+                            break
+                        except Exception as session_error:
+                            print(f"[Worker {worker_id}] ⚠️  Driver invalid for {agent_name} (attempt {attempt + 1}/{max_driver_attempts}): {session_error}")
+                            try:
+                                current_driver.quit()
+                            except Exception:
+                                pass
+                            current_driver = None
+                            time.sleep(2)
+                    
+                    # Try to create a fresh driver
                     try:
-                        # Test if driver is really alive
-                        current_driver.current_url
-                        current_driver.title  # Extra check
+                        current_driver = uc.Chrome(options=create_chrome_options())
+                        print(f"[Worker {worker_id}] ✅ New driver created for {agent_name}")
                         driver_ok = True
                         break
-                    except Exception as session_error:
-                        print(f"⚠️  Driver not usable (attempt {attempt + 1}/{max_driver_attempts}): {session_error}")
-                        
-                        # Kill old driver
-                        try:
-                            current_driver.quit()
-                        except:
-                            pass
-                        
-                        # Wait and recreate
+                    except Exception as create_error:
+                        print(f"[Worker {worker_id}] ❌ Failed to create driver (attempt {attempt + 1}/{max_driver_attempts}): {create_error}")
+                        current_driver = None
                         time.sleep(2)
-                        try:
-                            current_driver = uc.Chrome(options=create_chrome_options())
-                            print(f"✅ New driver created for {agent_name}")
-                        except Exception as create_error:
-                            print(f"❌ Failed to create driver: {create_error}")
-                            if attempt == max_driver_attempts - 1:
-                                raise  # Give up after max attempts
                 
-                if not driver_ok:
-                    print(f"❌ Could not get working driver for {agent_name}, skipping")
+                if not driver_ok or not current_driver:
+                    print(f"[Worker {worker_id}] ❌ Could not get working driver for {agent_name}, skipping")
+                    try:
+                        error_summary = {
+                            "agent": agent_name,
+                            "timestamp": RUN_TIMESTAMP,
+                            "run_id": RUN_TIMESTAMP,
+                            "summary": {
+                                "headlines": [],
+                                "insights": "Driver initialization failed - skipped"
+                            }
+                        }
+                        store_summary(error_summary)
+                    except Exception:
+                        pass
                     continue
                 
-                print(f"📰 Processing agent {agent_idx}/{len(URLS)}: {agent_name}")
+                print(f"[Worker {worker_id}] 📰 Processing agent {agent_idx}/{len(agent_sequence)}: {agent_name}")
                 
                 summary = summarize_page(agent_name, url, current_driver)
                 store_summary(summary)
-                print(f"✅ Stored summary for {agent_name}")
-                # Small delay between agents to prevent overwhelming the system
-                time.sleep(3)
-                
+                print(f"[Worker {worker_id}] ✅ Stored summary for {agent_name}")
+                time.sleep(1)
+            
             except Exception as e:
-                print(f"Error processing {agent_name} ({url}): {e}")
+                print(f"[Worker {worker_id}] Error processing {agent_name} ({url}): {e}")
                 
-                # Store error summary so we know what failed
                 try:
                     error_summary = {
                         "agent": agent_name,
@@ -567,39 +578,52 @@ def run_summary_agents():
                         }
                     }
                     store_summary(error_summary)
-                    print(f"Stored error summary for {agent_name}")
-                except:
+                    print(f"[Worker {worker_id}] Stored error summary for {agent_name}")
+                except Exception:
                     pass
                 
-                # Try to create a new driver for the next agent if this one failed
                 try:
                     if current_driver:
                         current_driver.quit()
-                except:
+                except Exception:
                     pass
-                
-                # Wait a bit before recreating driver to let system recover
+                current_driver = None
                 time.sleep(2)
-                
-                try:
-                    current_driver = uc.Chrome(options=create_chrome_options())
-                    print(f"Created new driver after {agent_name} error")
-                except Exception as driver_error:
-                    print(f"Failed to create new driver: {driver_error}")
-                    # Set to None so we don't try to use it
-                    current_driver = None
                 continue
-                
-    except Exception as e:
-        print(f"Failed to create initial Chrome driver: {e}")
     finally:
-        # Always cleanup the driver
         try:
             if current_driver:
                 current_driver.quit()
-                print("Chrome driver cleaned up")
-        except Exception as e:
-            print(f"Error cleaning up driver: {e}")
+                print(f"[Worker {worker_id}] Chrome driver cleaned up")
+        except Exception as cleanup_error:
+            print(f"[Worker {worker_id}] Error cleaning up driver: {cleanup_error}")
+
+
+def run_summary_agents():
+    initialize_database()
+    
+    worker_count = max(1, min(SUMMARY_MAX_WORKERS, len(URLS)))
+    if worker_count == 1:
+        _process_agent_sequence(URLS, worker_id=1)
+        return
+    
+    # Distribute agents across workers in round-robin fashion
+    batches = [[] for _ in range(worker_count)]
+    for idx, entry in enumerate(URLS):
+        batches[idx % worker_count].append(entry)
+    
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(_process_agent_sequence, batch, worker_id + 1): worker_id + 1
+            for worker_id, batch in enumerate(batches)
+            if batch
+        }
+        for future in as_completed(futures):
+            worker_id = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"[Worker {worker_id}] ❌ Batch processing failed: {e}")
 
 if __name__ == "__main__":
     run_summary_agents()

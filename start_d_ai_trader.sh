@@ -68,9 +68,17 @@ fi
 # shellcheck disable=SC1090
 source "${VENV_DIR}/bin/activate"
 
-# Ensure dependencies
+# Ensure dependencies (only when requirements.txt changes)
 if [[ -f "${PROJECT_ROOT}/requirements.txt" ]]; then
-  pip install -q -r "${PROJECT_ROOT}/requirements.txt"
+  REQUIREMENTS_FILE="${PROJECT_ROOT}/requirements.txt"
+  REQUIREMENTS_STAMP="${VENV_DIR}/.requirements-stamp"
+  if [[ ! -f "${REQUIREMENTS_STAMP}" || "${REQUIREMENTS_FILE}" -nt "${REQUIREMENTS_STAMP}" ]]; then
+    echo "📦 Installing dependencies from requirements.txt ..."
+    pip install -q -r "${REQUIREMENTS_FILE}"
+    touch "${REQUIREMENTS_STAMP}"
+  else
+    echo "📦 Dependencies up to date (skipping pip install)"
+  fi
 fi
 
 # Export runtime env

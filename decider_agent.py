@@ -15,8 +15,10 @@ import json
 import pytz
 from datetime import datetime
 import time
+import threading
+import atexit
 from math import floor
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
 import yfinance as yf
@@ -40,6 +42,247 @@ prompt_manager = PromptManager(client=openai, session=session)
 
 # Initialize feedback tracker
 feedback_tracker = TradeOutcomeTracker()
+
+
+class YFinancePriceFetcher:
+    """Shared price fetcher that caches results and batches slow Yahoo Finance calls."""
+
+    def __init__(self, cache_ttl_seconds=None, max_workers=None):
+        self._cache_ttl = float(cache_ttl_seconds or _os.getenv("PRICE_CACHE_TTL", "60"))
+        self._executor = ThreadPoolExecutor(max_workers=max(2, int(max_workers or _os.getenv("PRICE_FETCHER_WORKERS", "4"))))
+        self._cache = {}
+        self._lock = threading.Lock()
+        atexit.register(self._shutdown)
+
+    def _shutdown(self):
+        try:
+            self._executor.shutdown(wait=False)
+        except Exception:
+            pass
+
+    def _cache_get(self, ticker):
+        now = time.time()
+        with self._lock:
+            cached = self._cache.get(ticker)
+            if not cached:
+                return None
+            price, ts = cached
+            if price is not None and now - ts <= self._cache_ttl:
+                return price
+            # Expired cache entry
+            self._cache.pop(ticker, None)
+            return None
+
+    def _cache_set(self, ticker, price):
+        with self._lock:
+            self._cache[ticker] = (price, time.time())
+
+    def _run_with_timeout(self, func, timeout_seconds):
+        future = self._executor.submit(func)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except TimeoutError:
+            future.cancel()
+            raise
+
+    @staticmethod
+    def _is_valid_price(value):
+        try:
+            return value is not None and float(value) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def _fetch_from_info(self, stock, ticker):
+        try:
+            info = self._run_with_timeout(lambda: stock.info, 10)
+        except TimeoutError:
+            print(f"⏰ {ticker}: Price info timeout after 10 seconds")
+            return None
+        except Exception as e:
+            print(f"⚠️  {ticker}: Failed to load info: {e}")
+            return None
+
+        if not isinstance(info, dict):
+            return None
+
+        for field, label in (
+            ("currentPrice", "current price"),
+            ("regularMarketPrice", "regular market price"),
+            ("previousClose", "previous close"),
+        ):
+            value = info.get(field)
+            if self._is_valid_price(value):
+                price = float(value)
+                print(f"✅ {ticker}: Got {label}: ${price:.2f}")
+                return price
+        return None
+
+    def _fetch_from_fast_info(self, stock, ticker):
+        try:
+            fast_info = getattr(stock, "fast_info", None)
+        except Exception:
+            fast_info = None
+
+        if not fast_info:
+            return None
+
+        for key in ("lastPrice", "regularMarketPrice", "regularMarketPreviousClose"):
+            value = None
+            try:
+                value = fast_info.get(key) if hasattr(fast_info, "get") else getattr(fast_info, key, None)
+            except Exception:
+                value = None
+            if self._is_valid_price(value):
+                price = float(value)
+                print(f"✅ {ticker}: Got price from fast_info {key}: ${price:.2f}")
+                return price
+        return None
+
+    def _fetch_from_history(self, stock, ticker):
+        try:
+            history = self._run_with_timeout(lambda: stock.history(period="5d", interval="1d", prepost=True), 15)
+        except TimeoutError:
+            print(f"⏰ {ticker}: History fetch timeout after 15 seconds")
+            return None
+        except Exception as e:
+            print(f"⚠️  {ticker}: History fetch failed: {e}")
+            return None
+
+        if history is None or history.empty:
+            return None
+
+        close_series = history["Close"] if "Close" in history.columns else None
+        if close_series is None:
+            return None
+
+        last_valid = close_series.dropna()
+        if last_valid.empty:
+            return None
+
+        price = float(last_valid.iloc[-1])
+        print(f"✅ {ticker}: Got price from 5d history: ${price:.2f}")
+        return price
+
+    def _fetch_from_download(self, ticker):
+        try:
+            data = self._run_with_timeout(
+                lambda: yf.download(
+                    tickers=ticker,
+                    period="1mo",
+                    interval="1d",
+                    prepost=True,
+                    progress=False,
+                ),
+                20,
+            )
+        except TimeoutError:
+            print(f"⏰ {ticker}: yf.download timeout after 20 seconds")
+            return None
+        except Exception as e:
+            print(f"⚠️  {ticker}: yf.download failed: {e}")
+            return None
+
+        if data is None or data.empty:
+            return None
+
+        close_series = data["Close"] if "Close" in data.columns else data.get(("Close", ticker))
+        if close_series is None:
+            return None
+
+        last_valid = close_series.dropna()
+        if last_valid.empty:
+            return None
+
+        price = float(last_valid.iloc[-1])
+        print(f"✅ {ticker}: Got price from yf.download 1mo: ${price:.2f}")
+        return price
+
+    def _fetch_price(self, ticker):
+        stock = yf.Ticker(ticker)
+        price = self._fetch_from_info(stock, ticker)
+        if self._is_valid_price(price):
+            return float(price)
+
+        price = self._fetch_from_fast_info(stock, ticker)
+        if self._is_valid_price(price):
+            return float(price)
+
+        price = self._fetch_from_history(stock, ticker)
+        if self._is_valid_price(price):
+            return float(price)
+
+        price = self._fetch_from_download(ticker)
+        if self._is_valid_price(price):
+            return float(price)
+
+        return None
+
+    def get_price(self, ticker):
+        ticker = ticker.upper()
+        cached = self._cache_get(ticker)
+        if self._is_valid_price(cached):
+            print(f"✅ {ticker}: Using cached price ${float(cached):.2f}")
+            return float(cached)
+
+        price = self._fetch_price(ticker)
+        if self._is_valid_price(price):
+            self._cache_set(ticker, float(price))
+            return float(price)
+
+        return None
+
+    def prefetch_prices(self, tickers):
+        unique = sorted({t.upper() for t in tickers if t})
+        if len(unique) <= 1:
+            # Single tickers handled lazily
+            return
+
+        pending = [t for t in unique if self._cache_get(t) is None]
+        if not pending:
+            return
+
+        try:
+            data = self._run_with_timeout(
+                lambda: yf.download(
+                    tickers=pending,
+                    period="5d",
+                    interval="1d",
+                    prepost=True,
+                    progress=False,
+                    group_by="ticker",
+                    threads=False,
+                ),
+                20,
+            )
+        except TimeoutError:
+            print(f"⏰ Bulk price fetch timeout for {pending}")
+            return
+        except Exception as e:
+            print(f"⚠️  Bulk price fetch failed for {pending}: {e}")
+            return
+
+        if data is None or data.empty:
+            return
+
+        if getattr(data.columns, "nlevels", 1) > 1:
+            try:
+                close_frame = data["Close"]
+            except KeyError:
+                close_frame = None
+            if close_frame is not None:
+                for ticker in close_frame.columns:
+                    series = close_frame[ticker].dropna()
+                    if not series.empty:
+                        self._cache_set(ticker.upper(), float(series.iloc[-1]))
+        else:
+            close_series = data["Close"] if "Close" in data.columns else None
+            if close_series is not None:
+                last_valid = close_series.dropna()
+                if not last_valid.empty:
+                    self._cache_set(unique[0], float(last_valid.iloc[-1]))
+
+
+price_fetcher = YFinancePriceFetcher()
 
 def is_market_open():
     """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
@@ -129,6 +372,8 @@ def update_all_current_prices():
         if not holdings:
             print("No active holdings to update.")
             return
+
+        price_fetcher.prefetch_prices([holding["ticker"] for holding in holdings])
         
         updated_count = 0
         api_failures = []
@@ -336,138 +581,22 @@ def get_current_price(ticker):
         return None
     
     try:
-        stock = yf.Ticker(clean_ticker)
-
-        # Method 1: Try to get current price from info (works during market hours)
-        try:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # Submit the task with a 10 second timeout
-                future = executor.submit(lambda: stock.info.get('currentPrice'))
-                try:
-                    current_price = future.result(timeout=10)
-                    if current_price and current_price > 0:
-                        print(f"✅ {clean_ticker}: Got current price from info: ${current_price:.2f}")
-                        return float(current_price)
-                except concurrent.futures.TimeoutError:
-                    print(f"⏰ {clean_ticker}: Price fetch timeout after 10 seconds")
-                    raise Exception("Timeout fetching price")
-                
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 1 failed: {e}")
-
-        # Method 2: Try regular market price from info
-        try:
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # Submit the task with a 10 second timeout
-                future = executor.submit(lambda: stock.info.get('regularMarketPrice'))
-                try:
-                    regular_price = future.result(timeout=10)
-                    if regular_price and regular_price > 0:
-                        print(f"✅ {clean_ticker}: Got regular market price: ${regular_price:.2f}")
-                        return float(regular_price)
-                except concurrent.futures.TimeoutError:
-                    print(f"⏰ {clean_ticker}: Regular market price timeout after 10 seconds")
-                    raise Exception("Timeout fetching regular market price")
-                
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 2 failed: {e}")
-
-        # Method 3: Try previous close from info (works after hours)
-        try:
-            prev_close = stock.info.get('previousClose')
-            if prev_close and prev_close > 0:
-                print(f"✅ {clean_ticker}: Got previous close: ${prev_close:.2f}")
-                return float(prev_close)
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 3 failed: {e}")
-
-        # Method 3b: Try fast_info fields (often available off-hours)
-        try:
-            fast_info = getattr(stock, 'fast_info', None)
-            if fast_info:
-                for key in (
-                    'lastPrice',
-                    'regularMarketPreviousClose',
-                    'regularMarketPrice',
-                ):
-                    value = None
-                    try:
-                        value = fast_info.get(key) if hasattr(fast_info, 'get') else getattr(fast_info, key, None)
-                    except Exception:
-                        value = None
-                    if value and float(value) > 0:
-                        print(f"✅ {clean_ticker}: Got price from fast_info {key}: ${float(value):.2f}")
-                        return float(value)
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: fast_info lookup failed: {e}")
-
-        # Method 4: Try history with 1 day period
-        try:
-            hist = stock.history(period="1d", interval="1d", prepost=True)
-            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                price = float(hist['Close'].dropna().iloc[-1])
-                print(f"✅ {clean_ticker}: Got price from 1d history: ${price:.2f}")
-                return price
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 4 failed: {e}")
-
-        # Method 5: Try history with 5 day period
-        try:
-            hist = stock.history(period="5d", interval="1d", prepost=True)
-            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                price = float(hist['Close'].dropna().iloc[-1])
-                print(f"✅ {clean_ticker}: Got price from 5d history: ${price:.2f}")
-                return price
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 5 failed: {e}")
-
-        # Method 6: Try specific date range (last 7 days)
-        try:
-            from datetime import datetime, timedelta
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=7)
-            hist = stock.history(start=start_date, end=end_date, interval="1d", prepost=True)
-            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                price = float(hist['Close'].dropna().iloc[-1])
-                print(f"✅ {clean_ticker}: Got price from 7d history: ${price:.2f}")
-                return price
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 6 failed: {e}")
-
-        # Method 7: Use yf.download over a month and pick last valid close (reliable on weekends)
-        try:
-            dl = yf.download(
-                tickers=clean_ticker,
-                period="1mo",
-                interval="1d",
-                prepost=True,
-                progress=False,
-            )
-            if dl is not None and len(dl) > 0:
-                close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
-                if close_series is not None:
-                    last_valid = close_series.dropna()
-                    if len(last_valid) > 0:
-                        price = float(last_valid.iloc[-1])
-                        print(f"✅ {clean_ticker}: Got price from yf.download 1mo: ${price:.2f}")
-                        return price
-        except Exception as e:
-            print(f"⚠️  {clean_ticker}: Method 7 failed: {e}")
-
-        # If all attempts fail, do not use fallback prices - skip trading instead
-        print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
-        print(f"💡 This may be due to:")
-        print(f"   - After market hours or weekend/holiday")
-        print(f"   - Temporary Yahoo Finance API issues/rate limits")
-        print(f"   - Symbol may be invalid or delisted")
-        print(f"🚫 Yahoo Finance rate limit exceeded - skipping trade to ensure accurate pricing")
-        print(f"💡 API rate limits typically clear within 1 hour")
-        
-        return None
-
+        price = price_fetcher.get_price(clean_ticker)
     except Exception as e:
         print(f"❌ Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
         return None
+
+    if price is None:
+        print(f"❌ All price fetching methods failed for {clean_ticker} (original: {ticker})")
+        print("💡 This may be due to:")
+        print("   - After market hours or weekend/holiday")
+        print("   - Temporary Yahoo Finance API issues/rate limits")
+        print("   - Symbol may be invalid or delisted")
+        print("🚫 Yahoo Finance rate limit exceeded - skipping trade to ensure accurate pricing")
+        print("💡 API rate limits typically clear within 1 hour")
+        return None
+
+    return float(price)
 
 def execute_real_world_trade(decision):
     """
@@ -645,6 +774,8 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
     
     # Track the cash we're adding from sells
     cash_from_sells = 0.0
+
+    price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in sell_decisions])
     
     with engine.begin() as conn:
         for decision in sell_decisions:
@@ -778,6 +909,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
     if buy_decisions:
+        price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
         with engine.begin() as conn:
             cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
                 .fetchone()
@@ -953,6 +1085,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
     """Process all buy decisions and return updated cash balance"""
     
+    price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
+
     with engine.begin() as conn:
         for decision in buy_decisions:
             ticker = decision.get("ticker")

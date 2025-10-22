@@ -4,7 +4,8 @@ import base64
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from contextlib import contextmanager
+from sqlalchemy.orm import sessionmaker, scoped_session
 from dotenv import load_dotenv
 import openai
 from sqlalchemy import text
@@ -15,8 +16,31 @@ load_dotenv(override=True)
 # Database connection
 DATABASE_URI = 'postgresql://adobi@localhost/adobi'
 engine = create_engine(DATABASE_URI)
-Session = sessionmaker(bind=engine)
-session = Session()
+SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
+Session = scoped_session(SessionFactory)
+session = Session
+
+
+def get_session():
+    """Return a thread-local SQLAlchemy session."""
+    return Session()
+
+
+@contextmanager
+def session_scope():
+    """
+    Provide a transactional scope around a series of operations.
+    Ensures sessions are properly cleaned up across threads.
+    """
+    db_session = Session()
+    try:
+        yield db_session
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+        raise
+    finally:
+        Session.remove()
 
 # SQLAlchemy Base
 Base = declarative_base()
