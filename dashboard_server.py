@@ -33,6 +33,25 @@ import os
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
 
+DEFAULT_FEEDBACK_SYSTEM_PROMPT = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
+Your analysis should be thorough, data-driven, and provide actionable insights for all system components."""
+
+DEFAULT_FEEDBACK_USER_PROMPT = """You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
+
+Context Data: {context_data}
+Performance Metrics: {performance_metrics}
+
+Please provide:
+1. Overall system performance analysis
+2. Key strengths and weaknesses identified
+3. Specific recommendations for both summarizer and decider agents
+4. Market condition analysis and adaptation strategies
+5. Long-term improvement suggestions
+
+Focus on comprehensive insights that can guide the entire trading system's evolution."""
+
+DEFAULT_FEEDBACK_DESCRIPTION = "Default system analysis prompt - comprehensive system-wide feedback"
+
 # Initialize trading interface for Schwab integration
 try:
     from trading_interface import trading_interface
@@ -40,6 +59,236 @@ try:
 except ImportError:
     SCHWAB_ENABLED = False
     print("Warning: Trading interface not available, Schwab features disabled")
+
+class _SafeFormatDict(dict):
+    """Dictionary that leaves unknown keys in braces when formatting."""
+    def __missing__(self, key):
+        return f"{{{key}}}"
+
+def _normalize_feedback_value(value):
+    """Convert stored feedback (JSON/text/None) into a clean display string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return ""
+        try:
+            parsed = json.loads(trimmed)
+            return _normalize_feedback_value(parsed)
+        except (json.JSONDecodeError, TypeError):
+            return trimmed
+    if isinstance(value, list):
+        return "\n".join(f"- {item}" for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, indent=2, ensure_ascii=False)
+    return str(value)
+
+def _render_prompt_text(template, replacements):
+    """Render a prompt template with defensive formatting."""
+    if not template:
+        return None
+    try:
+        return template.format_map(_SafeFormatDict(replacements))
+    except Exception as exc:
+        print(f"Prompt render error: {exc}")
+        return template
+
+def _collect_prompt_payload(tracker, agent_candidates, key, replacements=None):
+    """Build a structured payload for the active prompt of a given agent."""
+    replacements = replacements or {}
+    if isinstance(agent_candidates, str):
+        agent_candidates = [agent_candidates]
+
+    prompt = None
+    for candidate in agent_candidates:
+        try:
+            prompt = tracker.get_active_prompt(candidate)
+        except Exception as exc:
+            print(f"Error loading prompt for {candidate}: {exc}")
+            prompt = None
+        if prompt:
+            break
+
+    base_payload = {
+        "agent": key,
+        "version": None,
+        "description": None,
+        "system_prompt": None,
+        "user_prompt": None,
+        "rendered_system_prompt": None,
+        "rendered_user_prompt": None,
+    }
+    if not prompt:
+        return base_payload
+
+    base_payload.update({
+        "version": prompt.get("version") or prompt.get("prompt_version"),
+        "description": prompt.get("description"),
+        "system_prompt": prompt.get("system_prompt"),
+        "user_prompt": prompt.get("user_prompt"),
+    })
+    base_payload["rendered_system_prompt"] = _render_prompt_text(base_payload["system_prompt"], replacements)
+    base_payload["rendered_user_prompt"] = _render_prompt_text(base_payload["user_prompt"], replacements)
+    return base_payload
+
+def _format_currency(amount):
+    try:
+        return "${:,.2f}".format(float(amount))
+    except (TypeError, ValueError):
+        return "N/A"
+
+def _format_percentage(value, multiplier=1.0):
+    try:
+        return "{:.2f}%".format(float(value) * multiplier)
+    except (TypeError, ValueError):
+        return "N/A"
+
+def _build_prompt_context_samples(latest_feedback=None):
+    """Create representative context strings for prompt previews."""
+    config_hash = get_current_config_hash()
+    holdings_rows = []
+    summary_rows = []
+
+    with engine.connect() as conn:
+        holdings_rows = conn.execute(text("""
+            SELECT ticker, shares, current_price, current_value
+            FROM holdings
+            WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
+
+        summary_rows = conn.execute(text("""
+            SELECT agent, data, timestamp
+            FROM summaries
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp DESC
+            LIMIT 3
+        """), {"config_hash": config_hash}).fetchall()
+
+    available_cash_value = 0.0
+    holdings_lines = []
+    for row in holdings_rows:
+        ticker = row.ticker
+        value = row.current_value or 0.0
+        if ticker and ticker.upper() == "CASH":
+            available_cash_value = value
+            continue
+        shares = row.shares or 0.0
+        price = row.current_price or 0.0
+        holdings_lines.append(
+            f"{ticker}: {shares:.2f} shares @ {_format_currency(price)} (value {_format_currency(value)})"
+        )
+
+    holdings_summary = "\n".join(holdings_lines) if holdings_lines else "No active equity positions."
+    available_cash_text = _format_currency(available_cash_value)
+
+    summary_entries = []
+    for row in summary_rows:
+        entry_data = row.data
+        if isinstance(entry_data, str):
+            try:
+                entry_data = json.loads(entry_data)
+            except (json.JSONDecodeError, TypeError):
+                entry_data = {}
+        summary_payload = entry_data.get("summary") if isinstance(entry_data, dict) else {}
+        if not isinstance(summary_payload, dict):
+            summary_payload = {}
+
+        headlines = summary_payload.get("headlines")
+        insights = summary_payload.get("insights")
+        timestamp = row.timestamp.strftime("%Y-%m-%d %H:%M") if isinstance(row.timestamp, datetime) else "recent"
+
+        entry_lines = [f"{row.agent} ({timestamp})"]
+        if isinstance(headlines, (list, tuple)):
+            entry_lines.extend(f"- {headline}" for headline in headlines)
+        if insights:
+            entry_lines.append(f"Insights: {insights}")
+        summary_entries.append("\n".join(entry_lines))
+
+    summaries_text = "\n\n".join(summary_entries) if summary_entries else "No recent summaries available."
+
+    performance_lines = []
+    if latest_feedback:
+        success_rate = latest_feedback.get("success_rate")
+        if success_rate is not None:
+            performance_lines.append(f"Success Rate: {_format_percentage(success_rate, multiplier=100.0)}")
+        avg_profit = latest_feedback.get("avg_profit_percentage")
+        if avg_profit is not None:
+            performance_lines.append(f"Average Profit: {_format_percentage(avg_profit)}")
+        trades = latest_feedback.get("total_trades_analyzed")
+        if trades is not None:
+            performance_lines.append(f"Trades Analyzed: {trades}")
+
+    performance_metrics_text = "\n".join(performance_lines) if performance_lines else "Performance metrics available at runtime."
+    context_data_text = f"Current Holdings:\n{holdings_summary}\n\nRecent Summaries:\n{summaries_text}"
+
+    return {
+        "CURRENT_HOLDINGS_SNAPSHOT": holdings_summary,
+        "holdings": holdings_summary,
+        "AVAILABLE_CASH": available_cash_text,
+        "available_cash": available_cash_text,
+        "LATEST_SUMMARIES": summaries_text,
+        "summaries": summaries_text,
+        "performance_metrics": performance_metrics_text,
+        "context_data": context_data_text,
+    }
+
+def _get_active_prompts_bundle():
+    """Fetch active prompt data for all primary agents with current feedback applied."""
+    tracker = TradeOutcomeTracker()
+    latest_feedback = tracker.get_latest_feedback() or {}
+    context_samples = _build_prompt_context_samples(latest_feedback)
+
+    summarizer_feedback_text = _normalize_feedback_value(latest_feedback.get("summarizer_feedback"))
+    decider_feedback_text = _normalize_feedback_value(latest_feedback.get("decider_feedback"))
+
+    summarizer_feedback_block = ""
+    if summarizer_feedback_text:
+        summarizer_feedback_block = f"\nPERFORMANCE FEEDBACK: {summarizer_feedback_text}\n"
+
+    replacements_common = {
+        **context_samples,
+        "content": context_samples.get("summaries", "<LATEST_NEWS_CONTENT>"),
+        "feedback_context": summarizer_feedback_block,
+        "decider_feedback": decider_feedback_text or "No recent performance feedback available."
+    }
+
+    summarizer_payload = _collect_prompt_payload(
+        tracker,
+        ["SummarizerAgent", "summarizer"],
+        "SummarizerAgent",
+        replacements=replacements_common
+    )
+
+    decider_payload = _collect_prompt_payload(
+        tracker,
+        ["DeciderAgent", "decider"],
+        "DeciderAgent",
+        replacements=dict(replacements_common)
+    )
+
+    feedback_payload = _collect_prompt_payload(
+        tracker,
+        ["FeedbackAgent", "feedback_analyzer", "feedback"],
+        "FeedbackAgent",
+        replacements=dict(replacements_common)
+    )
+
+    if not feedback_payload.get("system_prompt"):
+        feedback_payload.update({
+            "version": feedback_payload.get("version", 0),
+            "description": feedback_payload.get("description") or DEFAULT_FEEDBACK_DESCRIPTION,
+            "system_prompt": DEFAULT_FEEDBACK_SYSTEM_PROMPT,
+            "user_prompt": DEFAULT_FEEDBACK_USER_PROMPT,
+        })
+        feedback_payload["rendered_system_prompt"] = _render_prompt_text(DEFAULT_FEEDBACK_SYSTEM_PROMPT, replacements_common)
+        feedback_payload["rendered_user_prompt"] = _render_prompt_text(DEFAULT_FEEDBACK_USER_PROMPT, replacements_common)
+
+    return {
+        "summarizer": summarizer_payload,
+        "decider": decider_payload,
+        "feedback": feedback_payload
+    }
 
 def create_portfolio_history_table():
     """Create portfolio_history table to track portfolio value over time"""
@@ -692,7 +941,17 @@ def save_prompt(agent_type):
 @app.route('/feedback')
 def feedback_dashboard():
     """Feedback analysis dashboard page"""
-    return render_template('feedback_dashboard.html')
+    prompts = _get_active_prompts_bundle()
+    return render_template('feedback_dashboard.html', prompts=prompts)
+
+@app.route('/api/prompts/active')
+def get_active_prompts():
+    """Return the active prompt templates for key agents"""
+    prompts = _get_active_prompts_bundle()
+    return jsonify({
+        "status": "success",
+        "prompts": prompts
+    })
 
 # Manual trigger endpoints for testing
 @app.route('/api/trigger/summarizer', methods=['POST'])

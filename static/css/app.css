@@ -15,6 +15,7 @@ body { font-family: Arial, sans-serif; margin: 0; color: #212529; }
 .metric-card { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:20px; min-width:180px; text-align:center; }
 .metric-card h3 { margin:0 0 10px; font-size:14px; font-weight:600; color:#495057; }
 .metric-card .value { font-size:24px; font-weight:700; }
+.metric-card .card-subtext { margin:8px 0 0; font-size:12px; color:#6c757d; line-height:1.4; }
 .metric-card .percentage { margin-top:5px; font-size:14px; font-weight:600; }
 .metric-card.gain .value, .gain { color: var(--green); }
 .metric-card.loss .value, .loss { color: var(--red); }
@@ -104,3 +105,19 @@ th { background:#f8f9fa; font-weight:600; color:#333; }
 /* Animations */
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 .spinning { animation: spin 1s linear infinite; }
+
+/* Prompt transparency */
+.prompt-section { margin-bottom:30px; }
+.prompt-section-header { margin-bottom:20px; max-width:840px; }
+.prompt-section-header h2 { margin:0 0 10px; font-size:24px; color:#212529; }
+.section-intro { margin:0; color:#495057; font-size:14px; line-height:1.6; }
+.prompt-grid { display:grid; gap:20px; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); }
+.prompt-card { background:#fff; border:1px solid #dee2e6; border-radius:10px; padding:18px; box-shadow:0 4px 16px rgba(0,0,0,0.06); display:flex; flex-direction:column; gap:12px; }
+.prompt-card header { border-bottom:1px solid #f0f0f0; padding-bottom:10px; }
+.prompt-card-title { display:flex; justify-content:space-between; align-items:center; font-weight:600; color:#343a40; }
+.prompt-version-tag { font-size:12px; background:#e9ecef; color:#495057; padding:4px 8px; border-radius:12px; text-transform:uppercase; letter-spacing:.5px; }
+.prompt-description { margin:8px 0 0; font-size:13px; color:#6c757d; line-height:1.5; }
+.prompt-card details { border:1px solid #e9ecef; border-radius:8px; padding:10px 12px; background:#f8f9fa; }
+.prompt-card details summary { font-weight:600; color:#343a40; cursor:pointer; }
+.prompt-card details[open] summary { margin-bottom:10px; }
+.prompt-block { margin:0; white-space:pre-wrap; font-family:'SFMono-Regular','Menlo','Monaco','Consolas','Liberation Mono','Courier New',monospace; font-size:13px; line-height:1.45; color:#212529; }

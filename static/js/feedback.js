@@ -1,4 +1,84 @@
 let feedbackPerformanceChart = null;
+const promptFallbackDescriptions = {
+  summarizer: 'Latest summarizer template in use.',
+  decider: 'Latest decision-making template in use.',
+  feedback: 'Default system analysis prompt - comprehensive system-wide feedback.'
+};
+const promptElementMap = {
+  summarizer: {
+    version: 'summarizerVersion',
+    label: 'summarizerVersionLabel',
+    shortDescription: 'summarizerDescriptionShort',
+    fullDescription: 'summarizerDescriptionFull',
+    system: 'summarizerSystemPrompt',
+    user: 'summarizerUserTemplate'
+  },
+  decider: {
+    version: 'deciderVersion',
+    label: 'deciderVersionLabel',
+    shortDescription: 'deciderDescriptionShort',
+    fullDescription: 'deciderDescriptionFull',
+    system: 'deciderSystemPrompt',
+    user: 'deciderUserTemplate'
+  },
+  feedback: {
+    version: 'feedbackVersion',
+    label: 'feedbackVersionLabel',
+    shortDescription: 'feedbackDescriptionShort',
+    fullDescription: 'feedbackDescriptionFull',
+    system: 'feedbackSystemPrompt',
+    user: 'feedbackUserTemplate'
+  }
+};
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = value;
+}
+
+function updatePromptCard(prefix, prompt) {
+  const mapping = promptElementMap[prefix];
+  if (!mapping) return;
+
+  const version = (prompt && prompt.version !== undefined && prompt.version !== null)
+    ? `v${prompt.version}`
+    : '--';
+  const versionLabel = (prompt && prompt.version !== undefined && prompt.version !== null)
+    ? `v${prompt.version}`
+    : 'No active version';
+
+  const description = (prompt && typeof prompt.description === 'string' && prompt.description.trim().length)
+    ? prompt.description.trim()
+    : promptFallbackDescriptions[prefix] || 'Active template.';
+
+  const rawSystem = prompt && typeof prompt.system_prompt === 'string' ? prompt.system_prompt : '';
+  const renderedSystem = prompt && typeof prompt.rendered_system_prompt === 'string' ? prompt.rendered_system_prompt : '';
+  const systemPrompt = (renderedSystem || rawSystem || '').trim() || 'Not configured.';
+
+  const rawUser = prompt && typeof prompt.user_prompt === 'string' ? prompt.user_prompt : '';
+  const renderedUser = prompt && typeof prompt.rendered_user_prompt === 'string' ? prompt.rendered_user_prompt : '';
+  const userTemplate = (renderedUser || rawUser || '').trim() || 'Not configured.';
+
+  setText(mapping.version, version);
+  setText(mapping.label, versionLabel);
+  setText(mapping.shortDescription, description);
+  setText(mapping.fullDescription, description);
+  setText(mapping.system, systemPrompt);
+  setText(mapping.user, userTemplate);
+}
+
+async function loadPromptDetails() {
+  try {
+    const data = await fetchJSON('/api/prompts/active');
+    const prompts = data.prompts || {};
+    updatePromptCard('summarizer', prompts.summarizer);
+    updatePromptCard('decider', prompts.decider);
+    updatePromptCard('feedback', prompts.feedback);
+  } catch (e) {
+    console.error('Error loading prompt templates:', e);
+  }
+}
 
 function formatMaybePct(v) {
   const n = Number(v || 0);
@@ -186,6 +266,7 @@ function refreshFeedbackData() {
   loadTradeOutcomes();
 }
 document.addEventListener('DOMContentLoaded', () => {
+  loadPromptDetails();
   refreshFeedbackData();
   setInterval(refreshFeedbackData, 10000);
 });
