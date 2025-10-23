@@ -33,7 +33,10 @@ PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
 EASTERN_TIMEZONE = pytz.timezone('US/Eastern')
 
 # Trading configuration
-MAX_TRADES = 5
+try:
+    MAX_TRADES = max(1, int(_os.getenv("DAI_MAX_TRADES", "5")))
+except (TypeError, ValueError):
+    MAX_TRADES = 5
 MAX_FUNDS = 10000
 MIN_BUFFER = 100  # Must always have at least this much left
 

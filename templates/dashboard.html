@@ -5,6 +5,31 @@
 
 <h1>Portfolio Dashboard</h1>
 
+{% if schwab_summary %}
+<div class="account-meta">
+  <div class="account-card">
+    <span class="account-label">Account Hash</span>
+    <span class="account-value">{{ schwab_summary.account_hash or '—' }}</span>
+  </div>
+  <div class="account-card">
+    <span class="account-label">Account #</span>
+    <span class="account-value">{{ schwab_summary.account_number or '—' }}</span>
+  </div>
+  <div class="account-card">
+    <span class="account-label">Account Type</span>
+    <span class="account-value">{{ schwab_summary.account_type or '—' }}</span>
+  </div>
+  <div class="account-card">
+    <span class="account-label">Mode</span>
+    <span class="account-value">{{ 'Read-Only' if schwab_summary.readonly else 'Live Trading' }}</span>
+  </div>
+  <div class="account-card">
+    <span class="account-label">Last Update</span>
+    <span class="account-value">{{ schwab_summary.last_updated or '—' }}</span>
+  </div>
+</div>
+{% endif %}
+
 <div class="portfolio-summary">
   <div class="metric-card">
     <h3>Total Portfolio Value</h3>
@@ -27,7 +52,13 @@
     <h3>Net Gain/Loss</h3>
     <p class="value">${{ '%.2f'|format(net_gain_loss) }}</p>
     <p class="percentage">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
-    <p class="subtitle">on ${{ '%.0f'|format(initial_investment) }} initial</p>
+    <p class="subtitle">
+      {% if use_schwab_positions %}
+        Account cost basis ${{ '%.2f'|format(initial_investment) }}
+      {% else %}
+        on ${{ '%.0f'|format(initial_investment) }} initial
+      {% endif %}
+    </p>
   </div>
 </div>
 
@@ -51,7 +82,11 @@
     <div class="config-card">
       <h4>Trading Mode</h4>
       <p class="config-value {{ 'real-mode' if current_config.trading_mode == 'real_world' else 'sim-mode' }}">
-        {{ current_config.trading_mode.upper() }} {% if current_config.trading_mode == 'real_world' %}💰{% else %}🎮{% endif %}
+        {% if use_schwab_positions %}
+          LIVE (READ-ONLY) 🔒
+        {% else %}
+          {{ current_config.trading_mode.upper() }} {% if current_config.trading_mode == 'real_world' %}💰{% else %}🎮{% endif %}
+        {% endif %}
       </p>
     </div>
     <div class="config-card">

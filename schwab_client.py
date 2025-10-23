@@ -9,12 +9,24 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+SCHWAB_LIBRARY = None
+easy_client = None
+SchwabClient = None
+SchwabAPI = None
+
 try:
-    from schwab_api import SchwabAPI
-    SCHWAB_AVAILABLE = True
+    from schwab.auth import easy_client as _easy_client
+    from schwab.client.synchronous import Client as _SchwabClient
+    easy_client = _easy_client
+    SchwabClient = _SchwabClient
+    SCHWAB_LIBRARY = "schwab"
 except ImportError:
-    SCHWAB_AVAILABLE = False
-    SchwabAPI = None
+    try:
+        from schwab_api import SchwabAPI as _LegacySchwab
+        SchwabAPI = _LegacySchwab
+        SCHWAB_LIBRARY = "schwab_api"
+    except ImportError:
+        SCHWAB_LIBRARY = None
 from config import (
     SCHWAB_CLIENT_ID,
     SCHWAB_CLIENT_SECRET,
@@ -38,7 +50,7 @@ class SchwabAPIClient:
     
     def __init__(self):
         """Initialize the Schwab client"""
-        self.client = None
+        self.client: Optional[SchwabClient] = None
         self.account_hash = SCHWAB_ACCOUNT_HASH
         self.is_authenticated = False
         self.trading_mode = TRADING_MODE
@@ -68,23 +80,67 @@ class SchwabAPIClient:
         Returns: True if authentication successful, False otherwise
         """
         try:
-            if not SCHWAB_AVAILABLE:
-                logger.error("Schwab API package not available")
+            if SCHWAB_LIBRARY is None:
+                logger.error("Schwab API package not available. Install 'schwab' (preferred) or 'schwab-py'.")
                 return False
-                
+
             if not SCHWAB_CLIENT_ID or not SCHWAB_CLIENT_SECRET:
                 logger.error("Schwab API credentials not configured")
                 return False
             
-            # Note: schwab-api package may require different authentication
-            # This is a placeholder implementation that needs to be customized
-            # based on the actual schwab-api package documentation
-            
-            logger.warning("Schwab API integration requires manual setup")
-            logger.warning("Please refer to schwab-api package documentation")
-            
-            # For now, return False to use simulation mode
-            self.is_authenticated = False
+            token_path = os.path.join(os.path.dirname(__file__), self.token_file)
+            os.makedirs(os.path.dirname(token_path) or ".", exist_ok=True)
+
+            interactive = os.getenv("DAI_SCHWAB_INTERACTIVE", "true").lower() not in {"0", "false", "no"}
+            manual_flow = os.getenv("DAI_SCHWAB_MANUAL_FLOW", "0").lower() in {"1", "true", "yes"}
+
+            if SCHWAB_LIBRARY == "schwab":
+                logger.info("Authenticating with Schwab API (schwab) using token file %s", token_path)
+                if manual_flow:
+                    from schwab.auth import client_from_manual_flow
+                    client = client_from_manual_flow(
+                        api_key=SCHWAB_CLIENT_ID,
+                        app_secret=SCHWAB_CLIENT_SECRET,
+                        redirect_uri=SCHWAB_REDIRECT_URI,
+                        token_path=token_path,
+                        enforce_enums=True,
+                    )
+                else:
+                    client = easy_client(
+                        api_key=SCHWAB_CLIENT_ID,
+                        app_secret=SCHWAB_CLIENT_SECRET,
+                        callback_url=SCHWAB_REDIRECT_URI,
+                        token_path=token_path,
+                        enforce_enums=True,
+                        interactive=interactive,
+                    )
+
+                if isinstance(client, SchwabClient):
+                    self.client = client
+                    self.is_authenticated = True
+                    logger.info("Schwab client authenticated successfully")
+                    return True
+
+                logger.error("Unexpected client type returned from easy_client: %s", type(client))
+                return False
+
+            if SCHWAB_LIBRARY == "schwab_api":
+                logger.warning("Using deprecated 'schwab_api' client. Consider upgrading to the official 'schwab' package.")
+                try:
+                    self.client = SchwabAPI(
+                        client_id=SCHWAB_CLIENT_ID,
+                        client_secret=SCHWAB_CLIENT_SECRET,
+                        redirect_uri=SCHWAB_REDIRECT_URI,
+                        token_path=token_path,
+                    )
+                    self.is_authenticated = True
+                    logger.info("Legacy schwab_api client initialized successfully")
+                    return True
+                except Exception as legacy_error:
+                    logger.error(f"Legacy schwab_api authentication failed: {legacy_error}")
+                    return False
+
+            logger.error("Unsupported Schwab client library configuration")
             return False
                 
         except Exception as e:
@@ -130,7 +186,7 @@ class SchwabAPIClient:
             
             response = self.client.get_account(
                 acc_hash,
-                fields=schwab.client.Account.Fields.POSITIONS
+                fields=[self.client.Account.Fields.POSITIONS]
             )
             
             if response.status_code == 200:

@@ -4,11 +4,12 @@ Handles both simulation (dashboard) and live (Schwab API) trading
 """
 
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy import text
-from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash
+from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash, SCHWAB_ACCOUNT_HASH
 from schwab_client import schwab_client
 from feedback_agent import TradeOutcomeTracker
 from safety_checks import safety_manager
@@ -24,9 +25,11 @@ class TradingInterface:
         self.trading_mode = TRADING_MODE
         self.feedback_tracker = TradeOutcomeTracker()
         self.schwab_enabled = False
+        self.live_view_only = os.environ.get("DAI_SCHWAB_LIVE_VIEW", "0") == "1"
+        self.readonly_mode = os.environ.get("DAI_SCHWAB_READONLY", "0") == "1"
         
-        # Initialize Schwab client if in live mode
-        if self.trading_mode == "live":
+        # Initialize Schwab client if we are trading live OR have been asked to run live view
+        if self.trading_mode == "live" or self.live_view_only:
             try:
                 self.schwab_enabled = schwab_client.authenticate()
                 if self.schwab_enabled:
@@ -37,7 +40,13 @@ class TradingInterface:
                 logger.error(f"Error initializing Schwab client: {e}")
                 self.schwab_enabled = False
         
-        logger.info(f"TradingInterface initialized - Mode: {self.trading_mode}, Schwab: {self.schwab_enabled}")
+        logger.info(
+            "TradingInterface initialized - Mode: %s, Schwab Enabled: %s, Live View: %s, Read-Only: %s",
+            self.trading_mode,
+            self.schwab_enabled,
+            self.live_view_only,
+            self.readonly_mode
+        )
     
     def execute_trade_decisions(self, decisions: List[Dict]) -> Dict[str, Any]:
         """
@@ -331,6 +340,12 @@ class TradingInterface:
         """
         try:
             if not self.schwab_enabled:
+                if self.live_view_only or os.environ.get("DAI_SCHWAB_LIVE_VIEW", "0") == "1":
+                    try:
+                        self.schwab_enabled = schwab_client.authenticate()
+                    except Exception as auth_err:
+                        logger.error(f"Unable to authenticate Schwab client for live view: {auth_err}")
+
                 return {
                     "status": "disabled",
                     "message": "Schwab API not enabled"
@@ -390,9 +405,16 @@ class TradingInterface:
                 "account_info": {
                     "account_value": float(balances.get("totalLongMarketValue", 0)),
                     "buying_power": float(balances.get("buyingPower", 0)),
-                    "day_trading_buying_power": float(balances.get("dayTradingBuyingPower", 0))
+                    "day_trading_buying_power": float(balances.get("dayTradingBuyingPower", 0)),
+                    "account_hash": schwab_client.account_hash or SCHWAB_ACCOUNT_HASH,
+                    "account_number": securities_account.get("accountNumber") or securities_account.get("accountId"),
+                    "account_type": securities_account.get("accountType"),
+                    "status": securities_account.get("accountStatus")
                 },
-                "last_updated": datetime.now().isoformat()
+                "positions_count": len(formatted_positions),
+                "last_updated": datetime.now().isoformat(),
+                "readonly_mode": self.readonly_mode,
+                "live_trading_enabled": self.trading_mode == "live" and not self.readonly_mode
             }
             
         except Exception as e:

@@ -9,33 +9,30 @@
 <h1>AI Trading Feedback Dashboard</h1>
 {% include "partials/_config_banner.html" %}
 
-<div class="portfolio-summary">
-  <div class="metric-card" id="summarizerVersionCard">
-    <h3>📊 Summarizer Prompt</h3>
-    <p class="value" id="summarizerVersion">
-      {% if summarizer.version is not none %}v{{ summarizer.version }}{% else %}--{% endif %}
-    </p>
-    <p class="card-subtext" id="summarizerDescriptionShort">
-      {{ summarizer.description or 'Latest summarizer template in use.' }}
-    </p>
+<div class="prompt-summary">
+  <div class="prompt-chip" id="summarizerVersionCard">
+    <span class="prompt-chip-icon">📊</span>
+    <div class="prompt-chip-detail">
+      <span class="prompt-chip-title">Summarizer Prompt</span>
+      <span class="prompt-chip-version" id="summarizerVersion">{% if summarizer.version is not none %}v{{ summarizer.version }}{% else %}v0{% endif %}</span>
+      <span class="prompt-chip-desc" id="summarizerDescriptionShort">{{ summarizer.description or 'Latest summarizer template in use.' }}</span>
+    </div>
   </div>
-  <div class="metric-card" id="deciderVersionCard">
-    <h3>🎯 Decider Prompt</h3>
-    <p class="value" id="deciderVersion">
-      {% if decider.version is not none %}v{{ decider.version }}{% else %}--{% endif %}
-    </p>
-    <p class="card-subtext" id="deciderDescriptionShort">
-      {{ decider.description or 'Latest decision-making template in use.' }}
-    </p>
+  <div class="prompt-chip" id="deciderVersionCard">
+    <span class="prompt-chip-icon">🎯</span>
+    <div class="prompt-chip-detail">
+      <span class="prompt-chip-title">Decider Prompt</span>
+      <span class="prompt-chip-version" id="deciderVersion">{% if decider.version is not none %}v{{ decider.version }}{% else %}v0{% endif %}</span>
+      <span class="prompt-chip-desc" id="deciderDescriptionShort">{{ decider.description or 'Latest decision-making template in use.' }}</span>
+    </div>
   </div>
-  <div class="metric-card" id="feedbackVersionCard">
-    <h3>🧭 Feedback Prompt</h3>
-    <p class="value" id="feedbackVersion">
-      {% if feedback_prompt.version is not none %}v{{ feedback_prompt.version }}{% else %}--{% endif %}
-    </p>
-    <p class="card-subtext" id="feedbackDescriptionShort">
-      {{ feedback_prompt.description or 'Active performance review template.' }}
-    </p>
+  <div class="prompt-chip" id="feedbackVersionCard">
+    <span class="prompt-chip-icon">🧭</span>
+    <div class="prompt-chip-detail">
+      <span class="prompt-chip-title">Feedback Prompt</span>
+      <span class="prompt-chip-version" id="feedbackVersion">{% if feedback_prompt.version is not none %}v{{ feedback_prompt.version }}{% else %}v0{% endif %}</span>
+      <span class="prompt-chip-desc" id="feedbackDescriptionShort">{{ feedback_prompt.description or 'Active performance review template.' }}</span>
+    </div>
   </div>
 </div>
 
@@ -52,20 +49,20 @@
         <div class="prompt-card-title">
           <span>Summarizer Agent</span>
           <span class="prompt-version-tag" id="summarizerVersionLabel">
-            {% if summarizer.version is not none %}v{{ summarizer.version }}{% else %}No active version{% endif %}
+            {% if summarizer.version is not none %}v{{ summarizer.version }}{% else %}v0{% endif %}
           </span>
         </div>
         <p class="prompt-description" id="summarizerDescriptionFull">
-          {{ summarizer.description or 'No description provided for this template.' }}
+          {{ summarizer.description or 'Baseline summarizer template.' }}
         </p>
       </header>
       <details open>
         <summary>System Prompt</summary>
-        <pre class="prompt-block" id="summarizerSystemPrompt">{{ summarizer.rendered_system_prompt|default(summarizer.system_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="summarizerSystemPrompt">{{ summarizer.rendered_system_prompt|default(summarizer.system_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
       <details>
         <summary>User Template</summary>
-        <pre class="prompt-block" id="summarizerUserTemplate">{{ summarizer.rendered_user_prompt|default(summarizer.user_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="summarizerUserTemplate">{{ summarizer.rendered_user_prompt|default(summarizer.user_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
     </article>
 
@@ -74,20 +71,20 @@
         <div class="prompt-card-title">
           <span>Decider Agent</span>
           <span class="prompt-version-tag" id="deciderVersionLabel">
-            {% if decider.version is not none %}v{{ decider.version }}{% else %}No active version{% endif %}
+            {% if decider.version is not none %}v{{ decider.version }}{% else %}v0{% endif %}
           </span>
         </div>
         <p class="prompt-description" id="deciderDescriptionFull">
-          {{ decider.description or 'No description provided for this template.' }}
+          {{ decider.description or 'Baseline decision template.' }}
         </p>
       </header>
       <details open>
         <summary>System Prompt</summary>
-        <pre class="prompt-block" id="deciderSystemPrompt">{{ decider.rendered_system_prompt|default(decider.system_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="deciderSystemPrompt">{{ decider.rendered_system_prompt|default(decider.system_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
       <details>
         <summary>User Template</summary>
-        <pre class="prompt-block" id="deciderUserTemplate">{{ decider.rendered_user_prompt|default(decider.user_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="deciderUserTemplate">{{ decider.rendered_user_prompt|default(decider.user_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
     </article>
 
@@ -96,20 +93,20 @@
         <div class="prompt-card-title">
           <span>Feedback Agent</span>
           <span class="prompt-version-tag" id="feedbackVersionLabel">
-            {% if feedback_prompt.version is not none %}v{{ feedback_prompt.version }}{% else %}No active version{% endif %}
+            {% if feedback_prompt.version is not none %}v{{ feedback_prompt.version }}{% else %}v0{% endif %}
           </span>
         </div>
         <p class="prompt-description" id="feedbackDescriptionFull">
-          {{ feedback_prompt.description or 'No description provided for this template.' }}
+          {{ feedback_prompt.description or 'Default system analysis prompt - comprehensive system-wide feedback' }}
         </p>
       </header>
       <details open>
         <summary>System Prompt</summary>
-        <pre class="prompt-block" id="feedbackSystemPrompt">{{ feedback_prompt.rendered_system_prompt|default(feedback_prompt.system_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="feedbackSystemPrompt">{{ feedback_prompt.rendered_system_prompt|default(feedback_prompt.system_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
       <details>
         <summary>User Template</summary>
-        <pre class="prompt-block" id="feedbackUserTemplate">{{ feedback_prompt.rendered_user_prompt|default(feedback_prompt.user_prompt)|default('Not configured.', true)|e }}</pre>
+        <pre class="prompt-block" id="feedbackUserTemplate">{{ feedback_prompt.rendered_user_prompt|default(feedback_prompt.user_prompt)|default('Baseline prompt unavailable.', true)|e }}</pre>
       </details>
     </article>
   </div>

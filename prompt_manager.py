@@ -112,113 +112,94 @@ def get_active_prompt(agent_type):
                 raise ValueError(f"No prompts found for {agent_type}")
 
 def get_active_prompt_emergency_patch(agent_type):
-    """Emergency patch to get prompts - just use prompt_versions table directly"""
+    """Fetch active prompt with graceful baseline fallback for new configs."""
     from config import get_current_config_hash, engine
     from sqlalchemy import text
-    
+
     config_hash = get_current_config_hash()
-    
-    with engine.connect() as conn:
-        # Use prompt_versions table directly
-        try:
-            result = conn.execute(text("""
-                SELECT system_prompt, user_prompt_template, version
-                FROM prompt_versions
-                WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
-                ORDER BY version DESC LIMIT 1
-            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-            
-            if result:
-                return {
-                    "system_prompt": result.system_prompt,
-                    "user_prompt_template": result.user_prompt_template,
-                    "version": result.version
-                }
-        except Exception as e:
-            print(f"⚠️  prompt_versions table error: {e}")
-        
-        # Last resort: hardcoded v0 baseline
-        print(f"🚨 EMERGENCY: Using hardcoded v0 baseline for {agent_type}")
-        
-        if agent_type == "SummarizerAgent":
+
+    def _fetch_prompt(conn):
+        result = conn.execute(text("""
+            SELECT system_prompt, user_prompt_template, version
+            FROM prompt_versions
+            WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
+            ORDER BY version DESC LIMIT 1
+        """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
+        if result:
             return {
-                "system_prompt": "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles.",
-                "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights.
+                "system_prompt": result.system_prompt,
+                "user_prompt_template": result.user_prompt_template,
+                "version": result.version
+            }
+        return None
+
+    try:
+        with engine.connect() as conn:
+            prompt = _fetch_prompt(conn)
+            if prompt:
+                return prompt
+    except Exception as e:
+        print(f"⚠️ prompt_versions lookup error: {e}")
+
+    try:
+        if initialize_config_prompts(config_hash):
+            with engine.connect() as conn:
+                prompt = _fetch_prompt(conn)
+                if prompt:
+                    return prompt
+    except Exception as init_err:
+        print(f"⚠️ Prompt initialization warning for {agent_type}: {init_err}")
+
+    baselines = {
+        "SummarizerAgent": {
+            "system_prompt": "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles.",
+            "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights.
 
 {feedback_context}
 
 Content: {content}
 
 Return ONLY valid JSON in this EXACT format:
-{{
+{
     "headlines": ["headline 1", "headline 2", "headline 3"],
     "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
-}}""",
-                "version": 0
-            }
-        elif agent_type == "DeciderAgent":
-            return {
-                "system_prompt": "You are an aggressive day trading agent managing a $10,000 portfolio. You must use substantial position sizes and never waste capital on tiny trades. You cannot buy stocks you already own without selling first.",
-                "user_prompt_template": """You are an AGGRESSIVE DAY TRADING AI managing a $10,000 portfolio.
+}""",
+            "version": 0,
+        },
+        "DeciderAgent": {
+            "system_prompt": "You are an aggressive day trading agent managing a $10,000 portfolio. You must use substantial position sizes and never waste capital on tiny trades. You cannot buy stocks you already own without selling first.",
+            "user_prompt_template": """You are an AGGRESSIVE DAY TRADING AI managing a $10,000 portfolio.
 
 🚨 UNCHANGING CORE RULES (NEVER VIOLATE THESE):
-
-POSITION SIZING REQUIREMENTS:
-- MINIMUM buy order: $1500 (NEVER buy less than $1500)
-- TYPICAL buy order: $2000-$3500 (use substantial amounts)
-- MAXIMUM buy order: $4000 per position
-- Available cash: ${available_cash} - USE IT AGGRESSIVELY!
+- MINIMUM buy order: $1500
+- TYPICAL buy order: $2000-$3500
+- MAXIMUM buy order: $4000
+- Available cash: ${available_cash}
 
 PORTFOLIO MANAGEMENT REQUIREMENTS:
-- NEVER buy a stock you already own (sell it first if you want to reposition)
-- ALWAYS analyze existing positions for selling before considering new buys
-- MUST provide explicit sell/hold reasoning for EVERY existing position
-- Cannot hold more than 5 different stocks at once
+- NEVER buy a stock you already own
+- ALWAYS review existing positions before new buys
+- MUST justify every hold
+- Max 5 concurrent positions
 
-MANDATORY DECISION PROCESS:
-1. STEP 1: For EACH stock in "Current Holdings" below → decide SELL or HOLD with specific reasoning
-2. STEP 2: Consider NEW buy opportunities with $1500+ amounts
-3. STEP 3: Ensure total allocation doesn't exceed available cash
+Provide structured JSON decisions as documented.
+""",
+            "version": 0,
+        },
+        "FeedbackAgent": {
+            "system_prompt": "You are a trading performance analyst providing structured feedback for continuous improvement.",
+            "user_prompt_template": """Review recent trading outcomes and provide structured feedback covering:
+- Overall performance summary
+- Key strengths
+- Areas for improvement
+- Specific, actionable recommendations
+""",
+            "version": 0,
+        },
+    }
 
-Current Portfolio:
-- Available Cash: ${available_cash} (out of $10,000 total)
-- Current Holdings: {holdings}
-
-Market Analysis:
-{summaries}
-
-{feedback}
-
-🚨 MANDATORY: For EVERY stock listed in "Current Holdings" above, you MUST provide a decision.
-
-🚨 JSON RESPONSE FORMAT (NO EXCEPTIONS):
-[
-  {{
-    "action": "sell" or "buy" or "hold",
-    "ticker": "SYMBOL",
-    "amount_usd": dollar_amount,
-    "reason": "detailed explanation"
-  }}
-]
-
-AMOUNT RULES:
-- SELL: amount_usd = 0 (sell ALL shares)
-- BUY: amount_usd = $1500 to $4000 (substantial amounts only)
-- HOLD: amount_usd = 0 (but explain WHY not selling)
-
-EXAMPLES OF GOOD DECISIONS:
-✅ {{"action": "sell", "ticker": "GLD", "amount_usd": 0, "reason": "Taking profits after 8% gain, market showing signs of reversal"}}
-✅ {{"action": "buy", "ticker": "NVDA", "amount_usd": 2500, "reason": "Strong earnings beat, AI momentum, allocating $2500 for short-term upside"}}
-✅ {{"action": "hold", "ticker": "AAPL", "amount_usd": 0, "reason": "Keeping position, strong technical setup, earnings next week could drive further gains"}}
-
-EXAMPLES OF BAD DECISIONS:
-❌ {{"action": "buy", "ticker": "GLD", "amount_usd": 305, "reason": "..."}} ← TOO SMALL & ALREADY OWN IT
-❌ {{"action": "buy", "ticker": "TSLA", "amount_usd": 800, "reason": "..."}} ← TOO SMALL
-❌ Missing analysis for existing holdings ← MANDATORY REQUIREMENT""",
-                "version": 0
-            }
-    
-    return None
+    print(f"ℹ️ Using baseline prompt for {agent_type} (no active version found for config {config_hash})")
+    return baselines.get(agent_type, baselines["FeedbackAgent"])
 
 def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system"):
     """Create a new prompt version for the current config, reusing version numbers when possible"""

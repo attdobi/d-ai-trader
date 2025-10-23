@@ -28,12 +28,35 @@ function renderSchwabData(data) {
   const cash = document.getElementById('cash-balance');
   const bp = document.getElementById('buying-power');
   const dtbp = document.getElementById('day-trading-power');
+  const acctHashEl = document.getElementById('account-hash');
+  const acctNumberEl = document.getElementById('account-number');
+  const acctTypeEl = document.getElementById('account-type');
+  const acctModeEl = document.getElementById('account-mode');
+  const lastUpdatedEl = document.getElementById('last-updated');
+  const readonlyNoteEl = document.getElementById('readonly-note');
+  const readonlyDescription = readonlyNoteEl ? readonlyNoteEl.querySelector('p') : null;
+  const accountMetaEl = document.getElementById('account-meta');
+
   if (total) total.textContent = formatCurrency(data.total_portfolio_value || 0);
   if (cash) cash.textContent = formatCurrency(data.cash_balance || 0);
   if (data.account_info) {
     if (bp) bp.textContent = formatCurrency(data.account_info.buying_power || 0);
     if (dtbp) dtbp.textContent = formatCurrency(data.account_info.day_trading_buying_power || 0);
+    if (acctHashEl) acctHashEl.textContent = data.account_info.account_hash || '—';
+    if (acctNumberEl) acctNumberEl.textContent = data.account_info.account_number || '—';
+    if (acctTypeEl) acctTypeEl.textContent = data.account_info.account_type || '—';
   }
+  if (acctModeEl) acctModeEl.textContent = data.readonly_mode ? 'Read-Only' : (data.live_trading_enabled ? 'Live Trading' : 'Simulation');
+  if (lastUpdatedEl) {
+    const parsed = data.last_updated ? new Date(data.last_updated) : null;
+    lastUpdatedEl.textContent = (parsed && !Number.isNaN(parsed.valueOf()))
+      ? parsed.toLocaleString()
+      : (data.last_updated || new Date().toLocaleString());
+  }
+  if (accountMetaEl) accountMetaEl.style.display = 'grid';
+  if (readonlyNoteEl) readonlyNoteEl.style.display = data.readonly_mode ? 'block' : 'none';
+  if (data.warning && readonlyDescription) readonlyDescription.textContent = data.warning;
+
   const sum = document.getElementById('schwab-summary');
   if (sum) sum.style.display = 'grid';
   const tbody = document.getElementById('holdings-body');

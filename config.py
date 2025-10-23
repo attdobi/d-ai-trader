@@ -75,7 +75,7 @@ SCHWAB_REDIRECT_URI = os.getenv("SCHWAB_REDIRECT_URI", "https://localhost:8443/c
 SCHWAB_ACCOUNT_HASH = os.getenv("SCHWAB_ACCOUNT_HASH")
 
 # Trading configuration
-TRADING_MODE = os.getenv("TRADING_MODE", "simulation")  # simulation or live
+TRADING_MODE = os.getenv("TRADING_MODE", "simulation").lower()  # simulation or live
 MAX_POSITION_VALUE = float(os.getenv("MAX_POSITION_VALUE", "2000"))
 MAX_POSITION_FRACTION = float(os.getenv("MAX_POSITION_FRACTION", "0"))
 MAX_TOTAL_INVESTMENT = float(os.getenv("MAX_TOTAL_INVESTMENT", "10000"))

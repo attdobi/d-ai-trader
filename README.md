@@ -17,19 +17,32 @@ An autonomous **day trading system** powered by GPT-4o Vision that analyzes fina
 
 ### **Schwab API Read-Only Test (Before Going Live)**
 ```bash
-# Test Schwab API connection safely - NO TRADES
-./test_schwab_api.sh
+# View real holdings & balances without trades
+./start_schwab_live_view.sh -p 8080
 
 # Then open: http://localhost:8080/schwab
 ```
 
-### **Live Trading (ONLY after testing!)**
+### **Live Trading Pilot (One Buy Decision)**
 ```bash
-# Start conservative (every hour)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 60
+# Launch live trading in read-only mode first, then:
 
-# After confirming it works, increase to aggressive
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 15
+# Single-buy pilot – will execute at most ONE buy order per cycle
+./start_live_trading.sh --port 8080 --model gpt-4o --cadence 15
+
+# Environment overrides (optional):
+#   export DAI_MAX_TRADES=1      # already set by start_live_trading.sh
+#   export DAI_SCHWAB_INTERACTIVE=0  # skip ENTER prompt
+```
+
+### **Full Live Trading (Automation Enabled)**
+```bash
+# After verifying the pilot, remove the trade cap and increase cadence as desired
+export DAI_MAX_TRADES=5          # or your preferred limit
+export DAI_SCHWAB_READONLY=0     # ensure live orders are allowed
+export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
+
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -t real_world -c 15
 ```
 
 **Dashboard:** http://localhost:8080
@@ -187,7 +200,7 @@ OPENAI_API_KEY=sk-proj-your_actual_api_key_here
 SCHWAB_CLIENT_ID=your_client_id
 SCHWAB_CLIENT_SECRET=your_client_secret
 SCHWAB_ACCOUNT_HASH=your_account_hash
-SCHWAB_REDIRECT_URI=https://localhost:8443/callback
+SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
 ```
 
 ---

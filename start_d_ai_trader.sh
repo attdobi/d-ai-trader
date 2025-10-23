@@ -58,10 +58,57 @@ done
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 VENV_DIR="${PROJECT_ROOT}/dai"
 
-# Create venv if missing
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  :
+else
+  for candidate in "/opt/homebrew/bin/python3.11" "/opt/homebrew/bin/python3.10" python3.11 python3.10 python3; do
+    if [[ -x "${candidate}" && "${candidate}" == /* ]]; then
+      PYTHON_BIN="${candidate}"
+      break
+    elif command -v "${candidate}" >/dev/null 2>&1; then
+      PYTHON_BIN="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  echo "❌ Unable to locate a Python 3 interpreter (need >= 3.10)"
+  exit 1
+fi
+
+if [[ -n "${CONDA_PREFIX:-}" ]]; then
+  echo "⚠️  Detected active Conda environment (${CONDA_PREFIX}). Launch script will create its own venv using ${PYTHON_BIN}."
+fi
+
+PY_VERSION="$("${PYTHON_BIN}" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')"
+PY_MAJOR=$(echo "${PY_VERSION}" | cut -d. -f1)
+PY_MINOR=$(echo "${PY_VERSION}" | cut -d. -f2)
+if (( PY_MAJOR < 3 || (PY_MAJOR == 3 && PY_MINOR < 10) )); then
+  echo "❌ ${PYTHON_BIN} is Python ${PY_VERSION}. Please install Python 3.10+ (e.g., python3.10 or python3.11) and set PYTHON_BIN."
+  exit 1
+fi
+
+# Create venv if missing or wrong interpreter
+RECREATE_VENV=0
 if [[ ! -d "${VENV_DIR}" ]]; then
-  echo "📦 Creating virtualenv at ${VENV_DIR} ..."
-  python3 -m venv "${VENV_DIR}"
+  RECREATE_VENV=1
+elif [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  RECREATE_VENV=1
+else
+  VENV_VERSION="$("${VENV_DIR}/bin/python" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')"
+  VENV_MAJOR=$(echo "${VENV_VERSION}" | cut -d. -f1)
+  VENV_MINOR=$(echo "${VENV_VERSION}" | cut -d. -f2)
+  if (( VENV_MAJOR < 3 || (VENV_MAJOR == 3 && VENV_MINOR < 10) )); then
+    echo "⚠️  Existing virtualenv uses Python ${VENV_VERSION}; rebuilding with ${PYTHON_BIN} ..."
+    RECREATE_VENV=1
+  fi
+fi
+
+if (( RECREATE_VENV )); then
+  rm -rf "${VENV_DIR}"
+  echo "📦 Creating virtualenv at ${VENV_DIR} using ${PYTHON_BIN} ..."
+  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
 fi
 
 # Activate venv
@@ -86,6 +133,8 @@ export DAI_PROJECT_ROOT="${PROJECT_ROOT}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 # Default: disable UC to use Selenium Manager (stable on macOS)
 export DAI_DISABLE_UC="${DAI_DISABLE_UC:-1}"
+# Normalize trading mode to lower-case for downstream imports
+export TRADING_MODE="$(echo "${TRADING_MODE}" | tr '[:upper:]' '[:lower:]')"
 # Propagate config to the app
 export DAI_PORT="${PORT}"
 export DAI_GPT_MODEL="${MODEL}"

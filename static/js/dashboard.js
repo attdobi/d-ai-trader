@@ -137,10 +137,16 @@ function loadChart(ticker = null) {
 
 function loadPerformanceChart() {
   fetch('/api/portfolio-performance').then(r => r.json()).then(data => {
-    if (data && data.length > 0) {
-      const hasData = data.some(row => parseFloat(row.net_gain_loss) !== 0 || parseFloat(row.total_portfolio_value) !== 10000);
-      if (hasData) { renderPerformanceChart(data); } else { showNoDataMessage(); }
-    } else { showNoDataMessage(); }
+    if (Array.isArray(data) && data.length > 0) {
+      const hasData = data.some(row => Math.abs(parseFloat(row.net_gain_loss || 0)) > 0.01 || Math.abs(parseFloat(row.total_portfolio_value || 0)) > 0.01);
+      if (hasData) {
+        renderPerformanceChart(data);
+      } else {
+        showNoDataMessage();
+      }
+    } else {
+      showNoDataMessage();
+    }
   }).catch(() => showErrorMessage());
 }
 function showNoDataMessage() {

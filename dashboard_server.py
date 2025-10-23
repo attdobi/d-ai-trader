@@ -23,8 +23,9 @@ import pandas as pd
 import threading
 import time
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from feedback_agent import TradeOutcomeTracker
+from schwab_client import schwab_client
 import subprocess
 import sys
 import os
@@ -233,6 +234,96 @@ def _build_prompt_context_samples(latest_feedback=None):
         "context_data": context_data_text,
     }
 
+
+def _sync_holdings_with_database(config_hash, holdings, cash_balance):
+    """Replace holdings in the database with the live Schwab snapshot."""
+    now = datetime.utcnow()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM holdings WHERE config_hash = :config_hash"), {"config_hash": config_hash})
+
+        # Cash row
+        conn.execute(text("""
+            INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                  purchase_timestamp, current_price_timestamp, total_value, current_value,
+                                  gain_loss, reason, is_active)
+            VALUES (:config_hash, 'CASH', 1, :cash, :cash, :ts, :ts, :cash, :cash, 0, 'Schwab cash balance', TRUE)
+        """), {
+            "config_hash": config_hash,
+            "cash": cash_balance,
+            "ts": now
+        })
+
+        for row in holdings:
+            shares = float(row.get("shares") or 0)
+            current_price = float(row.get("current_price") or 0)
+            current_value = float(row.get("current_value") or (shares * current_price))
+            total_value = float(row.get("total_value") or (shares * current_price))
+            purchase_price = float(row.get("purchase_price") or 0)
+
+            if purchase_price == 0 and shares > 0:
+                purchase_price = total_value / shares if total_value else current_price
+
+            gain_loss = float(row.get("gain_loss") or (current_value - total_value))
+
+            conn.execute(text("""
+                INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                      purchase_timestamp, current_price_timestamp, total_value, current_value,
+                                      gain_loss, reason, is_active)
+                VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price,
+                        :ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
+            """), {
+                "config_hash": config_hash,
+                "ticker": row.get("ticker"),
+                "shares": shares,
+                "purchase_price": purchase_price,
+                "current_price": current_price,
+                "total_value": total_value,
+                "current_value": current_value,
+                "gain_loss": gain_loss,
+                "reason": row.get("reason", "Schwab synced position"),
+                "ts": now
+            })
+
+
+def _record_live_portfolio_snapshot(config_hash, total_portfolio_value, cash_balance,
+                                    total_invested, total_profit_loss, holdings):
+    """Persist live Schwab portfolio snapshot for charting/history."""
+    percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
+    holdings_snapshot = json.dumps([
+        {"ticker": h.get("ticker"), "current_value": h.get("current_value", 0)}
+        for h in holdings
+    ])
+
+    with engine.begin() as conn:
+        latest = conn.execute(text("""
+            SELECT timestamp, total_portfolio_value
+            FROM portfolio_history
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp DESC LIMIT 1
+        """), {"config_hash": config_hash}).fetchone()
+
+        if latest:
+            last_time = latest.timestamp
+            last_value = float(latest.total_portfolio_value)
+            if abs(last_value - total_portfolio_value) < 0.01 and (datetime.utcnow() - last_time) < timedelta(minutes=5):
+                return
+
+        conn.execute(text("""
+            INSERT INTO portfolio_history
+            (total_portfolio_value, cash_balance, total_invested,
+             total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
+            VALUES (:total_portfolio_value, :cash_balance, :total_invested,
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
+        """), {
+            "total_portfolio_value": total_portfolio_value,
+            "cash_balance": cash_balance,
+            "total_invested": total_invested,
+            "total_profit_loss": total_profit_loss,
+            "percentage_gain": percentage_gain,
+            "holdings_snapshot": holdings_snapshot,
+            "config_hash": config_hash
+        })
+
 def _get_active_prompts_bundle():
     """Fetch active prompt data for all primary agents with current feedback applied."""
     tracker = TradeOutcomeTracker()
@@ -373,7 +464,7 @@ def dashboard():
 
         holdings = [dict(row._mapping) for row in result]
 
-        # Calculate portfolio metrics
+        # Calculate portfolio metrics (default: local DB holdings)
         cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
         stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
         
@@ -382,13 +473,78 @@ def dashboard():
         total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
         total_portfolio_value = total_current_value + cash_balance
         
-        # Calculate metrics relative to initial $10,000 investment
+        # Calculate metrics relative to initial $10,000 investment by default
         initial_investment = 10000.0
         net_gain_loss = total_portfolio_value - initial_investment
-        net_percentage_gain = (net_gain_loss / initial_investment * 100)
+        net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
         
         # Calculate percentage gain on invested amount (excluding cash)
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
+
+        schwab_summary = None
+        use_schwab_positions = False
+
+        if getattr(trading_interface, "schwab_enabled", False):
+            if os.getenv("DAI_SCHWAB_LIVE_VIEW", "0") in {"1", "true", "True"} or get_trading_mode() == "live":
+                try:
+                    schwab_data = trading_interface.sync_schwab_positions()
+                    if schwab_data.get("status") == "success":
+                        positions = schwab_data.get("positions", [])
+                        if positions:
+                            holdings = []
+                            for position in positions:
+                                shares = float(position.get("shares") or 0)
+                                avg_price = float(position.get("average_price") or 0)
+                                current_price = float(position.get("current_price") or 0)
+                                total_cost = float(position.get("total_value") or (shares * avg_price))
+                                market_value = float(position.get("market_value") or (shares * current_price))
+                                gain_loss = float(position.get("gain_loss") or (market_value - total_cost))
+
+                                holdings.append({
+                                    "ticker": position.get("symbol", "-").upper(),
+                                    "shares": shares,
+                                    "purchase_price": avg_price,
+                                    "current_price": current_price,
+                                    "total_value": total_cost,
+                                    "current_value": market_value,
+                                    "gain_loss": gain_loss,
+                                    "reason": "📡 Synced from Schwab"
+                                })
+
+                            cash_balance = float(schwab_data.get("cash_balance", 0))
+                            total_invested = sum(row["total_value"] for row in holdings)
+                            total_current_value = sum(row["current_value"] for row in holdings)
+                            total_profit_loss = sum(row["gain_loss"] for row in holdings)
+                            total_portfolio_value = total_current_value + cash_balance
+
+                            # Use live account metrics for initial investment and net gain
+                            initial_investment = total_invested + cash_balance
+                            net_gain_loss = total_profit_loss
+                            net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
+                            percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
+
+                            account_info = schwab_data.get("account_info", {})
+                            schwab_summary = {
+                                "account_hash": account_info.get("account_hash") or os.getenv("SCHWAB_ACCOUNT_HASH"),
+                                "account_number": account_info.get("account_number"),
+                                "account_type": account_info.get("account_type"),
+                                "readonly": schwab_data.get("readonly_mode", False),
+                                "last_updated": schwab_data.get("last_updated")
+                            }
+                            use_schwab_positions = True
+
+                            # Persist live snapshot for dashboards/charts
+                            _sync_holdings_with_database(config_hash, holdings, cash_balance)
+                            _record_live_portfolio_snapshot(
+                                config_hash,
+                                total_portfolio_value,
+                                cash_balance,
+                                total_invested,
+                                total_profit_loss,
+                                holdings,
+                            )
+                except Exception as schwab_error:
+                    print(f"Error syncing Schwab data for dashboard: {schwab_error}")
 
         # Get current system configuration with prompt versions
         try:
@@ -417,7 +573,9 @@ def dashboard():
                                portfolio_value=total_current_value, total_invested=total_invested,
                                total_profit_loss=total_profit_loss, percentage_gain=percentage_gain,
                                initial_investment=initial_investment, net_gain_loss=net_gain_loss,
-                               net_percentage_gain=net_percentage_gain, current_config=current_config)
+                               net_percentage_gain=net_percentage_gain, current_config=current_config,
+                               schwab_summary=schwab_summary,
+                               use_schwab_positions=use_schwab_positions)
 
 @app.template_filter('from_json')
 def from_json_filter(s):
@@ -640,26 +798,50 @@ def api_portfolio_history():
             WHERE config_hash = :config_hash
             ORDER BY timestamp ASC
         """), {"config_hash": config_hash}).fetchall()
-        
-        return jsonify([dict(row._mapping) for row in result])
+
+    payload = []
+    for row in result:
+        record = dict(row._mapping)
+        ts = record.get("timestamp")
+        if isinstance(ts, datetime):
+            record["timestamp"] = ts.isoformat()
+        payload.append(record)
+
+    return jsonify(payload)
 
 @app.route("/api/portfolio-performance")
 def api_portfolio_performance():
     """Get portfolio performance relative to initial $10,000 investment - strictly filtered by current config"""
-    initial_investment = 10000.0
     config_hash = get_current_config_hash()
-    
+
     with engine.connect() as conn:
         result = conn.execute(text("""
             SELECT timestamp, total_portfolio_value, cash_balance,
-                   (total_portfolio_value - :initial_investment) as net_gain_loss,
-                   ((total_portfolio_value - :initial_investment) / :initial_investment * 100) as net_percentage_gain
+                   total_invested, total_profit_loss
             FROM portfolio_history 
             WHERE config_hash = :config_hash
             ORDER BY timestamp ASC
-        """), {"initial_investment": initial_investment, "config_hash": config_hash}).fetchall()
-        
-        return jsonify([dict(row._mapping) for row in result])
+        """), {"config_hash": config_hash}).fetchall()
+
+    rows = [dict(row._mapping) for row in result]
+    if not rows:
+        return jsonify([])
+
+    base = rows[0]["total_portfolio_value"] or 0
+    output = []
+    for row in rows:
+        total_value = float(row.get("total_portfolio_value") or 0)
+        net_gain_loss = total_value - base
+        net_percentage = (net_gain_loss / base * 100) if base else 0
+        output.append({
+            "timestamp": row.get("timestamp").isoformat() if isinstance(row.get("timestamp"), datetime) else row.get("timestamp"),
+            "total_portfolio_value": total_value,
+            "cash_balance": float(row.get("cash_balance") or 0),
+            "net_gain_loss": net_gain_loss,
+            "net_percentage_gain": net_percentage,
+        })
+
+    return jsonify(output)
 
 @app.route("/api/profit-loss")
 def api_profit_loss():
@@ -1330,29 +1512,41 @@ def reset_prompts():
 
 @app.route('/api/reset-portfolio', methods=['POST'])
 def reset_portfolio():
-    """Reset portfolio to initial state with $10,000 cash"""
+    """Reset portfolio to either the live Schwab snapshot or simulation baseline."""
     try:
         config_hash = get_current_config_hash()
+        use_live = getattr(trading_interface, 'schwab_enabled', False) and (
+            os.getenv('DAI_SCHWAB_LIVE_VIEW', '0') in {'1', 'true', 'True'} or get_trading_mode() == 'live'
+        )
+        schwab_snapshot = None
+
+        if use_live:
+            try:
+                snapshot = trading_interface.sync_schwab_positions()
+                if snapshot.get('status') == 'success':
+                    schwab_snapshot = snapshot
+                else:
+                    print(f"⚠️ Schwab reset snapshot unavailable: {snapshot.get('message')}")
+            except Exception as e:
+                print(f"⚠️ Schwab reset snapshot error: {e}")
+
         with engine.begin() as conn:
-            # Get current holdings to record them as sold for history (filter by config_hash)
             current_holdings = conn.execute(text("""
                 SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss
                 FROM holdings
                 WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
             """), {"config_hash": config_hash}).fetchall()
-            
-            # Record current holdings as sold for historical tracking
+
             for holding in current_holdings:
                 if holding.shares > 0:
-                    # Record as a sell transaction
                     conn.execute(text("""
                         INSERT INTO trade_outcomes (
-                            ticker, sell_timestamp, purchase_price, sell_price, 
-                            shares, gain_loss_amount, gain_loss_percentage, 
+                            ticker, sell_timestamp, purchase_price, sell_price,
+                            shares, gain_loss_amount, gain_loss_percentage,
                             hold_duration_days, original_reason, sell_reason, outcome_category, config_hash
                         ) VALUES (
                             :ticker, CURRENT_TIMESTAMP, :purchase_price, :current_price,
-                            :shares, :gain_loss, 
+                            :shares, :gain_loss,
                             CASE WHEN :total_value > 0 THEN (:gain_loss / :total_value * 100) ELSE 0 END,
                             0, 'Portfolio reset', 'Portfolio reset', 'break_even', :config_hash
                         )
@@ -1365,276 +1559,101 @@ def reset_portfolio():
                         "total_value": float(holding.total_value),
                         "config_hash": config_hash
                     })
-            
-            # Deactivate all current holdings
+
             conn.execute(text("""
-                UPDATE holdings 
+                UPDATE holdings
                 SET is_active = FALSE, shares = 0, current_value = 0, gain_loss = 0
                 WHERE ticker != 'CASH' AND config_hash = :config_hash
             """), {"config_hash": config_hash})
-            
-            # Reset cash to $10,000 (or create if not exists)
-            cash_update_result = conn.execute(text("""
-                UPDATE holdings 
-                SET current_value = 10000, total_value = 10000, current_price = 10000
-                WHERE ticker = 'CASH' AND config_hash = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # If no CASH holding exists, create it
-            if cash_update_result.rowcount == 0:
-                print(f"🚀 Creating initial CASH holding for config {config_hash}")
+
+            if not schwab_snapshot:
                 conn.execute(text("""
-                    INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                    VALUES (:config_hash, 'CASH', 1, 10000, 10000, now(), now(), 10000, 10000, 0, 'Reset to initial cash', TRUE)
+                    DELETE FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash
                 """), {"config_hash": config_hash})
-            
-            # Clear feedback data for this config
-            print(f"🧹 Clearing feedback data for config {config_hash}")
-            
-            # Clear agent feedback (success rates, etc.)
+                conn.execute(text("""
+                    INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                          purchase_timestamp, current_price_timestamp, total_value, current_value,
+                                          gain_loss, reason, is_active)
+                    VALUES (:config_hash, 'CASH', 1, 10000, 10000, now(), now(), 10000, 10000, 0, 'Reset to simulation cash', TRUE)
+                """), {"config_hash": config_hash})
+
             conn.execute(text("""
-                DELETE FROM agent_feedback 
-                WHERE config_hash = :config_hash
+                DELETE FROM agent_feedback WHERE config_hash = :config_hash
             """), {"config_hash": config_hash})
-            
-            # Clear trade outcomes (historical trades)
+
             conn.execute(text("""
-                DELETE FROM trade_outcomes 
-                WHERE config_hash = :config_hash
+                DELETE FROM trade_outcomes WHERE config_hash = :config_hash
             """), {"config_hash": config_hash})
-            
-            # Reset prompts to v4 baseline
-            agent_types = ['SummarizerAgent', 'DeciderAgent']
-            for agent_type in agent_types:
-                # Check if v4 exists
-                v4_exists = conn.execute(text("""
-                    SELECT id FROM prompt_versions 
-                    WHERE agent_type = :agent_type AND version = 4
-                """), {"agent_type": agent_type}).fetchone()
-                
-                if v4_exists:
-                    # Set all prompts to inactive first
-                    conn.execute(text("""
-                        UPDATE prompt_versions 
-                        SET is_active = FALSE
-                        WHERE agent_type = :agent_type
-                    """), {"agent_type": agent_type})
-                    
-                    # Then activate v4
-                    conn.execute(text("""
-                        UPDATE prompt_versions 
-                        SET is_active = TRUE
+
+        message = "Portfolio reset to simulation baseline ($10,000)."
+
+        if not schwab_snapshot:
+            with engine.begin() as conn:
+                agent_types = ['SummarizerAgent', 'DeciderAgent']
+                for agent_type in agent_types:
+                    v4_exists = conn.execute(text("""
+                        SELECT id FROM prompt_versions 
                         WHERE agent_type = :agent_type AND version = 4
-                    """), {"agent_type": agent_type})
-                    
-                    print(f"✅ Reset {agent_type} to v4 prompt")
-                else:
-                    print(f"⚠️  No v4 prompt found for {agent_type}, keeping current active prompt")
-            
-            # Clear any custom agent instruction updates
-            conn.execute(text("""
-                DELETE FROM agent_instruction_updates
-                WHERE agent_type IN ('SummarizerAgent', 'DeciderAgent')
-            """))
-            
-            # Clear system runs history for this config
-            conn.execute(text("""
-                DELETE FROM system_runs 
-                WHERE details->>'config_hash' = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # Clear processed summaries tracking
-            conn.execute(text("""
-                DELETE FROM processed_summaries 
-                WHERE summary_id IN (
-                    SELECT id FROM summaries WHERE config_hash = :config_hash
-                )
-            """), {"config_hash": config_hash})
-            
-            # Clear summaries for this config  
-            conn.execute(text("""
-                DELETE FROM summaries 
-                WHERE config_hash = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # Clear trade decisions for this config
-            conn.execute(text("""
-                DELETE FROM trade_decisions 
-                WHERE config_hash = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # Clear portfolio history for this config
-            conn.execute(text("""
-                DELETE FROM portfolio_history 
-                WHERE config_hash = :config_hash
-            """), {"config_hash": config_hash})
-            
-            # Record portfolio snapshot after reset
-            record_portfolio_snapshot()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Portfolio reset successfully. Cash: $10,000, Feedback cleared, Prompts reset to v4.'
-            })
-            
+                    """), {"agent_type": agent_type}).fetchone()
+
+                    if v4_exists:
+                        conn.execute(text("""
+                            UPDATE prompt_versions 
+                            SET is_active = FALSE
+                            WHERE agent_type = :agent_type
+                        """), {"agent_type": agent_type})
+                        conn.execute(text("""
+                            UPDATE prompt_versions 
+                            SET is_active = TRUE
+                            WHERE agent_type = :agent_type AND version = 4
+                        """), {"agent_type": agent_type})
+
+        if schwab_snapshot:
+            positions = schwab_snapshot.get('positions', [])
+            processed = []
+            total_invested = 0.0
+            total_current = 0.0
+            for position in positions:
+                shares = float(position.get('shares') or 0)
+                avg_price = float(position.get('average_price') or 0)
+                current_price = float(position.get('current_price') or 0)
+                total_cost = float(position.get('total_value') or (shares * avg_price))
+                market_value = float(position.get('market_value') or (shares * current_price))
+                if avg_price == 0 and shares > 0:
+                    avg_price = total_cost / shares if total_cost else current_price
+                gain_loss = market_value - total_cost
+                processed.append({
+                    "ticker": position.get('symbol', '-').upper(),
+                    "shares": shares,
+                    "purchase_price": avg_price,
+                    "current_price": current_price,
+                    "total_value": total_cost,
+                    "current_value": market_value,
+                    "gain_loss": gain_loss,
+                    "reason": "Schwab synced position"
+                })
+                total_invested += total_cost
+                total_current += market_value
+
+            cash_balance = float(schwab_snapshot.get('cash_balance', 0))
+            total_portfolio_value = total_current + cash_balance
+            total_profit_loss = total_current - total_invested
+
+            _sync_holdings_with_database(config_hash, processed, cash_balance)
+            _record_live_portfolio_snapshot(
+                config_hash,
+                total_portfolio_value,
+                cash_balance,
+                total_invested,
+                total_profit_loss,
+                processed,
+            )
+
+            message = "Portfolio reset to live Schwab snapshot."
+
+        return jsonify({"success": True, "message": message})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-def clean_ticker_symbol(ticker):
-    """Clean up ticker symbol to extract just the symbol"""
-    if not ticker:
-        return None
-    
-    # Remove common prefixes/suffixes and extract just the symbol
-    ticker = str(ticker).strip()
-    
-    # Handle cases like "S&P500 ETF (SPY)" -> "SPY"
-    if '(' in ticker and ')' in ticker:
-        # Extract text between parentheses
-        start = ticker.rfind('(') + 1
-        end = ticker.rfind(')')
-        if start > 0 and end > start:
-            ticker = ticker[start:end]
-    
-    # Remove common words that might be added by AI
-    ticker = ticker.replace('ETF', '').replace('Stock', '').replace('Shares', '').strip()
-    
-    # Remove any remaining parentheses and clean up
-    ticker = ticker.replace('(', '').replace(')', '').strip()
-    
-    return ticker
-
-def get_current_price_robust(ticker):
-    """Get current/last-close price with robust weekend/after-hours fallbacks"""
-    # Clean the ticker symbol first
-    clean_ticker = clean_ticker_symbol(ticker)
-    if not clean_ticker:
-        print(f"Invalid ticker symbol: {ticker}")
-        return None
-
-    try:
-        stock = yf.Ticker(clean_ticker)
-
-        # Fast info fields first
-        try:
-            fast_info = getattr(stock, 'fast_info', None)
-            if fast_info:
-                for key in (
-                    'lastPrice',
-                    'regularMarketPrice',
-                    'regularMarketPreviousClose',
-                ):
-                    value = None
-                    try:
-                        value = fast_info.get(key) if hasattr(fast_info, 'get') else getattr(fast_info, key, None)
-                    except Exception:
-                        value = None
-                    if value and float(value) > 0:
-                        return float(value)
-        except Exception:
-            pass
-
-        # Try info dict
-        try:
-            for key in ('currentPrice', 'regularMarketPrice', 'previousClose'):
-                value = stock.info.get(key)
-                if value and float(value) > 0:
-                    return float(value)
-        except Exception:
-            pass
-
-        # History with prepost, daily bars
-        try:
-            for period in ("1d", "5d"):
-                hist = stock.history(period=period, interval="1d", prepost=True)
-                if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                    close = hist['Close'].dropna()
-                    if len(close) > 0:
-                        return float(close.iloc[-1])
-        except Exception:
-            pass
-
-        # Last 7 days range
-        try:
-            from datetime import datetime, timedelta
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=7)
-            hist = stock.history(start=start_date, end=end_date, interval="1d", prepost=True)
-            if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                close = hist['Close'].dropna()
-                if len(close) > 0:
-                    return float(close.iloc[-1])
-        except Exception:
-            pass
-
-        # yf.download over 1 month as a final fallback
-        try:
-            dl = yf.download(
-                tickers=clean_ticker,
-                period="1mo",
-                interval="1d",
-                prepost=True,
-                progress=False,
-            )
-            if dl is not None and len(dl) > 0:
-                close_series = dl['Close'] if 'Close' in dl.columns else dl.get(('Close', clean_ticker))
-                if close_series is not None:
-                    last_valid = close_series.dropna()
-                    if len(last_valid) > 0:
-                        return float(last_valid.iloc[-1])
-        except Exception:
-            pass
-
-        # If all attempts fail, return None
-        print(f"No price data available for {clean_ticker} (original: {ticker})")
-        return None
-
-    except Exception as e:
-        print(f"Failed to fetch price for {clean_ticker} (original: {ticker}): {e}")
-        return None
-
-def update_prices():
-    while True:
-        time.sleep(REFRESH_INTERVAL_MINUTES * 60)
-        config_hash = get_current_config_hash()
-        with engine.begin() as conn:
-            result = conn.execute(text("SELECT ticker FROM holdings WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})
-            tickers = [row.ticker for row in result]
-            for ticker in tickers:
-                try:
-                    price = get_current_price_robust(ticker)
-                    if price is None:
-                        print(f"Skipping price update for {ticker} - no data available")
-                        continue
-
-                    now = datetime.utcnow()
-
-                    conn.execute(text("""
-                        UPDATE holdings
-                        SET current_price = :price,
-                            current_value = shares * :price,
-                            gain_loss = (shares * :price) - total_value,
-                            current_price_timestamp = :current_price_timestamp
-                        WHERE ticker = :ticker AND config_hash = :config_hash"""), {
-                            "price": price,
-                            "current_price_timestamp": now,
-                            "ticker": ticker,
-                            "config_hash": config_hash
-                        })
-                    print(f"Updated price for {ticker}: ${price:.2f}")
-                except Exception as e:
-                    print(f"Failed to update {ticker}: {e}")
-            
-            # Record portfolio snapshot after price updates
-            try:
-                record_portfolio_snapshot()
-                print("Portfolio snapshot recorded")
-            except Exception as e:
-                print(f"Failed to record portfolio snapshot: {e}")
-
-def start_price_updater():
-    thread = threading.Thread(target=update_prices, daemon=True)
-    thread.start()
 
 @app.route('/api/schwab/holdings')
 def get_schwab_holdings():
@@ -1656,6 +1675,10 @@ def get_schwab_holdings():
         schwab_data = trading_interface.sync_schwab_positions()
         schwab_data['enabled'] = True
         schwab_data['readonly_mode'] = readonly_mode
+        schwab_data['live_trading_enabled'] = (trading_interface.trading_mode == "live") and not readonly_mode
+        schwab_data.setdefault('account_info', {})
+        if readonly_mode:
+            schwab_data['account_info'].setdefault('account_hash', schwab_client.account_hash if hasattr(schwab_client, "account_hash") else None)
         
         # Add safety warning if in read-only mode
         if readonly_mode:
@@ -1712,7 +1735,6 @@ def schwab_dashboard():
     return render_template('schwab_dashboard.html')
 
 if __name__ == "__main__":
-    start_price_updater()
     port = int(os.environ.get('DAI_PORT', 8080))
     print(f"🚀 Starting dashboard server on port {port}")
     app.run(debug=True, port=port)
