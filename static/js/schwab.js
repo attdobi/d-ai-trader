@@ -26,8 +26,14 @@ function hideSchwabSections() {
 function renderSchwabData(data) {
   const total = document.getElementById('total-value');
   const cash = document.getElementById('cash-balance');
+  const unsettled = document.getElementById('unsettled-cash');
+  const funds = document.getElementById('funds-available');
+  const orderReserve = document.getElementById('order-reserve');
   const bp = document.getElementById('buying-power');
   const dtbp = document.getElementById('day-trading-power');
+  const openOrders = document.getElementById('open-orders');
+  const componentsCard = document.getElementById('funds-components-card');
+  const componentsText = document.getElementById('funds-components');
   const acctHashEl = document.getElementById('account-hash');
   const acctNumberEl = document.getElementById('account-number');
   const acctTypeEl = document.getElementById('account-type');
@@ -37,8 +43,61 @@ function renderSchwabData(data) {
   const readonlyDescription = readonlyNoteEl ? readonlyNoteEl.querySelector('p') : null;
   const accountMetaEl = document.getElementById('account-meta');
 
+  const fundsAvailable = data.funds_available_effective
+    ?? data.funds_available_for_trading
+    ?? data.account_info?.funds_available_for_trading
+    ?? data.account_info?.funds_available_effective
+    ?? data.cash_balance
+    ?? 0;
+  const settledCash = data.cash_balance_settled
+    ?? data.cash_balance
+    ?? data.account_info?.cash_balance
+    ?? 0;
+  const unsettledCash = data.unsettled_cash
+    ?? data.account_info?.unsettled_cash
+    ?? 0;
+
   if (total) total.textContent = formatCurrency(data.total_portfolio_value || 0);
-  if (cash) cash.textContent = formatCurrency(data.cash_balance || 0);
+  if (funds) funds.textContent = formatCurrency(fundsAvailable);
+  if (cash) cash.textContent = formatCurrency(settledCash);
+  if (unsettled) unsettled.textContent = formatCurrency(unsettledCash);
+  const reserveValue = data.order_reserve
+    ?? data.account_info?.order_reserve
+    ?? data.funds_available_components?.order_reserve
+    ?? 0;
+  if (orderReserve) orderReserve.textContent = formatCurrency(reserveValue);
+  const openCount = data.open_orders_count
+    ?? data.account_info?.open_orders_count
+    ?? 0;
+  if (openOrders) openOrders.textContent = openCount;
+  const components = data.funds_available_components
+    ?? data.account_info?.funds_available_components;
+  if (componentsCard && componentsText) {
+    if (components) {
+      const lines = [
+        `Eff ${formatCurrency(components.effective ?? fundsAvailable)}`,
+        `Exp ${formatCurrency(components.explicit ?? 0)}`,
+        `Der ${formatCurrency(components.derived_cash ?? 0)}`,
+        `Sett ${formatCurrency(components.settled_cash ?? settledCash)}`,
+        `Unsett ${formatCurrency(components.unsettled_cash ?? unsettledCash)}`,
+      ];
+      if (typeof components.order_reserve === 'number') {
+        lines.push(`Orders ${formatCurrency(components.order_reserve)}`);
+      }
+      if (typeof data.open_orders_count === 'number') {
+        lines.push(`Open ${data.open_orders_count}`);
+      } else if (typeof data.account_info?.open_orders_count === 'number') {
+        lines.push(`Open ${data.account_info.open_orders_count}`);
+      }
+      if (typeof components.same_day_net === 'number') {
+        lines.push(`Same-day ${formatCurrency(components.same_day_net)}`);
+      }
+      componentsText.textContent = lines.join(' · ');
+      componentsCard.style.display = 'block';
+    } else {
+      componentsCard.style.display = 'none';
+    }
+  }
   if (data.account_info) {
     if (bp) bp.textContent = formatCurrency(data.account_info.buying_power || 0);
     if (dtbp) dtbp.textContent = formatCurrency(data.account_info.day_trading_buying_power || 0);
@@ -101,6 +160,9 @@ async function refreshSchwabData() {
     }
     if (data.status === 'success') {
       updateStatus('✅','Connected to Schwab','#28a745');
+      if (data.raw_snapshot) {
+        console.log('📡 Schwab snapshot:', data.raw_snapshot);
+      }
       renderSchwabData(data);
       return;
     }

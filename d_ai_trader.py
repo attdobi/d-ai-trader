@@ -32,8 +32,9 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, set_gpt_model
+from config import engine, PromptManager, session, openai, set_gpt_model, get_trading_mode
 from feedback_agent import TradeOutcomeTracker
+from trading_interface import trading_interface
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -289,6 +290,17 @@ class DAITraderOrchestrator:
         logger.info(f"Starting decider agent run: {run_id}")
         
         try:
+            if get_trading_mode().lower() == "real_world":
+                logger.info("🔁 Syncing live Schwab portfolio before decider run")
+                try:
+                    sync_result = trading_interface.sync_schwab_positions(persist=True)
+                    if sync_result.get("status") != "success":
+                        logger.warning("⚠️  Schwab sync prior to decider returned %s", sync_result.get("message") or sync_result.get("error"))
+                    else:
+                        logger.info("✅ Live Schwab portfolio synchronized")
+                except Exception as sync_exc:
+                    logger.error("⚠️  Schwab sync failed before decider run: %s", sync_exc)
+
             # Record run start
             with engine.begin() as conn:
                 conn.execute(text("""

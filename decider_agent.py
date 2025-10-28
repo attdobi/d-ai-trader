@@ -660,14 +660,22 @@ def execute_real_world_trade(decision):
             else:
                 print(f"⚠️  Cannot sell {ticker} - no shares found in holdings")
                 return False
-        
+
+        if not result:
+            print("❌ REAL TRADE FAILED: No response from trading interface")
+            return False
+
         if result.get('success'):
             print(f"✅ REAL TRADE EXECUTED: {action.upper()} {ticker} for ${amount_usd}")
             print(f"   Order ID: {result.get('order_id', 'N/A')}")
             return True
         else:
             print(f"❌ REAL TRADE FAILED: {action.upper()} {ticker}")
-            print(f"   Error: {result.get('error', 'Unknown error')}")
+            error_detail = result.get('error') or result.get('reason') or 'Unknown error'
+            print(f"   Error: {error_detail}")
+            order_status = result.get('order_status')
+            if isinstance(order_status, dict):
+                print(f"   Schwab Status: {order_status.get('status')} Reason: {order_status.get('reason')}")
             return False
             
     except ImportError:
@@ -687,6 +695,34 @@ def update_holdings(decisions):
     skipped_decisions = []
     trading_mode = get_trading_mode()
     config_hash = get_current_config_hash()
+    one_trade_mode = _os.getenv("DAI_ONE_TRADE_MODE", "0") == "1"
+    allowed_buy_idx = None
+
+    def _sync_live_positions(stage):
+        if trading_mode != "real_world":
+            return
+        try:
+            from trading_interface import trading_interface
+            print(f"🔄 Syncing Schwab positions ({stage})...")
+            trading_interface.sync_schwab_positions(persist=True)
+        except Exception as exc:
+            print(f"⚠️  Schwab sync ({stage}) failed: {exc}")
+
+    def _current_cash_balance():
+        with engine.begin() as _conn:
+            cash_row_local = _conn.execute(text(
+                "SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"
+            ), {"config_hash": config_hash}).fetchone()
+            return float(cash_row_local.current_value) if cash_row_local else MAX_FUNDS
+
+    if one_trade_mode:
+        print("🎯 One-trade pilot mode active - enforcing single live buy limit")
+        for idx, decision in enumerate(decisions):
+            if (decision.get('action') or '').lower() == 'buy':
+                allowed_buy_idx = idx
+                break
+        if allowed_buy_idx is None:
+            print("⚠️  One-trade mode: no BUY decision provided; all live trades will be skipped")
     
     print(f"🔄 Updating holdings in {trading_mode.upper()} mode (config: {config_hash})")
     
@@ -712,30 +748,50 @@ def update_holdings(decisions):
     # Market is open - proceed with execution
     print(f"✅ Market is OPEN - Proceeding with trade execution")
     
-    # Execute real trades if in real_world mode
-    if trading_mode == "real_world":
-        print("💰 Executing real trades through Schwab API...")
-        for decision in decisions:
-            if decision.get('action', '').lower() in ['buy', 'sell']:
-                success = execute_real_world_trade(decision)
-                if not success:
-                    print(f"⚠️  Real trade failed for {decision.get('ticker', 'unknown')}, continuing with simulation")
-    else:
+    if trading_mode != "real_world":
         print("🎮 Running in simulation mode - no real trades executed")
 
-    # Normalize decisions
-    decisions_normalized = [
-        {
-            **d,
-            "action": (d.get("action") or "").lower(),
+    decisions_with_idx = []
+    for idx, decision in enumerate(decisions):
+        normalized = {
+            **decision,
+            "action": (decision.get("action") or "").lower(),
         }
-        for d in decisions
-    ]
-    
-    # Separate decision types
-    sell_decisions = [d for d in decisions_normalized if d.get("action") == "sell"]
-    buy_decisions = [d for d in decisions_normalized if d.get("action") == "buy"]  # Keep original order for priority
-    hold_decisions = [d for d in decisions_normalized if d.get("action") not in ("buy", "sell")]
+        decisions_with_idx.append((idx, normalized))
+
+    all_buy_decisions = [norm for idx, norm in decisions_with_idx if norm["action"] == "buy"]
+    sell_decisions = [norm for idx, norm in decisions_with_idx if norm["action"] == "sell"]
+    buy_decisions = list(all_buy_decisions)
+    hold_decisions = [norm for idx, norm in decisions_with_idx if norm["action"] not in ("buy", "sell")]
+
+    if one_trade_mode:
+        if allowed_buy_idx is not None:
+            buy_decisions = [
+                norm for idx, norm in decisions_with_idx
+                if idx == allowed_buy_idx and norm["action"] == "buy"
+            ]
+        else:
+            buy_decisions = []
+
+        skipped_extra_buys = 0
+        for idx, norm in decisions_with_idx:
+            if norm["action"] == "buy" and (allowed_buy_idx is None or idx != allowed_buy_idx):
+                skipped_extra_buys += 1
+                skipped_decisions.append({
+                    **norm,
+                    "reason": "One-trade pilot mode - additional buy skipped",
+                })
+        if skipped_extra_buys:
+            print(f"⏭️  One-trade mode skipped {skipped_extra_buys} additional buy decision(s)")
+
+        if sell_decisions:
+            print(f"⏭️  One-trade mode skipping {len(sell_decisions)} sell decision(s)")
+            for norm in sell_decisions:
+                skipped_decisions.append({
+                    **norm,
+                    "reason": "One-trade pilot mode - sell execution disabled",
+                })
+            sell_decisions = []
     
     print(f"📊 Processing {len(sell_decisions)} sells, {len(buy_decisions)} buys, {len(hold_decisions)} holds")
     
@@ -749,13 +805,19 @@ def update_holdings(decisions):
     if sell_decisions:
         print(f"🔥 Executing {len(sell_decisions)} sell orders first...")
         available_cash = process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions)
-    
+        _sync_live_positions("post-sell")
+        available_cash = _current_cash_balance()
+        print(f"💰 Cash after sells: ${available_cash:.2f}")
+
     # Wait 30 seconds between sells and buys if both exist (allows position swapping)
     if sell_decisions and buy_decisions:
         print("⏳ Waiting 30 seconds after sells to allow funds to clear before buys...")
         import time
         time.sleep(30)
-    
+        _sync_live_positions("post-wait")
+        available_cash = _current_cash_balance()
+        print(f"💰 Cash after wait: ${available_cash:.2f}")
+
     # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
     if buy_decisions:
         print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
@@ -769,6 +831,8 @@ def update_holdings(decisions):
                 **decision,
                 "reason": f"Hold decision - no action taken (Original: {decision.get('reason', '')})"
             })
+
+    _sync_live_positions("final")
 
     return skipped_decisions
 
@@ -819,6 +883,11 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 {"ticker": clean_ticker, "config_hash": config_hash}
             ).fetchone()
             if holding:
+                if get_trading_mode() == "real_world":
+                    live_success = execute_real_world_trade(decision)
+                    if not live_success:
+                        print(f"⚠️  Real sell execution failed for {ticker}, continuing with simulation bookkeeping")
+
                 shares = float(holding.shares)
                 purchase_price = float(holding.purchase_price)
                 total_value = shares * price
@@ -1556,6 +1625,7 @@ No explanatory text, no markdown, just pure JSON array."""
     # Calculate available funds
     available_cash = cash_balance
     max_spendable = max(0, available_cash - MIN_BUFFER)
+    total_portfolio_value = available_cash + sum(h.get("total_value", 0) for h in stock_holdings)
 
     # Get feedback from recent performance (simplified to reduce tokens)
     feedback_context = ""
@@ -1574,7 +1644,7 @@ No explanatory text, no markdown, just pure JSON array."""
         available_cash=available_cash,
         max_spendable=max_spendable,
         min_buffer=MIN_BUFFER,
-        max_funds=MAX_FUNDS,
+        max_funds=total_portfolio_value,
         holdings=holdings_text,
         feedback=feedback_context,
         summaries=summarized_text
