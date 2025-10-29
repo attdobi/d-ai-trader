@@ -40,7 +40,7 @@ USAGE
 PORT=8080
 MODEL="gpt-4o"
 PROMPT_VERSION="auto"
-TRADING_MODE="simulation"
+TRADING_MODE="${TRADING_MODE:-simulation}"
 CADENCE_MINUTES=60
 
 while [[ $# -gt 0 ]]; do

@@ -13,7 +13,7 @@ except Exception:
 
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
-from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model
+from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -238,6 +238,7 @@ def _build_prompt_context_samples(latest_feedback=None):
 def _sync_holdings_with_database(config_hash, holdings, cash_balance):
     """Replace holdings in the database with the live Schwab snapshot."""
     now = datetime.utcnow()
+    print(f"🗃️ Syncing holdings for {config_hash}: positions={len(holdings)} cash={cash_balance:.2f}")
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM holdings WHERE config_hash = :config_hash"), {"config_hash": config_hash})
 
@@ -484,67 +485,100 @@ def dashboard():
         schwab_summary = None
         use_schwab_positions = False
 
-        if getattr(trading_interface, "schwab_enabled", False):
-            if os.getenv("DAI_SCHWAB_LIVE_VIEW", "0") in {"1", "true", "True"} or get_trading_mode() == "live":
-                try:
-                    schwab_data = trading_interface.sync_schwab_positions()
-                    if schwab_data.get("status") == "success":
-                        positions = schwab_data.get("positions", [])
-                        if positions:
-                            holdings = []
-                            for position in positions:
-                                shares = float(position.get("shares") or 0)
-                                avg_price = float(position.get("average_price") or 0)
-                                current_price = float(position.get("current_price") or 0)
-                                total_cost = float(position.get("total_value") or (shares * avg_price))
-                                market_value = float(position.get("market_value") or (shares * current_price))
-                                gain_loss = float(position.get("gain_loss") or (market_value - total_cost))
+        if (
+            os.getenv("DAI_SCHWAB_LIVE_VIEW", "0") in {"1", "true", "True"}
+            or get_trading_mode() == "live"
+            or getattr(trading_interface, "schwab_enabled", False)
+        ):
+            try:
+                schwab_data = trading_interface.sync_schwab_positions()
+                if schwab_data.get("status") == "success":
+                    positions = schwab_data.get("positions", []) or []
+                    holdings = []
+                    for position in positions:
+                        shares = float(position.get("shares") or 0)
+                        avg_price = float(position.get("average_price") or 0)
+                        current_price = float(position.get("current_price") or 0)
+                        total_cost = float(position.get("total_value") or (shares * avg_price))
+                        market_value = float(position.get("market_value") or (shares * current_price))
+                        gain_loss = float(position.get("gain_loss") or (market_value - total_cost))
 
-                                holdings.append({
-                                    "ticker": position.get("symbol", "-").upper(),
-                                    "shares": shares,
-                                    "purchase_price": avg_price,
-                                    "current_price": current_price,
-                                    "total_value": total_cost,
-                                    "current_value": market_value,
-                                    "gain_loss": gain_loss,
-                                    "reason": "📡 Synced from Schwab"
-                                })
+                        holdings.append({
+                            "ticker": position.get("symbol", "-").upper(),
+                            "shares": shares,
+                            "purchase_price": avg_price,
+                            "current_price": current_price,
+                            "total_value": total_cost,
+                            "current_value": market_value,
+                            "gain_loss": gain_loss,
+                            "reason": "📡 Synced from Schwab"
+                        })
 
-                            cash_balance = float(schwab_data.get("cash_balance", 0))
-                            total_invested = sum(row["total_value"] for row in holdings)
-                            total_current_value = sum(row["current_value"] for row in holdings)
-                            total_profit_loss = sum(row["gain_loss"] for row in holdings)
-                            total_portfolio_value = total_current_value + cash_balance
+                    available_cash = float(
+                        schwab_data.get("funds_available_effective")
+                        or schwab_data.get("funds_available_for_trading")
+                        or schwab_data.get("cash_balance")
+                        or 0.0
+                    )
+                    raw_cash_balance = float(
+                        schwab_data.get("cash_balance_settled")
+                        or schwab_data.get("cash_balance")
+                        or 0.0
+                    )
+                    unsettled_cash = float(schwab_data.get("unsettled_cash") or 0.0)
+                    funds_components = schwab_data.get("funds_available_components", {})
+                    ledger_comp = schwab_data.get("ledger_components", {})
 
-                            # Use live account metrics for initial investment and net gain
-                            initial_investment = total_invested + cash_balance
-                            net_gain_loss = total_profit_loss
-                            net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
-                            percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
+                    total_invested = sum(row["total_value"] for row in holdings)
+                    total_current_value = sum(row["current_value"] for row in holdings)
+                    total_profit_loss = sum(row["gain_loss"] for row in holdings)
+                    total_portfolio_value = total_current_value + available_cash
+                    cash_balance = available_cash
 
-                            account_info = schwab_data.get("account_info", {})
-                            schwab_summary = {
-                                "account_hash": account_info.get("account_hash") or os.getenv("SCHWAB_ACCOUNT_HASH"),
-                                "account_number": account_info.get("account_number"),
-                                "account_type": account_info.get("account_type"),
-                                "readonly": schwab_data.get("readonly_mode", False),
-                                "last_updated": schwab_data.get("last_updated")
-                            }
-                            use_schwab_positions = True
+                    # Use live account metrics for initial investment and net gain
+                    initial_investment = total_invested + available_cash
+                    net_gain_loss = total_profit_loss
+                    net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
+                    percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
 
-                            # Persist live snapshot for dashboards/charts
-                            _sync_holdings_with_database(config_hash, holdings, cash_balance)
-                            _record_live_portfolio_snapshot(
-                                config_hash,
-                                total_portfolio_value,
-                                cash_balance,
-                                total_invested,
-                                total_profit_loss,
-                                holdings,
-                            )
-                except Exception as schwab_error:
-                    print(f"Error syncing Schwab data for dashboard: {schwab_error}")
+                    account_info = schwab_data.get("account_info", {})
+                    schwab_summary = {
+                        "account_hash": account_info.get("account_hash") or SCHWAB_ACCOUNT_HASH,
+                        "account_number": account_info.get("account_number"),
+                        "account_type": account_info.get("account_type"),
+                        "readonly": schwab_data.get("readonly_mode", False),
+                        "last_updated": schwab_data.get("last_updated"),
+                        "cash_balance": raw_cash_balance,
+                        "funds_available_for_trading": available_cash,
+                        "unsettled_cash": unsettled_cash,
+                        "order_reserve": schwab_data.get("order_reserve", 0.0),
+                        "funds_available_explicit": account_info.get("funds_available_explicit"),
+                        "funds_available_derived": account_info.get("funds_available_derived"),
+                        "same_day_net_activity": account_info.get("same_day_net_activity"),
+                        "buying_power": account_info.get("buying_power"),
+                        "day_trading_buying_power": account_info.get("day_trading_buying_power"),
+                        "funds_available_components": funds_components,
+                        "ledger_components": ledger_comp,
+                        "open_orders_count": schwab_data.get("open_orders_count", 0),
+                    }
+                    use_schwab_positions = True
+
+                    # Persist live snapshot for dashboards/charts
+                    _sync_holdings_with_database(config_hash, holdings, available_cash)
+                    _record_live_portfolio_snapshot(
+                        config_hash,
+                        total_portfolio_value,
+                        available_cash,
+                        total_invested,
+                        total_profit_loss,
+                        holdings,
+                    )
+                else:
+                    warning = schwab_data.get("message") or schwab_data.get("error")
+                    if warning:
+                        print(f"⚠️ Schwab sync unavailable: {warning}")
+            except Exception as schwab_error:
+                print(f"Error syncing Schwab data for dashboard: {schwab_error}")
 
         # Get current system configuration with prompt versions
         try:
@@ -1515,8 +1549,10 @@ def reset_portfolio():
     """Reset portfolio to either the live Schwab snapshot or simulation baseline."""
     try:
         config_hash = get_current_config_hash()
+        current_mode = get_trading_mode()
         use_live = getattr(trading_interface, 'schwab_enabled', False) and (
-            os.getenv('DAI_SCHWAB_LIVE_VIEW', '0') in {'1', 'true', 'True'} or get_trading_mode() == 'live'
+            os.getenv('DAI_SCHWAB_LIVE_VIEW', '0') in {'1', 'true', 'True'}
+            or current_mode in {'live', 'real_world'}
         )
         schwab_snapshot = None
 
@@ -1583,6 +1619,10 @@ def reset_portfolio():
 
             conn.execute(text("""
                 DELETE FROM trade_outcomes WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash})
+
+            conn.execute(text("""
+                DELETE FROM portfolio_history WHERE config_hash = :config_hash
             """), {"config_hash": config_hash})
 
         message = "Portfolio reset to simulation baseline ($10,000)."
@@ -1736,5 +1776,5 @@ def schwab_dashboard():
 
 if __name__ == "__main__":
     port = int(os.environ.get('DAI_PORT', 8080))
-    print(f"🚀 Starting dashboard server on port {port}")
+    print(f"🚀 Starting dashboard server on port {port} (trading_mode={get_trading_mode()})")
     app.run(debug=True, port=port)

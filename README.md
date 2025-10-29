@@ -35,6 +35,59 @@ An autonomous **day trading system** powered by GPT-4o Vision that analyzes fina
 #   export DAI_SCHWAB_INTERACTIVE=0  # skip ENTER prompt
 ```
 
+> **Auth refresh reminder**: Schwab refresh tokens expire roughly every 7 days. If you see
+> `refresh_token_authentication_error`, delete `schwab_tokens.json`, run `./test_schwab_api.sh`
+> to complete the OAuth flow again, and restart your live view/streaming scripts. During the
+> OAuth approval, make sure the `trade` scope is selected in the Schwab developer portal so the
+> API returns live balances and allows order placement.
+
+### **Manual OAuth Helper (Alternative Token Bootstrap)**
+```bash
+# Launch browser for the 3-legged OAuth flow and save tokens
+SCHWAB_CLIENT_ID=... SCHWAB_CLIENT_SECRET=... ./schwab_manual_auth.py --save
+
+# Refresh an existing token file before it expires (uses refresh_token)
+SCHWAB_CLIENT_ID=... SCHWAB_CLIENT_SECRET=... ./schwab_manual_auth.py --refresh --save
+```
+
+### **Quick schwab-py Bootstrap (auto-refreshing helper)**
+```python
+from schwab.auth import easy_client
+
+c = easy_client(
+    api_key="YOUR_APP_KEY",
+    app_secret="YOUR_APP_SECRET",
+    callback_url="https://127.0.0.1:5556/callback",  # must match portal entry
+    token_path="./schwab_tokens.json",
+)
+
+acct_map = c.get_account_numbers().json()
+print(acct_map[:1])
+```
+
+### **Intraday Streaming Helper (Live Quotes + Account Activity)**
+```bash
+# Streams Level-One equities quotes and refreshes holdings on fills
+./run_schwab_streaming.py            # auto-detect symbols from current positions
+
+# OR target a custom watchlist
+DAI_STREAM_SYMBOLS="SPY,AAPL,QQQ" ./run_schwab_streaming.py
+```
+> The streaming helper keeps a shadow ledger (unsettled cash, open-order reserves) so
+> “Funds Available (effective)” updates immediately after fills even when the Schwab
+> snapshot lags. Both `start_schwab_live_view.sh` and `start_live_trading.sh` launch it by
+> default; add `--no-stream` to disable.
+
+### **Probe Live Funds vs Ledger**
+```bash
+python effective_funds_probe.py
+# {
+#   "baseline_funds": 1234.56,
+#   "effective_funds": 3456.78,
+#   "ledger_components": { ... }
+# }
+```
+
 ### **Full Live Trading (Automation Enabled)**
 ```bash
 # After verifying the pilot, remove the trade cap and increase cadence as desired

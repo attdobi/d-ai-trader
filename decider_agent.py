@@ -12,6 +12,7 @@ except Exception:
 # --- end bootstrap ---
 
 import json
+import os
 import pytz
 from datetime import datetime
 import time
@@ -688,7 +689,7 @@ def execute_real_world_trade(decision):
         traceback.print_exc()
         return False
 
-def update_holdings(decisions):
+def update_holdings(decisions, skip_live_execution=False):
     # Use Pacific time as naive timestamp (database stores as-is, dashboard formats correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
     timestamp = pacific_now.replace(tzinfo=None)  # Store as naive Pacific time
@@ -698,8 +699,10 @@ def update_holdings(decisions):
     one_trade_mode = _os.getenv("DAI_ONE_TRADE_MODE", "0") == "1"
     allowed_buy_idx = None
 
+    live_execution_enabled = trading_mode == "real_world" and not skip_live_execution
+
     def _sync_live_positions(stage):
-        if trading_mode != "real_world":
+        if not live_execution_enabled:
             return
         try:
             from trading_interface import trading_interface
@@ -748,7 +751,7 @@ def update_holdings(decisions):
     # Market is open - proceed with execution
     print(f"✅ Market is OPEN - Proceeding with trade execution")
     
-    if trading_mode != "real_world":
+    if not live_execution_enabled:
         print("🎮 Running in simulation mode - no real trades executed")
 
     decisions_with_idx = []
@@ -792,7 +795,26 @@ def update_holdings(decisions):
                     "reason": "One-trade pilot mode - sell execution disabled",
                 })
             sell_decisions = []
-    
+    elif live_execution_enabled:
+        if len(sell_decisions) > 2:
+            overflow = sell_decisions[2:]
+            sell_decisions = sell_decisions[:2]
+            for norm in overflow:
+                skipped_decisions.append({
+                    **norm,
+                    "reason": "Live mode limit reached - max 2 sells executed",
+                })
+            print(f"⏭️  Live mode capped additional {len(overflow)} sell decision(s)")
+        if len(buy_decisions) > 2:
+            overflow = buy_decisions[2:]
+            buy_decisions = buy_decisions[:2]
+            for norm in overflow:
+                skipped_decisions.append({
+                    **norm,
+                    "reason": "Live mode limit reached - max 2 buys executed",
+                })
+            print(f"⏭️  Live mode capped additional {len(overflow)} buy decision(s)")
+
     print(f"📊 Processing {len(sell_decisions)} sells, {len(buy_decisions)} buys, {len(hold_decisions)} holds")
     
     # Get current cash balance
@@ -804,7 +826,14 @@ def update_holdings(decisions):
     # 1) EXECUTE ALL SELLS FIRST (to free up cash)
     if sell_decisions:
         print(f"🔥 Executing {len(sell_decisions)} sell orders first...")
-        available_cash = process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions)
+        available_cash = process_sell_decisions(
+            sell_decisions,
+            available_cash,
+            timestamp,
+            config_hash,
+            skipped_decisions,
+            live_execution_enabled,
+        )
         _sync_live_positions("post-sell")
         available_cash = _current_cash_balance()
         print(f"💰 Cash after sells: ${available_cash:.2f}")
@@ -821,7 +850,14 @@ def update_holdings(decisions):
     # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
     if buy_decisions:
         print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
-        available_cash = process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions)
+        available_cash = process_buy_decisions(
+            buy_decisions,
+            available_cash,
+            timestamp,
+            config_hash,
+            skipped_decisions,
+            live_execution_enabled,
+        )
     
     # 3) Log hold decisions
     if hold_decisions:
@@ -836,7 +872,7 @@ def update_holdings(decisions):
 
     return skipped_decisions
 
-def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions):
+def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all sell decisions and return updated cash balance"""
     
     # Track the cash we're adding from sells
@@ -883,7 +919,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 {"ticker": clean_ticker, "config_hash": config_hash}
             ).fetchone()
             if holding:
-                if get_trading_mode() == "real_world":
+                if live_execution_enabled:
                     live_success = execute_real_world_trade(decision)
                     if not live_success:
                         print(f"⚠️  Real sell execution failed for {ticker}, continuing with simulation bookkeeping")
@@ -979,7 +1015,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
         else:
             return available_cash
 
-def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
+def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     if buy_decisions:
         price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
         with engine.begin() as conn:
@@ -1154,7 +1190,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
         store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
         print(f"Stored {len(skipped_decisions)} skipped decisions due to price/data issues")
 
-def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions):
+def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all buy decisions and return updated cash balance"""
     
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
@@ -1219,8 +1255,11 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 })
                 continue
 
-            # Execute real-world trade if in real_world mode
-            real_trade_success = execute_real_world_trade(decision)
+            # Execute real-world trade if enabled
+            if live_execution_enabled:
+                real_trade_success = execute_real_world_trade(decision)
+                if not real_trade_success:
+                    print(f"⚠️  Real buy execution failed for {ticker}, recording in simulation only")
 
             # Execute the buy in simulation (always) 
             try:
@@ -1476,6 +1515,11 @@ POSITION SIZING (Maximize opportunities):
 - MAXIMUM buy: $4000 (for high-conviction plays)
 - Available cash: ${available_cash} - DEPLOY IT!
 
+AVOID FOMO ENTRIES:
+- ❌ Do NOT chase all-time highs or vertical pops right after bullish news/earnings
+- ✅ Prefer pullbacks to support, consolidations, or breakouts with fresh momentum confirmation
+- ✅ If price is already stretched 5%+ above the prior day close, wait for a better setup
+
 PORTFOLIO RULES:
 - Max 5 stocks at once (allows diversification and quick rotation)
 - NEVER add to existing positions - Sell first, then re-buy if still bullish
@@ -1493,6 +1537,8 @@ Then consider NEW opportunities from market analysis.
 
 Current Portfolio:
 - Available Cash: ${available_cash} (out of $10,000 total)
+- Current P/L Summary:
+{pnl_summary}
 - Current Holdings: {holdings}
 
 Market Analysis:
@@ -1557,27 +1603,27 @@ No explanatory text, no markdown, just pure JSON array."""
                 parsed = json.loads(s['data'])
             else:
                 parsed = s['data']
-            
+
             # Extract the summary from the parsed data
             summary_content = parsed.get('summary', {})
             if isinstance(summary_content, str):
                 # If summary is a string, try to parse it as JSON
                 try:
                     summary_content = json.loads(summary_content)
-                except:
+                except Exception:
                     # If it's not JSON, treat it as plain text
                     summary_content = {'headlines': [], 'insights': summary_content}
-            
+
             # Truncate long insights to reduce token usage
             insights = summary_content.get('insights', '')
-            if len(insights) > 500:  # Limit insights to 500 characters
+            if len(insights) > 1000:  # Limit insights to 500 characters
                 insights = insights[:500] + "... [truncated]"
-            
+
             # Limit headlines to reduce token usage
             headlines = summary_content.get('headlines', [])
             if len(headlines) > 5:  # Limit to 5 headlines
                 headlines = headlines[:5]
-            
+
             parsed_summaries.append({
                 "agent": s['agent'],
                 "headlines": headlines,
@@ -1593,13 +1639,17 @@ No explanatory text, no markdown, just pure JSON array."""
             })
 
     # Create a more concise summary text
+    parsed_summaries.sort(key=lambda x: (x.get('agent') or '').lower())
+
     summary_parts = []
     for s in parsed_summaries:
+        agent_label = (s.get('agent') or 'unknown').strip().lower()
         headlines_text = ', '.join(s['headlines'][:3])  # Limit to 3 headlines per agent
         insights_text = s['insights'][:200] if len(s['insights']) > 200 else s['insights']  # Limit insights
-        summary_parts.append(f"{s['agent']}: {headlines_text} | {insights_text}")
-    
+        summary_parts.append(f"{agent_label}: {headlines_text} | {insights_text}")
+
     summarized_text = "\n".join(summary_parts)
+    print(f"📰 Summaries forwarded to Decider: {len(parsed_summaries)}")
 
     # Separate cash and stock holdings
     cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
@@ -1639,6 +1689,22 @@ No explanatory text, no markdown, just pure JSON array."""
         print(f"Failed to get feedback context: {e}")
         feedback_context = "Feedback system unavailable."
 
+
+    pl_lines = []
+    for h in stock_holdings:
+        try:
+            ticker = h.get('ticker', 'UNKNOWN')
+            cost = float(h.get('total_value') or 0)
+            current = float(h.get('current_value') or 0)
+            pnl_pct = ((current - cost) / cost * 100) if cost else 0.0
+            pl_lines.append(f"- {ticker}: {pnl_pct:+.2f}% vs entry (stop loss -3%, take profit +5%)")
+        except Exception:
+            continue
+    if pl_lines:
+        pl_summary = "\n".join(pl_lines)
+    else:
+        pl_summary = "- No open positions"
+
     # Use versioned prompt template
     prompt = user_prompt_template.format(
         available_cash=available_cash,
@@ -1647,8 +1713,16 @@ No explanatory text, no markdown, just pure JSON array."""
         max_funds=total_portfolio_value,
         holdings=holdings_text,
         feedback=feedback_context,
-        summaries=summarized_text
+        summaries=summarized_text,
+        pnl_summary=pl_summary,
     )
+
+
+    prompt_preview_limit = int(os.getenv("DAI_PROMPT_DEBUG_LIMIT", "2000"))
+    prompt_snippet = prompt[:prompt_preview_limit]
+    print(f"🧠 Decider prompt preview (showing {len(prompt_snippet)} of {len(prompt)} chars):\n{prompt_snippet}")
+    if len(prompt_snippet) < len(prompt):
+        print("… (prompt truncated for console preview)")
     
     # Build explicit list of required decisions for current holdings
     current_tickers = [h['ticker'] for h in stock_holdings] if stock_holdings else []

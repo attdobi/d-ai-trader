@@ -37,6 +37,8 @@ class TradingSafetyManager:
         self.max_position_percentage = 0.20  # Max 20% of portfolio in single position
         self.min_trade_value = 50  # Minimum trade value
         self.max_loss_percentage = 0.15  # Stop if daily loss exceeds 15%
+        self.force_sell_loss_threshold = -0.03  # Force sell when loss >= 3%
+        self.force_sell_gain_threshold = 0.05   # Force sell when gain >= 5%
         
         logger.info(f"TradingSafetyManager initialized with limits:")
         logger.info(f"  Max position value floor: ${self.max_position_value}")
@@ -118,8 +120,12 @@ class TradingSafetyManager:
             
             if action == "buy":
                 return self._validate_buy_order(
-                    ticker, amount_usd, current_portfolio_value, 
-                    current_cash, current_positions
+                    decision,
+                    ticker,
+                    amount_usd,
+                    current_portfolio_value,
+                    current_cash,
+                    current_positions,
                 )
             elif action == "sell":
                 return self._validate_sell_order(
@@ -132,46 +138,69 @@ class TradingSafetyManager:
             logger.error(f"Error validating trade decision: {e}")
             return False, f"Validation error: {str(e)}"
     
-    def _validate_buy_order(self, 
-                           ticker: str, 
+    def _validate_buy_order(self,
+                           decision: Dict,
+                           ticker: str,
                            amount_usd: float,
                            portfolio_value: float,
                            current_cash: float,
                            positions: List[Dict]) -> Tuple[bool, str]:
-        """Validate buy order against safety limits"""
-        
-        # Check if we have enough cash (including buffer)
-        if current_cash < amount_usd + self.min_cash_buffer:
-            return False, f"Insufficient cash: ${current_cash:.2f} available, need ${amount_usd + self.min_cash_buffer:.2f}"
-        
-        # Check maximum position value (dynamic with fraction support)
+        """Validate buy order against safety limits (auto-resize when needed)."""
+
+        existing_position = next(
+            (p for p in positions if (p.get("symbol") or "").upper() == ticker.upper()),
+            None,
+        )
+        existing_position_value = float(existing_position.get("market_value", 0)) if existing_position else 0.0
+        total_positions_value = sum(float(p.get("market_value", 0)) for p in positions)
+
+        cash_capacity = max(0.0, current_cash - self.min_cash_buffer)
+
         position_limit = self._resolve_position_limit(portfolio_value, current_cash)
-        if isfinite(position_limit) and amount_usd > position_limit:
-            return False, f"Position value ${amount_usd:.2f} exceeds maximum ${position_limit:.2f}"
-        
-        # Check position concentration (percentage of portfolio)
-        if portfolio_value > 0:
-            position_percentage = amount_usd / portfolio_value
-            if position_percentage > self.max_position_percentage:
-                return False, f"Position would be {position_percentage*100:.1f}% of portfolio (max {self.max_position_percentage*100:.1f}%)"
-        
-        # Check if adding to existing position
-        existing_position = next((p for p in positions if p.get("symbol") == ticker), None)
-        if existing_position:
-            total_position_value = existing_position.get("market_value", 0) + amount_usd
-            if isfinite(position_limit) and total_position_value > position_limit:
-                return False, f"Total position value would be ${total_position_value:.2f} (max ${position_limit:.2f})"
-        
-        # Check total investment limit
-        total_invested = sum(p.get("market_value", 0) for p in positions) + amount_usd
+        if isfinite(position_limit):
+            position_capacity = max(0.0, position_limit - existing_position_value)
+        else:
+            position_capacity = float("inf")
+
+        if portfolio_value > 0 and self.max_position_percentage > 0:
+            max_pct_value = self.max_position_percentage * portfolio_value
+            pct_capacity = max(0.0, max_pct_value - existing_position_value)
+        else:
+            pct_capacity = float("inf")
+
         total_limit = self._resolve_total_investment_limit(portfolio_value, current_cash)
-        if isfinite(total_limit) and total_invested > total_limit:
-            return False, f"Total investment would be ${total_invested:.2f} (max ${total_limit:.2f})"
-        
-        # Check daily trade limit
+        if isfinite(total_limit):
+            remaining_total_capacity = max(0.0, total_limit - total_positions_value)
+        else:
+            remaining_total_capacity = float("inf")
+
+        allowed_amount = min(cash_capacity, position_capacity, pct_capacity, remaining_total_capacity)
+
+        if allowed_amount <= 0:
+            return False, "No capacity available for additional buying"
+
+        adjusted = False
+        original_amount = amount_usd
+        if amount_usd > allowed_amount:
+            if allowed_amount < self.min_trade_value:
+                return False, (
+                    f"Trade would exceed limits; remaining capacity ${allowed_amount:.2f} is below minimum ${self.min_trade_value:.2f}"
+                )
+            amount_usd = round(allowed_amount, 2)
+            decision["amount_usd"] = amount_usd
+            adjusted = True
+
+        if amount_usd <= 0:
+            return False, "Adjusted trade amount is zero"
+
+        if amount_usd + self.min_cash_buffer > current_cash:
+            return False, f"Insufficient cash after adjustment: ${current_cash:.2f} available"
+
         if not self._check_daily_trade_limit():
             return False, "Daily trade limit exceeded"
-        
+
+        if adjusted:
+            return True, f"Buy resized to ${amount_usd:.2f} (requested ${original_amount:.2f})"
         return True, "Buy order validated"
     
     def _validate_sell_order(self, 
@@ -191,6 +220,17 @@ class TradingSafetyManager:
             return False, f"No value in position for {ticker}"
         
         # For now, assume selling entire position (can be refined later)
+        try:
+            pos_current = float(position.get('current_value') or position.get('market_value') or 0.0)
+            pos_cost = float(position.get('total_value') or 0.0)
+            if pos_cost > 0:
+                pnl_ratio = (pos_current - pos_cost) / pos_cost
+                if pnl_ratio >= self.force_sell_gain_threshold:
+                    return True, f"Auto-sell to harvest gains: position up {pnl_ratio*100:.2f}%"
+                if pnl_ratio <= self.force_sell_loss_threshold:
+                    return True, f"Auto-sell stop loss: position down {abs(pnl_ratio)*100:.2f}%"
+        except Exception:
+            pass
         # In practice, you'd calculate based on amount_usd vs current price
         
         return True, "Sell order validated"

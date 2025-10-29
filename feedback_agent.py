@@ -14,7 +14,7 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE
 import yfinance as yf
 import pandas as pd
 
@@ -824,7 +824,7 @@ CRITICAL INSTRUCTIONS:
             # Get the correct parameters and use structured JSON schema
 
             token_params = get_model_token_params(GPT_MODEL, 2000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
+            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
             
             api_params = {
                 "model": GPT_MODEL,
@@ -1057,7 +1057,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             # Get the correct parameters and use structured JSON schema
 
             token_params = get_model_token_params(GPT_MODEL, 2000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
+            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
             
             api_params = {
                 "model": GPT_MODEL,
@@ -1480,7 +1480,7 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
             
             # Get AI model parameters
             token_params = get_model_token_params(GPT_MODEL, 1000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, 0.3)
+            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
             
             api_params = {
                 "model": GPT_MODEL,

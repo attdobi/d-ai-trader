@@ -36,9 +36,32 @@
     <p class="value">${{ '%.2f'|format(total_value) }}</p>
   </div>
   <div class="metric-card">
-    <h3>Cash Balance</h3>
+    <h3>
+      {% if use_schwab_positions %}
+        Funds Available
+      {% else %}
+        Cash Balance
+      {% endif %}
+    </h3>
     <p class="value">${{ '%.2f'|format(cash_balance) }}</p>
+    {% if use_schwab_positions and schwab_summary %}
+    <p class="subtitle">
+      Settled ${{ '%.2f'|format(schwab_summary.cash_balance or 0) }}
+      {% if schwab_summary.unsettled_cash is not none %}
+        · Unsettled ${{ '%.2f'|format(schwab_summary.unsettled_cash or 0) }}
+      {% endif %}
+      {% if schwab_summary.order_reserve is not none %}
+        · Order Reserve ${{ '%.2f'|format(schwab_summary.order_reserve or 0) }}
+      {% endif %}
+    </p>
+    {% endif %}
   </div>
+  {% if use_schwab_positions and schwab_summary %}
+  <div class="metric-card">
+    <h3>Open Orders</h3>
+    <p class="value">{{ schwab_summary.open_orders_count or 0 }}</p>
+  </div>
+  {% endif %}
   <div class="metric-card">
     <h3>Invested Amount</h3>
     <p class="value">${{ '%.2f'|format(total_invested) }}</p>
@@ -79,13 +102,14 @@
         {% endif %}
       </p>
     </div>
+    {% set is_live_mode = current_config.trading_mode in ['real_world', 'live'] %}
     <div class="config-card">
       <h4>Trading Mode</h4>
-      <p class="config-value {{ 'real-mode' if current_config.trading_mode == 'real_world' else 'sim-mode' }}">
+      <p class="config-value {{ 'real-mode' if is_live_mode else 'sim-mode' }}">
         {% if use_schwab_positions %}
           LIVE (READ-ONLY) 🔒
         {% else %}
-          {{ current_config.trading_mode.upper() }} {% if current_config.trading_mode == 'real_world' %}💰{% else %}🎮{% endif %}
+          {{ 'REAL_WORLD' if is_live_mode else current_config.trading_mode.upper() }} {% if is_live_mode %}💰{% else %}🎮{% endif %}
         {% endif %}
       </p>
     </div>

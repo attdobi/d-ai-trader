@@ -143,7 +143,7 @@ class TradingInterface:
             logger.info(f"Executing {len(decisions)} decisions in simulation mode")
             
             # Use the existing update_holdings function
-            update_holdings(decisions)
+            update_holdings(decisions, skip_live_execution=(self.trading_mode in {"live", "real_world"}))
             
             # Return success results for all decisions
             results = []
