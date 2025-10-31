@@ -14,7 +14,7 @@ This is critical for real-money trading - no AI hallucinations allowed!
 import os
 from typing import List, Dict, Any, Tuple
 
-MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1500"))
+MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 MAX_BUY_AMOUNT = float(os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 
 class DecisionValidator:

@@ -20,6 +20,7 @@ import threading
 import atexit
 from math import floor
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from typing import Dict, Any
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
 import yfinance as yf
@@ -40,10 +41,12 @@ except (TypeError, ValueError):
     MAX_TRADES = 5
 MAX_FUNDS = 10000
 MIN_BUFFER = 100  # Must always have at least this much left
-MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1500"))
+MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 TYPICAL_BUY_LOW = float(_os.getenv("DAI_TYPICAL_BUY_LOW", "2000"))
 TYPICAL_BUY_HIGH = float(_os.getenv("DAI_TYPICAL_BUY_HIGH", "3500"))
 MAX_BUY_AMOUNT = float(_os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
+SUMMARY_MAX_CHARS = int(_os.getenv("DAI_SUMMARY_CHARS", "3000"))
+ONE_TRADE_MODE = int(_os.getenv("DAI_ONE_TRADE_MODE", "0"))
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
@@ -1620,8 +1623,8 @@ No explanatory text, no markdown, just pure JSON array."""
 
             # Truncate long insights to reduce token usage
             insights = summary_content.get('insights', '')
-            if len(insights) > 1000:  # Limit insights to 500 characters
-                insights = insights[:500] + "... [truncated]"
+            if len(insights) > SUMMARY_MAX_CHARS:
+                insights = insights[:SUMMARY_MAX_CHARS] + "... [truncated]"
 
             # Limit headlines to reduce token usage
             headlines = summary_content.get('headlines', [])
@@ -1649,7 +1652,7 @@ No explanatory text, no markdown, just pure JSON array."""
     for s in parsed_summaries:
         agent_label = (s.get('agent') or 'unknown').strip().lower()
         headlines_text = ', '.join(s['headlines'][:3])  # Limit to 3 headlines per agent
-        insights_text = s['insights'][:200] if len(s['insights']) > 200 else s['insights']  # Limit insights
+        insights_text = s['insights'] if len(s['insights']) <= SUMMARY_MAX_CHARS else s['insights'][:SUMMARY_MAX_CHARS] + "... [truncated]"
         summary_parts.append(f"{agent_label}: {headlines_text} | {insights_text}")
 
     summarized_text = "\n".join(summary_parts)
@@ -1709,6 +1712,23 @@ No explanatory text, no markdown, just pure JSON array."""
     else:
         pl_summary = "- No open positions"
 
+    def _safe_format(template: str, values: Dict[str, Any]) -> str:
+        """Safely format prompt templates that contain literal JSON braces."""
+        sentinel_map = {}
+        safe_template = template
+        for key in values.keys():
+            placeholder = f"{{{key}}}"
+            marker = f"__PLACEHOLDER_{key.upper()}__"
+            sentinel_map[marker] = key
+            safe_template = safe_template.replace(placeholder, marker)
+
+        safe_template = safe_template.replace('{', '{{').replace('}', '}}')
+
+        for marker, key in sentinel_map.items():
+            safe_template = safe_template.replace(marker, f"{{{key}}}")
+
+        return safe_template.format(**values)
+
     # Use versioned prompt template
     user_prompt_values = {
         "available_cash": available_cash,
@@ -1726,8 +1746,10 @@ No explanatory text, no markdown, just pure JSON array."""
         "buy_example": f"{int((TYPICAL_BUY_LOW + TYPICAL_BUY_HIGH) / 2):,}",
         "below_min_buy": f"{max(int(MIN_BUY_AMOUNT * 0.6), 100):,}",
         "well_below_min": f"{max(int(MIN_BUY_AMOUNT * 0.4), 100):,}",
+        "max_trades": MAX_TRADES,
+        "one_trade_mode": ONE_TRADE_MODE,
     }
-    prompt = user_prompt_template.format(**user_prompt_values)
+    prompt = _safe_format(user_prompt_template, user_prompt_values)
 
 
     prompt_preview_limit = int(os.getenv("DAI_PROMPT_DEBUG_LIMIT", "2000"))
@@ -1806,7 +1828,28 @@ START YOUR JSON ARRAY NOW (begin with [ ):"""
     elif not isinstance(ai_response, list):
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
-    
+
+    # Guarantee a decision exists for every current holding
+    existing_decisions = {}
+    for decision in ai_response:
+        if isinstance(decision, dict):
+            ticker = (decision.get("ticker") or "").upper()
+            if ticker:
+                existing_decisions[ticker] = decision
+
+    current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
+    missing_tickers = [ticker for ticker in current_tickers if ticker not in existing_decisions]
+
+    if missing_tickers:
+        print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} — auto-filling HOLD entries.")
+        for ticker in missing_tickers:
+            ai_response.append({
+                "action": "hold",
+                "ticker": ticker,
+                "amount_usd": 0,
+                "reason": "Auto-generated HOLD because AI omitted this position. Provide explicit reasoning next cycle."
+            })
+
     # If market is closed, modify decisions to show they're deferred
     if not market_open:
         print("🕒 Market closed - Decisions recorded but execution deferred")
