@@ -104,10 +104,10 @@ CONFIGURATION CONSTRAINTS:
 - DAI_MAX_TRADES = {max_trades}
 - DAI_ONE_TRADE_MODE = {one_trade_mode} (1 means emit at most one BUY entry; 0 means multiple BUY entries are expected.)
 - ALWAYS evaluate existing holdings first. Provide SELL or HOLD decisions for every owned ticker before proposing any new BUY orders.
-- After completing sell/hold analysis, append BUY opportunities (if capital and {one_trade_mode} allow) until you reach the {max_trades} trade cap.
-- Rotate capital aggressively: prioritize SELL decisions that free cash before issuing BUY recommendations.
+- After completing sell/hold analysis, append BUY opportunities (if capital and {one_trade_mode} allow) until you reach the {max_trades} trade cap. Your default target mix is roughly half SELL/HOLD and half BUY (e.g., 3 sell/hold + 3 buy when {max_trades} = 6).
+- Rotate capital aggressively: prioritize SELL decisions that free cash before issuing BUY recommendations. If cash on hand is below ${min_buy}, plan a SELL that frees capital and immediately redeploy it with a BUY entry.
 - The JSON array you return MUST include at least one object per current holding (sell or hold). If you own two tickers, the array must contain two objects covering those tickers before any BUY objects are added.
-- If available cash after sells is ≥ ${min_buy}, you must propose at least two BUY entries targeting the highest-conviction opportunities. If cash is limited, include BUY entries that redeploy proceeds from planned sells to keep capital active.
+- If the cash available after considering required buffer is ≥ ${min_buy}, you must include at least one high-conviction BUY. When cash or proceeds permit multiple buys, provide two or more BUY entries so capital never sits idle.
 
 🚨 CRITICAL JSON REQUIREMENT:
 Return ONLY a JSON array of trade decisions. Each decision must include:
