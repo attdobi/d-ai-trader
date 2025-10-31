@@ -20,7 +20,9 @@ import threading
 import atexit
 from math import floor
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from functools import lru_cache
 from typing import Dict, Any
+import pandas as pd
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
 import yfinance as yf
