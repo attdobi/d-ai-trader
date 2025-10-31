@@ -12,9 +12,9 @@ def initialize_default_prompts():
     # Default prompts for each agent type - ACTUAL TRADING PROMPTS (v0 baseline)
     default_prompts = {
         "SummarizerAgent": {
-            "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights.
+            "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights, focus on day trading opportunities.
 
-{feedback_context}
+Follow the feedback context: {feedback_context}
 
 🚨 CRITICAL JSON REQUIREMENT:
 Return ONLY valid JSON in this EXACT format:
@@ -32,8 +32,9 @@ Return ONLY valid JSON in this EXACT format:
 Focus on identifying trading opportunities, market sentiment shifts, and specific companies or sectors that could impact short-term trading decisions.""",
             "description": "v0 Baseline SummarizerAgent - extracts trading insights from financial news"
         },
+
         "DeciderAgent": {
-            "user_prompt_template": """You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation.
+            "user_prompt_template": """You are an AGGRESSIVE DAY TRADING AI managing an investment portfolio.
 
 🚨 UNCHANGING CORE RULES (NEVER VIOLATE THESE):
 
@@ -109,7 +110,6 @@ Example: [{"action": "buy", "ticker": "AAPL", "amount_usd": 1000, "reason": "Str
         "feedback_analyzer": {
             "user_prompt": """You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
 
-Context Data: {context_data}
 Performance Metrics: {performance_metrics}
 
 Please provide:
@@ -147,4 +147,4 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     print("You can now view and edit prompts through the dashboard.")
 
 if __name__ == "__main__":
-    initialize_default_prompts() 
+    initialize_default_prompts()
