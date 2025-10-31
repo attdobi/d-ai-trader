@@ -40,6 +40,10 @@ except (TypeError, ValueError):
     MAX_TRADES = 5
 MAX_FUNDS = 10000
 MIN_BUFFER = 100  # Must always have at least this much left
+MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1500"))
+TYPICAL_BUY_LOW = float(_os.getenv("DAI_TYPICAL_BUY_LOW", "2000"))
+TYPICAL_BUY_HIGH = float(_os.getenv("DAI_TYPICAL_BUY_HIGH", "3500"))
+MAX_BUY_AMOUNT = float(_os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
@@ -1706,16 +1710,24 @@ No explanatory text, no markdown, just pure JSON array."""
         pl_summary = "- No open positions"
 
     # Use versioned prompt template
-    prompt = user_prompt_template.format(
-        available_cash=available_cash,
-        max_spendable=max_spendable,
-        min_buffer=MIN_BUFFER,
-        max_funds=total_portfolio_value,
-        holdings=holdings_text,
-        feedback=feedback_context,
-        summaries=summarized_text,
-        pnl_summary=pl_summary,
-    )
+    user_prompt_values = {
+        "available_cash": available_cash,
+        "max_spendable": max_spendable,
+        "min_buffer": MIN_BUFFER,
+        "max_funds": total_portfolio_value,
+        "holdings": holdings_text,
+        "feedback": feedback_context,
+        "summaries": summarized_text,
+        "pnl_summary": pl_summary,
+        "min_buy": f"{int(MIN_BUY_AMOUNT):,}",
+        "typical_buy_low": f"{int(TYPICAL_BUY_LOW):,}",
+        "typical_buy_high": f"{int(TYPICAL_BUY_HIGH):,}",
+        "max_buy": f"{int(MAX_BUY_AMOUNT):,}",
+        "buy_example": f"{int((TYPICAL_BUY_LOW + TYPICAL_BUY_HIGH) / 2):,}",
+        "below_min_buy": f"{max(int(MIN_BUY_AMOUNT * 0.6), 100):,}",
+        "well_below_min": f"{max(int(MIN_BUY_AMOUNT * 0.4), 100):,}",
+    }
+    prompt = user_prompt_template.format(**user_prompt_values)
 
 
     prompt_preview_limit = int(os.getenv("DAI_PROMPT_DEBUG_LIMIT", "2000"))
@@ -1741,8 +1753,11 @@ No explanatory text, no markdown, just pure JSON array."""
     else:
         holdings_instructions = "\n✅ You have NO current positions - only consider new BUYS\n"
     
+    example_buy_amount = int((TYPICAL_BUY_LOW + TYPICAL_BUY_HIGH) / 2)
+    buy_range_display = f"${int(MIN_BUY_AMOUNT):,}-${int(MAX_BUY_AMOUNT):,}"
+
     prompt += holdings_instructions
-    prompt += """\n
+    prompt += f"""\n
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎯 OUTPUT FORMAT: JSON ARRAY ONLY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1753,13 +1768,13 @@ Format:
 [
   {{"action": "sell", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
   {{"action": "hold", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
-  {{"action": "buy", "ticker": "TICKER", "amount_usd": 2500, "reason": "why"}}
+  {{"action": "buy", "ticker": "TICKER", "amount_usd": ${example_buy_amount:,}, "reason": "why"}}
 ]
 
 Rules:
 - Provide SELL or HOLD for EVERY stock you own (listed above)
 - Can suggest BUY for new stocks
-- amount_usd: 0 for sell/hold, $1500-4000 for buy
+- amount_usd: 0 for sell/hold, {buy_range_display} for buy
 
 START YOUR JSON ARRAY NOW (begin with [ ):"""
     
