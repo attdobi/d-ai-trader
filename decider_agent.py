@@ -58,9 +58,9 @@ prompt_manager = PromptManager(client=openai, session=session)
 feedback_tracker = TradeOutcomeTracker()
 
 
-def store_momentum_snapshot(config_hash, companies, momentum_data, momentum_summary, momentum_recap):
-    """Persist momentum recap information for reuse in UI displays."""
-    if not config_hash:
+def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momentum_summary, momentum_recap):
+    """Persist momentum recap information for reuse in UI displays, keyed by summarizer run."""
+    if not config_hash or not run_id:
         return
 
     try:
@@ -78,6 +78,7 @@ def store_momentum_snapshot(config_hash, companies, momentum_data, momentum_summ
             CREATE TABLE IF NOT EXISTS momentum_snapshots (
                 id SERIAL PRIMARY KEY,
                 config_hash TEXT NOT NULL,
+                run_id TEXT NOT NULL,
                 generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 companies_json JSONB,
                 momentum_data JSONB,
@@ -85,10 +86,15 @@ def store_momentum_snapshot(config_hash, companies, momentum_data, momentum_summ
                 momentum_recap TEXT
             )
         """))
+        conn.execute(text("""
+            ALTER TABLE momentum_snapshots
+            ADD COLUMN IF NOT EXISTS run_id TEXT
+        """))
 
         conn.execute(text("""
             INSERT INTO momentum_snapshots (
                 config_hash,
+                run_id,
                 generated_at,
                 companies_json,
                 momentum_data,
@@ -104,6 +110,7 @@ def store_momentum_snapshot(config_hash, companies, momentum_data, momentum_summ
             )
         """), {
             "config_hash": config_hash,
+            "run_id": run_id,
             "generated_at": datetime.now(PACIFIC_TIMEZONE).astimezone(pytz.UTC).replace(tzinfo=None),
             "companies_json": companies_json,
             "momentum_data": momentum_json,
@@ -1839,6 +1846,14 @@ def record_portfolio_snapshot():
         })
 
 def ask_decision_agent(summaries, run_id, holdings):
+    # Limit summaries to the targeted run_id when provided
+    if run_id:
+        run_scoped = [s for s in summaries if s.get('run_id') == run_id]
+        if run_scoped:
+            summaries = run_scoped
+        else:
+            print(f"⚠️  No summaries matched run_id {run_id}; proceeding with provided list of {len(summaries)} items")
+
     # Get versioned prompt for DeciderAgent
     from prompt_manager import get_active_prompt
     try:
@@ -2133,7 +2148,7 @@ No explanatory text, no markdown, just pure JSON array."""
 
     try:
         current_config_hash = get_current_config_hash()
-        store_momentum_snapshot(current_config_hash, company_entities, momentum_data, momentum_summary, momentum_recap)
+        store_momentum_snapshot(current_config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
     except Exception as snapshot_error:
         print(f"⚠️  Failed to store momentum snapshot: {snapshot_error}")
 
@@ -2580,10 +2595,22 @@ if __name__ == "__main__":
         unprocessed_summaries = []  # Empty list will trigger market status check
     else:
         print(f"Found {len(unprocessed_summaries)} unprocessed summaries")
-        
-        # Create a run_id based on the latest timestamp
-        latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
-        run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
+    
+        # Determine target run_id from summaries (prefer actual run metadata)
+        run_id_candidates = []
+        for summary in unprocessed_summaries:
+            summary_run_id = summary.get('run_id')
+            summary_timestamp = summary.get('timestamp')
+            if summary_run_id:
+                run_id_candidates.append((summary_timestamp, summary_run_id))
+        if run_id_candidates:
+            run_id_candidates.sort(key=lambda item: item[0] or datetime.min)
+            run_id = run_id_candidates[-1][1]
+            unprocessed_summaries = [s for s in unprocessed_summaries if s.get('run_id') == run_id] or unprocessed_summaries
+            print(f"Processing run {run_id} with {len(unprocessed_summaries)} summaries")
+        else:
+            latest_timestamp = max((s.get('timestamp') for s in unprocessed_summaries if s.get('timestamp')), default=None)
+            run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S") if latest_timestamp else datetime.now().strftime("%Y%m%dT%H%M%S")
         
         # Update current prices before making decisions
         update_all_current_prices()
@@ -2596,15 +2623,15 @@ if __name__ == "__main__":
             tickers_without_prices = [h['ticker'] for h in holdings_without_prices]
             print(f"\n⚠️  WARNING: Using purchase prices for decision making on: {', '.join(tickers_without_prices)}")
             print("💡 Consider manually updating prices for accurate decision making")
-        
+
         decisions = ask_decision_agent(unprocessed_summaries, run_id, holdings)
         store_trade_decisions(decisions, run_id)
-        
+
         # Execute trades through the unified trading interface
         try:
             from trading_interface import trading_interface
             execution_results = trading_interface.execute_trade_decisions(decisions)
-            
+
             # Log execution results
             if execution_results.get("summary"):
                 summary = execution_results["summary"]
@@ -2624,17 +2651,17 @@ if __name__ == "__main__":
             print(f"❌ Error in trading interface: {e}")
             print("🔄 Falling back to simulation mode")
             update_holdings(decisions)
-        
+
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]
         mark_summaries_processed(summary_ids)
-        
+
         # Record portfolio snapshot after trades
         try:
             record_portfolio_snapshot()
             print("Portfolio snapshot recorded after trades")
         except Exception as e:
             print(f"Failed to record portfolio snapshot: {e}")
-        
+
         print(f"Stored decisions and updated holdings for run {run_id}")
         print(f"Marked {len(summary_ids)} summaries as processed")

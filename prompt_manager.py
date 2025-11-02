@@ -150,7 +150,7 @@ def get_active_prompt_emergency_patch(agent_type):
     except Exception as init_err:
         print(f"⚠️ Prompt initialization warning for {agent_type}: {init_err}")
 
-    from prompts.default_prompts import DEFAULT_PROMPTS
+    from initialize_prompts import DEFAULT_PROMPTS
     baselines = {
         agent: {
             "system_prompt": payload["system_prompt"],

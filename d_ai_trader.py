@@ -326,20 +326,40 @@ class DAITraderOrchestrator:
             else:
                 logger.info(f"Found {len(unprocessed_summaries)} unprocessed summaries")
             
-            # Create a mock run_id for the decider to use
-            # We'll use the latest timestamp from the summaries, or current time if no summaries
+            # Determine which summarizer run to process
+            target_run_id = None
+            summaries_to_process = unprocessed_summaries
             if unprocessed_summaries:
-                latest_timestamp = max(s['timestamp'] for s in unprocessed_summaries)
-                mock_run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S")
+                run_id_candidates = []
+                for summary in unprocessed_summaries:
+                    summary_run_id = summary.get('run_id')
+                    summary_timestamp = summary.get('timestamp')
+                    if summary_run_id:
+                        run_id_candidates.append((summary_timestamp, summary_run_id))
+                if run_id_candidates:
+                    # Sort by timestamp, defaulting missing timestamps to minimal value
+                    run_id_candidates.sort(key=lambda item: item[0] or datetime.min)
+                    target_run_id = run_id_candidates[-1][1]
+                    summaries_filtered = [s for s in unprocessed_summaries if s.get('run_id') == target_run_id]
+                    if summaries_filtered:
+                        summaries_to_process = summaries_filtered
+                        logger.info(f"Processing {len(summaries_filtered)} summaries for run {target_run_id}")
+                else:
+                    latest_timestamp = max(s.get('timestamp') for s in unprocessed_summaries if s.get('timestamp'))
+                    target_run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S") if latest_timestamp else None
             else:
-                # No summaries, use current time for run_id
-                mock_run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
-            
+                target_run_id = None
+
+            if not target_run_id:
+                # Fallback when no run_id metadata exists
+                target_run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
+                logger.info(f"No summarizer run_id detected; using fallback decider run id {target_run_id}")
+
             # Temporarily override the get_latest_run_id function
             original_get_latest_run_id = decider.get_latest_run_id
             
             def mock_get_latest_run_id():
-                return mock_run_id
+                return target_run_id
             
             decider.get_latest_run_id = mock_get_latest_run_id
             
@@ -347,11 +367,11 @@ class DAITraderOrchestrator:
             decider.update_all_current_prices()
             
             # Run the decider agent
-            summaries = unprocessed_summaries
+            summaries = summaries_to_process
             holdings = decider.fetch_holdings()
             
             try:
-                decisions = decider.ask_decision_agent(summaries, mock_run_id, holdings)
+                decisions = decider.ask_decision_agent(summaries, target_run_id, holdings)
                 logger.info(f"✅ Decider AI returned {len(decisions) if isinstance(decisions, list) else 1} decisions")
             except Exception as e:
                 logger.error(f"❌ Decider AI call failed: {e}")
@@ -361,14 +381,14 @@ class DAITraderOrchestrator:
                 decisions = []
             
             if decisions:
-                decider.store_trade_decisions(decisions, mock_run_id)
+                decider.store_trade_decisions(decisions, target_run_id)
                 decider.update_holdings(decisions)
                 decider.record_portfolio_snapshot()
             else:
                 logger.warning("⚠️  No decisions to process - AI returned empty or failed")
             
             # Mark summaries as processed
-            summary_ids = [s['id'] for s in unprocessed_summaries]
+            summary_ids = [s['id'] for s in summaries]
             self.mark_summaries_processed(summary_ids, 'decider')
             
             # Restore original function

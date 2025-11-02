@@ -16,12 +16,13 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
 import importlib
-from prompts import default_prompts as default_prompts_module
+import initialize_prompts as default_prompts_module
 from prompt_manager import initialize_config_prompts
 from decider_agent import (
     extract_companies_from_summaries,
     build_momentum_recap,
     fetch_holdings,
+    store_momentum_snapshot,
     SUMMARY_MAX_CHARS,
 )
 
@@ -416,13 +417,27 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
     """Run the company extraction and momentum recap pipeline on recent summaries."""
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
-        rows = conn.execute(text("""
-            SELECT agent, data, timestamp
+        latest_run = conn.execute(text("""
+            SELECT run_id
             FROM summaries
             WHERE config_hash = :config_hash
             ORDER BY timestamp DESC
-            LIMIT :limit
-        """), {"config_hash": config_hash, "limit": limit}).fetchall()
+            LIMIT 1
+        """), {"config_hash": config_hash}).fetchone()
+
+        if not latest_run or not latest_run.run_id:
+            return {
+                "success": False,
+                "error": "No summarizer runs available for the current configuration."
+            }
+
+        run_id = latest_run.run_id
+        rows = conn.execute(text("""
+            SELECT agent, data, timestamp
+            FROM summaries
+            WHERE config_hash = :config_hash AND run_id = :run_id
+            ORDER BY timestamp ASC
+        """), {"config_hash": config_hash, "run_id": run_id}).fetchall()
 
     if not rows:
         return {
@@ -465,6 +480,7 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
                 CREATE TABLE IF NOT EXISTS momentum_snapshots (
                     id SERIAL PRIMARY KEY,
                     config_hash TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
                     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     companies_json JSONB,
                     momentum_data JSONB,
@@ -472,13 +488,17 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
                     momentum_recap TEXT
                 )
             """))
+            conn.execute(text("""
+                ALTER TABLE momentum_snapshots
+                ADD COLUMN IF NOT EXISTS run_id TEXT
+            """))
             snapshot = conn.execute(text("""
                 SELECT companies_json, momentum_data, momentum_summary, momentum_recap, generated_at
                 FROM momentum_snapshots
-                WHERE config_hash = :config_hash
+                WHERE config_hash = :config_hash AND run_id = :run_id
                 ORDER BY generated_at DESC
                 LIMIT 1
-            """), {"config_hash": config_hash}).fetchone()
+            """), {"config_hash": config_hash, "run_id": run_id}).fetchone()
     except Exception as snapshot_err:
         print(f"⚠️  Momentum snapshot lookup failed: {snapshot_err}")
 
@@ -504,7 +524,7 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
         momentum_data, momentum_summary = build_momentum_recap(company_entities)
         momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
         try:
-            store_momentum_snapshot(config_hash, company_entities, momentum_data, momentum_summary, momentum_recap)
+            store_momentum_snapshot(config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
         except Exception as persist_err:
             print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
 
@@ -536,6 +556,7 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
     return {
         "success": True,
         "summary_count": len(parsed_summaries),
+        "run_id": run_id,
         "summaries": parsed_summaries,
         "summaries_preview": summaries_preview,
         "companies": company_entities,
@@ -649,6 +670,7 @@ def _fetch_latest_momentum_snapshot(config_hash):
                 CREATE TABLE IF NOT EXISTS momentum_snapshots (
                     id SERIAL PRIMARY KEY,
                     config_hash TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
                     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     companies_json JSONB,
                     momentum_data JSONB,
@@ -656,8 +678,12 @@ def _fetch_latest_momentum_snapshot(config_hash):
                     momentum_recap TEXT
                 )
             """))
+            conn.execute(text("""
+                ALTER TABLE momentum_snapshots
+                ADD COLUMN IF NOT EXISTS run_id TEXT
+            """))
             snapshot = conn.execute(text("""
-                SELECT companies_json, momentum_data, momentum_summary, momentum_recap, generated_at
+                SELECT companies_json, momentum_data, momentum_summary, momentum_recap, generated_at, run_id
                 FROM momentum_snapshots
                 WHERE config_hash = :config_hash
                 ORDER BY generated_at DESC
