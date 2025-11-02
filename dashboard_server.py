@@ -412,7 +412,7 @@ def _parse_summary_row(row):
     }
 
 
-def generate_summary_analyzer_report(limit=10):
+def generate_summary_analyzer_report(limit=10, force_refresh=False):
     """Run the company extraction and momentum recap pipeline on recent summaries."""
     config_hash = get_current_config_hash()
     with engine.connect() as conn:
@@ -451,8 +451,62 @@ def generate_summary_analyzer_report(limit=10):
     summaries_preview = "\n".join(summary_parts)
     extraction_payload = "\n\n".join(extractor_blocks) if extractor_blocks else summaries_preview
 
-    company_entities = extract_companies_from_summaries(extraction_payload)
-    momentum_data, momentum_summary = build_momentum_recap(company_entities)
+    company_entities = []
+    momentum_data = []
+    momentum_summary = ""
+    momentum_recap = ""
+    analysis_timestamp = datetime.utcnow().isoformat() + "Z"
+
+    snapshot_loaded = False
+    snapshot = None
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS momentum_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    config_hash TEXT NOT NULL,
+                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    companies_json JSONB,
+                    momentum_data JSONB,
+                    momentum_summary TEXT,
+                    momentum_recap TEXT
+                )
+            """))
+            snapshot = conn.execute(text("""
+                SELECT companies_json, momentum_data, momentum_summary, momentum_recap, generated_at
+                FROM momentum_snapshots
+                WHERE config_hash = :config_hash
+                ORDER BY generated_at DESC
+                LIMIT 1
+            """), {"config_hash": config_hash}).fetchone()
+    except Exception as snapshot_err:
+        print(f"⚠️  Momentum snapshot lookup failed: {snapshot_err}")
+
+    if snapshot and not force_refresh:
+        snapshot_loaded = True
+        try:
+            company_entities = json.loads(snapshot.companies_json) if snapshot.companies_json else []
+        except Exception:
+            company_entities = []
+        try:
+            momentum_data = json.loads(snapshot.momentum_data) if snapshot.momentum_data else []
+        except Exception:
+            momentum_data = []
+        momentum_summary = snapshot.momentum_summary or ""
+        momentum_recap = snapshot.momentum_recap or ""
+        if snapshot.generated_at:
+            try:
+                analysis_timestamp = snapshot.generated_at.isoformat() + "Z"
+            except Exception:
+                analysis_timestamp = datetime.utcnow().isoformat() + "Z"
+    if not snapshot_loaded:
+        company_entities = extract_companies_from_summaries(extraction_payload)
+        momentum_data, momentum_summary = build_momentum_recap(company_entities)
+        momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
+        try:
+            store_momentum_snapshot(config_hash, company_entities, momentum_data, momentum_summary, momentum_recap)
+        except Exception as persist_err:
+            print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
 
     holdings = fetch_holdings()
     cash_balance = next((float(h.get("current_value", 0)) for h in holdings if h.get("ticker") == "CASH"), 0.0)
@@ -471,10 +525,12 @@ def generate_summary_analyzer_report(limit=10):
 
     holdings_pl_summary = "\n".join(pl_lines)
 
-    momentum_recap = momentum_summary or "- Momentum data unavailable"
-    if holdings_pl_summary:
-        momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
-    elif not momentum_data:
+    if holdings_pl_summary and "Existing Position P/L" not in (momentum_recap or ""):
+        if momentum_recap:
+            momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
+        else:
+            momentum_recap = f"Existing Position P/L:\n{holdings_pl_summary}"
+    elif not momentum_recap:
         momentum_recap = "- No momentum data available\n\nExisting Position P/L:\n- No open positions"
 
     return {
@@ -488,7 +544,7 @@ def generate_summary_analyzer_report(limit=10):
         "momentum_recap": momentum_recap,
         "holdings_pl_summary": holdings_pl_summary,
         "available_cash": cash_balance,
-        "analysis_timestamp": datetime.utcnow().isoformat() + "Z",
+        "analysis_timestamp": analysis_timestamp,
     }
 
 
@@ -582,23 +638,49 @@ def _record_live_portfolio_snapshot(config_hash, total_portfolio_value, cash_bal
             "config_hash": config_hash
         })
 
+
+def _fetch_latest_momentum_snapshot(config_hash):
+    if not config_hash:
+        return None
+    snapshot = None
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS momentum_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    config_hash TEXT NOT NULL,
+                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    companies_json JSONB,
+                    momentum_data JSONB,
+                    momentum_summary TEXT,
+                    momentum_recap TEXT
+                )
+            """))
+            snapshot = conn.execute(text("""
+                SELECT companies_json, momentum_data, momentum_summary, momentum_recap, generated_at
+                FROM momentum_snapshots
+                WHERE config_hash = :config_hash
+                ORDER BY generated_at DESC
+                LIMIT 1
+            """), {"config_hash": config_hash}).fetchone()
+    except Exception as exc:
+        print(f"⚠️  Momentum snapshot lookup failed: {exc}")
+        snapshot = None
+    return snapshot
+
 def _get_active_prompts_bundle():
     """Fetch active prompt data for all primary agents with current feedback applied."""
     tracker = TradeOutcomeTracker()
     latest_feedback = tracker.get_latest_feedback() or {}
     context_samples = _build_prompt_context_samples(latest_feedback)
 
-    momentum_report = None
-    try:
-        momentum_report = generate_summary_analyzer_report()
-    except Exception as exc:
-        print(f"Momentum analyzer preview failed: {exc}")
-        momentum_report = None
+    momentum_recap_text = "Momentum recap unavailable."
+    snapshot = _fetch_latest_momentum_snapshot(get_current_config_hash())
+    if snapshot and snapshot.momentum_recap:
+        momentum_recap_text = snapshot.momentum_recap
 
-    if momentum_report and momentum_report.get("success"):
-        momentum_recap_text = momentum_report.get("momentum_recap") or "Momentum recap unavailable."
-    else:
-        momentum_recap_text = "Momentum recap unavailable."
+    context_samples.setdefault("momentum_recap", momentum_recap_text)
+    context_samples.setdefault("pnl_summary", momentum_recap_text)
 
     context_samples.setdefault("momentum_recap", momentum_recap_text)
     context_samples.setdefault("pnl_summary", momentum_recap_text)
@@ -1524,7 +1606,7 @@ def get_active_prompts():
 def run_summary_analyzer_endpoint():
     """Ad-hoc trigger for the summary analyzer plus momentum recap."""
     try:
-        result = generate_summary_analyzer_report()
+        result = generate_summary_analyzer_report(force_refresh=True)
     except Exception as exc:
         print(f"Summary analyzer error: {exc}")
         result = {"success": False, "error": str(exc)}

@@ -58,6 +58,61 @@ prompt_manager = PromptManager(client=openai, session=session)
 feedback_tracker = TradeOutcomeTracker()
 
 
+def store_momentum_snapshot(config_hash, companies, momentum_data, momentum_summary, momentum_recap):
+    """Persist momentum recap information for reuse in UI displays."""
+    if not config_hash:
+        return
+
+    try:
+        companies_json = json.dumps(companies or [])
+    except Exception:
+        companies_json = json.dumps([])
+
+    try:
+        momentum_json = json.dumps(momentum_data or [])
+    except Exception:
+        momentum_json = json.dumps([])
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS momentum_snapshots (
+                id SERIAL PRIMARY KEY,
+                config_hash TEXT NOT NULL,
+                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                companies_json JSONB,
+                momentum_data JSONB,
+                momentum_summary TEXT,
+                momentum_recap TEXT
+            )
+        """))
+
+        conn.execute(text("""
+            INSERT INTO momentum_snapshots (
+                config_hash,
+                generated_at,
+                companies_json,
+                momentum_data,
+                momentum_summary,
+                momentum_recap
+            ) VALUES (
+                :config_hash,
+                :generated_at,
+                :companies_json,
+                :momentum_data,
+                :momentum_summary,
+                :momentum_recap
+            )
+        """), {
+            "config_hash": config_hash,
+            "generated_at": datetime.now(PACIFIC_TIMEZONE).astimezone(pytz.UTC).replace(tzinfo=None),
+            "companies_json": companies_json,
+            "momentum_data": momentum_json,
+            "momentum_summary": momentum_summary or "",
+            "momentum_recap": momentum_recap or "",
+        })
+
+
+
 class YFinancePriceFetcher:
     """Shared price fetcher that caches results and batches slow Yahoo Finance calls."""
 
@@ -2075,6 +2130,12 @@ No explanatory text, no markdown, just pure JSON array."""
         momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
     elif not momentum_data:
         momentum_recap = "- No momentum data available\n\nExisting Position P/L:\n- No open positions"
+
+    try:
+        current_config_hash = get_current_config_hash()
+        store_momentum_snapshot(current_config_hash, company_entities, momentum_data, momentum_summary, momentum_recap)
+    except Exception as snapshot_error:
+        print(f"⚠️  Failed to store momentum snapshot: {snapshot_error}")
 
     # Use versioned prompt template
     user_prompt_values = {
