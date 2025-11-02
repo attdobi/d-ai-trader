@@ -62,6 +62,7 @@ NON‑NEGOTIABLES:
 - **Images dominate**: Extract tickers and cues from price tables (Top Gainers/Losers/Most Active), on‑screen banners/overlays, captions, and recognizable logos next to names. Reference these explicitly in the narrative.
 - **Ticker & catalyst precision**: Include only valid, liquid symbols and concrete near‑term catalysts. If uncertain, exclude rather than guess.
 - **Depth target**: Craft an insights narrative of ~450–700 tokens, organized into the 7 labeled sections. Make it dense but readable; no fluff.
+- **Word budget**: keep the entire JSON output ≤350 words (≈500 tokens) while covering every section.
 - **Actionability** over prose: For each top name, explain *why it moves now*, *what the screenshot/text shows*, and *what would confirm/deny follow‑through* in the next 30–90 minutes.
 - **Structure locked**: Output JSON with exactly `headlines` (3 items) and `insights` (one long string). End with `Watchlist:`.
 

@@ -640,6 +640,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                             driver_kwargs["version_main"] = version_main
                         current_driver = uc.Chrome(**driver_kwargs)
                         print(f"[Worker {worker_id}] ✅ New driver created for {agent_name}")
+                        time.sleep(2)  # Allow Chrome to finish bootstrapping
                         driver_ok = True
                         break
                     except Exception as create_error:
@@ -699,6 +700,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                                     driver_kwargs["version_main"] = version_main
                                 current_driver = uc.Chrome(**driver_kwargs)
                                 print(f"[Worker {worker_id}] ✅ Recreated driver for {agent_name}")
+                                time.sleep(2)  # Allow Chrome to fully initialize after recreation
                                 continue
                             except Exception as recreate_err:
                                 print(f"[Worker {worker_id}] ❌ Failed to recreate driver after window loss: {recreate_err}")

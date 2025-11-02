@@ -102,6 +102,7 @@ def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momen
                 momentum_recap
             ) VALUES (
                 :config_hash,
+                :run_id,
                 :generated_at,
                 :companies_json,
                 :momentum_data,
