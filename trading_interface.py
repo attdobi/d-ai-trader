@@ -3,6 +3,7 @@ Trading Interface - Abstraction layer for trading operations
 Handles both simulation (dashboard) and live (Schwab API) trading
 """
 
+import json
 import logging
 import os
 import time
@@ -10,7 +11,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy import text
 from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash, SCHWAB_ACCOUNT_HASH
-from schwab_client import schwab_client
+from schwab_client import schwab_client, get_portfolio_snapshot
+from schwab_ledger import compute_effective_funds, components as ledger_components
 from feedback_agent import TradeOutcomeTracker
 from safety_checks import safety_manager
 
@@ -29,16 +31,24 @@ class TradingInterface:
         self.readonly_mode = os.environ.get("DAI_SCHWAB_READONLY", "0") == "1"
         
         # Initialize Schwab client if we are trading live OR have been asked to run live view
-        if self.trading_mode == "live" or self.live_view_only:
+        if self.trading_mode in {"live", "real_world"} or self.live_view_only:
             try:
                 self.schwab_enabled = schwab_client.authenticate()
                 if self.schwab_enabled:
                     logger.info("Schwab API client authenticated successfully")
                 else:
                     logger.error("Failed to authenticate Schwab API client")
+                    print(
+                        "⚠️ Schwab authentication failed. "
+                        "Run ./test_schwab_api.sh to complete re-authentication (browser OAuth required)."
+                    )
             except Exception as e:
                 logger.error(f"Error initializing Schwab client: {e}")
                 self.schwab_enabled = False
+                print(
+                    "⚠️ Unable to initialize Schwab client. "
+                    "Try re-running ./test_schwab_api.sh to refresh credentials."
+                )
         
         logger.info(
             "TradingInterface initialized - Mode: %s, Schwab Enabled: %s, Live View: %s, Read-Only: %s",
@@ -88,7 +98,7 @@ class TradingInterface:
                     results["summary"]["errors"] += 1
             
             # Execute in live trading if enabled
-            if self.trading_mode == "live" and self.schwab_enabled:
+            if self.trading_mode in {"live", "real_world"} and self.schwab_enabled:
                 # Run safety checks before live trading
                 safe_decisions, safety_results = self._run_safety_checks(decisions)
                 results["safety_checks"] = safety_results
@@ -133,7 +143,7 @@ class TradingInterface:
             logger.info(f"Executing {len(decisions)} decisions in simulation mode")
             
             # Use the existing update_holdings function
-            update_holdings(decisions)
+            update_holdings(decisions, skip_live_execution=(self.trading_mode in {"live", "real_world"}))
             
             # Return success results for all decisions
             results = []
@@ -204,6 +214,70 @@ class TradingInterface:
                 "execution_type": "live"
             }]
     
+    @staticmethod
+    def _wrap_live_result(result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalise Schwab live execution responses for legacy callers.
+        """
+        if not isinstance(result, dict):
+            return {
+                "success": False,
+                "status": "error",
+                "error": "Unknown Schwab order response",
+            }
+
+        payload = dict(result)
+        status = payload.get("status")
+        if status == "success":
+            payload["success"] = True
+        else:
+            payload["success"] = False
+            payload.setdefault("error", payload.get("reason", "Order not executed"))
+        return payload
+
+    def execute_buy_order(self, ticker: str, amount_usd: float, reason: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Place a market buy order using USD allocation (legacy helper for decider_agent).
+        """
+        decision = {
+            "action": "buy",
+            "ticker": ticker,
+            "amount_usd": amount_usd,
+            "reason": reason or "",
+        }
+        return self._wrap_live_result(self._execute_schwab_order(decision))
+
+    def execute_sell_order(self, ticker: str, shares: float, reason: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Place a market sell order for an explicit share count (legacy helper for decider_agent).
+        """
+        try:
+            shares_int = int(float(shares))
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "status": "error",
+                "error": f"Invalid share quantity: {shares}",
+                "ticker": ticker,
+            }
+
+        if shares_int <= 0:
+            return {
+                "success": False,
+                "status": "error",
+                "error": f"Share quantity must be positive (got {shares_int})",
+                "ticker": ticker,
+            }
+
+        decision = {
+            "action": "sell",
+            "ticker": ticker,
+            "shares_override": shares_int,
+            "amount_usd": 0.0,
+            "reason": reason or "",
+        }
+        return self._wrap_live_result(self._execute_schwab_order(decision))
+
     def _execute_schwab_order(self, decision: Dict) -> Dict:
         """
         Execute a single order through Schwab API
@@ -211,16 +285,16 @@ class TradingInterface:
         try:
             action = decision.get("action", "").lower()
             ticker = decision.get("ticker", "")
-            amount_usd = float(decision.get("amount_usd", 0))
             reason = decision.get("reason", "")
-            
-            if not ticker or amount_usd <= 0:
+            if not ticker:
                 return {
                     "status": "error",
-                    "error": "Invalid ticker or amount",
+                    "error": "Invalid ticker",
                     "execution_type": "live",
                     "decision": decision
                 }
+
+            amount_usd = float(decision.get("amount_usd", 0))
             
             # Get current price to calculate shares
             from decider_agent import get_current_price
@@ -235,6 +309,13 @@ class TradingInterface:
                 }
             
             if action == "buy":
+                if amount_usd <= 0:
+                    return {
+                        "status": "error",
+                        "error": "Invalid allocation amount",
+                        "execution_type": "live",
+                        "decision": decision
+                    }
                 # Calculate number of shares to buy
                 shares = int(amount_usd / current_price)
                 if shares == 0:
@@ -244,6 +325,10 @@ class TradingInterface:
                         "execution_type": "live",
                         "decision": decision
                     }
+                estimated_total = shares * current_price
+                decision["shares_estimate"] = shares
+                decision["price_estimate"] = current_price
+                decision["estimated_value"] = estimated_total
                 
                 # Place buy order
                 order_result = schwab_client.place_equity_order(
@@ -252,35 +337,52 @@ class TradingInterface:
                     instruction="BUY",
                     order_type="MARKET"
                 )
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("price", current_price)
+                    order_result.setdefault("estimated_value", estimated_total)
                 
             elif action == "sell":
                 # For sells, we need to get current position to know how many shares to sell
-                positions = schwab_client.get_positions()
-                if not positions:
-                    return {
-                        "status": "error",
-                        "error": "Could not get current positions",
-                        "execution_type": "live",
-                        "decision": decision
-                    }
-                
-                # Find the position for this ticker
-                position = None
-                for pos in positions:
-                    instrument = pos.get("instrument", {})
-                    if instrument.get("symbol") == ticker:
-                        position = pos
-                        break
-                
-                if not position:
-                    return {
-                        "status": "skipped",
-                        "reason": f"No position found for {ticker}",
-                        "execution_type": "live",
-                        "decision": decision
-                    }
-                
-                shares = int(position.get("longQuantity", 0))
+                shares_override = decision.get("shares_override")
+                if shares_override is not None:
+                    try:
+                        shares = int(float(shares_override))
+                    except (TypeError, ValueError):
+                        return {
+                            "status": "error",
+                            "error": f"Invalid share override: {shares_override}",
+                            "execution_type": "live",
+                            "decision": decision,
+                        }
+                else:
+                    positions = schwab_client.get_positions()
+                    if not positions:
+                        return {
+                            "status": "error",
+                            "error": "Could not get current positions",
+                            "execution_type": "live",
+                            "decision": decision
+                        }
+
+                    # Find the position for this ticker
+                    position = None
+                    for pos in positions:
+                        instrument = pos.get("instrument", {})
+                        if instrument.get("symbol") == ticker:
+                            position = pos
+                            break
+
+                    if not position:
+                        return {
+                            "status": "skipped",
+                            "reason": f"No position found for {ticker}",
+                            "execution_type": "live",
+                            "decision": decision
+                        }
+
+                    shares = int(position.get("longQuantity", 0))
+
                 if shares == 0:
                     return {
                         "status": "skipped",
@@ -288,6 +390,10 @@ class TradingInterface:
                         "execution_type": "live",
                         "decision": decision
                     }
+                estimated_total = shares * current_price
+                decision["shares_estimate"] = shares
+                decision["price_estimate"] = current_price
+                decision["estimated_value"] = estimated_total
                 
                 # Place sell order
                 order_result = schwab_client.place_equity_order(
@@ -296,6 +402,13 @@ class TradingInterface:
                     instruction="SELL",
                     order_type="MARKET"
                 )
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("estimated_value", shares * current_price)
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("price", current_price)
+                    order_result.setdefault("estimated_value", estimated_total)
             
             else:
                 return {
@@ -306,6 +419,10 @@ class TradingInterface:
                 }
             
             if order_result and order_result.get("status") == "success":
+                order_state = (order_result.get("order_status", {}) or {}).get("status")
+                order_reason = (order_result.get("order_status", {}) or {}).get("reason")
+                if order_state and order_state.upper() != "FILLED":
+                    logger.info("Schwab order %s status=%s reason=%s", order_result.get("order_id"), order_state, order_reason)
                 return {
                     "status": "success",
                     "order_id": order_result.get("order_id"),
@@ -334,88 +451,146 @@ class TradingInterface:
                 "decision": decision
             }
     
-    def sync_schwab_positions(self) -> Dict[str, Any]:
+    def sync_schwab_positions(self, persist: bool = False) -> Dict[str, Any]:
         """
         Sync positions from Schwab API for the dashboard
         """
         try:
             if not self.schwab_enabled:
-                if self.live_view_only or os.environ.get("DAI_SCHWAB_LIVE_VIEW", "0") == "1":
-                    try:
-                        self.schwab_enabled = schwab_client.authenticate()
-                    except Exception as auth_err:
-                        logger.error(f"Unable to authenticate Schwab client for live view: {auth_err}")
+                try:
+                    if schwab_client.ensure_authenticated(force=False):
+                        self.schwab_enabled = True
+                    else:
+                        if self.live_view_only or os.environ.get("DAI_SCHWAB_LIVE_VIEW", "0") == "1":
+                            print(
+                                "⚠️ Schwab live view authentication failed. "
+                                "Run ./test_schwab_api.sh to refresh Schwab OAuth tokens."
+                            )
+                        return {
+                            "status": "disabled",
+                            "message": "Schwab API not enabled"
+                        }
+                except Exception as auth_err:
+                    logger.error(f"Unable to authenticate Schwab client: {auth_err}")
+                    if self.live_view_only or os.environ.get("DAI_SCHWAB_LIVE_VIEW", "0") == "1":
+                        print(
+                            "⚠️ Schwab live view authentication failed. "
+                            "Run ./test_schwab_api.sh to refresh Schwab OAuth tokens."
+                        )
+                    return {
+                        "status": "disabled",
+                        "message": "Schwab API not enabled"
+                    }
 
-                return {
-                    "status": "disabled",
-                    "message": "Schwab API not enabled"
-                }
-            
-            # Get account info and positions
-            account_info = schwab_client.get_account_info()
-            if not account_info:
+            if not schwab_client.ensure_authenticated():
+                self.schwab_enabled = False
                 return {
                     "status": "error",
-                    "message": "Could not get account info"
+                    "message": "Schwab authentication expired; refresh token required"
                 }
             
-            securities_account = account_info.get("securitiesAccount", {})
-            positions = securities_account.get("positions", [])
-            balances = securities_account.get("currentBalances", {})
-            
-            # Format positions for dashboard
-            formatted_positions = []
-            total_value = 0
-            
-            for position in positions:
-                instrument = position.get("instrument", {})
-                symbol = instrument.get("symbol", "")
-                
-                if symbol and symbol != "CASH":
-                    long_qty = float(position.get("longQuantity", 0))
-                    market_value = float(position.get("marketValue", 0))
-                    avg_price = float(position.get("averagePrice", 0))
-                    
-                    if long_qty > 0:
-                        current_price = market_value / long_qty if long_qty > 0 else 0
-                        gain_loss = market_value - (long_qty * avg_price)
-                        gain_loss_pct = (gain_loss / (long_qty * avg_price)) * 100 if avg_price > 0 else 0
-                        
-                        formatted_positions.append({
-                            "symbol": symbol,
-                            "shares": long_qty,
-                            "average_price": avg_price,
-                            "current_price": current_price,
-                            "market_value": market_value,
-                            "gain_loss": gain_loss,
-                            "gain_loss_percentage": gain_loss_pct,
-                            "total_value": long_qty * avg_price
-                        })
-                        
-                        total_value += market_value
-            
-            # Get cash balance
-            cash_balance = float(balances.get("cashBalance", 0))
-            
-            return {
+            logger.info(
+                "Fetching Schwab portfolio snapshot (live_view=%s, trading_mode=%s)",
+                self.live_view_only,
+                self.trading_mode,
+            )
+            print("🔍 sync_schwab_positions: requesting account snapshot...")
+            portfolio = get_portfolio_snapshot()
+            if not portfolio:
+                print("⚠️ sync_schwab_positions: no portfolio snapshot returned")
+                return {
+                    "status": "error",
+                    "message": "Could not get Schwab portfolio snapshot"
+                }
+
+            formatted_positions = portfolio.get("positions", [])
+            settled_positions = portfolio.get("settled_positions", [])
+            balances_raw = portfolio.get("balances_raw", {})
+            positions_raw = portfolio.get("positions_raw", [])
+            ledger_state = portfolio.get("ledger_state")
+            ledger_comp = portfolio.get("ledger_components") or ledger_components()
+
+            total_value = sum(p.get("market_value", 0) for p in formatted_positions)
+
+            cash_balance_settled = portfolio.get("cash_balance_settled", portfolio.get("cash_balance", 0.0))
+            unsettled_cash = portfolio.get("unsettled_cash", 0.0)
+            same_day_net = portfolio.get("same_day_net_activity", ledger_comp.get("same_day_net", 0.0))
+            order_reserve = portfolio.get("order_reserve", ledger_comp.get("open_buy_reserve", 0.0))
+
+            baseline_cash = portfolio.get("funds_available_explicit")
+            if baseline_cash is None:
+                baseline_cash = portfolio.get("funds_available_raw", cash_balance_settled)
+            explicit_cash = baseline_cash
+            derived_cash = portfolio.get("funds_available_derived", baseline_cash)
+            effective_cash = compute_effective_funds(baseline_cash)
+
+            buying_power = effective_cash
+            day_trading_power = 0.0
+            account_value = portfolio.get("account_value", total_value + effective_cash)
+
+            print(
+                f"💰 sync_schwab_positions: funds_available={effective_cash:.2f} "
+                f"cash_settled={cash_balance_settled:.2f} unsettled_cash={unsettled_cash:.2f} "
+                f"order_reserve={order_reserve:.2f} buying_power={buying_power:.2f} "
+                f"day_trading_power={day_trading_power:.2f}"
+            )
+            if same_day_net:
+                print(f"   ↳ same-day net activity contribution: {same_day_net:.2f}")
+
+            result = {
                 "status": "success",
                 "positions": formatted_positions,
-                "cash_balance": cash_balance,
-                "total_portfolio_value": total_value + cash_balance,
+                "settled_positions": settled_positions,
+                "cash_balance": cash_balance_settled,
+                "cash_balance_settled": cash_balance_settled,
+                "unsettled_cash": unsettled_cash,
+                "funds_available_for_trading": effective_cash,
+                "funds_available_effective": effective_cash,
+                "funds_available_explicit": explicit_cash,
+                "funds_available_derived": derived_cash,
+                "same_day_net_activity": same_day_net,
+                "order_reserve": order_reserve,
+                "total_portfolio_value": total_value + effective_cash,
                 "account_info": {
-                    "account_value": float(balances.get("totalLongMarketValue", 0)),
-                    "buying_power": float(balances.get("buyingPower", 0)),
-                    "day_trading_buying_power": float(balances.get("dayTradingBuyingPower", 0)),
-                    "account_hash": schwab_client.account_hash or SCHWAB_ACCOUNT_HASH,
-                    "account_number": securities_account.get("accountNumber") or securities_account.get("accountId"),
-                    "account_type": securities_account.get("accountType"),
-                    "status": securities_account.get("accountStatus")
+                    "account_value": account_value,
+                    "buying_power": buying_power,
+                    "day_trading_buying_power": day_trading_power,
+                    "funds_available_for_trading": effective_cash,
+                    "funds_available_explicit": explicit_cash,
+                    "funds_available_derived": derived_cash,
+                    "same_day_net_activity": same_day_net,
+                    "cash_balance": cash_balance_settled,
+                    "unsettled_cash": unsettled_cash,
+                    "order_reserve": order_reserve,
+                    "balances_raw": balances_raw,
+                    "positions_raw": positions_raw,
+                    "account_hash": portfolio.get("account_hash") or SCHWAB_ACCOUNT_HASH,
+                    "account_number": portfolio.get("account_number"),
+                    "account_type": portfolio.get("account_type"),
                 },
                 "positions_count": len(formatted_positions),
                 "last_updated": datetime.now().isoformat(),
                 "readonly_mode": self.readonly_mode,
-                "live_trading_enabled": self.trading_mode == "live" and not self.readonly_mode
+                "live_trading_enabled": (self.trading_mode in {"live", "real_world"}) and not self.readonly_mode,
+                "funds_available_components": {
+                    "effective": effective_cash,
+                    "explicit": explicit_cash,
+                    "derived_cash": derived_cash,
+                    "settled_cash": cash_balance_settled,
+                    "unsettled_cash": unsettled_cash,
+                    "same_day_net": same_day_net,
+                    "order_reserve": order_reserve,
+                },
+                "ledger_state": ledger_state,
+                "ledger_components": ledger_comp,
+                "transactions_sample": portfolio.get("transactions_sample")
             }
+            if persist:
+                try:
+                    self._persist_live_snapshot(formatted_positions, cash_balance_settled, result)
+                except Exception as persist_err:
+                    logger.error("Failed to persist live Schwab snapshot: %s", persist_err)
+            return result
             
         except Exception as e:
             logger.error(f"Error syncing Schwab positions: {e}")
@@ -423,6 +598,121 @@ class TradingInterface:
                 "status": "error",
                 "message": str(e)
             }
+    
+    def _persist_live_snapshot(self, positions: List[Dict[str, Any]], cash_balance: float, snapshot: Dict[str, Any]) -> None:
+        """
+        Write live Schwab holdings and portfolio snapshot into the database so charts & prompts use real balances.
+        """
+        config_hash = get_current_config_hash()
+        now = datetime.utcnow()
+
+        def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
+            if not symbol:
+                return None
+            sym = symbol.upper()
+            corrections = {
+                'GOOGLE': 'GOOGL',
+                'ALPHABET': 'GOOGL',
+                'FACEBOOK': 'META',
+                'FB': 'META',
+                'TESLA': 'TSLA',
+                'APPLE': 'AAPL',
+                'MICROSOFT': 'MSFT',
+                'AMAZON': 'AMZN',
+                'NVIDIA': 'NVDA',
+            }
+            return corrections.get(sym, sym)
+
+        processed_holdings = []
+        total_invested = 0.0
+        total_current = 0.0
+
+        for position in positions:
+            shares = float(position.get("shares") or 0.0)
+            avg_price = float(position.get("average_price") or 0.0)
+            current_price = float(position.get("current_price") or 0.0)
+            total_value = float(position.get("total_value") or (shares * avg_price))
+            current_value = float(position.get("market_value") or (shares * current_price))
+            gain_loss = float(position.get("gain_loss") or (current_value - total_value))
+
+            symbol = _normalize_symbol(position.get("symbol"))
+            if not symbol:
+                continue
+
+            processed_holdings.append({
+                "ticker": symbol,
+                "shares": shares,
+                "purchase_price": avg_price,
+                "current_price": current_price,
+                "total_value": total_value,
+                "current_value": current_value,
+                "gain_loss": gain_loss,
+                "reason": "Schwab synced position",
+            })
+
+            total_invested += total_value
+            total_current += current_value
+
+        holdings_snapshot = json.dumps([
+            {"ticker": h["ticker"], "current_value": h["current_value"]}
+            for h in processed_holdings
+        ])
+
+        total_portfolio_value = total_current + float(cash_balance)
+        total_profit_loss = total_current - total_invested
+        percentage_gain = (total_profit_loss / total_invested * 100.0) if total_invested else 0.0
+
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM holdings WHERE config_hash = :config_hash"),
+                {"config_hash": config_hash},
+            )
+            conn.execute(text("""
+                INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                      purchase_timestamp, current_price_timestamp, total_value, current_value,
+                                      gain_loss, reason, is_active)
+                VALUES (:config_hash, 'CASH', 1, :cash, :cash, :ts, :ts, :cash, :cash, 0, 'Schwab cash balance', TRUE)
+            """), {
+                "config_hash": config_hash,
+                "cash": float(cash_balance),
+                "ts": now,
+            })
+
+            for holding in processed_holdings:
+                conn.execute(text("""
+                    INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                          purchase_timestamp, current_price_timestamp, total_value, current_value,
+                                          gain_loss, reason, is_active)
+                    VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price,
+                            :ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                """), {
+                    "config_hash": config_hash,
+                    "ticker": holding["ticker"],
+                    "shares": holding["shares"],
+                    "purchase_price": holding["purchase_price"],
+                    "current_price": holding["current_price"],
+                    "total_value": holding["total_value"],
+                    "current_value": holding["current_value"],
+                    "gain_loss": holding["gain_loss"],
+                    "reason": holding["reason"],
+                    "ts": now,
+                })
+
+            conn.execute(text("""
+                INSERT INTO portfolio_history
+                (total_portfolio_value, cash_balance, total_invested,
+                 total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
+                VALUES (:total_portfolio_value, :cash_balance, :total_invested,
+                        :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
+            """), {
+                "total_portfolio_value": total_portfolio_value,
+                "cash_balance": float(cash_balance),
+                "total_invested": total_invested,
+                "total_profit_loss": total_profit_loss,
+                "percentage_gain": percentage_gain,
+                "holdings_snapshot": holdings_snapshot,
+                "config_hash": config_hash,
+            })
     
     def _run_safety_checks(self, decisions: List[Dict]) -> tuple:
         """

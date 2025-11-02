@@ -4,9 +4,11 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_schwab_live_view.sh [-p PORT]
+Usage: start_schwab_live_view.sh [-p PORT] [--no-stream] [--stream]
 
   -p, --port   Dashboard port (default: 8080)
+      --stream     Launch Schwab streaming helper (default: on)
+      --no-stream  Disable streaming helper
   --help       Show this help message
 
 This script starts the Flask dashboard with Schwab integration enabled in
@@ -15,10 +17,13 @@ USAGE
 }
 
 PORT="${PORT:-8080}"
+ENABLE_STREAM=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port) PORT="$2"; shift 2 ;;
+    --stream) ENABLE_STREAM=1; shift ;;
+    --no-stream) ENABLE_STREAM=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; usage; exit 1 ;;
   esac
@@ -97,7 +102,8 @@ fi
 export DAI_PROJECT_ROOT="${PROJECT_ROOT}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 export DAI_PORT="${PORT}"
-export TRADING_MODE="${TRADING_MODE:-live}"
+# Force live mode for Schwab read-only view so API is enabled
+export TRADING_MODE="live"
 export DAI_SCHWAB_LIVE_VIEW=1
 export DAI_SCHWAB_READONLY=1
 export DAI_DISABLE_AUTOMATION=1
@@ -119,6 +125,25 @@ echo ""
 echo "🌐 Dashboard URL: http://localhost:${PORT}"
 echo ""
 echo "🚫 No trades will be executed in this mode."
+if (( ENABLE_STREAM )); then
+  echo "🔄 Streaming:       ENABLED (schwab_streaming.py)"
+else
+  echo "🔄 Streaming:       DISABLED"
+fi
 echo ""
+
+cleanup() {
+  if [[ -n "${STREAM_PID:-}" ]]; then
+    kill "${STREAM_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+if (( ENABLE_STREAM )); then
+  echo "▶️  Starting Schwab streaming helper (Level I quotes + account activity)..."
+  python "${PROJECT_ROOT}/run_schwab_streaming.py" >/tmp/dai_schwab_stream.log 2>&1 &
+  STREAM_PID=$!
+  echo "   Logs: tail -f /tmp/dai_schwab_stream.log"
+fi
 
 python "${PROJECT_ROOT}/dashboard_server.py"

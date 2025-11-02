@@ -246,6 +246,12 @@ body {
 .trigger-status.error { background:rgba(255,95,115,0.12); color:var(--danger); border:1px solid rgba(255,95,115,0.22); }
 
 .trigger-status.loading { background:rgba(66,201,255,0.12); color:var(--accent); border:1px solid rgba(66,201,255,0.22); }
+.analyzer-company-list { margin:8px 0 0 18px; padding:0; }
+.analyzer-company-list li { margin:4px 0; list-style:disc; }
+.analyzer-company-list .ticker { color:var(--accent); }
+.analyzer-summaries { margin-top:8px; }
+.analyzer-summaries summary { cursor:pointer; font-weight:600; }
+.analyzer-summaries div { margin-top:6px; font-size:0.9em; line-height:1.4; white-space:normal; }
 
 .table-container { overflow-x:auto; }
 

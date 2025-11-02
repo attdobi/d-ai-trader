@@ -11,7 +11,11 @@ FINANCIAL GUARDRAILS:
 This is critical for real-money trading - no AI hallucinations allowed!
 """
 
+import os
 from typing import List, Dict, Any, Tuple
+
+MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
+MAX_BUY_AMOUNT = float(os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 
 class DecisionValidator:
     """Validates trading decisions to prevent hallucinations and errors"""
@@ -103,10 +107,10 @@ class DecisionValidator:
             # Rule 7: Amount validation for buys
             try:
                 amount = float(amount_usd)
-                if amount < 1500:
-                    return False, f"Buy amount ${amount:.2f} too small (minimum $1500)"
-                if amount > 4000:
-                    return False, f"Buy amount ${amount:.2f} too large (maximum $4000)"
+                if amount < MIN_BUY_AMOUNT:
+                    return False, f"Buy amount ${amount:.2f} too small (minimum ${MIN_BUY_AMOUNT:,.0f})"
+                if amount > MAX_BUY_AMOUNT:
+                    return False, f"Buy amount ${amount:.2f} too large (maximum ${MAX_BUY_AMOUNT:,.0f})"
                 if amount > self.available_cash:
                     return False, f"Buy amount ${amount:.2f} exceeds available cash ${self.available_cash:.2f}"
             except (ValueError, TypeError):
@@ -135,4 +139,3 @@ class DecisionValidator:
             print(f"   AI should have provided SELL or HOLD decision for each!")
         
         return list(missing)
-

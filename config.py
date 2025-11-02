@@ -1,17 +1,43 @@
 import os
 import json
 import base64
+import time
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
 from sqlalchemy.orm import sessionmaker, scoped_session
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
+from pathlib import Path
 import openai
 from sqlalchemy import text
 
-# Load environment variables (prefer .env over existing shell vars to avoid stale keys)
-load_dotenv(override=True)
+# Load environment variables (prefer .env but do not override existing shell vars)
+load_dotenv(override=False)
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DOTENV_PATH = PROJECT_ROOT / ".env"
+DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH.exists() else {}
+
+
+def dotenv_first(key: str, default=None):
+    val = DOTENV_VALUES.get(key)
+    if val not in (None, ""):
+        return val
+    val = os.getenv(key)
+    if val not in (None, ""):
+        return val
+    return default
+
+
+def env_first(key: str, default=None):
+    val = os.getenv(key)
+    if val not in (None, ""):
+        return val
+    val = DOTENV_VALUES.get(key)
+    if val not in (None, ""):
+        return val
+    return default
 
 # Database connection
 DATABASE_URI = 'postgresql://adobi@localhost/adobi'
@@ -66,22 +92,23 @@ class Summary(Base):
 Base.metadata.create_all(engine)
 
 # OpenAI configuration
-api_key = os.getenv("OPENAI_API_KEY")
+api_key = env_first("OPENAI_API_KEY")
 
 # Schwab API configuration
-SCHWAB_CLIENT_ID = os.getenv("SCHWAB_CLIENT_ID")
-SCHWAB_CLIENT_SECRET = os.getenv("SCHWAB_CLIENT_SECRET")
-SCHWAB_REDIRECT_URI = os.getenv("SCHWAB_REDIRECT_URI", "https://localhost:8443/callback")
-SCHWAB_ACCOUNT_HASH = os.getenv("SCHWAB_ACCOUNT_HASH")
+SCHWAB_CLIENT_ID = env_first("SCHWAB_CLIENT_ID")
+SCHWAB_CLIENT_SECRET = env_first("SCHWAB_CLIENT_SECRET")
+SCHWAB_REDIRECT_URI = env_first("SCHWAB_REDIRECT_URI", "https://127.0.0.1:5556/callback")
+SCHWAB_ACCOUNT_HASH = dotenv_first("SCHWAB_ACCOUNT_HASH")
 
 # Trading configuration
-TRADING_MODE = os.getenv("TRADING_MODE", "simulation").lower()  # simulation or live
+TRADING_MODE = env_first("TRADING_MODE", "simulation").lower()
 MAX_POSITION_VALUE = float(os.getenv("MAX_POSITION_VALUE", "2000"))
 MAX_POSITION_FRACTION = float(os.getenv("MAX_POSITION_FRACTION", "0"))
 MAX_TOTAL_INVESTMENT = float(os.getenv("MAX_TOTAL_INVESTMENT", "10000"))
 MAX_TOTAL_INVESTMENT_FRACTION = float(os.getenv("MAX_TOTAL_INVESTMENT_FRACTION", "0"))
 MIN_CASH_BUFFER = float(os.getenv("MIN_CASH_BUFFER", "500"))
 DEBUG_TRADING = os.getenv("DEBUG_TRADING", "true").lower() == "true"
+MODEL_TEMPERATURE = float(os.getenv("DAI_MODEL_TEMPERATURE", "0.2"))
 
 # Optional: print masked key for debugging if requested
 try:
@@ -125,16 +152,41 @@ openai.api_key = api_key
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
 GPT_MODEL = "gpt-4o"  # Default: GPT-4o (most reliable for trading)
+_last_announced_model = None
+
+
+def _announce_model(model_name: str):
+    global _last_announced_model
+    if model_name and model_name != _last_announced_model:
+        print(f"🤖 Using AI model: {model_name}")
+        _last_announced_model = model_name
+
+
+_announce_model(GPT_MODEL)
 
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
-    if model_name in valid_models:
-        GPT_MODEL = model_name
-        print(f"✅ Updated GPT model to: {GPT_MODEL}")
+    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    alias_map = {
+        "gpt4.1": "gpt-4.1",
+        "gpt-4-turbo": "gpt-4-turbo",
+    }
+
+    raw_input = (model_name or "").strip()
+    lookup_key = raw_input.lower()
+    normalized = alias_map.get(lookup_key, lookup_key)
+    if normalized != lookup_key:
+        print(f"ℹ️  Model alias '{raw_input}' resolved to '{normalized}'")
+
+    if normalized in valid_models:
+        if GPT_MODEL != normalized:
+            GPT_MODEL = normalized
+            _announce_model(GPT_MODEL)
+        else:
+            print(f"ℹ️  GPT model already set to {GPT_MODEL}")
     else:
-        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models}")
+        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models + list(alias_map.keys())}")
         print(f"⚠️  Keeping current model: {GPT_MODEL}")
 
 def get_gpt_model():
@@ -187,18 +239,43 @@ def should_use_specific_prompt_version():
     return PROMPT_VERSION_MODE == "fixed" and FORCED_PROMPT_VERSION is not None
 
 # Trading mode configuration
-TRADING_MODE = "simulation"  # Default to simulation
+_VALID_TRADING_MODES = {"simulation", "real_world", "live"}
+_TRADING_MODE_ALIASES = {
+    "realworld": "real_world",
+    "real": "real_world",
+    "live_trading": "live",
+}
+
+
+def _normalize_trading_mode(mode):
+    """Normalize trading mode strings and apply aliases."""
+    if not mode:
+        return "simulation"
+    normalized = str(mode).strip().lower()
+    return _TRADING_MODE_ALIASES.get(normalized, normalized)
+
+
+TRADING_MODE = _normalize_trading_mode(TRADING_MODE)
+# Treat 'live' as an alias for 'real_world' to maintain backward compatibility.
+if TRADING_MODE == "live":
+    TRADING_MODE = "real_world"
+if TRADING_MODE not in _VALID_TRADING_MODES:
+    TRADING_MODE = "simulation"
+
 
 def set_trading_mode(mode):
-    """Set trading mode: simulation or real_world"""
+    """Set trading mode: simulation, real_world (live alias supported)"""
     global TRADING_MODE
-    valid_modes = ["simulation", "real_world"]
-    if mode in valid_modes:
-        TRADING_MODE = mode
+    target = _normalize_trading_mode(mode)
+    if target == "live":
+        target = "real_world"
+    if target in _VALID_TRADING_MODES:
+        TRADING_MODE = target
         print(f"🔄 Trading mode set to: {TRADING_MODE.upper()}")
     else:
-        print(f"❌ Invalid trading mode '{mode}'. Valid modes: {valid_modes}")
+        print(f"❌ Invalid trading mode '{mode}'. Valid modes: {sorted(_VALID_TRADING_MODES)}")
         print(f"🔄 Keeping current mode: {TRADING_MODE}")
+
 
 def get_trading_mode():
     """Get current trading mode"""
@@ -362,6 +439,7 @@ class PromptManager:
         while retries < max_retries:
             try:
                 model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                requires_json = (agent_name in {"SummarizerAgent", "DeciderAgent", "FeedbackAgent"})
                 
                 # ============================================
                 # PARALLEL PATH 1: GPT-5 (Reasoning Model)
@@ -395,6 +473,8 @@ class PromptManager:
                         "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
                         # No temperature - GPT-5 only supports default (1.0)
                     }
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
                     print(f"📊 GPT-5 Token limit: 8000 (includes reasoning tokens)")
                 
                 # ============================================
@@ -427,15 +507,17 @@ class PromptManager:
                         "model": GPT_MODEL,
                         "messages": messages,
                         "max_completion_tokens": 2000,
-                        "temperature": 0.3
+                        "temperature": MODEL_TEMPERATURE
                     }
-                    print(f"📊 Token params: max_completion_tokens=2000, temperature=0.3")
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
+                    print(f"📊 Token params: max_completion_tokens=2000, temperature={MODEL_TEMPERATURE}")
                 
                 # ============================================
                 # PARALLEL PATH 3: GPT-4-turbo and older
                 # ============================================
                 else:
-                    print(f"🤖 Using {GPT_MODEL} (older model) for {agent_name}")
+                    print(f"🤖 Using {GPT_MODEL} for {agent_name}")
                     
                     # Older models: Use max_tokens instead of max_completion_tokens
                     messages = [
@@ -448,12 +530,18 @@ class PromptManager:
                         "model": GPT_MODEL,
                         "messages": messages,
                         "max_tokens": 1500,
-                        "temperature": 0.3
+                        "temperature": MODEL_TEMPERATURE
                     }
-                    print(f"📊 Token params: max_tokens=1500, temperature=0.3")
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
+                    print(f"📊 Token params: max_tokens=1500, temperature={MODEL_TEMPERATURE}")
                 
-                # Make API call
+                # Make API call with latency logging
+                start_time = time.time()
+                print(f"[PromptManager] ⏳ Awaiting {agent_name or 'UnknownAgent'} response (attempt {retries + 1}/{max_retries})", flush=True)
                 response = self.client.chat.completions.create(**api_params)
+                elapsed = time.time() - start_time
+                print(f"[PromptManager] ✅ {agent_name or 'UnknownAgent'} response received in {elapsed:.1f}s", flush=True)
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
@@ -602,7 +690,13 @@ class PromptManager:
                     return self._create_fallback_response(content, agent_name)
 
             except Exception as e:
-                print(f"API Call Error: {e}")
+                elapsed = None
+                if 'start_time' in locals():
+                    elapsed = time.time() - start_time
+                if elapsed is not None:
+                    print(f"[PromptManager] ❌ {agent_name or 'UnknownAgent'} error after {elapsed:.1f}s: {e}")
+                else:
+                    print(f"API Call Error: {e}")
                 retries += 1
                 if retries >= max_retries:
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}

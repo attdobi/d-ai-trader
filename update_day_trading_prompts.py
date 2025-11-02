@@ -15,7 +15,7 @@ def update_decider_prompt():
     # New day trading focused prompt
     new_user_prompt = """
 You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed {MAX_TRADES} total trades, never allocate more than ${MAX_FUNDS - MIN_BUFFER} total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed {MAX_TRADES} total trades, never allocate more than the total available balance for trading.
 Retain at least ${MIN_BUFFER} in funds.
 
 DAY TRADING STRATEGY:

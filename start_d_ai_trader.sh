@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE] [-c CADENCE]
+Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE] [-c CADENCE] [-H HASH]
 
   -p, --port            Dashboard port (default: 8080)
   -m, --model           AI model (default: gpt-4o)
@@ -28,6 +28,7 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                           • 15  - Every 15 minutes (aggressive day trading)
                           • 30  - Every 30 minutes (active trading)
                           • 60  - Every hour (default, conservative)
+  -H, --config-hash     Force a specific configuration hash for this run
   --help                Show this help
 
 Tips:
@@ -40,8 +41,9 @@ USAGE
 PORT=8080
 MODEL="gpt-4o"
 PROMPT_VERSION="auto"
-TRADING_MODE="simulation"
+TRADING_MODE="${TRADING_MODE:-simulation}"
 CADENCE_MINUTES=60
+CONFIG_HASH_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     -v|--prompt-version) PROMPT_VERSION="$2"; shift 2;;
     -t|--trading-mode) TRADING_MODE="$2"; shift 2;;
     -c|--cadence) CADENCE_MINUTES="$2"; shift 2;;
+    -H|--config-hash) CONFIG_HASH_OVERRIDE="$2"; shift 2;;
     --help|-h) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -141,6 +144,9 @@ export DAI_GPT_MODEL="${MODEL}"
 export DAI_PROMPT_VERSION="${PROMPT_VERSION}"
 export TRADING_MODE="${TRADING_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE_MINUTES}"
+if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then
+  export CURRENT_CONFIG_HASH="${CONFIG_HASH_OVERRIDE}"
+fi
 
 echo "========================================"
 echo "D-AI-Trader Startup Configuration"
@@ -150,6 +156,9 @@ echo "AI Model:          ${MODEL}"
 echo "Prompt Version:    ${PROMPT_VERSION}"
 echo "Trading Mode:      ${TRADING_MODE}"
 echo "Run Cadence:       Every ${CADENCE_MINUTES} minutes"
+if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then
+  echo "Config Hash:       ${CONFIG_HASH_OVERRIDE} (forced override)"
+fi
 if [[ "${DAI_DISABLE_UC}" == "1" ]]; then
   echo "UC Shim:           DISABLED"
 else

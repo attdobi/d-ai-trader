@@ -12,9 +12,12 @@ except Exception:
 # --- end bootstrap ---
 
 import os
+import sys
 import time
 import json
 import re
+import shutil
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from selenium import webdriver
@@ -23,6 +26,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException
 from sqlalchemy import text
 from config import engine, api_key, PromptManager, session, get_current_config_hash, set_gpt_model
 import chromedriver_autoinstaller
@@ -68,8 +72,56 @@ os.makedirs(RUN_DIR, exist_ok=True)
 print(f"Screenshot directory: {SCREENSHOT_DIR}")
 print(f"Run directory: {RUN_DIR}")
 
+SUMMARY_WITH_IMAGES_ONLY = os.getenv("SUMMARY_WITH_IMAGES_ONLY", "0") == "1"
+if SUMMARY_WITH_IMAGES_ONLY:
+    print("📷 SUMMARY_WITH_IMAGES_ONLY enabled — summaries will rely solely on screenshots.")
+
 # Automatically install correct ChromeDriver version
 chromedriver_autoinstaller.install()
+
+# Track UC cache reset to avoid repeated deletions in a single run
+UC_CACHE_RESET = False
+UC_VERSION_MAIN = None
+
+
+def chrome_major_version():
+    """Detect installed Chrome major version and cache it."""
+    global UC_VERSION_MAIN
+    if UC_VERSION_MAIN is not None:
+        return UC_VERSION_MAIN
+    try:
+        detected = chromedriver_autoinstaller.get_chrome_version()
+        if detected:
+            UC_VERSION_MAIN = int(detected.split(".")[0])
+            print(f"ℹ️  Detected Chrome major version {UC_VERSION_MAIN}")
+            return UC_VERSION_MAIN
+    except Exception as exc:
+        print(f"⚠️  Unable to determine Chrome version automatically: {exc}")
+    UC_VERSION_MAIN = None
+    return None
+
+
+def reset_undetected_chromedriver_cache():
+    """Remove undetected_chromedriver cache directory to clear stale symlinks."""
+    global UC_CACHE_RESET, UC_VERSION_MAIN
+    data_dir_env = os.getenv("UC_DATA_DIR")
+    if data_dir_env:
+        base_dir = Path(data_dir_env)
+    else:
+        if sys.platform == "darwin":
+            base_dir = Path.home() / "Library/Application Support/undetected_chromedriver"
+        elif sys.platform.startswith("win"):
+            base_dir = Path(os.getenv("LOCALAPPDATA", Path.home())) / "undetected_chromedriver"
+        else:
+            base_dir = Path.home() / ".undetected_chromedriver"
+    try:
+        if base_dir.exists():
+            shutil.rmtree(base_dir)
+            print(f"🧹 Cleared undetected_chromedriver cache at {base_dir}")
+        UC_CACHE_RESET = True
+        UC_VERSION_MAIN = None
+    except Exception as exc:
+        print(f"⚠️  Unable to reset undetected_chromedriver cache: {exc}")
 
 # Function to create fresh Chrome options (never reuse)
 def create_chrome_options():
@@ -109,6 +161,22 @@ def initialize_database():
         '''))
 
 def get_openai_summary(agent_name, html_content, image_paths):
+    def _safe_format_template(template, values):
+        sentinel_map = {}
+        safe_template = template
+        for key, value in values.items():
+            placeholder = f"{{{key}}}"
+            marker = f"__PLACEHOLDER_{key.upper()}__"
+            sentinel_map[marker] = value
+            safe_template = safe_template.replace(placeholder, marker)
+
+        safe_template = safe_template.replace('{', '{{').replace('}', '}}')
+
+        for marker, value in sentinel_map.items():
+            safe_template = safe_template.replace(marker, value)
+
+        return safe_template
+
     # Get versioned prompt for SummarizerAgent
     from prompt_manager import get_active_prompt
     try:
@@ -154,38 +222,66 @@ Return a JSON object with:
     html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
     html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
     
-    # Extract text content more efficiently
-    try:
-        soup = BeautifulSoup(html_content, 'html.parser')
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-        
-        # Get text content
-        text_content = soup.get_text()
-        
-        # Clean up whitespace
-        lines = (line.strip() for line in text_content.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text_content = ' '.join(chunk for chunk in chunks if chunk)
-        
-        # Limit content length to avoid rate limiting (reduced from 10000 to 5000)
-        if len(text_content) > 5000:
-            text_content = text_content[:5000] + "... [content truncated]"
+    if SUMMARY_WITH_IMAGES_ONLY:
+        html_content_processed = "[TEXT CONTEXT DISABLED – rely on screenshots only.]"
+    else:
+        html_content_processed = html_content
+        # Extract text content more efficiently
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
             
-        html_content = text_content
-    except Exception as e:
-        print(f"Failed to parse HTML content for {agent_name}: {e}")
-        # Fallback: just truncate the raw HTML
-        if len(html_content) > 5000:
-            html_content = html_content[:5000] + "... [content truncated]"
+            # Get text content
+            text_content = soup.get_text()
+            
+            # Clean up whitespace
+            lines = (line.strip() for line in text_content.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text_content = ' '.join(chunk for chunk in chunks if chunk)
+            
+            # Limit content length to avoid rate limiting (reduced from 10000 to 5000)
+            if len(text_content) > 5000:
+                text_content = text_content[:5000] + "... [content truncated]"
+                
+            html_content_processed = text_content
+        except Exception as e:
+            print(f"Failed to parse HTML content for {agent_name}: {e}")
+            # Fallback: just truncate the raw HTML
+            if len(html_content_processed) > 5000:
+                html_content_processed = html_content_processed[:5000] + "... [content truncated]"
+
+    # Only include images if they were successfully saved and are reasonably sized
+    IMAGE_SIZE_LIMIT = 1_500_000  # 1.5 MB limit per image
+    valid_image_paths = []
+    for img_path in image_paths:
+        if os.path.exists(img_path):
+            file_size = os.path.getsize(img_path)
+            if file_size < IMAGE_SIZE_LIMIT:
+                valid_image_paths.append(img_path)
+            else:
+                print(f"Skipping large image {img_path} ({file_size} bytes >= {IMAGE_SIZE_LIMIT})")
+        else:
+            print(f"⚠️  Image path missing: {img_path}")
 
     # Use versioned prompt template
-    prompt = user_prompt_template.format(
-        content=html_content,
-        feedback_context=feedback_context
+    prompt = _safe_format_template(
+        user_prompt_template,
+        {
+            "content": html_content_processed,
+            "feedback_context": feedback_context,
+        }
     )
-    
+
+    screenshot_instructions = []
+    if valid_image_paths:
+        screenshot_instructions.append("SCREENSHOT CONTEXT:")
+        for idx, path in enumerate(valid_image_paths, 1):
+            screenshot_instructions.append(f"- Screenshot {idx}: {os.path.basename(path)}")
+    elif SUMMARY_WITH_IMAGES_ONLY:
+        screenshot_instructions.append("SCREENSHOT CONTEXT: No screenshots available (check capture pipeline).")
+
     # Add instruction to ignore popups and extract visible content
     prompt += """\n
 IMPORTANT: If you see privacy notices, cookie consent dialogs, login prompts, or "Press and Hold" overlays in the screenshots:
@@ -195,21 +291,21 @@ IMPORTANT: If you see privacy notices, cookie consent dialogs, login prompts, or
 - Focus on the financial news content that is readable despite any overlays
 
 Most financial news websites still show headlines and articles even with popups visible."""
+
+    if screenshot_instructions:
+        prompt += "\n\n" + "\n".join(screenshot_instructions)
     
     # Use versioned system prompt with feedback context
     system_prompt = system_prompt_template + f"\n\n{feedback_context}"
     
-    # Only include images if they were successfully saved and are reasonably sized
-    valid_image_paths = []
-    for img_path in image_paths:
-        if os.path.exists(img_path):
-            file_size = os.path.getsize(img_path)
-            # Only include images smaller than 1MB to avoid rate limiting
-            if file_size < 1024 * 1024:
-                valid_image_paths.append(img_path)
-            else:
-                print(f"Skipping large image {img_path} ({file_size} bytes)")
-    
+    print(f"🖼️ {agent_name}: passing {len(valid_image_paths)} image(s) to OpenAI")
+    if valid_image_paths:
+        for idx, img in enumerate(valid_image_paths, 1):
+            try:
+                print(f"   • Image {idx}: {img} ({os.path.getsize(img)} bytes)")
+            except OSError:
+                print(f"   • Image {idx}: {img} (size unavailable)")
+
     return prompt_manager.ask_openai(
         prompt, 
         system_prompt, 
@@ -347,12 +443,14 @@ def summarize_page(agent_name, url, web_driver):
     """
     Summarize a webpage using the provided webdriver
     """
-    # Check if driver session is still valid
+    # Basic guard: ensure at least one window handle is available
     try:
-        web_driver.current_url  # Test if session is alive
+        handles = web_driver.window_handles
     except Exception as e:
         print(f"Driver session invalid for {agent_name}: {e}")
         raise e
+    if not handles:
+        print(f"⚠️  No window handles for {agent_name} - attempting to continue with driver.get")
     
     # Special handling for Yahoo Finance which can be slow
     if "yahoo.com" in url.lower():
@@ -465,8 +563,12 @@ def summarize_page(agent_name, url, web_driver):
 
     try:
         summary_data = get_openai_summary(agent_name, html, saved_screenshots)
+        if isinstance(summary_data, list):
+            summary_data = summary_data[0] if summary_data else {}
+        print(f"🧾 {agent_name} summary response: {summary_data}")
     except Exception as e:
         summary_data = {"error": f"Summary failed: {e}"}
+        print(f"❌ {agent_name} summary error: {e}")
 
     summary = {
         "agent": agent_name,
@@ -505,7 +607,8 @@ def _process_agent_sequence(agent_sequence, worker_id):
     """Process a sequence of agents using a dedicated Chrome driver"""
     if not agent_sequence:
         return
-    
+    global UC_VERSION_MAIN
+
     current_driver = None
     try:
         for agent_idx, (agent_name, url) in enumerate(agent_sequence, 1):
@@ -531,14 +634,30 @@ def _process_agent_sequence(agent_sequence, worker_id):
                     
                     # Try to create a fresh driver
                     try:
-                        current_driver = uc.Chrome(options=create_chrome_options())
+                        driver_kwargs = {"options": create_chrome_options()}
+                        version_main = chrome_major_version()
+                        if version_main:
+                            driver_kwargs["version_main"] = version_main
+                        current_driver = uc.Chrome(**driver_kwargs)
                         print(f"[Worker {worker_id}] ✅ New driver created for {agent_name}")
+                        time.sleep(2)  # Allow Chrome to finish bootstrapping
                         driver_ok = True
                         break
                     except Exception as create_error:
                         print(f"[Worker {worker_id}] ❌ Failed to create driver (attempt {attempt + 1}/{max_driver_attempts}): {create_error}")
+                        error_text = str(create_error)
+                        if (
+                            isinstance(create_error, FileNotFoundError)
+                            or "undetected_chromedriver" in error_text
+                            or "only supports Chrome version" in error_text
+                        ):
+                            reset_undetected_chromedriver_cache()
+                            # Re-detect Chrome version after cache reset
+                            globals()["UC_VERSION_MAIN"] = None
+                            chrome_major_version()
                         current_driver = None
                         time.sleep(2)
+                        continue
                 
                 if not driver_ok or not current_driver:
                     print(f"[Worker {worker_id}] ❌ Could not get working driver for {agent_name}, skipping")
@@ -558,14 +677,55 @@ def _process_agent_sequence(agent_sequence, worker_id):
                     continue
                 
                 print(f"[Worker {worker_id}] 📰 Processing agent {agent_idx}/{len(agent_sequence)}: {agent_name}")
-                
-                summary = summarize_page(agent_name, url, current_driver)
+
+                summary = None
+                for page_attempt in range(2):
+                    try:
+                        summary = summarize_page(agent_name, url, current_driver)
+                        break
+                    except WebDriverException as driver_exc:
+                        if "no such window" in str(driver_exc).lower():
+                            print(f"[Worker {worker_id}] ⚠️  Driver window missing for {agent_name}, rebuilding (attempt {page_attempt + 1}/2)")
+                            try:
+                                if current_driver:
+                                    current_driver.quit()
+                            except Exception:
+                                pass
+                            current_driver = None
+                            time.sleep(2)
+                            try:
+                                driver_kwargs = {"options": create_chrome_options()}
+                                version_main = chrome_major_version()
+                                if version_main:
+                                    driver_kwargs["version_main"] = version_main
+                                current_driver = uc.Chrome(**driver_kwargs)
+                                print(f"[Worker {worker_id}] ✅ Recreated driver for {agent_name}")
+                                time.sleep(2)  # Allow Chrome to fully initialize after recreation
+                                continue
+                            except Exception as recreate_err:
+                                print(f"[Worker {worker_id}] ❌ Failed to recreate driver after window loss: {recreate_err}")
+                                current_driver = None
+                                break
+                        raise
+
+                if not summary:
+                    raise RuntimeError("Unable to capture summary after driver recovery attempts")
+
                 store_summary(summary)
                 print(f"[Worker {worker_id}] ✅ Stored summary for {agent_name}")
                 time.sleep(1)
-            
+
             except Exception as e:
                 print(f"[Worker {worker_id}] Error processing {agent_name} ({url}): {e}")
+
+                try:
+                    if current_driver:
+                        current_driver.quit()
+                except Exception:
+                    pass
+                current_driver = None
+                time.sleep(2)
+                continue
                 
                 try:
                     error_summary = {
