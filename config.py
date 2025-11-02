@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import time
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -107,7 +108,7 @@ MAX_TOTAL_INVESTMENT = float(os.getenv("MAX_TOTAL_INVESTMENT", "10000"))
 MAX_TOTAL_INVESTMENT_FRACTION = float(os.getenv("MAX_TOTAL_INVESTMENT_FRACTION", "0"))
 MIN_CASH_BUFFER = float(os.getenv("MIN_CASH_BUFFER", "500"))
 DEBUG_TRADING = os.getenv("DEBUG_TRADING", "true").lower() == "true"
-MODEL_TEMPERATURE = float(os.getenv("DAI_MODEL_TEMPERATURE", "0.5"))
+MODEL_TEMPERATURE = float(os.getenv("DAI_MODEL_TEMPERATURE", "0.2"))
 
 # Optional: print masked key for debugging if requested
 try:
@@ -166,12 +167,26 @@ _announce_model(GPT_MODEL)
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
-    if model_name in valid_models:
-        GPT_MODEL = model_name
-        _announce_model(GPT_MODEL)
+    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    alias_map = {
+        "gpt4.1": "gpt-4.1",
+        "gpt-4-turbo": "gpt-4-turbo",
+    }
+
+    raw_input = (model_name or "").strip()
+    lookup_key = raw_input.lower()
+    normalized = alias_map.get(lookup_key, lookup_key)
+    if normalized != lookup_key:
+        print(f"ℹ️  Model alias '{raw_input}' resolved to '{normalized}'")
+
+    if normalized in valid_models:
+        if GPT_MODEL != normalized:
+            GPT_MODEL = normalized
+            _announce_model(GPT_MODEL)
+        else:
+            print(f"ℹ️  GPT model already set to {GPT_MODEL}")
     else:
-        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models}")
+        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models + list(alias_map.keys())}")
         print(f"⚠️  Keeping current model: {GPT_MODEL}")
 
 def get_gpt_model():
@@ -424,6 +439,7 @@ class PromptManager:
         while retries < max_retries:
             try:
                 model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                requires_json = (agent_name in {"SummarizerAgent", "DeciderAgent", "FeedbackAgent"})
                 
                 # ============================================
                 # PARALLEL PATH 1: GPT-5 (Reasoning Model)
@@ -457,6 +473,8 @@ class PromptManager:
                         "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
                         # No temperature - GPT-5 only supports default (1.0)
                     }
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
                     print(f"📊 GPT-5 Token limit: 8000 (includes reasoning tokens)")
                 
                 # ============================================
@@ -491,13 +509,15 @@ class PromptManager:
                         "max_completion_tokens": 2000,
                         "temperature": MODEL_TEMPERATURE
                     }
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
                     print(f"📊 Token params: max_completion_tokens=2000, temperature={MODEL_TEMPERATURE}")
                 
                 # ============================================
                 # PARALLEL PATH 3: GPT-4-turbo and older
                 # ============================================
                 else:
-                    print(f"🤖 Using {GPT_MODEL} (older model) for {agent_name}")
+                    print(f"🤖 Using {GPT_MODEL} for {agent_name}")
                     
                     # Older models: Use max_tokens instead of max_completion_tokens
                     messages = [
@@ -512,10 +532,16 @@ class PromptManager:
                         "max_tokens": 1500,
                         "temperature": MODEL_TEMPERATURE
                     }
+                    if requires_json:
+                        api_params["response_format"] = {"type": "json_object"}
                     print(f"📊 Token params: max_tokens=1500, temperature={MODEL_TEMPERATURE}")
                 
-                # Make API call
+                # Make API call with latency logging
+                start_time = time.time()
+                print(f"[PromptManager] ⏳ Awaiting {agent_name or 'UnknownAgent'} response (attempt {retries + 1}/{max_retries})", flush=True)
                 response = self.client.chat.completions.create(**api_params)
+                elapsed = time.time() - start_time
+                print(f"[PromptManager] ✅ {agent_name or 'UnknownAgent'} response received in {elapsed:.1f}s", flush=True)
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
@@ -664,7 +690,13 @@ class PromptManager:
                     return self._create_fallback_response(content, agent_name)
 
             except Exception as e:
-                print(f"API Call Error: {e}")
+                elapsed = None
+                if 'start_time' in locals():
+                    elapsed = time.time() - start_time
+                if elapsed is not None:
+                    print(f"[PromptManager] ❌ {agent_name or 'UnknownAgent'} error after {elapsed:.1f}s: {e}")
+                else:
+                    print(f"API Call Error: {e}")
                 retries += 1
                 if retries >= max_retries:
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}

@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from functools import lru_cache
 from typing import Dict, Any
 import pandas as pd
+import re
 from sqlalchemy import text
 from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
 import yfinance as yf
@@ -610,6 +611,348 @@ def get_current_price(ticker):
         return None
 
     return float(price)
+
+
+def _format_percent(value):
+    if value is None:
+        return "N/A"
+    try:
+        return f"{float(value):+.2f}%"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _format_number(value):
+    if value is None:
+        return "N/A"
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+
+    if abs(num) >= 1_000_000_000:
+        return f"{num / 1_000_000_000:.2f}B"
+    if abs(num) >= 1_000_000:
+        return f"{num / 1_000_000:.2f}M"
+    if abs(num) >= 1_000:
+        return f"{num / 1_000:.2f}K"
+    return f"{num:.0f}"
+
+
+def _pct_change(current, reference):
+    try:
+        current = float(current)
+        reference = float(reference)
+    except (TypeError, ValueError):
+        return None
+
+    if reference == 0:
+        return None
+    return (current - reference) / reference * 100.0
+
+
+PARENT_COMPANY_OVERRIDES = {
+    # Streaming / digital platforms owned by Alphabet
+    "youtube": {"company": "Alphabet", "symbol": "GOOGL"},
+    "youtube tv": {"company": "Alphabet", "symbol": "GOOGL"},
+    "google": {"company": "Alphabet", "symbol": "GOOGL"},
+
+    # Disney media properties
+    "abc": {"company": "The Walt Disney Company", "symbol": "DIS"},
+    "espn": {"company": "The Walt Disney Company", "symbol": "DIS"},
+    "disney+": {"company": "The Walt Disney Company", "symbol": "DIS"},
+    "disney plus": {"company": "The Walt Disney Company", "symbol": "DIS"},
+
+    # Meta platforms
+    "instagram": {"company": "Meta Platforms", "symbol": "META"},
+    "whatsapp": {"company": "Meta Platforms", "symbol": "META"},
+    "oculus": {"company": "Meta Platforms", "symbol": "META"},
+
+    # Microsoft products
+    "linkedin": {"company": "Microsoft", "symbol": "MSFT"},
+    "xbox": {"company": "Microsoft", "symbol": "MSFT"},
+
+    # Amazon properties
+    "prime video": {"company": "Amazon", "symbol": "AMZN"},
+    "aws": {"company": "Amazon", "symbol": "AMZN"},
+}
+
+
+def safe_format_template(template: str, values: Dict[str, Any]) -> str:
+    """Safely format templates that contain literal JSON braces."""
+    sentinel_map = {}
+    safe_template = template
+    for key in values.keys():
+        placeholder = f"{{{key}}}"
+        marker = f"__PLACEHOLDER_{key.upper()}__"
+        sentinel_map[marker] = key
+        safe_template = safe_template.replace(placeholder, marker)
+
+    safe_template = safe_template.replace('{', '{{').replace('}', '}}')
+
+    for marker, key in sentinel_map.items():
+        safe_template = safe_template.replace(marker, f"{{{key}}}")
+
+    return safe_template.format(**values)
+
+
+def _parse_company_entities(raw_response):
+    """Attempt to parse company entities returned by the extraction agent."""
+    if not raw_response:
+        return []
+
+    if isinstance(raw_response, list):
+        return raw_response
+
+    if isinstance(raw_response, dict):
+        if 'companies' in raw_response and isinstance(raw_response['companies'], list):
+            return raw_response['companies']
+        # Some models may nest under a different key; fall back to dict values
+        candidate = next((v for v in raw_response.values() if isinstance(v, list)), None)
+        if candidate is not None:
+            return candidate
+
+    text = raw_response
+    if not isinstance(text, str):
+        try:
+            text = json.dumps(raw_response)
+        except Exception:
+            text = str(raw_response)
+
+    # Try direct JSON load
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            candidate = parsed.get('companies')
+            if isinstance(candidate, list):
+                return candidate
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt to extract the first JSON array in the text
+    match = re.search(r"(\[[\s\S]*\])", text)
+    if match:
+        try:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    return []
+
+
+def extract_companies_from_summaries(summary_text):
+    """Use the CompanyExtractionAgent to pull companies and symbols from summaries."""
+    if not summary_text.strip():
+        return []
+
+    try:
+        from prompt_manager import get_active_prompt
+        prompt_data = get_active_prompt("CompanyExtractionAgent")
+        system_prompt = prompt_data["system_prompt"]
+        user_prompt_template = prompt_data["user_prompt_template"]
+        print(f"🧬 Using CompanyExtractionAgent prompt v{prompt_data.get('version', 'unknown')}")
+    except Exception as e:
+        print(f"⚠️  Falling back to default company extraction prompt: {e}")
+        system_prompt = (
+            "You extract company names and their stock tickers from market summaries. "
+            "Map products, subsidiaries, or brands to their publicly traded parent company. "
+            "Never guess tickers; if unsure, leave symbol blank. Return ONLY JSON."
+        )
+        user_prompt_template = (
+            "Summaries discussing market activity:\n\n{summaries}\n\n"
+            "Return a JSON array like [{\"company\": \"The Walt Disney Company\", \"symbol\": \"DIS\"}]. "
+            "If a product or division is mentioned (e.g., YouTube TV, ESPN), list the parent company and "
+            "its ticker symbol."
+        )
+
+    prompt = safe_format_template(user_prompt_template, {"summaries": summary_text})
+    try:
+        response = prompt_manager.ask_openai(prompt, system_prompt, agent_name="CompanyExtractionAgent")
+    except Exception as exc:
+        print(f"❌ Company extraction agent call failed: {exc}")
+        return []
+    entities = _parse_company_entities(response)
+
+    cleaned_entities = []
+    seen_symbols = set()
+    seen_companies = set()
+    for entry in entities:
+        if not isinstance(entry, dict):
+            continue
+
+        company = (entry.get("company") or entry.get("name") or "").strip()
+        symbol_raw = (entry.get("symbol") or entry.get("ticker") or "").strip()
+
+        normalized_name = company.lower()
+        override = PARENT_COMPANY_OVERRIDES.get(normalized_name)
+        if override:
+            company = override.get("company", company) or company
+            symbol_raw = override.get("symbol", symbol_raw)
+
+        symbol_display = symbol_raw.upper()
+        normalized_symbol = clean_ticker_symbol(symbol_display) if symbol_display else None
+
+        if not company and not normalized_symbol:
+            continue
+
+        if normalized_symbol:
+            if normalized_symbol in seen_symbols:
+                continue
+            seen_symbols.add(normalized_symbol)
+        else:
+            normalized_company = company.lower()
+            if normalized_company in seen_companies:
+                continue
+            seen_companies.add(normalized_company)
+
+        cleaned_entities.append({
+            "company": company,
+            "symbol": symbol_display if symbol_display else "",
+        })
+
+    print(f"🏢 Extracted {len(cleaned_entities)} company entities")
+    return cleaned_entities
+
+
+def _select_reference_price(history_df, cutoff_date):
+    if history_df.empty:
+        return None
+
+    subset = history_df.loc[history_df.index <= cutoff_date]
+    if subset.empty:
+        return None
+    return float(subset['Close'].iloc[-1])
+
+
+def _compute_symbol_momentum(symbol):
+    ticker = clean_ticker_symbol(symbol)
+    if not ticker:
+        return None
+
+    print(f"📈 Gathering momentum data for {ticker}")
+
+    try:
+        stock = yf.Ticker(ticker)
+    except Exception as e:
+        print(f"⚠️  Failed to initialize yfinance for {ticker}: {e}")
+        return None
+
+    history_daily = pd.DataFrame()
+    try:
+        history_daily = stock.history(period="1y", interval="1d", auto_adjust=False)
+    except Exception as e:
+        print(f"⚠️  Failed to fetch 1y daily history for {ticker}: {e}")
+
+    if history_daily is None or history_daily.empty:
+        print(f"⚠️  No 1y daily history available for {ticker}")
+        return None
+
+    intraday = pd.DataFrame()
+    try:
+        intraday = stock.history(period="1d", interval="1m", auto_adjust=False)
+    except Exception as e:
+        print(f"⚠️  Failed to fetch intraday history for {ticker}: {e}")
+
+    latest_row = history_daily.iloc[-1]
+    current_price = float(latest_row.get('Close'))
+    previous_close = float(history_daily['Close'].iloc[-2]) if len(history_daily) > 1 else None
+    daily_pct = _pct_change(current_price, previous_close)
+
+    latest_date = history_daily.index[-1]
+    yoy_reference_date = latest_date - pd.DateOffset(years=1)
+    yoy_price = _select_reference_price(history_daily, yoy_reference_date)
+    yoy_pct = _pct_change(current_price, yoy_price)
+
+    mom_reference_date = latest_date - pd.DateOffset(months=1)
+    mom_price = _select_reference_price(history_daily, mom_reference_date)
+    mom_pct = _pct_change(current_price, mom_price)
+
+    ten_min_pct = None
+    if intraday is not None and not intraday.empty:
+        latest_intraday_price = float(intraday['Close'].iloc[-1])
+        ten_min_cutoff = intraday.index[-1] - pd.Timedelta(minutes=10)
+        past_window = intraday.loc[intraday.index <= ten_min_cutoff]
+        if not past_window.empty:
+            price_10_min = float(past_window['Close'].iloc[-1])
+            ten_min_pct = _pct_change(latest_intraday_price, price_10_min)
+        current_price = latest_intraday_price  # Prefer real-time price when available
+
+    day_high = float(latest_row.get('High')) if latest_row.get('High') is not None else None
+    day_low = float(latest_row.get('Low')) if latest_row.get('Low') is not None else None
+    volume = float(latest_row.get('Volume')) if latest_row.get('Volume') is not None else None
+
+    last_year = history_daily.tail(252)
+    high_52 = float(last_year['High'].max()) if not last_year.empty else None
+    low_52 = float(last_year['Low'].min()) if not last_year.empty else None
+
+    return {
+        "symbol": ticker,
+        "price": current_price,
+        "daily_pct": daily_pct,
+        "yoy_pct": yoy_pct,
+        "mom_pct": mom_pct,
+        "ten_min_pct": ten_min_pct,
+        "volume": volume,
+        "day_high": day_high,
+        "day_low": day_low,
+        "high_52": high_52,
+        "low_52": low_52,
+    }
+
+
+def build_momentum_recap(entities):
+    symbols_in_order = []
+    company_names = {}
+    for entry in entities:
+        symbol = clean_ticker_symbol(entry.get('symbol')) if isinstance(entry, dict) else None
+        if not symbol:
+            continue
+        if symbol not in symbols_in_order:
+            symbols_in_order.append(symbol)
+            company_names[symbol] = entry.get('company', '') if isinstance(entry, dict) else ''
+
+    momentum_data = []
+    for symbol in symbols_in_order:
+        snapshot = _compute_symbol_momentum(symbol)
+        if snapshot:
+            snapshot['company'] = company_names.get(symbol, '')
+            momentum_data.append(snapshot)
+
+    if not momentum_data:
+        return momentum_data, "- No momentum data available"
+
+    lines = []
+    for snapshot in momentum_data:
+        name = snapshot.get('company') or snapshot['symbol']
+        symbol = snapshot['symbol']
+        price = snapshot.get('price')
+        daily_pct = _format_percent(snapshot.get('daily_pct'))
+        mom_pct = _format_percent(snapshot.get('mom_pct'))
+        yoy_pct = _format_percent(snapshot.get('yoy_pct'))
+        ten_pct = _format_percent(snapshot.get('ten_min_pct'))
+        volume = _format_number(snapshot.get('volume'))
+        day_range = (
+            f"{snapshot['day_low']:.2f}-{snapshot['day_high']:.2f}"
+            if snapshot.get('day_low') is not None and snapshot.get('day_high') is not None
+            else "N/A"
+        )
+        range_52w = (
+            f"{snapshot['low_52']:.2f}-{snapshot['high_52']:.2f}"
+            if snapshot.get('low_52') is not None and snapshot.get('high_52') is not None
+            else "N/A"
+        )
+        price_text = f"${price:.2f}" if price is not None else "N/A"
+
+        lines.append(
+            f"- {name} ({symbol}): Price {price_text} | Daily {daily_pct} | MoM {mom_pct} | YoY {yoy_pct} | "
+            f"10m {ten_pct} | Vol {volume} | Day {day_range} | 52w {range_52w}"
+        )
+
+    return momentum_data, "\n".join(lines)
 
 def execute_real_world_trade(decision):
     """
@@ -1546,8 +1889,8 @@ Then consider NEW opportunities from market analysis.
 
 Current Portfolio:
 - Available Cash: ${available_cash} (out of $10,000 total)
-- Current P/L Summary:
-{pnl_summary}
+- Momentum Recap:
+{momentum_recap}
 - Current Holdings: {holdings}
 
 Market Analysis:
@@ -1651,14 +1994,30 @@ No explanatory text, no markdown, just pure JSON array."""
     parsed_summaries.sort(key=lambda x: (x.get('agent') or '').lower())
 
     summary_parts = []
+    extractor_blocks = []
     for s in parsed_summaries:
         agent_label = (s.get('agent') or 'unknown').strip().lower()
         headlines_text = ', '.join(s['headlines'][:3])  # Limit to 3 headlines per agent
         insights_text = s['insights'] if len(s['insights']) <= SUMMARY_MAX_CHARS else s['insights'][:SUMMARY_MAX_CHARS] + "... [truncated]"
         summary_parts.append(f"{agent_label}: {headlines_text} | {insights_text}")
+        extractor_blocks.append(
+            f"Agent: {agent_label}\nHeadlines: {headlines_text or 'None'}\nInsights: {insights_text or 'None'}"
+        )
 
     summarized_text = "\n".join(summary_parts)
+    summaries_for_extraction = "\n\n".join(extractor_blocks) if extractor_blocks else summarized_text
     print(f"📰 Summaries forwarded to Decider: {len(parsed_summaries)}")
+
+    company_entities = extract_companies_from_summaries(summaries_for_extraction)
+    momentum_data, momentum_summary = build_momentum_recap(company_entities)
+    print(f"📊 Momentum recap prepared for {len(momentum_data)} symbols")
+    if momentum_summary:
+        preview_lines = momentum_summary.split("\n")[:5]
+        preview_text = "\n".join(preview_lines)
+        print("🧾 Momentum summary preview:\n" + preview_text)
+    if momentum_data:
+        sample = momentum_data[:3]
+        print(f"🧪 Momentum data sample: {json.dumps(sample, default=str)[:500]}")
 
     # Separate cash and stock holdings
     cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
@@ -1709,27 +2068,13 @@ No explanatory text, no markdown, just pure JSON array."""
             pl_lines.append(f"- {ticker}: {pnl_pct:+.2f}% vs entry (stop loss -3%, take profit +5%)")
         except Exception:
             continue
-    if pl_lines:
-        pl_summary = "\n".join(pl_lines)
-    else:
-        pl_summary = "- No open positions"
+    holdings_pl_summary = "\n".join(pl_lines) if pl_lines else ""
 
-    def _safe_format(template: str, values: Dict[str, Any]) -> str:
-        """Safely format prompt templates that contain literal JSON braces."""
-        sentinel_map = {}
-        safe_template = template
-        for key in values.keys():
-            placeholder = f"{{{key}}}"
-            marker = f"__PLACEHOLDER_{key.upper()}__"
-            sentinel_map[marker] = key
-            safe_template = safe_template.replace(placeholder, marker)
-
-        safe_template = safe_template.replace('{', '{{').replace('}', '}}')
-
-        for marker, key in sentinel_map.items():
-            safe_template = safe_template.replace(marker, f"{{{key}}}")
-
-        return safe_template.format(**values)
+    momentum_recap = momentum_summary or "- Momentum data unavailable"
+    if holdings_pl_summary:
+        momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
+    elif not momentum_data:
+        momentum_recap = "- No momentum data available\n\nExisting Position P/L:\n- No open positions"
 
     # Use versioned prompt template
     user_prompt_values = {
@@ -1740,7 +2085,8 @@ No explanatory text, no markdown, just pure JSON array."""
         "holdings": holdings_text,
         "feedback": feedback_context,
         "summaries": summarized_text,
-        "pnl_summary": pl_summary,
+        "momentum_recap": momentum_recap,
+        "pnl_summary": momentum_recap,
         "min_buy": f"{int(MIN_BUY_AMOUNT):,}",
         "typical_buy_low": f"{int(TYPICAL_BUY_LOW):,}",
         "typical_buy_high": f"{int(TYPICAL_BUY_HIGH):,}",
@@ -1751,7 +2097,7 @@ No explanatory text, no markdown, just pure JSON array."""
         "max_trades": MAX_TRADES,
         "one_trade_mode": ONE_TRADE_MODE,
     }
-    prompt = _safe_format(user_prompt_template, user_prompt_values)
+    prompt = safe_format_template(user_prompt_template, user_prompt_values)
 
 
     prompt_preview_limit = int(os.getenv("DAI_PROMPT_DEBUG_LIMIT", "2000"))
@@ -2042,11 +2388,15 @@ def store_trade_decisions(decisions, run_id):
             # MODIFY decision if market is closed (only if not already marked)
             if not market_open:
                 action = decision.get('action', '').lower()
-                if action in ['buy', 'sell']:
+                if action in ['buy', 'sell', 'hold']:
                     original_reason = decision.get('reason', 'No reason provided')
+                    if action == 'hold':
+                        prefix = "⛔ MARKET CLOSED - Hold recorded for visibility. AI suggested: "
+                    else:
+                        prefix = "⛔ MARKET CLOSED - No action taken. AI suggested: "
                     # Only add prefix if not already present (avoid double prefix)
                     if not original_reason.startswith('⛔ MARKET CLOSED'):
-                        decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                        decision['reason'] = f"{prefix}{original_reason}"
                         decision['execution_status'] = 'market_closed'
                         print(f"   Modified {action.upper()} {decision.get('ticker')} → MARKET CLOSED")
                     else:
@@ -2060,9 +2410,14 @@ def store_trade_decisions(decisions, run_id):
             if extracted:
                 print(f"✅ Extracted: {extracted}")
                 # Also mark extracted decisions if market closed
-                if not market_open and extracted.get('action', '').lower() in ['buy', 'sell']:
+                if not market_open and extracted.get('action', '').lower() in ['buy', 'sell', 'hold']:
+                    action = extracted.get('action', '').lower()
                     original_reason = extracted.get('reason', '')
-                    extracted['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    if action == 'hold':
+                        prefix = "⛔ MARKET CLOSED - Hold recorded for visibility. AI suggested: "
+                    else:
+                        prefix = "⛔ MARKET CLOSED - No action taken. AI suggested: "
+                    extracted['reason'] = f"{prefix}{original_reason}"
                     extracted['execution_status'] = 'market_closed'
                 valid_decisions.append(extracted)
     
@@ -2085,9 +2440,13 @@ def store_trade_decisions(decisions, run_id):
             # If market is closed, modify the reason
             if not market_open:
                 action = extracted_from_full.get('action', '').lower()
-                if action in ['buy', 'sell']:
+                if action in ['buy', 'sell', 'hold']:
                     original_reason = extracted_from_full.get('reason', '')
-                    extracted_from_full["reason"] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
+                    if action == 'hold':
+                        prefix = "⛔ MARKET CLOSED - Hold recorded for visibility. AI suggested: "
+                    else:
+                        prefix = "⛔ MARKET CLOSED - No action taken. AI suggested: "
+                    extracted_from_full["reason"] = f"{prefix}{original_reason}"
                     extracted_from_full['execution_status'] = 'market_closed'
             valid_decisions = [extracted_from_full]
         else:

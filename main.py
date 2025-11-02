@@ -72,6 +72,10 @@ os.makedirs(RUN_DIR, exist_ok=True)
 print(f"Screenshot directory: {SCREENSHOT_DIR}")
 print(f"Run directory: {RUN_DIR}")
 
+SUMMARY_WITH_IMAGES_ONLY = os.getenv("SUMMARY_WITH_IMAGES_ONLY", "0") == "1"
+if SUMMARY_WITH_IMAGES_ONLY:
+    print("📷 SUMMARY_WITH_IMAGES_ONLY enabled — summaries will rely solely on screenshots.")
+
 # Automatically install correct ChromeDriver version
 chromedriver_autoinstaller.install()
 
@@ -157,6 +161,22 @@ def initialize_database():
         '''))
 
 def get_openai_summary(agent_name, html_content, image_paths):
+    def _safe_format_template(template, values):
+        sentinel_map = {}
+        safe_template = template
+        for key, value in values.items():
+            placeholder = f"{{{key}}}"
+            marker = f"__PLACEHOLDER_{key.upper()}__"
+            sentinel_map[marker] = value
+            safe_template = safe_template.replace(placeholder, marker)
+
+        safe_template = safe_template.replace('{', '{{').replace('}', '}}')
+
+        for marker, value in sentinel_map.items():
+            safe_template = safe_template.replace(marker, value)
+
+        return safe_template
+
     # Get versioned prompt for SummarizerAgent
     from prompt_manager import get_active_prompt
     try:
@@ -202,38 +222,66 @@ Return a JSON object with:
     html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
     html_content = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
     
-    # Extract text content more efficiently
-    try:
-        soup = BeautifulSoup(html_content, 'html.parser')
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-        
-        # Get text content
-        text_content = soup.get_text()
-        
-        # Clean up whitespace
-        lines = (line.strip() for line in text_content.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text_content = ' '.join(chunk for chunk in chunks if chunk)
-        
-        # Limit content length to avoid rate limiting (reduced from 10000 to 5000)
-        if len(text_content) > 5000:
-            text_content = text_content[:5000] + "... [content truncated]"
+    if SUMMARY_WITH_IMAGES_ONLY:
+        html_content_processed = "[TEXT CONTEXT DISABLED – rely on screenshots only.]"
+    else:
+        html_content_processed = html_content
+        # Extract text content more efficiently
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
             
-        html_content = text_content
-    except Exception as e:
-        print(f"Failed to parse HTML content for {agent_name}: {e}")
-        # Fallback: just truncate the raw HTML
-        if len(html_content) > 5000:
-            html_content = html_content[:5000] + "... [content truncated]"
+            # Get text content
+            text_content = soup.get_text()
+            
+            # Clean up whitespace
+            lines = (line.strip() for line in text_content.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text_content = ' '.join(chunk for chunk in chunks if chunk)
+            
+            # Limit content length to avoid rate limiting (reduced from 10000 to 5000)
+            if len(text_content) > 5000:
+                text_content = text_content[:5000] + "... [content truncated]"
+                
+            html_content_processed = text_content
+        except Exception as e:
+            print(f"Failed to parse HTML content for {agent_name}: {e}")
+            # Fallback: just truncate the raw HTML
+            if len(html_content_processed) > 5000:
+                html_content_processed = html_content_processed[:5000] + "... [content truncated]"
+
+    # Only include images if they were successfully saved and are reasonably sized
+    IMAGE_SIZE_LIMIT = 1_500_000  # 1.5 MB limit per image
+    valid_image_paths = []
+    for img_path in image_paths:
+        if os.path.exists(img_path):
+            file_size = os.path.getsize(img_path)
+            if file_size < IMAGE_SIZE_LIMIT:
+                valid_image_paths.append(img_path)
+            else:
+                print(f"Skipping large image {img_path} ({file_size} bytes >= {IMAGE_SIZE_LIMIT})")
+        else:
+            print(f"⚠️  Image path missing: {img_path}")
 
     # Use versioned prompt template
-    prompt = user_prompt_template.format(
-        content=html_content,
-        feedback_context=feedback_context
+    prompt = _safe_format_template(
+        user_prompt_template,
+        {
+            "content": html_content_processed,
+            "feedback_context": feedback_context,
+        }
     )
-    
+
+    screenshot_instructions = []
+    if valid_image_paths:
+        screenshot_instructions.append("SCREENSHOT CONTEXT:")
+        for idx, path in enumerate(valid_image_paths, 1):
+            screenshot_instructions.append(f"- Screenshot {idx}: {os.path.basename(path)}")
+    elif SUMMARY_WITH_IMAGES_ONLY:
+        screenshot_instructions.append("SCREENSHOT CONTEXT: No screenshots available (check capture pipeline).")
+
     # Add instruction to ignore popups and extract visible content
     prompt += """\n
 IMPORTANT: If you see privacy notices, cookie consent dialogs, login prompts, or "Press and Hold" overlays in the screenshots:
@@ -243,21 +291,21 @@ IMPORTANT: If you see privacy notices, cookie consent dialogs, login prompts, or
 - Focus on the financial news content that is readable despite any overlays
 
 Most financial news websites still show headlines and articles even with popups visible."""
+
+    if screenshot_instructions:
+        prompt += "\n\n" + "\n".join(screenshot_instructions)
     
     # Use versioned system prompt with feedback context
     system_prompt = system_prompt_template + f"\n\n{feedback_context}"
     
-    # Only include images if they were successfully saved and are reasonably sized
-    valid_image_paths = []
-    for img_path in image_paths:
-        if os.path.exists(img_path):
-            file_size = os.path.getsize(img_path)
-            # Only include images smaller than 1MB to avoid rate limiting
-            if file_size < 1024 * 1024:
-                valid_image_paths.append(img_path)
-            else:
-                print(f"Skipping large image {img_path} ({file_size} bytes)")
-    
+    print(f"🖼️ {agent_name}: passing {len(valid_image_paths)} image(s) to OpenAI")
+    if valid_image_paths:
+        for idx, img in enumerate(valid_image_paths, 1):
+            try:
+                print(f"   • Image {idx}: {img} ({os.path.getsize(img)} bytes)")
+            except OSError:
+                print(f"   • Image {idx}: {img} (size unavailable)")
+
     return prompt_manager.ask_openai(
         prompt, 
         system_prompt, 
@@ -395,12 +443,14 @@ def summarize_page(agent_name, url, web_driver):
     """
     Summarize a webpage using the provided webdriver
     """
-    # Check if driver session is still valid
+    # Basic guard: ensure at least one window handle is available
     try:
-        web_driver.current_url  # Test if session is alive
+        handles = web_driver.window_handles
     except Exception as e:
         print(f"Driver session invalid for {agent_name}: {e}")
         raise e
+    if not handles:
+        print(f"⚠️  No window handles for {agent_name} - attempting to continue with driver.get")
     
     # Special handling for Yahoo Finance which can be slow
     if "yahoo.com" in url.lower():
@@ -513,8 +563,12 @@ def summarize_page(agent_name, url, web_driver):
 
     try:
         summary_data = get_openai_summary(agent_name, html, saved_screenshots)
+        if isinstance(summary_data, list):
+            summary_data = summary_data[0] if summary_data else {}
+        print(f"🧾 {agent_name} summary response: {summary_data}")
     except Exception as e:
         summary_data = {"error": f"Summary failed: {e}"}
+        print(f"❌ {agent_name} summary error: {e}")
 
     summary = {
         "agent": agent_name,

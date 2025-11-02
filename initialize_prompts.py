@@ -12,27 +12,32 @@ def initialize_default_prompts():
     # Default prompts for each agent type - ACTUAL TRADING PROMPTS (v0 baseline)
     default_prompts = {
         "SummarizerAgent": {
-            "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights.
+        "user_prompt_template": """Analyze the following financial news captures and extract the most important actionable insights.
 
 {feedback_context}
 
 Content: {content}
 
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY valid JSON in this EXACT format:
+🚨 CRITICAL RESPONSE REQUIREMENT:
+ONLY RETURN a valid JSON object in this EXACT format (no surrounding array, no extra keys):
 {{
-    "headlines": ["headline 1", "headline 2", "headline 3"],
-    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
+  "headlines": ["headline 1", "headline 2", "headline 3"],
+  "insights": "A comprehensive analysis paragraph focusing on actionable trading catalysts, prevailing sentiment (bullish/bearish/fear/etc.), key people or institutions, dominant narratives/themes, and any signs of media influence or manipulation that could impact markets."
 }}
 
 ⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
 ✅ ONLY pure JSON starting with {{ and ending with }}""",
-            "system_prompt": """You are an intelligent financial analysis assistant specialized in extracting actionable trading insights from news articles. 
+        "system_prompt": """You are an intelligent financial analysis assistant specialized in extracting actionable insights from financial news screenshots and any accompanying visible text.
 
-🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string.
+CORE MISSION:
+- Surface high-impact headlines, rapid catalysts, and short-term trading opportunities
+- Gauge sentiment intensity, emotional framing, and how people/institutions are portrayed
+- Detect coordinated narratives, propaganda cues, or manipulation attempts that could sway traders
+- Highlight market-moving facts across equities, sectors, macro themes, and cross-asset flows
 
-Focus on identifying trading opportunities, market sentiment shifts, and specific companies or sectors that could impact short-term trading decisions.""",
-            "description": "v0 Baseline SummarizerAgent - extracts trading insights from financial news"
+🚨 CRITICAL: ALWAYS respond with valid JSON containing a three-item "headlines" array and a single "insights" paragraph synthesizing catalysts, sentiment, people, themes, and any manipulation cues. ONLY RETURN THE JSON OBJECT—NO PREFACE, NO SUFFIX, NO MARKDOWN.
+Focus more on the images than the text input when compiling the summaries. The summaries you write will be used downstream by a day trading AI agent.""",
+            "description": "v0 Baseline SummarizerAgent - extracts trading and sentiment insights from financial news"
         },
 
         "DeciderAgent": {
@@ -64,8 +69,8 @@ Current Portfolio:
 News & Momentum Summary:
 {summaries}
 
-P/L Recap:
-{pnl_summary}
+Momentum Recap:
+{momentum_recap}
 
 🚨 MANDATORY: For EVERY stock listed in "Current Holdings" above, you MUST provide a decision.
 
@@ -127,6 +132,22 @@ Example Output:
 ]
 """,
             "description": "v0 Baseline DeciderAgent - makes aggressive day trading decisions with proper position sizing"
+        },
+        "CompanyExtractionAgent": {
+            "user_prompt_template": """Identify every company, product, or brand referenced in the following market summaries. When a product or subsidiary is mentioned, map it to the publicly traded parent company before assigning the ticker. If you are unsure of a ticker symbol, return an empty string for that entry.
+
+Summaries:
+{summaries}
+
+Return ONLY a JSON array like:
+[
+  {"company": "Alphabet", "symbol": "GOOGL"},
+  {"company": "The Walt Disney Company", "symbol": "DIS"}
+]
+
+No explanation, no markdown, just JSON.""",
+            "system_prompt": """You are a precise financial entity extraction assistant. Read trading summaries, normalize each mention to its publicly traded parent company, and supply the parent company's stock ticker symbol. Use uppercase tickers, avoid duplicates, and respond only with JSON.""",
+            "description": "Extracts companies (rolled up to parent) and ticker symbols from summarizer output"
         },
         "feedback_analyzer": {
             "user_prompt": """You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.

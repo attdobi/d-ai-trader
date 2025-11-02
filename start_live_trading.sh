@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_live_trading.sh [--port PORT] [--model MODEL] [--cadence MINUTES] [--no-stream] [--stream]
+Usage: start_live_trading.sh [--port PORT] [--model MODEL] [--cadence MINUTES] [--no-stream] [--stream] [--one-trade|--multi-trade]
 
 This wrapper sets the environment for live Schwab execution and then delegates to
 start_d_ai_trader.sh. Defaults are tuned for the initial pilot (single buy).
@@ -14,7 +14,9 @@ start_d_ai_trader.sh. Defaults are tuned for the initial pilot (single buy).
   --cadence    Minutes between intraday runs (default: 15)
       --stream     Launch Schwab streaming helper (default: on)
       --no-stream  Disable streaming helper
-  --help       Show this help
+  --one-trade    Enforce single live buy per cycle (default)
+  --multi-trade  Allow multiple buys per cycle (disables safeguard)
+  --help         Show this help
 USAGE
 }
 
@@ -23,6 +25,19 @@ MODEL="gpt-4o"
 CADENCE=15
 ENABLE_STREAM=1
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+VENV_DIR="${PROJECT_ROOT}/dai"
+
+ENV_FILE="${PROJECT_ROOT}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ENV_FILE}"
+  set +a
+fi
+
+ONE_TRADE_MODE="${DAI_ONE_TRADE_MODE:-1}"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port) PORT="$2"; shift 2 ;;
@@ -30,13 +45,12 @@ while [[ $# -gt 0 ]]; do
     -c|--cadence) CADENCE="$2"; shift 2 ;;
     --stream) ENABLE_STREAM=1; shift ;;
     --no-stream) ENABLE_STREAM=0; shift ;;
+    --one-trade) ONE_TRADE_MODE=1; shift ;;
+    --multi-trade) ONE_TRADE_MODE=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; usage; exit 1 ;;
   esac
 done
-
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-VENV_DIR="${PROJECT_ROOT}/dai"
 
 if [[ -n "${PYTHON_BIN:-}" ]]; then
   :
@@ -109,6 +123,7 @@ export DAI_DISABLE_AUTOMATION=0
 export DAI_SCHWAB_INTERACTIVE="${DAI_SCHWAB_INTERACTIVE:-0}"
 export DAI_SCHWAB_MANUAL_FLOW="${DAI_SCHWAB_MANUAL_FLOW:-0}"
 export DAI_MAX_TRADES="${DAI_MAX_TRADES:-1}"
+export DAI_ONE_TRADE_MODE="${ONE_TRADE_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE}"
 export TRADING_MODE="real_world"
 
@@ -119,6 +134,7 @@ echo "Dashboard Port:    ${PORT}"
 echo "AI Model:          ${MODEL}"
 echo "Cadence:           Every ${CADENCE} minutes"
 echo "Max Trades:        ${DAI_MAX_TRADES}"
+echo "One-Trade Mode:    $([[ "${DAI_ONE_TRADE_MODE}" == "1" ]] && echo ON || echo OFF)"
 echo "Schwab Mode:       LIVE (READ-ONLY=${DAI_SCHWAB_READONLY})"
 if (( ENABLE_STREAM )); then
   echo "Streaming helper:  ENABLED (schwab_streaming.py)"
@@ -128,7 +144,11 @@ fi
 echo "========================================"
 echo ""
 echo "NOTE: Ensure market hours and Schwab credentials are ready."
-echo "      The system will execute at most one buy decision per cycle."
+if [[ "${DAI_ONE_TRADE_MODE}" == "1" ]]; then
+  echo "      One-Trade Mode ON: at most one live buy per cycle."
+else
+  echo "      One-Trade Mode OFF: AI may execute multiple buys (respecting other limits)."
+fi
 echo ""
 
 cleanup() {

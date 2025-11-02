@@ -127,9 +127,11 @@
     <button class="trigger-btn" onclick="triggerAgent('summarizer')"><span class="btn-icon">📰</span>Run Summarizer Agents</button>
     <button class="trigger-btn" onclick="triggerAgent('decider')"><span class="btn-icon">🤖</span>Run Decider Agent</button>
     <button class="trigger-btn" onclick="triggerAgent('feedback')"><span class="btn-icon">📊</span>Run Feedback Agent</button>
+    <button class="trigger-btn" id="summary-analyzer-btn" onclick="runSummaryAnalyzer()"><span class="btn-icon">🧠</span>Run Summary Analyzer &amp; Momentum</button>
     <button class="trigger-btn trigger-all" onclick="triggerAgent('all')"><span class="btn-icon">🚀</span>Run All Agents</button>
   </div>
   <div id="trigger-status" class="trigger-status"></div>
+  <div id="summary-analyzer-output" class="trigger-status"></div>
 </div>
 
 <table>

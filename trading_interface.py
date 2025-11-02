@@ -325,6 +325,10 @@ class TradingInterface:
                         "execution_type": "live",
                         "decision": decision
                     }
+                estimated_total = shares * current_price
+                decision["shares_estimate"] = shares
+                decision["price_estimate"] = current_price
+                decision["estimated_value"] = estimated_total
                 
                 # Place buy order
                 order_result = schwab_client.place_equity_order(
@@ -333,6 +337,10 @@ class TradingInterface:
                     instruction="BUY",
                     order_type="MARKET"
                 )
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("price", current_price)
+                    order_result.setdefault("estimated_value", estimated_total)
                 
             elif action == "sell":
                 # For sells, we need to get current position to know how many shares to sell
@@ -382,6 +390,10 @@ class TradingInterface:
                         "execution_type": "live",
                         "decision": decision
                     }
+                estimated_total = shares * current_price
+                decision["shares_estimate"] = shares
+                decision["price_estimate"] = current_price
+                decision["estimated_value"] = estimated_total
                 
                 # Place sell order
                 order_result = schwab_client.place_equity_order(
@@ -390,6 +402,13 @@ class TradingInterface:
                     instruction="SELL",
                     order_type="MARKET"
                 )
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("estimated_value", shares * current_price)
+                if isinstance(order_result, dict):
+                    order_result.setdefault("shares", shares)
+                    order_result.setdefault("price", current_price)
+                    order_result.setdefault("estimated_value", estimated_total)
             
             else:
                 return {
@@ -400,6 +419,10 @@ class TradingInterface:
                 }
             
             if order_result and order_result.get("status") == "success":
+                order_state = (order_result.get("order_status", {}) or {}).get("status")
+                order_reason = (order_result.get("order_status", {}) or {}).get("reason")
+                if order_state and order_state.upper() != "FILLED":
+                    logger.info("Schwab order %s status=%s reason=%s", order_result.get("order_id"), order_state, order_reason)
                 return {
                     "status": "success",
                     "order_id": order_result.get("order_id"),
@@ -501,8 +524,8 @@ class TradingInterface:
             derived_cash = portfolio.get("funds_available_derived", baseline_cash)
             effective_cash = compute_effective_funds(baseline_cash)
 
-            buying_power = portfolio.get("buying_power", effective_cash)
-            day_trading_power = portfolio.get("day_trading_power", 0.0)
+            buying_power = effective_cash
+            day_trading_power = 0.0
             account_value = portfolio.get("account_value", total_value + effective_cash)
 
             print(
@@ -583,6 +606,23 @@ class TradingInterface:
         config_hash = get_current_config_hash()
         now = datetime.utcnow()
 
+        def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
+            if not symbol:
+                return None
+            sym = symbol.upper()
+            corrections = {
+                'GOOGLE': 'GOOGL',
+                'ALPHABET': 'GOOGL',
+                'FACEBOOK': 'META',
+                'FB': 'META',
+                'TESLA': 'TSLA',
+                'APPLE': 'AAPL',
+                'MICROSOFT': 'MSFT',
+                'AMAZON': 'AMZN',
+                'NVIDIA': 'NVDA',
+            }
+            return corrections.get(sym, sym)
+
         processed_holdings = []
         total_invested = 0.0
         total_current = 0.0
@@ -595,8 +635,12 @@ class TradingInterface:
             current_value = float(position.get("market_value") or (shares * current_price))
             gain_loss = float(position.get("gain_loss") or (current_value - total_value))
 
+            symbol = _normalize_symbol(position.get("symbol"))
+            if not symbol:
+                continue
+
             processed_holdings.append({
-                "ticker": position.get("symbol", "-").upper(),
+                "ticker": symbol,
                 "shares": shares,
                 "purchase_price": avg_price,
                 "current_price": current_price,

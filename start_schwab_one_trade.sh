@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_schwab_one_trade.sh [--port PORT] [--model MODEL] [--cadence MINUTES]
+Usage: start_schwab_one_trade.sh [--port PORT] [--model MODEL] [--cadence MINUTES] [--one-trade|--multi-trade]
 
 This script mirrors start_schwab_readonly.sh but enables trading automation with a
 single-trade cap (DAI_MAX_TRADES=1). It refreshes Schwab tokens when necessary,
@@ -17,19 +17,31 @@ PORT=8081
 MODEL="gpt-4o"
 CADENCE=15
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+VENV_DIR="${PROJECT_ROOT}/dai"
+TOKEN_FILE="${PROJECT_ROOT}/schwab_tokens.json"
+
+ENV_FILE="${PROJECT_ROOT}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${ENV_FILE}"
+  set +a
+fi
+
+ONE_TRADE_MODE="${DAI_ONE_TRADE_MODE:-1}"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port|-p) PORT="$2"; shift 2 ;;
     --model|-m) MODEL="$2"; shift 2 ;;
     --cadence|-c) CADENCE="$2"; shift 2 ;;
+    --one-trade) ONE_TRADE_MODE=1; shift ;;
+    --multi-trade) ONE_TRADE_MODE=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1"; usage; exit 1 ;;
   esac
 done
-
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-VENV_DIR="${PROJECT_ROOT}/dai"
-TOKEN_FILE="${PROJECT_ROOT}/schwab_tokens.json"
 
 # --- venv bootstrap (copied from start_schwab_readonly.sh) ---
 if [[ -n "${PYTHON_BIN:-}" ]]; then :; else
@@ -83,7 +95,7 @@ export DAI_DISABLE_AUTOMATION=0
 export DAI_SCHWAB_INTERACTIVE="${DAI_SCHWAB_INTERACTIVE:-0}"
 export DAI_SCHWAB_MANUAL_FLOW="${DAI_SCHWAB_MANUAL_FLOW:-0}"
 export DAI_MAX_TRADES="${DAI_MAX_TRADES:-1}"
-export DAI_ONE_TRADE_MODE=1
+export DAI_ONE_TRADE_MODE="${ONE_TRADE_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE}"
 export DAI_PORT="${PORT}"
 export DAI_GPT_MODEL="${MODEL}"
@@ -160,6 +172,7 @@ echo "Port: ${PORT}"
 echo "Model: ${MODEL}"
 echo "Cadence: ${CADENCE} minutes"
 echo "Max Trades: ${DAI_MAX_TRADES}"
+echo "One-Trade Mode: $([[ "${DAI_ONE_TRADE_MODE}" == "1" ]] && echo ON || echo OFF)"
 echo "========================================"
 
 echo "🌐 Starting dashboard server on http://localhost:${PORT} ..."

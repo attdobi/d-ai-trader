@@ -13,7 +13,17 @@ except Exception:
 
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
+import importlib
+from prompts import default_prompts as default_prompts_module
+from prompt_manager import initialize_config_prompts
+from decider_agent import (
+    extract_companies_from_summaries,
+    build_momentum_recap,
+    fetch_holdings,
+    SUMMARY_MAX_CHARS,
+)
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -34,24 +44,10 @@ import os
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
 
-DEFAULT_FEEDBACK_SYSTEM_PROMPT = """You are a senior trading system analyst providing comprehensive feedback for AI trading system improvement. 
-Your analysis should be thorough, data-driven, and provide actionable insights for all system components."""
-
-DEFAULT_FEEDBACK_USER_PROMPT = """You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
-
-Context Data: {context_data}
-Performance Metrics: {performance_metrics}
-
-Please provide:
-1. Overall system performance analysis
-2. Key strengths and weaknesses identified
-3. Specific recommendations for both summarizer and decider agents
-4. Market condition analysis and adaptation strategies
-5. Long-term improvement suggestions
-
-Focus on comprehensive insights that can guide the entire trading system's evolution."""
-
-DEFAULT_FEEDBACK_DESCRIPTION = "Default system analysis prompt - comprehensive system-wide feedback"
+FEEDBACK_DEFAULTS = default_prompts_module.DEFAULT_PROMPTS["FeedbackAgent"]
+DEFAULT_FEEDBACK_SYSTEM_PROMPT = FEEDBACK_DEFAULTS["system_prompt"]
+DEFAULT_FEEDBACK_USER_PROMPT = FEEDBACK_DEFAULTS["user_prompt_template"]
+DEFAULT_FEEDBACK_DESCRIPTION = FEEDBACK_DEFAULTS["description"]
 
 # Initialize trading interface for Schwab integration
 try:
@@ -60,6 +56,147 @@ try:
 except ImportError:
     SCHWAB_ENABLED = False
     print("Warning: Trading interface not available, Schwab features disabled")
+
+
+def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
+    """Ensure the v0 prompt for the given agent/config matches code defaults."""
+    if not prompt_payload:
+        return
+
+    system_prompt = prompt_payload.get("system_prompt")
+    user_prompt = prompt_payload.get("user_prompt_template") or prompt_payload.get("user_prompt")
+    description = prompt_payload.get("description")
+
+    if not system_prompt or not user_prompt:
+        return
+
+    delete_params = {
+        "agent_type": agent_type,
+        "config_hash": config_hash,
+    }
+
+    def _delete_rows(table_name, template):
+        conn.execute(text(template), delete_params)
+
+    def _insert_row(table_name, insert_sql):
+        values = {
+            "agent_type": agent_type,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "description": description,
+            "config_hash": 'global' if config_hash == "global" else config_hash,
+        }
+        conn.execute(text(insert_sql), values)
+
+    # Base table
+    if config_hash == "global":
+        _delete_rows("prompt_versions", """
+            DELETE FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND version = 0
+              AND (config_hash = 'global' OR config_hash IS NULL)
+        """)
+    else:
+        _delete_rows("prompt_versions", """
+            DELETE FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND version = 0
+              AND config_hash = :config_hash
+        """)
+
+    _insert_row("prompt_versions", """
+        INSERT INTO prompt_versions
+            (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
+        VALUES
+            (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+    """)
+
+    def _table_exists(table_name):
+        result = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": table_name}).scalar()
+        return result is not None
+
+    def _table_has_column(table_name, column_name):
+        return conn.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = :table AND column_name = :column
+        """), {"table": table_name, "column": column_name}).fetchone() is not None
+
+    if _table_exists('ai_agent_prompts') and _table_has_column('ai_agent_prompts', 'agent_type'):
+        has_config = _table_has_column('ai_agent_prompts', 'config_hash')
+        use_version = _table_has_column('ai_agent_prompts', 'version')
+
+        if not has_config:
+            # Cannot scope by config hash; skip syncing to avoid corrupting shared rows
+            return
+        else:
+            if config_hash == "global":
+                if use_version:
+                    _delete_rows("ai_agent_prompts", """
+                        DELETE FROM ai_agent_prompts
+                        WHERE agent_type = :agent_type
+                          AND version = 0
+                          AND (config_hash = 'global' OR config_hash IS NULL)
+                    """)
+                else:
+                    _delete_rows("ai_agent_prompts", """
+                        DELETE FROM ai_agent_prompts
+                        WHERE agent_type = :agent_type
+                          AND (config_hash = 'global' OR config_hash IS NULL)
+                    """)
+            else:
+                if use_version:
+                    _delete_rows("ai_agent_prompts", """
+                        DELETE FROM ai_agent_prompts
+                        WHERE agent_type = :agent_type
+                          AND version = 0
+                          AND config_hash = :config_hash
+                    """)
+                else:
+                    _delete_rows("ai_agent_prompts", """
+                        DELETE FROM ai_agent_prompts
+                        WHERE agent_type = :agent_type
+                          AND config_hash = :config_hash
+                    """)
+
+        if has_config:
+            if use_version:
+                _insert_row("ai_agent_prompts", """
+                    INSERT INTO ai_agent_prompts
+                        (agent_type, version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
+                    VALUES
+                        (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+                """)
+            else:
+                _insert_row("ai_agent_prompts", """
+                    INSERT INTO ai_agent_prompts
+                        (agent_type, system_prompt, user_prompt, description, created_by, is_active, config_hash)
+                    VALUES
+                        (:agent_type, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+                """)
+
+    if _table_exists('unified_prompts') and _table_has_column('unified_prompts', 'agent_type'):
+        if config_hash == "global":
+            _delete_rows("unified_prompts", """
+                DELETE FROM unified_prompts
+                WHERE agent_type = :agent_type
+                  AND version = 0
+                  AND (config_hash = 'global' OR config_hash IS NULL)
+            """)
+        else:
+            _delete_rows("unified_prompts", """
+                DELETE FROM unified_prompts
+                WHERE agent_type = :agent_type
+                  AND version = 0
+                  AND config_hash = :config_hash
+            """)
+
+        _insert_row("unified_prompts", """
+            INSERT INTO unified_prompts
+                (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
+            VALUES
+                (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+        """)
+
 
 class _SafeFormatDict(dict):
     """Dictionary that leaves unknown keys in braces when formatting."""
@@ -235,6 +372,126 @@ def _build_prompt_context_samples(latest_feedback=None):
     }
 
 
+def _parse_summary_row(row):
+    """Normalize a raw summaries table row into structured fields."""
+    agent = (row.agent or "unknown").strip()
+    data = row.data
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+
+    summary_content = data.get("summary") if isinstance(data, dict) else {}
+    if isinstance(summary_content, str):
+        try:
+            summary_content = json.loads(summary_content)
+        except (json.JSONDecodeError, TypeError):
+            summary_content = {"headlines": [], "insights": summary_content}
+
+    headlines = summary_content.get("headlines") if isinstance(summary_content, dict) else []
+    if not isinstance(headlines, (list, tuple)):
+        headlines = []
+    headlines = [str(h).strip() for h in headlines if h]
+    if len(headlines) > 5:
+        headlines = headlines[:5]
+
+    insights = summary_content.get("insights") if isinstance(summary_content, dict) else ""
+    if not isinstance(insights, str):
+        insights = json.dumps(insights, ensure_ascii=False)
+    if len(insights) > SUMMARY_MAX_CHARS:
+        insights = insights[:SUMMARY_MAX_CHARS] + "... [truncated]"
+
+    timestamp = row.timestamp.isoformat() if isinstance(row.timestamp, datetime) else None
+
+    return {
+        "agent": agent,
+        "headlines": headlines,
+        "insights": insights,
+        "timestamp": timestamp,
+    }
+
+
+def generate_summary_analyzer_report(limit=10):
+    """Run the company extraction and momentum recap pipeline on recent summaries."""
+    config_hash = get_current_config_hash()
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT agent, data, timestamp
+            FROM summaries
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """), {"config_hash": config_hash, "limit": limit}).fetchall()
+
+    if not rows:
+        return {
+            "success": False,
+            "error": "No summaries available for the current configuration."
+        }
+
+    parsed_summaries = [_parse_summary_row(row) for row in rows]
+    parsed_summaries.reverse()  # Oldest first for readability
+
+    summary_parts = []
+    extractor_blocks = []
+    for entry in parsed_summaries:
+        agent_label = entry["agent"]
+        headline_text = ", ".join(entry["headlines"][:3])
+        insight_text = entry["insights"]
+        summary_parts.append(f"{agent_label}: {headline_text} | {insight_text}")
+        extractor_blocks.append(
+            "\n".join([
+                f"Agent: {agent_label}",
+                f"Headlines: {headline_text or 'None'}",
+                f"Insights: {insight_text or 'None'}",
+            ])
+        )
+
+    summaries_preview = "\n".join(summary_parts)
+    extraction_payload = "\n\n".join(extractor_blocks) if extractor_blocks else summaries_preview
+
+    company_entities = extract_companies_from_summaries(extraction_payload)
+    momentum_data, momentum_summary = build_momentum_recap(company_entities)
+
+    holdings = fetch_holdings()
+    cash_balance = next((float(h.get("current_value", 0)) for h in holdings if h.get("ticker") == "CASH"), 0.0)
+    stock_holdings = [h for h in holdings if h.get("ticker") not in (None, "CASH")]
+
+    pl_lines = []
+    for holding in stock_holdings:
+        try:
+            ticker = holding.get("ticker", "UNKNOWN")
+            cost = float(holding.get("total_value") or 0)
+            current = float(holding.get("current_value") or 0)
+            pnl_pct = ((current - cost) / cost * 100) if cost else 0.0
+            pl_lines.append(f"- {ticker}: {pnl_pct:+.2f}% vs entry (stop loss -3%, take profit +5%)")
+        except Exception:
+            continue
+
+    holdings_pl_summary = "\n".join(pl_lines)
+
+    momentum_recap = momentum_summary or "- Momentum data unavailable"
+    if holdings_pl_summary:
+        momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
+    elif not momentum_data:
+        momentum_recap = "- No momentum data available\n\nExisting Position P/L:\n- No open positions"
+
+    return {
+        "success": True,
+        "summary_count": len(parsed_summaries),
+        "summaries": parsed_summaries,
+        "summaries_preview": summaries_preview,
+        "companies": company_entities,
+        "momentum_summary": momentum_summary,
+        "momentum_data": momentum_data,
+        "momentum_recap": momentum_recap,
+        "holdings_pl_summary": holdings_pl_summary,
+        "available_cash": cash_balance,
+        "analysis_timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 def _sync_holdings_with_database(config_hash, holdings, cash_balance):
     """Replace holdings in the database with the live Schwab snapshot."""
     now = datetime.utcnow()
@@ -331,6 +588,21 @@ def _get_active_prompts_bundle():
     latest_feedback = tracker.get_latest_feedback() or {}
     context_samples = _build_prompt_context_samples(latest_feedback)
 
+    momentum_report = None
+    try:
+        momentum_report = generate_summary_analyzer_report()
+    except Exception as exc:
+        print(f"Momentum analyzer preview failed: {exc}")
+        momentum_report = None
+
+    if momentum_report and momentum_report.get("success"):
+        momentum_recap_text = momentum_report.get("momentum_recap") or "Momentum recap unavailable."
+    else:
+        momentum_recap_text = "Momentum recap unavailable."
+
+    context_samples.setdefault("momentum_recap", momentum_recap_text)
+    context_samples.setdefault("pnl_summary", momentum_recap_text)
+
     summarizer_feedback_text = _normalize_feedback_value(latest_feedback.get("summarizer_feedback"))
     decider_feedback_text = _normalize_feedback_value(latest_feedback.get("decider_feedback"))
 
@@ -349,7 +621,9 @@ def _get_active_prompts_bundle():
         tracker,
         ["SummarizerAgent", "summarizer"],
         "SummarizerAgent",
-        replacements=replacements_common
+        replacements={
+            "feedback_context": summarizer_feedback_block,
+        }
     )
 
     decider_payload = _collect_prompt_payload(
@@ -601,6 +875,35 @@ def dashboard():
             'config_hash': get_current_config_hash(),
             'prompt_versions': prompt_versions
         }
+
+        baseline_snapshot = conn.execute(text("""
+            SELECT total_portfolio_value, cash_balance, total_invested,
+                   total_profit_loss, percentage_gain
+            FROM portfolio_history
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp ASC
+            LIMIT 1
+        """), {"config_hash": config_hash}).fetchone()
+
+        if baseline_snapshot:
+            baseline_total_value = float(baseline_snapshot.total_portfolio_value or 0.0)
+            baseline_cash = float(baseline_snapshot.cash_balance or 0.0)
+            baseline_invested = float(baseline_snapshot.total_invested or 0.0)
+            baseline_profit_loss = float(baseline_snapshot.total_profit_loss or 0.0)
+            baseline_percentage = float(baseline_snapshot.percentage_gain or 0.0)
+
+            if baseline_total_value or baseline_invested:
+                total_profit_loss = baseline_profit_loss
+                percentage_gain = baseline_percentage
+                initial_investment = baseline_invested if baseline_invested > 0 else baseline_total_value
+                if initial_investment == 0:
+                    initial_investment = 10000.0
+                net_gain_loss = baseline_profit_loss
+                net_percentage_gain = baseline_percentage
+                total_portfolio_value = baseline_total_value
+                cash_balance = baseline_cash
+                total_invested = baseline_invested
+                total_current_value = max(0.0, total_portfolio_value - cash_balance)
 
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
                                total_value=total_portfolio_value, cash_balance=cash_balance,
@@ -876,6 +1179,53 @@ def api_portfolio_performance():
         })
 
     return jsonify(output)
+
+
+@app.route("/api/prompts/reset", methods=["POST"])
+def api_reset_prompts_to_baseline():
+    """Reset prompt blueprints to their v0 baseline for the active configuration."""
+    config_hash = get_current_config_hash()
+    agents = ["SummarizerAgent", "DeciderAgent", "FeedbackAgent"]
+    try:
+        importlib.reload(default_prompts_module)
+        latest_defaults = default_prompts_module.DEFAULT_PROMPTS
+
+        # Sync global baselines first so initialize_config_prompts copies fresh text
+        with engine.begin() as conn:
+            for agent, payload in latest_defaults.items():
+                _ensure_v0_prompt(conn, agent, "global", payload)
+
+        initialize_config_prompts(config_hash)
+        with engine.begin() as conn:
+            for agent, payload in latest_defaults.items():
+                _ensure_v0_prompt(conn, agent, config_hash, payload)
+
+        with engine.begin() as conn:
+            for agent in agents:
+                conn.execute(text(
+                    "UPDATE prompt_versions SET is_active = FALSE WHERE agent_type = :agent AND config_hash = :cfg"
+                ), {"agent": agent, "cfg": config_hash})
+
+                updated = conn.execute(text(
+                    """
+                    UPDATE prompt_versions
+                    SET is_active = TRUE
+                    WHERE agent_type = :agent AND config_hash = :cfg AND version = 0
+                    """
+                ), {"agent": agent, "cfg": config_hash})
+
+                if updated.rowcount == 0:
+                    conn.execute(text(
+                        """
+                        UPDATE prompt_versions
+                        SET is_active = TRUE
+                        WHERE agent_type = :agent AND version = 0 AND (config_hash IS NULL OR config_hash = 'global')
+                        """
+                    ), {"agent": agent})
+
+        return jsonify({"status": "success"})
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 @app.route("/api/profit-loss")
 def api_profit_loss():
@@ -1168,6 +1518,20 @@ def get_active_prompts():
         "status": "success",
         "prompts": prompts
     })
+
+
+@app.route('/api/run-summary-analyzer', methods=['POST'])
+def run_summary_analyzer_endpoint():
+    """Ad-hoc trigger for the summary analyzer plus momentum recap."""
+    try:
+        result = generate_summary_analyzer_report()
+    except Exception as exc:
+        print(f"Summary analyzer error: {exc}")
+        result = {"success": False, "error": str(exc)}
+        return jsonify(result), 500
+
+    status_code = 200 if result.get('success') else 404
+    return jsonify(result), status_code
 
 # Manual trigger endpoints for testing
 @app.route('/api/trigger/summarizer', methods=['POST'])
@@ -1463,7 +1827,18 @@ def reset_prompts():
                 return jsonify({
                     'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
                 }), 400
-        
+
+        # Ensure v0 templates match current code defaults before toggling
+        try:
+            importlib.reload(default_prompts_module)
+            latest_defaults = default_prompts_module.DEFAULT_PROMPTS
+            with engine.begin() as conn:
+                for agent_type, payload in latest_defaults.items():
+                    _ensure_v0_prompt(conn, agent_type, config_hash, payload)
+                    _ensure_v0_prompt(conn, agent_type, 'global', payload)
+        except Exception as e:
+            print(f"⚠️  Failed to sync v0 prompts with defaults: {e}")
+
         # Reset prompt systems with proper error handling
         try:
             with engine.begin() as conn:
@@ -1715,7 +2090,7 @@ def get_schwab_holdings():
         schwab_data = trading_interface.sync_schwab_positions()
         schwab_data['enabled'] = True
         schwab_data['readonly_mode'] = readonly_mode
-        schwab_data['live_trading_enabled'] = (trading_interface.trading_mode == "live") and not readonly_mode
+        schwab_data['live_trading_enabled'] = (trading_interface.trading_mode in {"live", "real_world"}) and not readonly_mode
         schwab_data.setdefault('account_info', {})
         if readonly_mode:
             schwab_data['account_info'].setdefault('account_hash', schwab_client.account_hash if hasattr(schwab_client, "account_hash") else None)

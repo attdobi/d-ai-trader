@@ -1,5 +1,16 @@
 let chart, performanceChart, breakdownChart;
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>'"]/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch] || ch));
+}
+
 function renderChart(data, label = 'Portfolio Value') {
   const el = document.getElementById('historyChart');
   const canvas = el;
@@ -178,6 +189,55 @@ function triggerAgent(agentType) {
     })
     .catch(err => { statusDiv.innerHTML = `❌ Network error: ${err.message}`; statusDiv.className = 'trigger-status error'; })
     .finally(() => { buttons.forEach(b => b.disabled = false); });
+}
+function runSummaryAnalyzer() {
+  const statusDiv = document.getElementById('summary-analyzer-output');
+  const triggerButton = document.getElementById('summary-analyzer-btn');
+  if (!statusDiv) return;
+
+  statusDiv.innerHTML = '🔄 Running summary analyzer and momentum recap...';
+  statusDiv.className = 'trigger-status loading';
+  if (triggerButton) triggerButton.disabled = true;
+
+  fetch('/api/run-summary-analyzer', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(response => response.json())
+    .then(data => {
+      if (!data.success) {
+        statusDiv.innerHTML = `❌ ${escapeHtml(data.error || 'Analyzer failed.')}`;
+        statusDiv.className = 'trigger-status error';
+        return;
+      }
+
+      const summariesCount = data.summary_count || 0;
+      const companies = Array.isArray(data.companies) ? data.companies : [];
+      const momentumRecap = escapeHtml(data.momentum_recap || data.momentum_summary || '').replace(/\n/g, '<br>');
+      const summariesPreview = escapeHtml(data.summaries_preview || '').replace(/\n/g, '<br>');
+
+      let companiesHtml = 'No companies detected.';
+      if (companies.length) {
+        companiesHtml = '<ul class="analyzer-company-list">' + companies.map(entry => {
+          const name = escapeHtml(entry.company || entry.symbol || 'Unknown');
+          const symbol = escapeHtml(entry.symbol || '–');
+          return `<li><strong>${name}</strong> <span class="ticker">(${symbol})</span></li>`;
+        }).join('') + '</ul>';
+      }
+
+      statusDiv.innerHTML = [
+        '✅ Summary analyzer complete.',
+        `<strong>Summaries Processed:</strong> ${summariesCount}`,
+        `<strong>Detected Companies:</strong><br>${companiesHtml}`,
+        `<strong>Momentum Recap:</strong><br>${momentumRecap || 'N/A'}`,
+        `<details class="analyzer-summaries"><summary>Summary Preview</summary><div>${summariesPreview || 'N/A'}</div></details>`
+      ].join('<br><br>');
+      statusDiv.className = 'trigger-status success';
+    })
+    .catch(err => {
+      statusDiv.innerHTML = `❌ Network error: ${escapeHtml(err.message)}`;
+      statusDiv.className = 'trigger-status error';
+    })
+    .finally(() => {
+      if (triggerButton) triggerButton.disabled = false;
+    });
 }
 function resetPortfolio() {
   if (!confirm('Are you sure you want to reset the portfolio? This will:\n\n• Sell all current holdings\n• Reset cash balance to $10,000\n• Clear all trading history\n\nThis action cannot be undone.')) return;

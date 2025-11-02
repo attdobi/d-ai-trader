@@ -80,6 +80,32 @@ async function loadPromptDetails() {
   }
 }
 
+async function resetPromptsToBaseline() {
+  const status = document.getElementById('promptResetStatus');
+  if (status) {
+    status.textContent = 'Resetting prompts to baseline...';
+    status.style.color = '#555';
+  }
+  try {
+    const response = await fetch('/api/prompts/reset', { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok || payload.status !== 'success') {
+      throw new Error(payload.message || 'Reset failed');
+    }
+    if (status) {
+      status.textContent = 'Prompts reset to baseline (v0).';
+      status.style.color = '#2e7d32';
+    }
+    await loadPromptDetails();
+  } catch (err) {
+    console.error('Prompt reset failed:', err);
+    if (status) {
+      status.textContent = `Reset failed: ${err.message}`;
+      status.style.color = '#c62828';
+    }
+  }
+}
+
 function formatMaybePct(v) {
   const n = Number(v || 0);
   return `${n.toFixed(2)}%`;
@@ -269,4 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPromptDetails();
   refreshFeedbackData();
   setInterval(refreshFeedbackData, 10000);
+  const resetBtn = document.getElementById('resetPromptsBtn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', resetPromptsToBaseline);
+  }
 });

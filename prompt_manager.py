@@ -150,52 +150,14 @@ def get_active_prompt_emergency_patch(agent_type):
     except Exception as init_err:
         print(f"⚠️ Prompt initialization warning for {agent_type}: {init_err}")
 
+    from prompts.default_prompts import DEFAULT_PROMPTS
     baselines = {
-        "SummarizerAgent": {
-            "system_prompt": "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles.",
-            "user_prompt_template": """Analyze the following financial news and extract the most important actionable insights.
-
-{feedback_context}
-
-Content: {content}
-
-Return ONLY valid JSON in this EXACT format:
-{
-    "headlines": ["headline 1", "headline 2", "headline 3"],
-    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
-}""",
+        agent: {
+            "system_prompt": payload["system_prompt"],
+            "user_prompt_template": payload["user_prompt_template"],
             "version": 0,
-        },
-        "DeciderAgent": {
-            "system_prompt": "You are an aggressive day trading agent managing a $10,000 portfolio. You must use substantial position sizes and never waste capital on tiny trades. You cannot buy stocks you already own without selling first.",
-            "user_prompt_template": """You are an AGGRESSIVE DAY TRADING AI managing a $10,000 portfolio.
-
-🚨 UNCHANGING CORE RULES (NEVER VIOLATE THESE):
-- MINIMUM buy order: $1500
-- TYPICAL buy order: $2000-$3500
-- MAXIMUM buy order: $4000
-- Available cash: ${available_cash}
-
-PORTFOLIO MANAGEMENT REQUIREMENTS:
-- NEVER buy a stock you already own
-- ALWAYS review existing positions before new buys
-- MUST justify every hold
-- Max 5 concurrent positions
-
-Provide structured JSON decisions as documented.
-""",
-            "version": 0,
-        },
-        "FeedbackAgent": {
-            "system_prompt": "You are a trading performance analyst providing structured feedback for continuous improvement.",
-            "user_prompt_template": """Review recent trading outcomes and provide structured feedback covering:
-- Overall performance summary
-- Key strengths
-- Areas for improvement
-- Specific, actionable recommendations
-""",
-            "version": 0,
-        },
+        }
+        for agent, payload in DEFAULT_PROMPTS.items()
     }
 
     print(f"ℹ️ Using baseline prompt for {agent_type} (no active version found for config {config_hash})")

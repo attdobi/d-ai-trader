@@ -411,7 +411,7 @@ class TradeOutcomeTracker:
                 # FIXED TEMPLATE COMPONENTS (never change) - using hardcoded constants to avoid circular imports
                 DECIDER_BASE_INSTRUCTIONS = '''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than $9900 total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than the total available balance for trading.
 Retain at least $100 in funds.'''
 
                 DECIDER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
@@ -607,6 +607,64 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
         except Exception as e:
             print(f"❌ Error checking config mode for {config_hash}: {e}")
             return True  # Default to AUTO if error
+    
+    def _flatten_feedback_text(self, value, max_items=3):
+        """Flatten nested feedback structures into a concise string"""
+        if not value:
+            return ""
+        
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate and candidate[0] in "{[":
+                try:
+                    parsed = json.loads(candidate)
+                    return self._flatten_feedback_text(parsed, max_items=max_items)
+                except json.JSONDecodeError:
+                    pass
+            return candidate
+        
+        if isinstance(value, dict):
+            pieces = []
+            for key in ["summary", "focus", "priority", "actions", "next_steps"]:
+                if key in value and len(pieces) < max_items:
+                    piece = self._flatten_feedback_text(value[key], max_items=max_items)
+                    if piece:
+                        pieces.append(piece)
+            if not pieces:
+                for item in value.values():
+                    piece = self._flatten_feedback_text(item, max_items=max_items)
+                    if piece:
+                        pieces.append(piece)
+                    if len(pieces) >= max_items:
+                        break
+            return "; ".join(pieces)
+        
+        if isinstance(value, (list, tuple, set)):
+            pieces = []
+            for item in value:
+                piece = self._flatten_feedback_text(item, max_items=max_items)
+                if piece:
+                    pieces.append(piece)
+                if len(pieces) >= max_items:
+                    break
+            return "; ".join(pieces)
+        
+        return str(value)
+    
+    def _extract_feedback_snippet(self, feedback_value, max_chars=220):
+        """Create a short, formatting-safe feedback snippet for prompt injection"""
+        text_value = self._flatten_feedback_text(feedback_value)
+        if not text_value:
+            text_value = "No recent feedback. Stay consistent with the current playbook."
+        
+        condensed = " ".join(text_value.split())
+        if len(condensed) > max_chars:
+            truncated = condensed[:max_chars].rsplit(" ", 1)[0]
+            if not truncated:
+                truncated = condensed[:max_chars]
+            condensed = f"{truncated}..."
+        
+        return condensed.replace("{", "{{").replace("}", "}}")
 
     def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
         """Generate prompts for a specific config without changing global state"""
@@ -631,18 +689,22 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
             decider_feedback = feedback.get('decider_feedback', '')
             
             if summarizer_feedback:
-                # Create simple updated summarizer prompt
-                new_summarizer_system = f"""You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You specialize in analyzing financial news articles and extracting actionable trading insights.
+                snippet = self._extract_feedback_snippet(summarizer_feedback)
 
-🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string.
+                new_summarizer_system = (
+                    "You are an intelligent, machiavellian day trading agent tuned on extracting market "
+                    "insights and turning a profit. You specialize in analyzing financial news articles and "
+                    "extracting actionable trading insights.\n\n"
+                    '🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string.'
+                )
 
-PERFORMANCE FEEDBACK: {summarizer_feedback}"""
+                new_summarizer_user = f"""Analyze the following financial news and extract the most important actionable insights.
 
-                new_summarizer_user = """Analyze the following financial news and extract the most important actionable insights.
+Latest Feedback Reminder: {snippet}
 
-{feedback_context}
+{{feedback_context}}
 
-Content: {content}
+Content: {{content}}
 
 🚨 CRITICAL JSON REQUIREMENT:
 Return ONLY valid JSON in this EXACT format:
@@ -654,32 +716,34 @@ Return ONLY valid JSON in this EXACT format:
 ⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
 ✅ ONLY pure JSON starting with {{ and ending with }}"""
 
-                # Save the updated prompt directly
                 version = self._create_new_prompt_version_for_config(
-                    'SummarizerAgent', 
-                    new_summarizer_user, 
+                    'SummarizerAgent',
+                    new_summarizer_user,
                     new_summarizer_system,
                     f'Auto-generated from feedback (ID: {feedback_id})',
                     config_hash
                 )
                 print(f"✅ Created summarizer prompt v{version} for config {config_hash}")
-            
+
             if decider_feedback:
-                # Create simple updated decider prompt
-                new_decider_system = f"""You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation.
+                snippet = self._extract_feedback_snippet(decider_feedback)
 
-PERFORMANCE FEEDBACK: {decider_feedback}"""
+                new_decider_system = (
+                    "You are an intelligent, machiavellian day trading agent tuned on extracting market "
+                    "insights and turning a profit. You are aggressive and focused on short-term gains and "
+                    "capital rotation."
+                )
 
-                new_decider_user = """You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
+                new_decider_user = f"""You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
 
-Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than $9900 total.
+Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than the total available balance for trading.
 Retain at least $100 in funds.
 
-LATEST PERFORMANCE FEEDBACK: {decider_feedback}
+Latest Feedback Reminder: {snippet}
 
-Current Portfolio: {holdings}
-Available Cash: {available_cash}
-News Summaries: {summaries}
+Current Portfolio: {{holdings}}
+Available Cash: {{available_cash}}
+News Summaries: {{summaries}}
 
 🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
 [
@@ -719,8 +783,12 @@ No explanatory text, no markdown, just pure JSON array."""
             os.environ['CURRENT_CONFIG_HASH'] = config_hash
             
             try:
-                version = create_new_prompt_version(agent_type, user_prompt, system_prompt, description)
-                return version
+                prompt_id = create_new_prompt_version(agent_type, user_prompt, system_prompt, description)
+                with engine.connect() as conn:
+                    result = conn.execute(text("""
+                        SELECT version FROM prompt_versions WHERE id = :id
+                    """), {"id": prompt_id}).fetchone()
+                return result.version if result else 0
             finally:
                 # Restore original hash
                 if original_hash:

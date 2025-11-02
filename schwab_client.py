@@ -4,6 +4,7 @@ Handles authentication, order placement, and account data retrieval
 """
 
 import os
+import sys
 import json
 import logging
 import time
@@ -262,7 +263,13 @@ class SchwabAPIClient:
                         remaining_refresh / 3600.0,
                     )
 
-            interactive = os.getenv("DAI_SCHWAB_INTERACTIVE", "true").lower() not in {"0", "false", "no"}
+            interactive_env = os.getenv("DAI_SCHWAB_INTERACTIVE")
+            if interactive_env is None:
+                interactive = sys.stdin.isatty()
+                if not interactive:
+                    logger.info("No interactive TTY detected for Schwab auth; using non-interactive browser flow.")
+            else:
+                interactive = interactive_env.lower() not in {"0", "false", "no"}
             manual_flow = os.getenv("DAI_SCHWAB_MANUAL_FLOW", "0").lower() in {"1", "true", "yes"}
 
             if SCHWAB_LIBRARY == "schwab":
@@ -277,7 +284,7 @@ class SchwabAPIClient:
                         enforce_enums=True,
                     )
                 else:
-                    client = easy_client(
+                    easy_kwargs = dict(
                         api_key=SCHWAB_CLIENT_ID,
                         app_secret=SCHWAB_CLIENT_SECRET,
                         callback_url=SCHWAB_REDIRECT_URI,
@@ -285,6 +292,15 @@ class SchwabAPIClient:
                         enforce_enums=True,
                         interactive=interactive,
                     )
+                    try:
+                        client = easy_client(**easy_kwargs)
+                    except EOFError:
+                        if interactive:
+                            logger.warning(
+                                "Interactive Schwab auth prompt unavailable (EOF). Retrying with interactive=False."
+                            )
+                        easy_kwargs["interactive"] = False
+                        client = easy_client(**easy_kwargs)
 
                 if isinstance(client, SchwabClient):
                     self.client = client
@@ -497,10 +513,94 @@ class SchwabAPIClient:
                         logger.error(f"Insufficient funds: ${cash_balance:.2f} available, need ${estimated_cost + self.min_cash_buffer:.2f}")
                         return None
             
-            # Place the order
+            # Place the order (with lightweight retry to absorb transient disconnects)
             logger.info(f"Placing {instruction} order for {quantity} shares of {symbol}")
-            response = self.client.place_order(acc_hash, order)
-            
+            response = None
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = self.client.place_order(acc_hash, order)
+                    break
+                except requests.exceptions.RequestException as exc:
+                    logger.warning(
+                        "Schwab place_order attempt %s/%s failed for %s %s: %s",
+                        attempt,
+                        max_attempts,
+                        instruction,
+                        symbol,
+                        exc,
+                    )
+                    if attempt == max_attempts:
+                        logger.error(
+                            "Exhausted Schwab place_order retries for %s %s due to %s",
+                            instruction,
+                            symbol,
+                            exc,
+                        )
+                        return {
+                            "status": "error",
+                            "symbol": symbol,
+                            "quantity": quantity,
+                            "instruction": instruction,
+                            "order_type": order_type,
+                            "price": price,
+                            "timestamp": datetime.now().isoformat(),
+                            "success": False,
+                            "error": f"place_order connection error: {exc}",
+                        }
+                    # Refresh auth and give Schwab a brief moment before retrying
+                    try:
+                        self.ensure_authenticated(force=True)
+                    except Exception as auth_exc:
+                        logger.warning("Auth refresh during retry failed: %s", auth_exc)
+                    time.sleep(min(1.5 * attempt, 4.0))
+
+            if not response:
+                logger.error("No response received from Schwab place_order for %s %s", instruction, symbol)
+                return {
+                    "status": "error",
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "instruction": instruction,
+                    "order_type": order_type,
+                    "price": price,
+                    "timestamp": datetime.now().isoformat(),
+                    "success": False,
+                    "error": "place_order returned no response",
+                }
+
+            if response.status_code == 401:
+                logger.warning("Schwab returned 401 for %s %s - attempting re-authentication", instruction, symbol)
+                if self.ensure_authenticated(force=True):
+                    try:
+                        response = self.client.place_order(acc_hash, order)
+                    except requests.exceptions.RequestException as exc:
+                        logger.error("Reattempt after 401 failed for %s %s: %s", instruction, symbol, exc)
+                        return {
+                            "status": "error",
+                            "symbol": symbol,
+                            "quantity": quantity,
+                            "instruction": instruction,
+                            "order_type": order_type,
+                            "price": price,
+                            "timestamp": datetime.now().isoformat(),
+                            "success": False,
+                            "error": f"place_order retry after 401 failed: {exc}",
+                        }
+                else:
+                    logger.error("Unable to refresh Schwab authentication after 401 for %s %s", instruction, symbol)
+                    return {
+                        "status": "error",
+                        "symbol": symbol,
+                        "quantity": quantity,
+                        "instruction": instruction,
+                        "order_type": order_type,
+                        "price": price,
+                        "timestamp": datetime.now().isoformat(),
+                        "success": False,
+                        "error": "Authentication refresh failed after 401",
+                    }
+
             if response.status_code in [200, 201]:
                 order_id = response.headers.get('Location', '').split('/')[-1]
                 logger.info(f"Order placed successfully. Order ID: {order_id}")
@@ -534,11 +634,31 @@ class SchwabAPIClient:
                 }
             else:
                 logger.error(f"Failed to place order: {response.status_code} - {response.text}")
-                return None
+                return {
+                    "status": "error",
+                    "symbol": symbol,
+                    "quantity": quantity,
+                    "instruction": instruction,
+                    "order_type": order_type,
+                    "price": price,
+                    "timestamp": datetime.now().isoformat(),
+                    "success": False,
+                    "error": f"{response.status_code}: {response.text}",
+                }
                 
         except Exception as e:
             logger.error(f"Error placing order: {e}")
-            return None
+            return {
+                "status": "error",
+                "symbol": symbol,
+                "quantity": quantity,
+                "instruction": instruction,
+                "order_type": order_type,
+                "price": price,
+                "timestamp": datetime.now().isoformat(),
+                "success": False,
+                "error": str(e),
+            }
 
     def _build_equity_order(self, symbol: str, quantity: int, instruction: str,
                             order_type: str, price: Optional[float]):
