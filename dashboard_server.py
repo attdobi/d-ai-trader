@@ -725,6 +725,36 @@ def _fetch_latest_momentum_snapshot(config_hash):
         snapshot = None
     return snapshot
 
+
+def _get_live_portfolio_baseline(config_hash, current_value):
+    """Return baseline portfolio value for given config, creating if missing."""
+    if not config_hash:
+        return current_value
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS live_portfolio_baselines (
+                config_hash TEXT PRIMARY KEY,
+                baseline_value FLOAT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        baseline_row = conn.execute(text("""
+            SELECT baseline_value FROM live_portfolio_baselines
+            WHERE config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone()
+
+        if baseline_row:
+            return float(baseline_row.baseline_value)
+
+        conn.execute(text("""
+            INSERT INTO live_portfolio_baselines (config_hash, baseline_value)
+            VALUES (:config_hash, :baseline_value)
+        """), {"config_hash": config_hash, "baseline_value": current_value})
+
+        return float(current_value)
+
 def _get_active_prompts_bundle():
     """Fetch active prompt data for all primary agents with current feedback applied."""
     tracker = TradeOutcomeTracker()
@@ -949,21 +979,10 @@ def dashboard():
                     cash_balance = available_cash
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
-                    if not baseline_snapshot:
-                        initial_investment = total_portfolio_value
-                        baseline_snapshot = type("Baseline", (), {
-                            "total_portfolio_value": total_portfolio_value,
-                            "cash_balance": cash_balance,
-                            "total_invested": total_invested,
-                            "total_profit_loss": total_profit_loss,
-                            "percentage_gain": 0.0,
-                        })()
-                    net_gain_loss = total_portfolio_value - float(baseline_snapshot.total_portfolio_value or initial_investment)
-                    net_percentage_gain = (
-                        (net_gain_loss / float(baseline_snapshot.total_portfolio_value)) * 100
-                        if baseline_snapshot and float(baseline_snapshot.total_portfolio_value)
-                        else 0
-                    )
+                    baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
+                    net_gain_loss = total_portfolio_value - baseline_value
+                    initial_investment = baseline_value
+                    net_percentage_gain = (net_gain_loss / baseline_value * 100) if baseline_value else 0
                     percentage_gain = (
                         (total_profit_loss / total_invested * 100)
                         if total_invested
