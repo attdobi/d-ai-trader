@@ -630,26 +630,43 @@ class DAITraderOrchestrator:
         """Setup the scheduling for all jobs with configurable cadence"""
         # Get cadence from environment (default: 60 minutes)
         cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
-        
+
+        # Helper to convert ET schedule time to local scheduler time string (HH:MM)
+        local_tz = datetime.now().astimezone().tzinfo
+
+        def _et_time_to_local_str(hour: int, minute: int) -> str:
+            now_et = datetime.now(EASTERN_TIMEZONE)
+            target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            target_local = target_et.astimezone(local_tz)
+            return target_local.strftime("%H:%M")
+
         # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
-        schedule.every().day.at("09:25").do(self.market_open_job)  # 9:25 AM ET = 6:25 AM PT
-        
+        market_open_local = _et_time_to_local_str(9, 25)
+        schedule.every().day.at(market_open_local).do(self.market_open_job)
+
         # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
-        # This avoids overlap with the market open job
-        start_time_et = "09:35"  # 5 minutes after market opens
+        # Kick off a run at 9:35 AM ET, then continue every cadence_minutes minutes.
+        cadence_start_local = _et_time_to_local_str(9, 35)
+
+        def _cadence_wrapper():
+            self.scheduled_summarizer_and_decider_job()
+
+        schedule.every().day.at(cadence_start_local).do(_cadence_wrapper)
         schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
-        
+
         # Feedback agent - once daily after market close
-        schedule.every().day.at("16:30").do(self.scheduled_feedback_job)  # 4:30pm ET
+        feedback_local = _et_time_to_local_str(16, 30)
+        schedule.every().day.at(feedback_local).do(self.scheduled_feedback_job)
         
         logger.info("="*60)
         logger.info("Schedule setup completed")
         logger.info(f"📊 DAY TRADING MODE:")
         logger.info(f"   🔔 Market Open (9:25-9:30:05 AM ET):")
-        logger.info(f"      - 9:25:00 AM: Analyze pre-market news")
-        logger.info(f"      - 9:30:05 AM: Execute opening trades (5 sec after bell)")
+        local_tz_name = datetime.now(local_tz).tzname()
+        logger.info(f"      - 9:25:00 AM ET ({market_open_local} {local_tz_name}): Analyze pre-market news")
+        logger.info(f"      - 9:30:05 AM ET ({_et_time_to_local_str(9,30)} {local_tz_name}): Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
-        logger.info(f"      - Every {cadence_minutes} minutes starting at 9:35 AM ET")
+        logger.info(f"      - First cycle at 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
         logger.info(f"   📊 Feedback: Daily at 4:30 PM ET (after market close)")
         if cadence_minutes <= 15:
@@ -690,11 +707,11 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
-        logger.info("   9:25:00 AM ET (6:25 AM PT) - Analyze pre-market news")
-        logger.info("   9:30:05 AM ET (6:30 AM PT) - Execute opening trades (5 sec after bell)")
+        logger.info(f"   9:25:00 AM ET ({market_open_local} {local_tz_name}) - Analyze pre-market news")
+        logger.info(f"   9:30:05 AM ET ({_et_time_to_local_str(9,30)} {local_tz_name}) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
-        logger.info(f"   Every {cadence_minutes} minutes from 9:35 AM - 4:00 PM ET")
+        logger.info(f"   First cycle 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes until 4:00 PM ET")
         if cadence_minutes <= 15:
             cycles_per_day = int(390 / cadence_minutes) + 1  # +1 for opening bell
             logger.info(f"   ⚡ AGGRESSIVE MODE: Up to {cycles_per_day} trades/day!")
