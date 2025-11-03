@@ -72,6 +72,20 @@ class DAITraderOrchestrator:
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
         self.initialize_database()
+        self._local_tz = datetime.now().astimezone().tzinfo
+
+    def _get_local_timezone(self):
+        if not self._local_tz:
+            self._local_tz = datetime.now().astimezone().tzinfo
+        return self._local_tz
+
+    def _et_to_local_str(self, hour: int, minute: int) -> str:
+        target_et = datetime.now(EASTERN_TIMEZONE).replace(hour=hour, minute=minute, second=0, microsecond=0)
+        target_local = target_et.astimezone(self._get_local_timezone())
+        return target_local.strftime("%H:%M")
+
+    def _et_to_local_datetime(self, dt) -> datetime:
+        return dt.astimezone(self._get_local_timezone())
         
     def initialize_database(self):
         """Initialize database tables for tracking processed summaries"""
@@ -623,16 +637,10 @@ class DAITraderOrchestrator:
         cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
 
         # Helper to convert ET schedule time to local scheduler time string (HH:MM)
-        local_tz = datetime.now().astimezone().tzinfo
-
-        def _et_time_to_local_str(hour: int, minute: int) -> str:
-            now_et = datetime.now(EASTERN_TIMEZONE)
-            target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            target_local = target_et.astimezone(local_tz)
-            return target_local.strftime("%H:%M")
+        local_tz = self._get_local_timezone()
 
         # Market open run at 9:30 AM ET
-        market_open_local = _et_time_to_local_str(9, 30)
+        market_open_local = self._et_to_local_str(9, 30)
         schedule.every().day.at(market_open_local).do(self.market_open_job)
         self.market_open_local = market_open_local
         self.local_tz_name = datetime.now(local_tz).tzname()
@@ -665,7 +673,7 @@ class DAITraderOrchestrator:
             self.next_cadence_run = None
 
         # Feedback agent - once daily after market close
-        feedback_local = _et_time_to_local_str(16, 30)
+        feedback_local = self._et_to_local_str(16, 30)
         schedule.every().day.at(feedback_local).do(self.scheduled_feedback_job)
         
         logger.info("="*60)
@@ -722,7 +730,7 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
-        market_open_local = getattr(self, "market_open_local", _et_time_to_local_str(9, 30))
+        market_open_local = getattr(self, "market_open_local", self._et_to_local_str(9, 30))
         cadence_times_local = getattr(self, "cadence_times_local", [])
         local_tz_name = getattr(self, "local_tz_name", datetime.now().astimezone().tzname())
 
