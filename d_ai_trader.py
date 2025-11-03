@@ -637,19 +637,32 @@ class DAITraderOrchestrator:
         self.market_open_local = market_open_local
         self.local_tz_name = datetime.now(local_tz).tzname()
 
-        # Regular cadence: start at 9:30 AM ET + cadence_minutes (first interval after opening run)
+        # Regular cadence: repeat every cadence_minutes starting from first slot after market open.
+        now_et = datetime.now(EASTERN_TIMEZONE)
+        market_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+        if now_et < market_open_et:
+            next_cycle_et = market_open_et + timedelta(minutes=cadence_minutes)
+        else:
+            elapsed = now_et - market_open_et
+            cycles_passed = int(elapsed.total_seconds() // (cadence_minutes * 60)) + 1
+            next_cycle_et = market_open_et + timedelta(minutes=cycles_passed * cadence_minutes)
+
+        market_close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
         cadence_times_local = []
-        first_cycle_et = datetime.now(EASTERN_TIMEZONE).replace(hour=9, minute=30, second=0, microsecond=0)
-        first_cycle_et += timedelta(minutes=cadence_minutes)
-        market_close_et = datetime.now(EASTERN_TIMEZONE).replace(hour=16, minute=0, second=0, microsecond=0)
-
-        while first_cycle_et <= market_close_et:
-            local_str = first_cycle_et.astimezone(local_tz).strftime("%H:%M")
-            schedule.every().day.at(local_str).do(self.scheduled_summarizer_and_decider_job)
-            cadence_times_local.append(local_str)
-            first_cycle_et += timedelta(minutes=cadence_minutes)
-
+        preview_et = next_cycle_et
+        while preview_et <= market_close_et:
+            cadence_times_local.append(preview_et.astimezone(local_tz).strftime("%H:%M"))
+            preview_et += timedelta(minutes=cadence_minutes)
         self.cadence_times_local = cadence_times_local
+
+        if next_cycle_et <= market_close_et:
+            next_cycle_local = next_cycle_et.astimezone(local_tz)
+            cadence_job = schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
+            cadence_job.next_run = next_cycle_local.replace(tzinfo=None)
+            cadence_job.last_run = None
+            self.next_cadence_run = next_cycle_local
+        else:
+            self.next_cadence_run = None
 
         # Feedback agent - once daily after market close
         feedback_local = _et_time_to_local_str(16, 30)
@@ -662,11 +675,11 @@ class DAITraderOrchestrator:
         local_tz_name = self.local_tz_name
         logger.info(f"      - 9:30:00 AM ET ({market_open_local} {local_tz_name}): Run summarizer + decider")
         logger.info(f"   📈 Regular Cadence:")
+        if self.next_cadence_run:
+            logger.info(f"      - Next cycle at {self.next_cadence_run.strftime('%H:%M')} {local_tz_name}")
         if self.cadence_times_local:
-            first_local = self.cadence_times_local[0]
-            logger.info(f"      - First cycle at {first_local} {local_tz_name} ({cadence_minutes}-min cadence from 9:30 AM ET)")
             if len(self.cadence_times_local) > 1:
-                logger.info(f"      - Subsequent cycles: {', '.join(self.cadence_times_local[1:])} {local_tz_name}")
+                logger.info(f"      - Remaining cycles today: {', '.join(self.cadence_times_local)} {local_tz_name}")
         else:
             logger.info(f"      - Cadence {cadence_minutes} min results in only market-open cycle today")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
@@ -718,6 +731,8 @@ class DAITraderOrchestrator:
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
         if cadence_times_local:
             logger.info(f"   Next cycle at {cadence_times_local[0]} {local_tz_name}, then every {cadence_minutes} minutes until 4:00 PM ET")
+        elif self.next_cadence_run:
+            logger.info(f"   Next cycle at {self.next_cadence_run.strftime('%H:%M')} {local_tz_name}, then every {cadence_minutes} minutes")
         else:
             logger.info(f"   Cadence {cadence_minutes} minutes yields only opening cycle today.")
         if cadence_minutes <= 15:
