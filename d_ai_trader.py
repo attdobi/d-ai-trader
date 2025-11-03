@@ -646,18 +646,21 @@ class DAITraderOrchestrator:
         market_trade_local = _et_time_to_local_str(9, 30)
         self.market_open_local = market_open_local
         self.market_trade_local = market_trade_local
-        
-        # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
-        # Kick off a run at 9:35 AM ET, then continue every cadence_minutes minutes.
-        cadence_start_local = _et_time_to_local_str(9, 35)
-        self.cadence_start_local = cadence_start_local
         self.local_tz_name = datetime.now(local_tz).tzname()
 
-        def _cadence_wrapper():
-            self.scheduled_summarizer_and_decider_job()
+        # Regular cadence: after market open job, continue every cadence_minutes minutes starting from 9:30 AM ET + cadence
+        cadence_times_local = []
+        first_cycle_et = datetime.now(EASTERN_TIMEZONE).replace(hour=9, minute=30, second=0, microsecond=0)
+        first_cycle_et += timedelta(minutes=cadence_minutes)
+        market_close_et = datetime.now(EASTERN_TIMEZONE).replace(hour=16, minute=0, second=0, microsecond=0)
 
-        schedule.every().day.at(cadence_start_local).do(_cadence_wrapper)
-        schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
+        while first_cycle_et <= market_close_et:
+            local_str = first_cycle_et.astimezone(local_tz).strftime("%H:%M")
+            schedule.every().day.at(local_str).do(self.scheduled_summarizer_and_decider_job)
+            cadence_times_local.append(local_str)
+            first_cycle_et += timedelta(minutes=cadence_minutes)
+
+        self.cadence_times_local = cadence_times_local
 
         # Feedback agent - once daily after market close
         feedback_local = _et_time_to_local_str(16, 30)
@@ -671,7 +674,13 @@ class DAITraderOrchestrator:
         logger.info(f"      - 9:25:00 AM ET ({market_open_local} {local_tz_name}): Analyze pre-market news")
         logger.info(f"      - 9:30:05 AM ET ({market_trade_local} {local_tz_name}): Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
-        logger.info(f"      - First cycle at 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes")
+        if self.cadence_times_local:
+            first_local = self.cadence_times_local[0]
+            logger.info(f"      - First cycle at {first_local} {local_tz_name} ({cadence_minutes}-min cadence from 9:30 AM ET)")
+            if len(self.cadence_times_local) > 1:
+                logger.info(f"      - Subsequent cycles: {', '.join(self.cadence_times_local[1:])} {local_tz_name}")
+        else:
+            logger.info(f"      - Cadence {cadence_minutes} min results in only market-open cycle today")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
         logger.info(f"   📊 Feedback: Daily at 4:30 PM ET (after market close)")
         if cadence_minutes <= 15:
@@ -712,21 +721,19 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
-        def _get_local_str(hour, minute):
-            now_et = datetime.now(EASTERN_TIMEZONE)
-            target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            return target_et.astimezone(datetime.now().astimezone().tzinfo).strftime("%H:%M")
-
-        market_open_local = getattr(self, "market_open_local", _get_local_str(9, 25))
-        market_trade_local = getattr(self, "market_trade_local", _get_local_str(9, 30))
-        cadence_start_local = getattr(self, "cadence_start_local", _get_local_str(9, 35))
+        market_open_local = getattr(self, "market_open_local", _et_time_to_local_str(9, 25))
+        market_trade_local = getattr(self, "market_trade_local", _et_time_to_local_str(9, 30))
+        cadence_times_local = getattr(self, "cadence_times_local", [])
         local_tz_name = getattr(self, "local_tz_name", datetime.now().astimezone().tzname())
 
         logger.info(f"   9:25:00 AM ET ({market_open_local} {local_tz_name}) - Analyze pre-market news")
         logger.info(f"   9:30:05 AM ET ({market_trade_local} {local_tz_name}) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
-        logger.info(f"   First cycle 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes until 4:00 PM ET")
+        if cadence_times_local:
+            logger.info(f"   Next cycle at {cadence_times_local[0]} {local_tz_name}, then every {cadence_minutes} minutes until 4:00 PM ET")
+        else:
+            logger.info(f"   Cadence {cadence_minutes} minutes yields only opening cycle today.")
         if cadence_minutes <= 15:
             cycles_per_day = int(390 / cadence_minutes) + 1  # +1 for opening bell
             logger.info(f"   ⚡ AGGRESSIVE MODE: Up to {cycles_per_day} trades/day!")
