@@ -52,6 +52,7 @@ class DecisionValidator:
             if is_valid:
                 valid.append(decision)
                 print(f"   ✅ Decision {i}: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')}")
+                self._apply_decision_effects(decision)
             else:
                 invalid.append({
                     'decision': decision,
@@ -123,6 +124,36 @@ class DecisionValidator:
         
         # All validation passed
         return True, ""
+    
+    def _apply_decision_effects(self, decision: Dict) -> None:
+        """
+        Update internal cash/holdings state after accepting a decision so
+        subsequent validations reflect freed cash or new positions.
+        """
+        action = decision.get('action', '').lower()
+        ticker = decision.get('ticker', '').upper().strip()
+        
+        if action == 'sell':
+            holding = self.holdings_map.get(ticker, {})
+            proceeds = (
+                holding.get('current_value')
+                or holding.get('total_value')
+                or (holding.get('current_price', 0) * holding.get('shares', 0))
+                or 0
+            )
+            self.available_cash += proceeds
+            self.current_tickers.discard(ticker)
+            self.holdings_map.pop(ticker, None)
+            print(f"      ➕ Cash after SELL {ticker}: ${self.available_cash:.2f}")
+        elif action == 'buy':
+            try:
+                amount = float(decision.get('amount_usd', 0))
+            except (ValueError, TypeError):
+                amount = 0
+            self.available_cash -= amount
+            self.current_tickers.add(ticker)
+            self.holdings_map[ticker] = {"ticker": ticker}
+            print(f"      ➖ Cash after BUY {ticker}: ${self.available_cash:.2f}")
     
     def get_missing_holdings_decisions(self, decisions: List[Dict]) -> List[str]:
         """
