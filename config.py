@@ -425,9 +425,6 @@ def get_model_temperature_params(model_name, temperature_value):
         # GPT-4o, GPT-4-turbo, and earlier models support custom temperature
         return {"temperature": temperature_value}
 
-# JSON schema functions removed - now using strong system prompts instead
-# as structured response_format was unreliable with GPT-4o and newer models
-
 class PromptManager:
     def __init__(self, client, session, run_id=None):
         self.client = client
@@ -439,7 +436,9 @@ class PromptManager:
         while retries < max_retries:
             try:
                 model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
-                requires_json = (agent_name in {"SummarizerAgent", "DeciderAgent", "FeedbackAgent"})
+                decider_agent = (agent_name == "DeciderAgent")
+                # Summarizer & Feedback still benefit from json_object coercion; Decider relies on prompt rules.
+                requires_json = (agent_name in {"SummarizerAgent", "FeedbackAgent"})
                 
                 # ============================================
                 # PARALLEL PATH 1: GPT-5 (Reasoning Model)
@@ -503,15 +502,16 @@ class PromptManager:
                         messages.append({"role": "user", "content": prompt})
                     
                     # GPT-4o parameters: Normal tokens, custom temperature
+                    token_cap = 2800 if decider_agent else 2000
                     api_params = {
                         "model": GPT_MODEL,
                         "messages": messages,
-                        "max_completion_tokens": 2000,
+                        "max_completion_tokens": token_cap,
                         "temperature": MODEL_TEMPERATURE
                     }
                     if requires_json:
                         api_params["response_format"] = {"type": "json_object"}
-                    print(f"📊 Token params: max_completion_tokens=2000, temperature={MODEL_TEMPERATURE}")
+                    print(f"📊 Token params: max_completion_tokens={token_cap}, temperature={MODEL_TEMPERATURE}")
                 
                 # ============================================
                 # PARALLEL PATH 3: GPT-4-turbo and older
@@ -526,15 +526,16 @@ class PromptManager:
                     ]
                     
                     # Note: GPT-4-turbo doesn't have vision support in this path
+                    token_cap = 2800 if decider_agent else 1500
                     api_params = {
                         "model": GPT_MODEL,
                         "messages": messages,
-                        "max_tokens": 1500,
+                        "max_tokens": token_cap,
                         "temperature": MODEL_TEMPERATURE
                     }
                     if requires_json:
                         api_params["response_format"] = {"type": "json_object"}
-                    print(f"📊 Token params: max_tokens=1500, temperature={MODEL_TEMPERATURE}")
+                    print(f"📊 Token params: max_tokens={token_cap}, temperature={MODEL_TEMPERATURE}")
                 
                 # Make API call with latency logging
                 start_time = time.time()
