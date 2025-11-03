@@ -1073,14 +1073,25 @@ def dashboard():
             net_gain_loss = total_portfolio_value - baseline_total_value
             net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
 
-        return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
-                               total_value=total_portfolio_value, cash_balance=cash_balance,
-                               portfolio_value=total_current_value, total_invested=total_invested,
-                               total_profit_loss=total_profit_loss, percentage_gain=percentage_gain,
-                               initial_investment=initial_investment, net_gain_loss=net_gain_loss,
-                               net_percentage_gain=net_percentage_gain, current_config=current_config,
-                               schwab_summary=schwab_summary,
-                               use_schwab_positions=use_schwab_positions)
+        return render_template(
+            "dashboard.html",
+            active_tab="dashboard",
+            holdings=holdings,
+            total_value=total_portfolio_value,
+            cash_balance=cash_balance,
+            portfolio_value=total_current_value,
+            total_invested=total_invested,
+            total_profit_loss=total_profit_loss,
+            percentage_gain=percentage_gain,
+            initial_investment=initial_investment,
+            net_gain_loss=net_gain_loss,
+            net_percentage_gain=net_percentage_gain,
+            current_config=current_config,
+            schwab_summary=schwab_summary,
+            use_schwab_positions=use_schwab_positions,
+            initial_account_value=initial_investment,
+            current_account_value=total_portfolio_value,
+        )
 
 @app.template_filter('from_json')
 def from_json_filter(s):
