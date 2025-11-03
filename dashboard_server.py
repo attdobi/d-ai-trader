@@ -1059,6 +1059,8 @@ def dashboard():
             LIMIT 1
         """), {"config_hash": config_hash}).fetchone()
 
+        baseline_total_value = baseline_cash = baseline_invested = None
+        baseline_profit_loss = baseline_percentage = None
         if baseline_snapshot:
             baseline_total_value = float(baseline_snapshot.total_portfolio_value or 0.0)
             baseline_cash = float(baseline_snapshot.cash_balance or 0.0)
@@ -1066,18 +1068,10 @@ def dashboard():
             baseline_profit_loss = float(baseline_snapshot.total_profit_loss or 0.0)
             baseline_percentage = float(baseline_snapshot.percentage_gain or 0.0)
 
-            if baseline_total_value or baseline_invested:
-                total_profit_loss = baseline_profit_loss
-                percentage_gain = baseline_percentage
-                initial_investment = baseline_invested if baseline_invested > 0 else baseline_total_value
-                if initial_investment == 0:
-                    initial_investment = 10000.0
-                net_gain_loss = baseline_profit_loss
-                net_percentage_gain = baseline_percentage
-                total_portfolio_value = baseline_total_value
-                cash_balance = baseline_cash
-                total_invested = baseline_invested
-                total_current_value = max(0.0, total_portfolio_value - cash_balance)
+        if not use_schwab_positions and baseline_total_value:
+            initial_investment = baseline_total_value
+            net_gain_loss = total_portfolio_value - baseline_total_value
+            net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
 
         return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
                                total_value=total_portfolio_value, cash_balance=cash_balance,
