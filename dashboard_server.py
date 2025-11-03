@@ -59,6 +59,37 @@ except ImportError:
     print("Warning: Trading interface not available, Schwab features disabled")
 
 
+def _refresh_holdings_with_quotes(holdings):
+    """
+    Update live pricing for Schwab holdings using yfinance to keep dashboard values current.
+    """
+    updated = False
+    for row in holdings:
+        symbol = row.get("ticker")
+        if not symbol or symbol == "CASH":
+            continue
+        try:
+            ticker = yf.Ticker(symbol)
+            fast = getattr(ticker, "fast_info", None)
+            price = None
+            if fast:
+                price = fast.get("last_price") or fast.get("regular_market_price") or fast.get("previous_close")
+            if price is None:
+                info = getattr(ticker, "info", {}) or {}
+                price = info.get("regularMarketPrice") or info.get("regularMarketPreviousClose")
+            if price:
+                price = float(price)
+                shares = float(row.get("shares") or 0)
+                cost_basis = float(row.get("total_value") or (row.get("purchase_price", 0) * shares))
+                row["current_price"] = price
+                row["current_value"] = price * shares
+                row["gain_loss"] = row["current_value"] - cost_basis
+                updated = True
+        except Exception as exc:
+            print(f"⚠️  Unable to refresh quote for {symbol}: {exc}")
+    return updated
+
+
 def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
     """Ensure the v0 prompt for the given agent/config matches code defaults."""
     if not prompt_payload:
@@ -911,6 +942,7 @@ def dashboard():
                     funds_components = schwab_data.get("funds_available_components", {})
                     ledger_comp = schwab_data.get("ledger_components", {})
 
+                    _refresh_holdings_with_quotes(holdings)
                     total_invested = sum(row["total_value"] for row in holdings)
                     total_current_value = sum(row["current_value"] for row in holdings)
                     total_profit_loss = sum(row["gain_loss"] for row in holdings)

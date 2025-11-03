@@ -107,7 +107,11 @@
       <h4>Trading Mode</h4>
       <p class="config-value {{ 'real-mode' if is_live_mode else 'sim-mode' }}">
         {% if use_schwab_positions %}
-          LIVE (READ-ONLY) 🔒
+          {% if schwab_summary and not schwab_summary.readonly %}
+            LIVE TRADING 💰
+          {% else %}
+            LIVE (READ-ONLY) 🔒
+          {% endif %}
         {% else %}
           {{ 'REAL_WORLD' if is_live_mode else current_config.trading_mode.upper() }} {% if is_live_mode %}💰{% else %}🎮{% endif %}
         {% endif %}
