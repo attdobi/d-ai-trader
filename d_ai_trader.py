@@ -605,7 +605,8 @@ class DAITraderOrchestrator:
             self.run_summarizer_agents()
             logger.info("✅ Summarizer run complete")
             
-            # Execute trades immediately after summarizer
+            # Execute trades shortly after summarizer (allow DB writes to settle)
+            time.sleep(10)
             now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
             logger.info(f"🚀 EXECUTING OPENING TRADES at {now_eastern.strftime('%I:%M:%S %p ET')}")
             self.run_decider_agent()
