@@ -12,6 +12,7 @@ This is critical for real-money trading - no AI hallucinations allowed!
 """
 
 import os
+import re
 from typing import List, Dict, Any, Tuple
 
 MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
@@ -76,7 +77,8 @@ class DecisionValidator:
         
         # Rule 2: Must have required fields
         action = decision.get('action', '').lower()
-        ticker = decision.get('ticker', '').upper().strip()
+        ticker_raw = decision.get('ticker', '')
+        ticker = self._normalize_ticker(ticker_raw)
         amount_usd = decision.get('amount_usd', 0)
         reason = decision.get('reason', '')
         
@@ -84,6 +86,9 @@ class DecisionValidator:
             return False, "Missing 'action' field"
         if not ticker:
             return False, "Missing 'ticker' field"
+
+        # Mutate decision with normalized ticker so downstream consumers use cleaned symbol
+        decision['ticker'] = ticker
         if not reason:
             return False, "Missing 'reason' field"
         
@@ -124,6 +129,18 @@ class DecisionValidator:
         
         # All validation passed
         return True, ""
+
+    def _normalize_ticker(self, ticker: Any) -> str:
+        if not isinstance(ticker, str):
+            return ''
+        cleaned = ticker.strip().upper()
+        if not cleaned:
+            return ''
+        # Strip ranking prefixes like R1-KVUE, r2/TSLA, etc.
+        match = re.match(r'^R(\d+)\s*[-_:/\\\s]+([A-Z0-9.]+)$', cleaned)
+        if match:
+            cleaned = match.group(2)
+        return cleaned
     
     def _apply_decision_effects(self, decision: Dict) -> None:
         """
