@@ -948,11 +948,27 @@ def dashboard():
                     total_portfolio_value = total_current_value + available_cash
                     cash_balance = available_cash
 
-                    # Use live account metrics for initial investment and net gain
-                    initial_investment = total_invested + available_cash
-                    net_gain_loss = total_profit_loss
-                    net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
-                    percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
+                    # Use account valuation relative to baseline (first snapshot) for net gain/loss
+                    if not baseline_snapshot:
+                        initial_investment = total_portfolio_value
+                        baseline_snapshot = type("Baseline", (), {
+                            "total_portfolio_value": total_portfolio_value,
+                            "cash_balance": cash_balance,
+                            "total_invested": total_invested,
+                            "total_profit_loss": total_profit_loss,
+                            "percentage_gain": 0.0,
+                        })()
+                    net_gain_loss = total_portfolio_value - float(baseline_snapshot.total_portfolio_value or initial_investment)
+                    net_percentage_gain = (
+                        (net_gain_loss / float(baseline_snapshot.total_portfolio_value)) * 100
+                        if baseline_snapshot and float(baseline_snapshot.total_portfolio_value)
+                        else 0
+                    )
+                    percentage_gain = (
+                        (total_profit_loss / total_invested * 100)
+                        if total_invested
+                        else 0
+                    )
 
                     account_info = schwab_data.get("account_info", {})
                     schwab_summary = {
