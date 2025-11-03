@@ -942,7 +942,6 @@ def dashboard():
                     funds_components = schwab_data.get("funds_available_components", {})
                     ledger_comp = schwab_data.get("ledger_components", {})
 
-                    _refresh_holdings_with_quotes(holdings)
                     total_invested = sum(row["total_value"] for row in holdings)
                     total_current_value = sum(row["current_value"] for row in holdings)
                     total_profit_loss = sum(row["gain_loss"] for row in holdings)

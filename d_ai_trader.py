@@ -643,10 +643,15 @@ class DAITraderOrchestrator:
         # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
         market_open_local = _et_time_to_local_str(9, 25)
         schedule.every().day.at(market_open_local).do(self.market_open_job)
-
+        market_trade_local = _et_time_to_local_str(9, 30)
+        self.market_open_local = market_open_local
+        self.market_trade_local = market_trade_local
+        
         # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
         # Kick off a run at 9:35 AM ET, then continue every cadence_minutes minutes.
         cadence_start_local = _et_time_to_local_str(9, 35)
+        self.cadence_start_local = cadence_start_local
+        self.local_tz_name = datetime.now(local_tz).tzname()
 
         def _cadence_wrapper():
             self.scheduled_summarizer_and_decider_job()
@@ -662,9 +667,9 @@ class DAITraderOrchestrator:
         logger.info("Schedule setup completed")
         logger.info(f"📊 DAY TRADING MODE:")
         logger.info(f"   🔔 Market Open (9:25-9:30:05 AM ET):")
-        local_tz_name = datetime.now(local_tz).tzname()
+        local_tz_name = self.local_tz_name
         logger.info(f"      - 9:25:00 AM ET ({market_open_local} {local_tz_name}): Analyze pre-market news")
-        logger.info(f"      - 9:30:05 AM ET ({_et_time_to_local_str(9,30)} {local_tz_name}): Execute opening trades (5 sec after bell)")
+        logger.info(f"      - 9:30:05 AM ET ({market_trade_local} {local_tz_name}): Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
         logger.info(f"      - First cycle at 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
@@ -707,8 +712,18 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
+        def _get_local_str(hour, minute):
+            now_et = datetime.now(EASTERN_TIMEZONE)
+            target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            return target_et.astimezone(datetime.now().astimezone().tzinfo).strftime("%H:%M")
+
+        market_open_local = getattr(self, "market_open_local", _get_local_str(9, 25))
+        market_trade_local = getattr(self, "market_trade_local", _get_local_str(9, 30))
+        cadence_start_local = getattr(self, "cadence_start_local", _get_local_str(9, 35))
+        local_tz_name = getattr(self, "local_tz_name", datetime.now().astimezone().tzname())
+
         logger.info(f"   9:25:00 AM ET ({market_open_local} {local_tz_name}) - Analyze pre-market news")
-        logger.info(f"   9:30:05 AM ET ({_et_time_to_local_str(9,30)} {local_tz_name}) - Execute opening trades (5 sec after bell)")
+        logger.info(f"   9:30:05 AM ET ({market_trade_local} {local_tz_name}) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
         logger.info(f"   First cycle 9:35 AM ET ({cadence_start_local} {local_tz_name}), then every {cadence_minutes} minutes until 4:00 PM ET")
