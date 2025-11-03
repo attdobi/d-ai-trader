@@ -2078,13 +2078,19 @@ No explanatory text, no markdown, just pure JSON array."""
     summarized_text = "\n".join(summary_parts)
     summaries_for_extraction = "\n\n".join(extractor_blocks) if extractor_blocks else summarized_text
     print(f"📰 Summaries forwarded to Decider: {len(parsed_summaries)}")
+    summary_preview_limit = int(os.getenv("DAI_SUMMARY_PREVIEW_LIMIT", "6000"))
+    summary_snippet = summarized_text[:summary_preview_limit]
+    print(f"🧾 Summaries preview (showing {len(summary_snippet)} of {len(summarized_text)} chars):\n{summary_snippet}")
+    if len(summary_snippet) < len(summarized_text):
+        print("… (summaries truncated for console preview)")
 
     company_entities = extract_companies_from_summaries(summaries_for_extraction)
     momentum_data, momentum_summary = build_momentum_recap(company_entities)
     print(f"📊 Momentum recap prepared for {len(momentum_data)} symbols")
     if momentum_summary:
-        preview_lines = momentum_summary.split("\n")[:5]
-        preview_text = "\n".join(preview_lines)
+        preview_text = momentum_summary[:6000]
+        if len(momentum_summary) > 6000:
+            preview_text += "... [truncated]"
         print("🧾 Momentum summary preview:\n" + preview_text)
     if momentum_data:
         sample = momentum_data[:3]
@@ -2177,11 +2183,22 @@ No explanatory text, no markdown, just pure JSON array."""
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
 
 
-    prompt_preview_limit = int(os.getenv("DAI_PROMPT_DEBUG_LIMIT", "2000"))
-    prompt_snippet = prompt[:prompt_preview_limit]
-    print(f"🧠 Decider prompt preview (showing {len(prompt_snippet)} of {len(prompt)} chars):\n{prompt_snippet}")
-    if len(prompt_snippet) < len(prompt):
+    prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
+    prompt_preview_tail = int(os.getenv("DAI_PROMPT_DEBUG_TAIL", "5000"))
+    prompt_coverage = prompt_preview_head + prompt_preview_tail
+    if len(prompt) <= prompt_coverage:
+        prompt_snippet = prompt
+        shown_chars = len(prompt)
+    else:
+        head = prompt[:prompt_preview_head]
+        tail = prompt[-prompt_preview_tail:] if prompt_preview_tail > 0 else ""
+        prompt_snippet = "".join([head, "\n… [middle omitted]\n", tail])
+        shown_chars = min(len(prompt), prompt_coverage)
+
+    print(f"🧠 Decider prompt preview (showing {shown_chars} of {len(prompt)} chars | head {prompt_preview_head}, tail {prompt_preview_tail}):\n{prompt_snippet}")
+    if len(prompt) > prompt_coverage:
         print("… (prompt truncated for console preview)")
+    print(f"🧠 Decider prompt (full {len(prompt)} chars):\n{prompt}")
     
     # Build explicit list of required decisions for current holdings
     current_tickers = [h['ticker'] for h in stock_holdings] if stock_holdings else []
