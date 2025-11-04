@@ -59,6 +59,37 @@ except ImportError:
     print("Warning: Trading interface not available, Schwab features disabled")
 
 
+def _refresh_holdings_with_quotes(holdings):
+    """
+    Update live pricing for Schwab holdings using yfinance to keep dashboard values current.
+    """
+    updated = False
+    for row in holdings:
+        symbol = row.get("ticker")
+        if not symbol or symbol == "CASH":
+            continue
+        try:
+            ticker = yf.Ticker(symbol)
+            fast = getattr(ticker, "fast_info", None)
+            price = None
+            if fast:
+                price = fast.get("last_price") or fast.get("regular_market_price") or fast.get("previous_close")
+            if price is None:
+                info = getattr(ticker, "info", {}) or {}
+                price = info.get("regularMarketPrice") or info.get("regularMarketPreviousClose")
+            if price:
+                price = float(price)
+                shares = float(row.get("shares") or 0)
+                cost_basis = float(row.get("total_value") or (row.get("purchase_price", 0) * shares))
+                row["current_price"] = price
+                row["current_value"] = price * shares
+                row["gain_loss"] = row["current_value"] - cost_basis
+                updated = True
+        except Exception as exc:
+            print(f"⚠️  Unable to refresh quote for {symbol}: {exc}")
+    return updated
+
+
 def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
     """Ensure the v0 prompt for the given agent/config matches code defaults."""
     if not prompt_payload:
@@ -694,6 +725,36 @@ def _fetch_latest_momentum_snapshot(config_hash):
         snapshot = None
     return snapshot
 
+
+def _get_live_portfolio_baseline(config_hash, current_value):
+    """Return baseline portfolio value for given config, creating if missing."""
+    if not config_hash:
+        return current_value
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS live_portfolio_baselines (
+                config_hash TEXT PRIMARY KEY,
+                baseline_value FLOAT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        baseline_row = conn.execute(text("""
+            SELECT baseline_value FROM live_portfolio_baselines
+            WHERE config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone()
+
+        if baseline_row:
+            return float(baseline_row.baseline_value)
+
+        conn.execute(text("""
+            INSERT INTO live_portfolio_baselines (config_hash, baseline_value)
+            VALUES (:config_hash, :baseline_value)
+        """), {"config_hash": config_hash, "baseline_value": current_value})
+
+        return float(current_value)
+
 def _get_active_prompts_bundle():
     """Fetch active prompt data for all primary agents with current feedback applied."""
     tracker = TradeOutcomeTracker()
@@ -917,11 +978,16 @@ def dashboard():
                     total_portfolio_value = total_current_value + available_cash
                     cash_balance = available_cash
 
-                    # Use live account metrics for initial investment and net gain
-                    initial_investment = total_invested + available_cash
-                    net_gain_loss = total_profit_loss
-                    net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
-                    percentage_gain = (total_profit_loss / total_invested * 100) if total_invested else 0
+                    # Use account valuation relative to baseline (first snapshot) for net gain/loss
+                    baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
+                    net_gain_loss = total_portfolio_value - baseline_value
+                    initial_investment = baseline_value
+                    net_percentage_gain = (net_gain_loss / baseline_value * 100) if baseline_value else 0
+                    percentage_gain = (
+                        (total_profit_loss / total_invested * 100)
+                        if total_invested
+                        else 0
+                    )
 
                     account_info = schwab_data.get("account_info", {})
                     schwab_summary = {
@@ -993,6 +1059,8 @@ def dashboard():
             LIMIT 1
         """), {"config_hash": config_hash}).fetchone()
 
+        baseline_total_value = baseline_cash = baseline_invested = None
+        baseline_profit_loss = baseline_percentage = None
         if baseline_snapshot:
             baseline_total_value = float(baseline_snapshot.total_portfolio_value or 0.0)
             baseline_cash = float(baseline_snapshot.cash_balance or 0.0)
@@ -1000,27 +1068,30 @@ def dashboard():
             baseline_profit_loss = float(baseline_snapshot.total_profit_loss or 0.0)
             baseline_percentage = float(baseline_snapshot.percentage_gain or 0.0)
 
-            if baseline_total_value or baseline_invested:
-                total_profit_loss = baseline_profit_loss
-                percentage_gain = baseline_percentage
-                initial_investment = baseline_invested if baseline_invested > 0 else baseline_total_value
-                if initial_investment == 0:
-                    initial_investment = 10000.0
-                net_gain_loss = baseline_profit_loss
-                net_percentage_gain = baseline_percentage
-                total_portfolio_value = baseline_total_value
-                cash_balance = baseline_cash
-                total_invested = baseline_invested
-                total_current_value = max(0.0, total_portfolio_value - cash_balance)
+        if not use_schwab_positions and baseline_total_value:
+            initial_investment = baseline_total_value
+            net_gain_loss = total_portfolio_value - baseline_total_value
+            net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
 
-        return render_template("dashboard.html", active_tab="dashboard", holdings=holdings,
-                               total_value=total_portfolio_value, cash_balance=cash_balance,
-                               portfolio_value=total_current_value, total_invested=total_invested,
-                               total_profit_loss=total_profit_loss, percentage_gain=percentage_gain,
-                               initial_investment=initial_investment, net_gain_loss=net_gain_loss,
-                               net_percentage_gain=net_percentage_gain, current_config=current_config,
-                               schwab_summary=schwab_summary,
-                               use_schwab_positions=use_schwab_positions)
+        return render_template(
+            "dashboard.html",
+            active_tab="dashboard",
+            holdings=holdings,
+            total_value=total_portfolio_value,
+            cash_balance=cash_balance,
+            portfolio_value=total_current_value,
+            total_invested=total_invested,
+            total_profit_loss=total_profit_loss,
+            percentage_gain=percentage_gain,
+            initial_investment=initial_investment,
+            net_gain_loss=net_gain_loss,
+            net_percentage_gain=net_percentage_gain,
+            current_config=current_config,
+            schwab_summary=schwab_summary,
+            use_schwab_positions=use_schwab_positions,
+            initial_account_value=initial_investment,
+            current_account_value=total_portfolio_value,
+        )
 
 @app.template_filter('from_json')
 def from_json_filter(s):

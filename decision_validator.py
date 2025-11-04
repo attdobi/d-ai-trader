@@ -12,6 +12,7 @@ This is critical for real-money trading - no AI hallucinations allowed!
 """
 
 import os
+import re
 from typing import List, Dict, Any, Tuple
 
 MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
@@ -52,6 +53,7 @@ class DecisionValidator:
             if is_valid:
                 valid.append(decision)
                 print(f"   ✅ Decision {i}: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')}")
+                self._apply_decision_effects(decision)
             else:
                 invalid.append({
                     'decision': decision,
@@ -75,7 +77,8 @@ class DecisionValidator:
         
         # Rule 2: Must have required fields
         action = decision.get('action', '').lower()
-        ticker = decision.get('ticker', '').upper().strip()
+        ticker_raw = decision.get('ticker', '')
+        ticker = self._normalize_ticker(ticker_raw)
         amount_usd = decision.get('amount_usd', 0)
         reason = decision.get('reason', '')
         
@@ -83,6 +86,9 @@ class DecisionValidator:
             return False, "Missing 'action' field"
         if not ticker:
             return False, "Missing 'ticker' field"
+
+        # Mutate decision with normalized ticker so downstream consumers use cleaned symbol
+        decision['ticker'] = ticker
         if not reason:
             return False, "Missing 'reason' field"
         
@@ -123,6 +129,48 @@ class DecisionValidator:
         
         # All validation passed
         return True, ""
+
+    def _normalize_ticker(self, ticker: Any) -> str:
+        if not isinstance(ticker, str):
+            return ''
+        cleaned = ticker.strip().upper()
+        if not cleaned:
+            return ''
+        # Strip ranking prefixes like R1-KVUE, r2/TSLA, etc.
+        match = re.match(r'^R(\d+)\s*[-_:/\\\s]+([A-Z0-9.]+)$', cleaned)
+        if match:
+            cleaned = match.group(2)
+        return cleaned
+    
+    def _apply_decision_effects(self, decision: Dict) -> None:
+        """
+        Update internal cash/holdings state after accepting a decision so
+        subsequent validations reflect freed cash or new positions.
+        """
+        action = decision.get('action', '').lower()
+        ticker = decision.get('ticker', '').upper().strip()
+        
+        if action == 'sell':
+            holding = self.holdings_map.get(ticker, {})
+            proceeds = (
+                holding.get('current_value')
+                or holding.get('total_value')
+                or (holding.get('current_price', 0) * holding.get('shares', 0))
+                or 0
+            )
+            self.available_cash += proceeds
+            self.current_tickers.discard(ticker)
+            self.holdings_map.pop(ticker, None)
+            print(f"      ➕ Cash after SELL {ticker}: ${self.available_cash:.2f}")
+        elif action == 'buy':
+            try:
+                amount = float(decision.get('amount_usd', 0))
+            except (ValueError, TypeError):
+                amount = 0
+            self.available_cash -= amount
+            self.current_tickers.add(ticker)
+            self.holdings_map[ticker] = {"ticker": ticker}
+            print(f"      ➖ Cash after BUY {ticker}: ${self.available_cash:.2f}")
     
     def get_missing_holdings_decisions(self, decisions: List[Dict]) -> List[str]:
         """
