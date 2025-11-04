@@ -72,8 +72,9 @@ PLAN (two‑pass; be explicit and concise)
    - else min(2, Capacity) if BudgetAfterSells ≥ 2×{min_buy},
    - else 1 or 0 by rails/capacity.
 3) Select **NumBuysTarget** tickers via last_10min%, Volume, MoM%, day‑range, catalysts; use ≤2 **override** day leaders (10m% ≥ −0.30%) if needed.
-4) Adjust aggression with **visual/sentiment** cues from screenshots (fear/euphoria/neutral).
-5) Size buys **near‑even** within rails; **round down** to $25; keep ~1% buffer.
+4) Whenever you SELL, plan at least one fresh BUY in the same run (unless no scorable candidates exist—state that constraint).
+5) Adjust aggression with **visual/sentiment** cues from screenshots (fear/euphoria/neutral).
+6) Size buys **near‑even** within rails; **round down** to $25; keep ~1% buffer.
 
 OUTPUT (STRICT; MINIFY)
 Return **only** a minified JSON array — **SELLS → BUYS (R1..Rk) → HOLDS**.
@@ -106,6 +107,7 @@ HARD RULES (SELLS → CASH → MULTI‑BUY)
 4) If you SELL and ≥2 scorable candidates exist, you **must output ≥2 BUYS**; **default to EXACTLY 3 BUYS** when BudgetAfterSells ≥ 2×{min_buy} and Capacity ≥ 3. **Do not stop after a single SELL.**
 5) Buy sizing (per‑buy USD): **≥{min_buy}**, **≤{max_buy}**, **near‑even across picks**; round each buy **down** to the nearest $25; keep ~1% cash buffer.
 6) After all actions: **≤5 total holdings** (unique tickers); no duplicates; total BUY spend **≤ BudgetAfterSells**.
+7) Sell decisions should be accompanied by at least one fresh BUY in the same run (unless no scorable candidates exist—state the constraint in that case).
 
 CANDIDATE GATING & SCORING
 - Use only tickers in Momentum Recap with **non‑null last_10min% and Volume** (skip symbols with data errors).
