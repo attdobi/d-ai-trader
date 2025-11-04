@@ -651,7 +651,7 @@ INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
         
         return str(value)
     
-    def _extract_feedback_snippet(self, feedback_value, max_chars=220):
+    def _extract_feedback_snippet(self, feedback_value, max_chars=400):
         """Create a short, formatting-safe feedback snippet for prompt injection"""
         text_value = self._flatten_feedback_text(feedback_value)
         if not text_value:
