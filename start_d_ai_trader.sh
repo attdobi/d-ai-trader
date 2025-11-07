@@ -23,11 +23,11 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                         Note: o1/o3 models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
-  -c, --cadence         How often to run (in minutes, default: 60)
+  -c, --cadence         How often to run (in minutes, default: 180)
                         Examples:
-                          • 15  - Every 15 minutes (aggressive day trading)
-                          • 30  - Every 30 minutes (active trading)
-                          • 60  - Every hour (default, conservative)
+                          • 180 - Every 3 hours (default, swing/settled funds pacing)
+                          • 60  - Every hour (active monitoring)
+                          • 15  - Every 15 minutes (legacy intraday testing)
   -H, --config-hash     Force a specific configuration hash for this run
   --help                Show this help
 
@@ -42,7 +42,7 @@ PORT=8080
 MODEL="gpt-4o"
 PROMPT_VERSION="auto"
 TRADING_MODE="${TRADING_MODE:-simulation}"
-CADENCE_MINUTES=60
+CADENCE_MINUTES=180
 CONFIG_HASH_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do

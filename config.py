@@ -109,6 +109,11 @@ MAX_TOTAL_INVESTMENT_FRACTION = float(os.getenv("MAX_TOTAL_INVESTMENT_FRACTION",
 MIN_CASH_BUFFER = float(os.getenv("MIN_CASH_BUFFER", "500"))
 DEBUG_TRADING = os.getenv("DEBUG_TRADING", "true").lower() == "true"
 MODEL_TEMPERATURE = float(os.getenv("DAI_MODEL_TEMPERATURE", "0.2"))
+IS_MARGIN_ACCOUNT = bool(int(os.getenv("IS_MARGIN_ACCOUNT", "0")))
+DAILY_TICKET_CAP = int(os.getenv("DAILY_TICKET_CAP", "6"))
+DAILY_BUY_CAP = int(os.getenv("DAILY_BUY_CAP", "3"))
+MIN_ENTRY_SPACING_MIN = int(os.getenv("MIN_ENTRY_SPACING_MIN", "45"))
+REENTRY_COOLDOWN_MIN = int(os.getenv("REENTRY_COOLDOWN_MIN", "240"))
 
 # Optional: print masked key for debugging if requested
 try:

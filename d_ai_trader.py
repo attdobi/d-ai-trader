@@ -72,20 +72,6 @@ class DAITraderOrchestrator:
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
         self.initialize_database()
-        self._local_tz = datetime.now().astimezone().tzinfo
-
-    def _get_local_timezone(self):
-        if not self._local_tz:
-            self._local_tz = datetime.now().astimezone().tzinfo
-        return self._local_tz
-
-    def _et_to_local_str(self, hour: int, minute: int) -> str:
-        target_et = datetime.now(EASTERN_TIMEZONE).replace(hour=hour, minute=minute, second=0, microsecond=0)
-        target_local = target_et.astimezone(self._get_local_timezone())
-        return target_local.strftime("%H:%M")
-
-    def _et_to_local_datetime(self, dt) -> datetime:
-        return dt.astimezone(self._get_local_timezone())
         
     def initialize_database(self):
         """Initialize database tables for tracking processed summaries"""
@@ -600,7 +586,8 @@ class DAITraderOrchestrator:
     
     def market_open_job(self):
         """
-        Run summarizer + decider immediately at market open (9:30 AM ET).
+        Special job that runs at market open (9:30:05 AM ET).
+        Runs summarizers at 9:25 AM ET, then waits until exactly 9:30:05 AM ET to execute trades.
         """
         try:
             now_pacific = datetime.now(PACIFIC_TIMEZONE)
@@ -611,16 +598,24 @@ class DAITraderOrchestrator:
                 logger.info("Skipping market open job - weekend")
                 return
             
-            logger.info("🔔 MARKET OPEN RUN (9:30 AM ET)")
+            logger.info("🔔 MARKET OPEN SEQUENCE STARTING")
             logger.info(f"   Current time: {now_eastern.strftime('%I:%M:%S %p ET')}")
             
-            # Run summarizers immediately at market open
-            logger.info("📰 Running summarizers at market open")
+            # Step 1: Run summarizers at 9:25 AM ET (5 min before open)
+            logger.info("📰 Step 1: Pre-market news analysis (9:25 AM ET)")
             self.run_summarizer_agents()
-            logger.info("✅ Summarizer run complete")
+            logger.info("✅ Pre-market analysis complete")
             
-            # Execute trades shortly after summarizer (allow DB writes to settle)
-            time.sleep(10)
+            # Step 2: Wait until exactly 9:30:05 AM ET
+            now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
+            market_open_time = now_eastern.replace(hour=9, minute=30, second=5, microsecond=0)
+            
+            if now_eastern < market_open_time:
+                wait_seconds = (market_open_time - now_eastern).total_seconds()
+                logger.info(f"⏰ Waiting {wait_seconds:.0f} seconds until market opens at 9:30:05 AM ET...")
+                time.sleep(wait_seconds)
+            
+            # Step 3: Execute trades at market open
             now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
             logger.info(f"🚀 EXECUTING OPENING TRADES at {now_eastern.strftime('%I:%M:%S %p ET')}")
             self.run_decider_agent()
@@ -633,63 +628,28 @@ class DAITraderOrchestrator:
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs with configurable cadence"""
-        # Get cadence from environment (default: 60 minutes)
-        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
-
-        # Helper to convert ET schedule time to local scheduler time string (HH:MM)
-        local_tz = self._get_local_timezone()
-
-        # Market open run at 9:30 AM ET
-        market_open_local = self._et_to_local_str(9, 30)
-        schedule.every().day.at(market_open_local).do(self.market_open_job)
-        self.market_open_local = market_open_local
-        self.local_tz_name = datetime.now(local_tz).tzname()
-
-        # Regular cadence: repeat every cadence_minutes starting from first slot after market open.
-        now_et = datetime.now(EASTERN_TIMEZONE)
-        market_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-        if now_et < market_open_et:
-            next_cycle_et = market_open_et + timedelta(minutes=cadence_minutes)
-        else:
-            elapsed = now_et - market_open_et
-            cycles_passed = int(elapsed.total_seconds() // (cadence_minutes * 60)) + 1
-            next_cycle_et = market_open_et + timedelta(minutes=cycles_passed * cadence_minutes)
-
-        market_close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-        cadence_times_local = []
-        preview_et = next_cycle_et
-        while preview_et <= market_close_et:
-            cadence_times_local.append(preview_et.astimezone(local_tz).strftime("%H:%M"))
-            preview_et += timedelta(minutes=cadence_minutes)
-        self.cadence_times_local = cadence_times_local
-
-        if next_cycle_et <= market_close_et:
-            next_cycle_local = next_cycle_et.astimezone(local_tz)
-            cadence_job = schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
-            cadence_job.next_run = next_cycle_local.replace(tzinfo=None)
-            cadence_job.last_run = None
-            self.next_cadence_run = next_cycle_local
-        else:
-            self.next_cadence_run = None
-
+        # Get cadence from environment (default: 180 minutes = 3 hours)
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
+        
+        # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
+        schedule.every().day.at("09:25").do(self.market_open_job)  # 9:25 AM ET = 6:25 AM PT
+        
+        # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
+        # This avoids overlap with the market open job
+        start_time_et = "09:35"  # 5 minutes after market opens
+        schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
+        
         # Feedback agent - once daily after market close
-        feedback_local = self._et_to_local_str(16, 30)
-        schedule.every().day.at(feedback_local).do(self.scheduled_feedback_job)
+        schedule.every().day.at("16:30").do(self.scheduled_feedback_job)  # 4:30pm ET
         
         logger.info("="*60)
         logger.info("Schedule setup completed")
         logger.info(f"📊 DAY TRADING MODE:")
-        logger.info(f"   🔔 Market Open (9:30 AM ET):")
-        local_tz_name = self.local_tz_name
-        logger.info(f"      - 9:30:00 AM ET ({market_open_local} {local_tz_name}): Run summarizer + decider")
+        logger.info(f"   🔔 Market Open (9:25-9:30:05 AM ET):")
+        logger.info(f"      - 9:25:00 AM: Analyze pre-market news")
+        logger.info(f"      - 9:30:05 AM: Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
-        if self.next_cadence_run:
-            logger.info(f"      - Next cycle at {self.next_cadence_run.strftime('%H:%M')} {local_tz_name}")
-        if self.cadence_times_local:
-            if len(self.cadence_times_local) > 1:
-                logger.info(f"      - Remaining cycles today: {', '.join(self.cadence_times_local)} {local_tz_name}")
-        else:
-            logger.info(f"      - Cadence {cadence_minutes} min results in only market-open cycle today")
+        logger.info(f"      - Every {cadence_minutes} minutes starting at 9:35 AM ET")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
         logger.info(f"   📊 Feedback: Daily at 4:30 PM ET (after market close)")
         if cadence_minutes <= 15:
@@ -704,7 +664,7 @@ class DAITraderOrchestrator:
         self.setup_schedule()
         
         # Get cadence for display
-        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
         
         skip_cycle = os.getenv("DAI_SKIP_STARTUP_CYCLE", "0").lower() in {"1", "true", "yes"}
         if skip_cycle:
@@ -730,19 +690,11 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
-        market_open_local = getattr(self, "market_open_local", self._et_to_local_str(9, 30))
-        cadence_times_local = getattr(self, "cadence_times_local", [])
-        local_tz_name = getattr(self, "local_tz_name", datetime.now().astimezone().tzname())
-
-        logger.info(f"   9:30:00 AM ET ({market_open_local} {local_tz_name}) - Run summarizer + decider")
+        logger.info("   9:25:00 AM ET (6:25 AM PT) - Analyze pre-market news")
+        logger.info("   9:30:05 AM ET (6:30 AM PT) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
-        if cadence_times_local:
-            logger.info(f"   Next cycle at {cadence_times_local[0]} {local_tz_name}, then every {cadence_minutes} minutes until 4:00 PM ET")
-        elif self.next_cadence_run:
-            logger.info(f"   Next cycle at {self.next_cadence_run.strftime('%H:%M')} {local_tz_name}, then every {cadence_minutes} minutes")
-        else:
-            logger.info(f"   Cadence {cadence_minutes} minutes yields only opening cycle today.")
+        logger.info(f"   Every {cadence_minutes} minutes from 9:35 AM - 4:00 PM ET")
         if cadence_minutes <= 15:
             cycles_per_day = int(390 / cadence_minutes) + 1  # +1 for opening bell
             logger.info(f"   ⚡ AGGRESSIVE MODE: Up to {cycles_per_day} trades/day!")

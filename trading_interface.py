@@ -537,6 +537,9 @@ class TradingInterface:
             if same_day_net:
                 print(f"   ↳ same-day net activity contribution: {same_day_net:.2f}")
 
+            settled_cash_strict = portfolio.get("settled_funds_strict", cash_balance_settled)
+            trading_funds = portfolio.get("available_trading_funds", effective_cash)
+
             result = {
                 "status": "success",
                 "positions": formatted_positions,
@@ -551,6 +554,8 @@ class TradingInterface:
                 "same_day_net_activity": same_day_net,
                 "order_reserve": order_reserve,
                 "total_portfolio_value": total_value + effective_cash,
+                "settled_cash_strict": settled_cash_strict,
+                "available_trading_funds": trading_funds,
                 "account_info": {
                     "account_value": account_value,
                     "buying_power": buying_power,
@@ -567,6 +572,8 @@ class TradingInterface:
                     "account_hash": portfolio.get("account_hash") or SCHWAB_ACCOUNT_HASH,
                     "account_number": portfolio.get("account_number"),
                     "account_type": portfolio.get("account_type"),
+                    "settled_funds_strict": settled_cash_strict,
+                    "available_trading_funds": trading_funds,
                 },
                 "positions_count": len(formatted_positions),
                 "last_updated": datetime.now().isoformat(),

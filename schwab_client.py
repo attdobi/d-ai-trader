@@ -18,6 +18,57 @@ easy_client = None
 SchwabClient = None
 SchwabAPI = None
 
+
+def _dig_value(payload: Dict[str, Any], path: List[str]) -> Optional[float]:
+    """Safely drill into nested dicts, returning float if present."""
+    current = payload
+    for key in path:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return None
+    if isinstance(current, (int, float)):
+        return float(current)
+    return None
+
+
+def extract_settled_funds(account_payload: Dict[str, Any]) -> float:
+    """Best-effort extraction of settled funds from Schwab account payloads."""
+    if not isinstance(account_payload, dict):
+        return 0.0
+    candidate_paths = [
+        ["balances", "cash", "settledCash"],
+        ["balances", "cash", "cashAvailableForWithdrawal"],
+        ["balances", "cash", "cashBalance"],
+        ["balances", "securitiesSettlementCash"],
+        ["cashBalances", "settledCash"],
+        ["cashBalances", "cashAvailableForWithdrawal"],
+    ]
+    for path in candidate_paths:
+        value = _dig_value(account_payload, path)
+        if value is not None:
+            return value
+    return 0.0
+
+
+def extract_available_trading_funds(account_payload: Dict[str, Any]) -> float:
+    """Approximate available trading funds/buying power from Schwab payloads."""
+    if not isinstance(account_payload, dict):
+        return 0.0
+    candidate_paths = [
+        ["balances", "cash", "cashAvailableForTrading"],
+        ["balances", "cash", "cashAvailableForSecuritiesPurchases"],
+        ["balances", "margin", "equityBuyingPower"],
+        ["cashBalances", "cashAvailableForTrading"],
+        ["marginBalances", "equityBuyingPower"],
+    ]
+    for path in candidate_paths:
+        value = _dig_value(account_payload, path)
+        if value is not None:
+            return value
+    return 0.0
+
+
 try:
     from schwab.auth import easy_client as _easy_client
     from schwab.client.synchronous import Client as _SchwabClient
@@ -1080,6 +1131,9 @@ def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
         balances = securities_account.get("currentBalances", {}) or {}
         positions_raw = securities_account.get("positions", []) or []
 
+        settled_funds_strict = extract_settled_funds(securities_account)
+        trading_funds = extract_available_trading_funds(securities_account)
+
         seed_from_balances(balances)
 
         formatted_positions: List[Dict[str, Any]] = []
@@ -1169,6 +1223,8 @@ def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
             "account_hash": schwab_client.account_hash,
             "account_number": schwab_client.account_number,
             "account_type": securities_account.get("type"),
+            "settled_funds_strict": float(settled_funds_strict),
+            "available_trading_funds": float(trading_funds),
             "ledger_components": ledger_comp,
         }
 
@@ -1192,6 +1248,8 @@ def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
             "account_number": schwab_client.account_number,
             "account_hash": schwab_client.account_hash,
             "account_type": securities_account.get("type"),
+            "settled_funds_strict": float(settled_funds_strict),
+            "available_trading_funds": float(trading_funds),
             "aggregated_balance": payload.get("aggregatedBalance"),
             "transactions_sample": (transactions_today[:5] if transactions_today else None),
             "open_orders_sample": open_orders_sample,
