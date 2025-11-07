@@ -43,6 +43,7 @@ Thumbs.db
 # Database
 *.db
 *.sqlite
+*.sqlite3
 
 # Jupyter
 .ipynb_checkpoints/

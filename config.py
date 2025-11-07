@@ -11,6 +11,7 @@ from dotenv import load_dotenv, dotenv_values
 from pathlib import Path
 import openai
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 # Load environment variables (prefer .env but do not override existing shell vars)
 load_dotenv(override=False)
@@ -39,9 +40,34 @@ def env_first(key: str, default=None):
         return val
     return default
 
-# Database connection
-DATABASE_URI = 'postgresql://adobi@localhost/adobi'
-engine = create_engine(DATABASE_URI)
+# Database connection (with fallback to SQLite so the system can boot without Postgres)
+DEFAULT_DB_URI = env_first(
+    "DATABASE_URI",
+    env_first("DATABASE_URL", f"postgresql://{os.getenv('USER', 'postgres')}@localhost/{os.getenv('USER', 'postgres')}")
+)
+FALLBACK_DB_URI = env_first(
+    "FALLBACK_DATABASE_URI",
+    f"sqlite:///{(PROJECT_ROOT / 'd_ai_trader.sqlite3')}"
+)
+
+def _create_engine():
+    """Create the primary engine, falling back to SQLite if Postgres is unavailable."""
+    if DEFAULT_DB_URI:
+        try:
+            primary_engine = create_engine(DEFAULT_DB_URI, pool_pre_ping=True)
+            # Force an early connection so failures happen on startup instead of mid-run
+            with primary_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print(f"🗄️  Using database: {DEFAULT_DB_URI}")
+            return primary_engine
+        except OperationalError as exc:
+            print(f"⚠️  Failed to connect to primary database '{DEFAULT_DB_URI}': {exc}")
+            print(f"   ➜ Falling back to local SQLite database at {FALLBACK_DB_URI}")
+    fallback_engine = create_engine(FALLBACK_DB_URI, pool_pre_ping=True)
+    print(f"🗄️  Using fallback database: {FALLBACK_DB_URI}")
+    return fallback_engine
+
+engine = _create_engine()
 SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
 Session = scoped_session(SessionFactory)
 session = Session

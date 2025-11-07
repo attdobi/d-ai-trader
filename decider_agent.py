@@ -1928,6 +1928,9 @@ def record_portfolio_snapshot():
         })
 
 def ask_decision_agent(summaries, run_id, holdings):
+    config_hash = get_current_config_hash()
+    market_open = is_market_open()
+    print(f"⏰ Market status at decision time: {'OPEN' if market_open else 'CLOSED'}")
     # Limit summaries to the targeted run_id when provided
     if run_id:
         run_scoped = [s for s in summaries if s.get('run_id') == run_id]
@@ -1935,8 +1938,7 @@ def ask_decision_agent(summaries, run_id, holdings):
             summaries = run_scoped
         else:
             print(f"⚠️  No summaries matched run_id {run_id}; proceeding with provided list of {len(summaries)} items")
-
-        config_hash = get_current_config_hash()
+        # config_hash already pulled for downstream usage; no change needed
 
 # Get versioned prompt for DeciderAgent
     from prompt_manager import get_active_prompt
@@ -2014,6 +2016,7 @@ OUTPUT (STRICT)
         summaries = summaries[-max_summaries:]  # Take the most recent ones
         print(f"Processing only the {max_summaries} most recent summaries to avoid rate limiting")
     
+    parsed_summaries = []
     for s in summaries:
         try:
             # The data is already stored as a JSON string in the database
@@ -2091,6 +2094,38 @@ OUTPUT (STRICT)
     if momentum_data:
         sample = momentum_data[:3]
         print(f"🧪 Momentum data sample: {json.dumps(sample, default=str)[:500]}")
+    momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
+    try:
+        store_momentum_snapshot(config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
+    except Exception as persist_err:
+        print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
+
+    # Pull latest decider feedback context for prompt enrichment
+    feedback_context = "No recent performance feedback recorded."
+    try:
+        latest_feedback = feedback_tracker.get_latest_feedback()
+        if latest_feedback:
+            decider_feedback = latest_feedback.get("decider_feedback") or latest_feedback.get("recommended_adjustments")
+            if isinstance(decider_feedback, str):
+                decider_feedback = decider_feedback.strip()
+                if decider_feedback.lower() == "null":
+                    decider_feedback = ""
+                else:
+                    try:
+                        decider_feedback = json.loads(decider_feedback)
+                    except Exception:
+                        # keep as plain string
+                        pass
+            if isinstance(decider_feedback, (dict, list)):
+                try:
+                    feedback_context = json.dumps(decider_feedback, indent=2)
+                except Exception:
+                    feedback_context = str(decider_feedback)
+            elif decider_feedback:
+                feedback_context = str(decider_feedback)
+    except Exception as feedback_err:
+        feedback_context = f"Unable to load recent feedback: {feedback_err}"
+        print(f"⚠️  Failed to build decider feedback context: {feedback_err}")
 
     # Separate cash and stock holdings
     cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
@@ -2164,7 +2199,6 @@ OUTPUT (STRICT)
         "summaries": summarized_text,
         "momentum_recap": momentum_recap,
         "feedback_context": feedback_context,
-    }
     }
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
 

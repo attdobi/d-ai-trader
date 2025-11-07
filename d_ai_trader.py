@@ -670,19 +670,19 @@ class DAITraderOrchestrator:
         if skip_cycle:
             logger.info("⏸️  Startup cycle skipped (DAI_SKIP_STARTUP_CYCLE is set).")
         else:
-            if self.is_summarizer_time():
-                try:
+            try:
+                if self.is_summarizer_time():
                     logger.info("⚡ Startup inside trading window – running immediate summarizer + decider cycle.")
-                    self.run_summarizer_agents()
-                    logger.info("✅ Startup summarizer run complete.")
-                    self.run_decider_agent()
-                    logger.info("✅ Startup decider run complete.")
-                except Exception as exc:
-                    logger.error(f"❌ Startup cycle failed: {exc}")
-                    import traceback
-                    logger.error(traceback.format_exc())
-            else:
-                logger.info("Startup outside summarizer window; waiting for first scheduled cadence.")
+                else:
+                    logger.info("⚡ Startup outside preferred window – forcing immediate summarizer + decider cycle.")
+                self.run_summarizer_agents()
+                logger.info("✅ Startup summarizer run complete.")
+                self.run_decider_agent()
+                logger.info("✅ Startup decider run complete.")
+            except Exception as exc:
+                logger.error(f"❌ Startup cycle failed: {exc}")
+                import traceback
+                logger.error(traceback.format_exc())
 
         logger.info("")
         logger.info("="*60)
