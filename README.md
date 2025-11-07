@@ -1,6 +1,6 @@
 # 🤖 D-AI-Trader - AI-Powered Day Trading System
 
-An autonomous **day trading system** powered by GPT-4o Vision that analyzes financial news screenshots, makes rapid trading decisions, and executes trades every 15-60 minutes during market hours. Optimized for **5-10% quick gains** with aggressive profit-taking and fast stop losses.
+An autonomous **swing/short-term trading system** powered by GPT-4o / GPT-4.1 Vision that analyzes financial news screenshots, makes selective trading decisions, and executes trades roughly every **3 hours** during market hours. Optimized for **1–3 day holding periods** so cash accounts stay within good-faith rules (buys only with settled funds), while still rotating capital aggressively when high-conviction setups appear.
 
 ---
 
@@ -8,11 +8,12 @@ An autonomous **day trading system** powered by GPT-4o Vision that analyzes fina
 
 ### **Simulation Mode (Safe Testing)**
 ```bash
-# Aggressive day trading - every 15 minutes
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+# Default pacing – every 3 hours (aligns with settled-funds workflow)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 180
 
-# Conservative - every hour
+# Faster loops for experimentation (15 or 60 minutes)
 ./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
 ```
 
 ### **Schwab API Read-Only Test (Before Going Live)**
@@ -28,7 +29,7 @@ An autonomous **day trading system** powered by GPT-4o Vision that analyzes fina
 # Launch live trading in read-only mode first, then:
 
 # Single-buy pilot – will execute at most ONE buy order per cycle
-./start_live_trading.sh --port 8080 --model gpt-4o --cadence 15
+./start_live_trading.sh --port 8080 --model gpt-4o --cadence 180
 
 # Environment overrides (optional):
 #   export DAI_MAX_TRADES=1      # already set by start_live_trading.sh
@@ -106,7 +107,7 @@ export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
 
 ### **Trading Philosophy**
 - ⚡ **Quick Profits**: Target 5-10% gains per trade, exit fast
-- 🔄 **Multiple Trades Per Day**: 15-60 minute cadence = 7-27 opportunities/day
+- 🔄 **Selective Entries**: ~2–3 high-conviction trades/day (3-hour cadence)
 - 📈 **Momentum Trading**: Ride trends, exit before reversals
 - 💰 **Capital Rotation**: Sell winners, redeploy into new opportunities
 - 🛡️ **Risk Management**: Fast stop losses, position limits
@@ -129,16 +130,15 @@ export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
 
 ### **Opening Bell Sequence**
 ```
-6:25 AM PT (9:25 AM ET) - Analyze overnight/pre-market news
-6:30:05 AM PT (9:30:05 AM ET) - Execute opening trades (5 sec after bell)
+6:30 AM PT (9:30 AM ET) - Summarizer + Decider run at the opening bell (executes trades 10 seconds after summarize step)
 ```
 
 ### **Intraday Trading**
 ```
-6:35 AM - 1:00 PM PT - Run every N minutes (configurable: 15/30/60)
+6:30 AM, 9:30 AM, 12:30 PM PT - Repeat cycles every ~3 hours (default 180‑min cadence)
    ├─ Scan 6 news sources
-   ├─ Analyze current positions (take profits? cut losses?)
-   ├─ Make trading decisions
+   ├─ Re-evaluate positions (1–3 day thesis)
+   ├─ Make selective trading decisions (respect pacing/cooldown)
    └─ Execute trades (during market hours only)
 ```
 
@@ -169,6 +169,11 @@ No trades executed - portfolio unchanged
 - Max positions: 5 stocks
 - Cash buffer: Always maintained
 - Market hours: Only 6:30 AM - 1:00 PM PT (M-F)
+
+### **Good-Faith & Margin Compliance**
+- **Cash accounts**: Buys use **settled funds only**. Sell proceeds typically settle T+1, so the 3-hour cadence plus 1–3 day holding period keeps the account clear of good-faith violations.
+- **Margin accounts**: When `IS_MARGIN_ACCOUNT=1`, the system may reuse same-day proceeds within the rails. Confirm with your broker that pattern-day-trader and maintenance requirements are satisfied before enabling margin mode.
+- **High-frequency intraday trading** (15–30 minute cadence) is only recommended with margin accounts and ample buying power.
 
 ### **Multi-Layer Safety (Real Trading)**
 1. `DAI_SCHWAB_READONLY` flag check
@@ -202,6 +207,10 @@ No trades executed - portfolio unchanged
   - Excellent vision capabilities
   - Custom temperature (0.3 for consistency)
   - 2000 tokens sufficient
+
+- **gpt-4.1** - Fully supported (same API schema as gpt-4o)
+  - Great when you want GPT-4.1's math/toolchain improvements
+  - Pair with ~2800 max tokens for multi-buy JSON output
 
 - **gpt-4o-mini** - Good for testing ($0.15/$0.60 per 1M tokens)
   - Faster, cheaper
@@ -269,20 +278,20 @@ Options:
   -m, --model MODEL         AI model (default: gpt-4o)
   -v, --prompt-version VER  auto | vN (default: auto)
   -t, --trading-mode MODE   simulation | real_world (default: simulation)
-  -c, --cadence MINUTES     15 | 30 | 60 (default: 60)
+  -c, --cadence MINUTES     180 (default) | 60 | 30 | 15
 ```
 
 ### **Examples**
 ```bash
-# Aggressive day trading (every 15 min)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+# Default swing cadence (~3 hours)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 180
 
-# Compare two models in parallel
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
-./start_d_ai_trader.sh -p 8081 -m gpt-5-mini -v auto -t simulation -c 15
+# Compare two models (hourly loop)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
+./start_d_ai_trader.sh -p 8081 -m gpt-5-mini -v auto -t simulation -c 60
 
-# Live trading (after testing!)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 15
+# Live trading (settled-funds cadence)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 180
 ```
 
 ---
@@ -346,18 +355,14 @@ pkill -f dashboard_server.py
 
 ## 📈 Expected Performance
 
-### **With 15-Minute Cadence**
+### **Legacy 15-Minute Cadence (optional)**
 - Trading opportunities: ~27 per day
 - Target per trade: 5-10% gain
 - Win rate: 50-60%
 - Daily gain potential: 15-25%
 - Monthly gain potential: 300-500%+
 
-### **Costs (GPT-4o)**
-- ~156 API calls/day (6 sources × 26 cycles)
-- ~$10/day in API costs
-- ~$300/month
-- **Worth it if trading with real money!**
+> ⚠️ This high-frequency mode is only recommended with margin accounts and larger balances. It also pushes API usage to ~$10/day because of the 26 intraday cycles.
 
 ---
 
@@ -444,19 +449,19 @@ pkill -f dashboard_server.py
 
 ## 💰 Cost Analysis
 
-### **API Costs (GPT-4o)**
-- 6 sources × 26 cycles/day = 156 calls/day
+### **API Costs (GPT-4o, default cadence)**
+- 6 sources × 3 cycles/day ≈ 18 calls/day
 - ~5K tokens per screenshot analysis
-- ~780K tokens/day total
-- **Input**: $2.50/1M tokens = $2/day
-- **Output**: $10/1M tokens = $8/day
-- **Total**: ~$10/day or $300/month
+- ~90K tokens/day total (~0.09M)
+- **Input**: ~$0.25/day
+- **Output**: ~$0.75/day (decider + helpers)
+- **Total**: ~$1/day or ~$30/month (lower if you pause cycles)
 
 ### **Potential Returns**
-- 26 trades/day × 6% average × 50% win rate = 78% daily gain potential
-- With $10K portfolio = $7,800/day theoretical maximum
-- Realistic target: 15-25% daily gains = $1,500-$2,500/day
-- **API costs ($10/day) are negligible vs. trading profits**
+- 2–3 high-conviction trades/day × 3–5% targets with disciplined stops
+- With $10K cash account = steady compounding while avoiding good-faith violations
+- Faster cadences (15/30 min) remain available for margin users who accept higher risk
+- **API costs (~$1/day) are negligible vs. trading profits**
 
 ---
 

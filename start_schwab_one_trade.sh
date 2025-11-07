@@ -15,7 +15,7 @@ USAGE
 
 PORT=8081
 MODEL="gpt-4o"
-CADENCE=15
+CADENCE=180
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 VENV_DIR="${PROJECT_ROOT}/dai"

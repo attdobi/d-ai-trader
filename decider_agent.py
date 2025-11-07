@@ -25,7 +25,20 @@ from typing import Dict, Any
 import pandas as pd
 import re
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, get_current_config_hash, get_trading_mode, set_gpt_model
+from config import (
+    engine,
+    PromptManager,
+    session,
+    openai,
+    get_current_config_hash,
+    get_trading_mode,
+    set_gpt_model,
+    IS_MARGIN_ACCOUNT,
+    DAILY_TICKET_CAP,
+    DAILY_BUY_CAP,
+    MIN_ENTRY_SPACING_MIN,
+    REENTRY_COOLDOWN_MIN,
+)
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
 
@@ -119,6 +132,74 @@ def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momen
             "momentum_recap": momentum_recap or "",
         })
 
+
+
+def get_daily_trade_usage(config_hash: str) -> Dict[str, Any]:
+    """Summarize today's recorded decisions for pacing logic."""
+    now_pacific = datetime.now(PACIFIC_TIMEZONE)
+    day_start = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start_naive = day_start.replace(tzinfo=None)
+
+    today_tickets = 0
+    today_buys = 0
+    last_entry_ts = None
+    tickers_entered: set[str] = set()
+
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            """
+            SELECT timestamp, data
+            FROM trade_decisions
+            WHERE config_hash = :config_hash
+              AND timestamp >= :day_start
+            """
+        ), {"config_hash": config_hash, "day_start": day_start_naive}).fetchall()
+
+    for row in rows:
+        decisions_payload = row.data
+        if isinstance(decisions_payload, str):
+            try:
+                decisions_payload = json.loads(decisions_payload)
+            except json.JSONDecodeError:
+                continue
+
+        if isinstance(decisions_payload, dict) and "decisions" in decisions_payload:
+            decisions = decisions_payload.get("decisions", [])
+        else:
+            decisions = decisions_payload
+
+        if not isinstance(decisions, list):
+            continue
+
+        today_tickets += len(decisions)
+        ts = row.timestamp
+        ts_local = None
+        if isinstance(ts, datetime):
+            ts_local = ts if ts.tzinfo else PACIFIC_TIMEZONE.localize(ts)
+            if ts_local.tzinfo:
+                ts_local = ts_local.astimezone(PACIFIC_TIMEZONE)
+
+        for decision in decisions:
+            action = (decision.get("action") or "").lower()
+            ticker = (decision.get("ticker") or "").upper()
+            amount = float(decision.get("amount_usd", 0) or 0)
+            if action == "buy" and amount > 0:
+                today_buys += 1
+                if ticker:
+                    tickers_entered.add(ticker)
+                if ts_local and (last_entry_ts is None or ts_local > last_entry_ts):
+                    last_entry_ts = ts_local
+
+    minutes_since_entry = None
+    if last_entry_ts:
+        minutes_since_entry = max(0, int((now_pacific - last_entry_ts).total_seconds() // 60))
+
+    return {
+        "today_tickets_used": today_tickets,
+        "today_buys_used": today_buys,
+        "minutes_since_last_entry": minutes_since_entry,
+        "tickers_entered_today": sorted(tickers_entered),
+    }
 
 
 class YFinancePriceFetcher:
@@ -1855,7 +1936,9 @@ def ask_decision_agent(summaries, run_id, holdings):
         else:
             print(f"⚠️  No summaries matched run_id {run_id}; proceeding with provided list of {len(summaries)} items")
 
-    # Get versioned prompt for DeciderAgent
+        config_hash = get_current_config_hash()
+
+# Get versioned prompt for DeciderAgent
     from prompt_manager import get_active_prompt
     try:
         prompt_data = get_active_prompt("DeciderAgent")
@@ -1901,116 +1984,29 @@ No explanatory text, no markdown, just pure JSON array."""
         
     except Exception as e:
         print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
-        # Build system prompt with ACTUAL holdings list
-        current_tickers_for_system = [h['ticker'] for h in stock_holdings] if stock_holdings else []
-        holdings_list = ', '.join(current_tickers_for_system) if current_tickers_for_system else 'NONE'
-        
-        # Fallback to AGGRESSIVE DAY TRADING prompt
-        system_prompt = f"""You are an AGGRESSIVE day trading AI optimized for SHORT-TERM PROFITS.
+        # Fallback minimal prompt when versioned template is unavailable
+        system_prompt = """You are a selective intraday trading AI. Focus on 1–2 day tactical opportunities, keep trades limited by daily caps, and output a JSON object with a `decisions` array."""
 
-🚨 CRITICAL - YOUR CURRENT PORTFOLIO:
-You currently own ONLY these stocks: {holdings_list}
-You can ONLY sell stocks you own. You CANNOT sell stocks not in the list above.
+        user_prompt_template = """ACCOUNT
+- Mode: {account_mode}
+- Settled Funds (USD): ${settled_cash}
+- Available Trading Funds (USD): ${available_trading_funds}
 
-DAY TRADING PHILOSOPHY:
-- Multiple trades per day is GOOD (this system runs every 15-60 minutes)
-- Take profits QUICKLY on 5%+ gains - don't be greedy
-- Cut losses FAST at -3% to -5% - protect capital
-- MOMENTUM is everything - ride trends but exit before reversals
-- Cash is a position - holding cash while waiting for setups is SMART
+DAILY STATE
+- Today tickets used / cap: {today_tickets_used}/{daily_ticket_cap}
+- Today buys used / cap: {today_buys_used}/{daily_buy_cap}
+- Minutes since last new entry: {minutes_since_last_entry}
+- Tickers entered today: {tickers_entered_today}
 
-You are NOT a long-term investor. You are a DAY TRADER seeking 2-10% gains on each trade."""
+INPUT SNAPSHOT
+- Holdings: {holdings}
+- Momentum Recap: {momentum_recap}
+- Summaries: {summaries}
+- Feedback: {feedback_context}
 
-        user_prompt_template = """You are an AGGRESSIVE DAY TRADING AI managing a $10,000 portfolio.
+OUTPUT (STRICT)
+{{"decisions":[{{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum + catalyst; add visual cue if relevant; buys prefixed R1..Rk"}},...]}}"""
 
-🔥 DAY TRADING CORE RULES:
-
-AGGRESSIVE PROFIT TAKING (We trade MULTIPLE times per day):
-- ✅ SELL at 5-8% profit - Lock in quick wins!
-- ✅ SELL at 8-15% profit - Great day trade!
-- ✅ SELL at 15%+ profit - Exceptional win, take it NOW!
-- ⚠️  HOLD only if strong momentum continues AND news supports more upside
-- ❌ CUT LOSSES at -3% to -5% - Protect capital for next opportunity
-
-POSITION SIZING (Maximize opportunities):
-- MINIMUM buy: $1500 (ensures meaningful profit on 5% gains)
-- OPTIMAL buy: $2000-$3500 (balanced for multiple positions)
-- MAXIMUM buy: $4000 (for high-conviction plays)
-- Available cash: ${available_cash} - DEPLOY IT!
-
-AVOID FOMO ENTRIES:
-- ❌ Do NOT chase all-time highs or vertical pops right after bullish news/earnings
-- ✅ Prefer pullbacks to support, consolidations, or breakouts with fresh momentum confirmation
-- ✅ If price is already stretched 5%+ above the prior day close, wait for a better setup
-
-PORTFOLIO RULES:
-- Max 5 stocks at once (allows diversification and quick rotation)
-- NEVER add to existing positions - Sell first, then re-buy if still bullish
-- OK to hold cash while scanning for next setup
-- Make EVERY position count - if uncertain, wait for better setup
-
-DECISION PROCESS FOR EXISTING POSITIONS:
-For EACH stock in "Current Holdings":
-1. Check current profit/loss %
-2. Evaluate momentum (is the move continuing or fading?)
-3. Check news for new catalysts or risks
-4. DECISION: SELL (take profits/cut losses) or HOLD (momentum continues)
-
-Then consider NEW opportunities from market analysis.
-
-Current Portfolio:
-- Available Cash: ${available_cash} (out of $10,000 total)
-- Momentum Recap:
-{momentum_recap}
-- Current Holdings: {holdings}
-
-Market Analysis:
-{summaries}
-
-Performance Feedback:
-{feedback}
-
-🚨 MANDATORY: For EVERY stock in "Current Holdings", provide SELL or HOLD decision with reasoning.
-
-🚨 JSON RESPONSE FORMAT (NO EXCEPTIONS):
-[
-  {{
-    "action": "sell" or "buy" or "hold",
-    "ticker": "SYMBOL",
-    "amount_usd": dollar_amount,
-    "reason": "detailed explanation"
-  }}
-]
-
-AMOUNT RULES:
-- SELL: amount_usd = 0 (sell ALL shares)
-- BUY: amount_usd = $1500 to $4000 (substantial amounts only)
-- HOLD: amount_usd = 0 (but explain WHY not selling)
-
-EXAMPLES OF AGGRESSIVE DAY TRADING DECISIONS:
-✅ {{"action": "sell", "ticker": "NVDA", "amount_usd": 0, "reason": "DAY TRADE: Up 6% since this morning, taking profits before potential reversal"}}
-✅ {{"action": "sell", "ticker": "TSLA", "amount_usd": 0, "reason": "DAY TRADE: Hit 8% gain target, locking in $240 profit"}}
-✅ {{"action": "buy", "ticker": "AMD", "amount_usd": 3000, "reason": "MOMENTUM PLAY: Breaking out on chip deal news, targeting 5-10% quick gain"}}
-✅ {{"action": "sell", "ticker": "BA", "amount_usd": 0, "reason": "STOP LOSS: Down 4%, cutting losses to preserve capital"}}
-✅ {{"action": "hold", "ticker": "AAPL", "amount_usd": 0, "reason": "STRONG MOMENTUM: Up 3% with positive news flow, holding for 8-10% target"}}
-
-EXAMPLES OF BAD DECISIONS:
-❌ {{"action": "hold", "ticker": "SPY", "amount_usd": 0, "reason": "Long-term investment"}} ← We're DAY TRADING, not investing!
-❌ {{"action": "hold", "ticker": "NVDA", "amount_usd": 0, "reason": "Up 12% but will hold for more"}} ← TAKE PROFITS! 12% is great!
-❌ {{"action": "buy", "ticker": "GLD", "amount_usd": 305, "reason": "..."}} ← TOO SMALL!
-❌ {{"action": "buy", "ticker": "TSLA", "amount_usd": 800, "reason": "..."}} ← TOO SMALL (under $1500 minimum)
-
-No explanatory text, no markdown, just pure JSON array."""
-    
-    # Check market status for later use
-    market_open = is_market_open()
-    if not market_open:
-        print("📈 Market is CLOSED - Will analyze summaries but defer execution")
-    else:
-        print("📈 Market is OPEN - Will analyze summaries and execute trades")
-    
-    parsed_summaries = []
-    
     # Limit the number of summaries to process to avoid rate limiting
     # Process only the most recent summaries
     max_summaries = 10
@@ -2117,68 +2113,58 @@ No explanatory text, no markdown, just pure JSON array."""
     else:
         holdings_text = "No current stock holdings."
     
-    # Calculate available funds
+    # Calculate available funds and pacing stats
     available_cash = cash_balance
-    max_spendable = max(0, available_cash - MIN_BUFFER)
     total_portfolio_value = available_cash + sum(h.get("total_value", 0) for h in stock_holdings)
 
-    # Get feedback from recent performance (simplified to reduce tokens)
-    feedback_context = ""
-    try:
-        latest_feedback = feedback_tracker.get_latest_feedback()
-        if latest_feedback:
-            feedback_context = f"Recent Success Rate: {latest_feedback['success_rate']:.1%}, Avg Profit: {latest_feedback['avg_profit_percentage']:.2%}"
-        else:
-            feedback_context = "No recent performance data available."
-    except Exception as e:
-        print(f"Failed to get feedback context: {e}")
-        feedback_context = "Feedback system unavailable."
-
-
-    pl_lines = []
-    for h in stock_holdings:
-        try:
-            ticker = h.get('ticker', 'UNKNOWN')
-            cost = float(h.get('total_value') or 0)
-            current = float(h.get('current_value') or 0)
-            pnl_pct = ((current - cost) / cost * 100) if cost else 0.0
-            pl_lines.append(f"- {ticker}: {pnl_pct:+.2f}% vs entry (stop loss -3%, take profit +5%)")
-        except Exception:
-            continue
-    holdings_pl_summary = "\n".join(pl_lines) if pl_lines else ""
-
-    momentum_recap = momentum_summary or "- Momentum data unavailable"
-    if holdings_pl_summary:
-        momentum_recap = f"{momentum_recap}\n\nExisting Position P/L:\n{holdings_pl_summary}"
-    elif not momentum_data:
-        momentum_recap = "- No momentum data available\n\nExisting Position P/L:\n- No open positions"
+    account_mode = "MARGIN" if IS_MARGIN_ACCOUNT else "CASH"
+    settled_cash_prompt = cash_balance
+    available_trading_funds_prompt = available_cash if IS_MARGIN_ACCOUNT else 0.0
 
     try:
-        current_config_hash = get_current_config_hash()
-        store_momentum_snapshot(current_config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
-    except Exception as snapshot_error:
-        print(f"⚠️  Failed to store momentum snapshot: {snapshot_error}")
+        if account_mode == "MARGIN" or get_trading_mode() in {"live", "real_world"}:
+            from trading_interface import trading_interface
+            snapshot = trading_interface.sync_schwab_positions()
+            if snapshot and snapshot.get("status") == "success":
+                settled_cash_prompt = float(snapshot.get("settled_cash_strict") or settled_cash_prompt)
+                available_trading_funds_prompt = float(snapshot.get("available_trading_funds") or available_trading_funds_prompt)
+    except Exception as sync_error:
+        print(f"⚠️  Unable to refresh Schwab funds for prompt: {sync_error}")
 
-    # Use versioned prompt template
+    if IS_MARGIN_ACCOUNT and available_trading_funds_prompt <= 0:
+        available_trading_funds_prompt = max(available_cash, 0.0)
+
+    daily_usage = get_daily_trade_usage(config_hash)
+    minutes_since_last_entry_value = daily_usage.get("minutes_since_last_entry")
+    minutes_since_last_entry_str = (
+        str(minutes_since_last_entry_value)
+        if minutes_since_last_entry_value is not None
+        else "none"
+    )
+    tickers_entered_today_list = daily_usage.get("tickers_entered_today", [])
+    tickers_entered_today_str = ", ".join(tickers_entered_today_list) if tickers_entered_today_list else "none"
+
     user_prompt_values = {
-        "available_cash": available_cash,
-        "max_spendable": max_spendable,
-        "min_buffer": MIN_BUFFER,
-        "max_funds": total_portfolio_value,
-        "holdings": holdings_text,
-        "feedback": feedback_context,
-        "summaries": summarized_text,
-        "momentum_recap": momentum_recap,
-        "pnl_summary": momentum_recap,
+        "account_mode": account_mode,
+        "settled_cash": f"{settled_cash_prompt:,.2f}",
+        "available_trading_funds": f"{available_trading_funds_prompt:,.2f}",
+        "daily_ticket_cap": DAILY_TICKET_CAP,
+        "daily_buy_cap": DAILY_BUY_CAP,
+        "today_tickets_used": daily_usage.get("today_tickets_used", 0),
+        "today_buys_used": daily_usage.get("today_buys_used", 0),
+        "minutes_since_last_entry": minutes_since_last_entry_str,
+        "tickers_entered_today": tickers_entered_today_str,
+        "min_entry_spacing_min": MIN_ENTRY_SPACING_MIN,
+        "reentry_cooldown_min": REENTRY_COOLDOWN_MIN,
         "min_buy": f"{int(MIN_BUY_AMOUNT):,}",
         "typical_buy_low": f"{int(TYPICAL_BUY_LOW):,}",
         "typical_buy_high": f"{int(TYPICAL_BUY_HIGH):,}",
         "max_buy": f"{int(MAX_BUY_AMOUNT):,}",
-        "buy_example": f"{int((TYPICAL_BUY_LOW + TYPICAL_BUY_HIGH) / 2):,}",
-        "below_min_buy": f"{max(int(MIN_BUY_AMOUNT * 0.6), 100):,}",
-        "well_below_min": f"{max(int(MIN_BUY_AMOUNT * 0.4), 100):,}",
-        "max_trades": MAX_TRADES,
-        "one_trade_mode": ONE_TRADE_MODE,
+        "holdings": holdings_text,
+        "summaries": summarized_text,
+        "momentum_recap": momentum_recap,
+        "feedback_context": feedback_context,
+    }
     }
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
 
@@ -2210,37 +2196,13 @@ No explanatory text, no markdown, just pure JSON array."""
         print(f"💼 Portfolio: NO positions (cash only)")
     
     # Create clear instructions with actual ticker examples
-    holdings_instructions = ""
+    # Logging current holdings – informational only
     if current_tickers:
-        holdings_instructions = f"\n🚨 YOU CURRENTLY OWN: {', '.join(current_tickers)}\n"
-        holdings_instructions += "For EACH of these stocks, you MUST decide: SELL (take profits/cut losses) or HOLD (keep position)\n"
+        print(f"🚨 YOU CURRENTLY OWN: {', '.join(current_tickers)}")
     else:
-        holdings_instructions = "\n✅ You have NO current positions - only consider new BUYS\n"
-    
-    example_buy_amount = int((TYPICAL_BUY_LOW + TYPICAL_BUY_HIGH) / 2)
-    buy_range_display = f"${int(MIN_BUY_AMOUNT):,}-${int(MAX_BUY_AMOUNT):,}"
+        print('✅ You have NO current positions - scanning for new setups')
 
-    prompt += holdings_instructions
-    prompt += f"""\n
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 OUTPUT FORMAT: JSON ARRAY ONLY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Your response must be ONLY a JSON array of decisions. Nothing else.
-
-Format:
-[
-  {{"action": "sell", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
-  {{"action": "hold", "ticker": "TICKER", "amount_usd": 0, "reason": "why"}},
-  {{"action": "buy", "ticker": "TICKER", "amount_usd": ${example_buy_amount:,}, "reason": "why"}}
-]
-
-Rules:
-- Provide SELL or HOLD for EVERY stock you own (listed above)
-- Can suggest BUY for new stocks
-- amount_usd: 0 for sell/hold, {buy_range_display} for buy
-
-START YOUR JSON ARRAY NOW (begin with [ ):"""
     
     # Debug: Print first 300 chars of prompt
     print(f"📝 Prompt preview: {prompt[:300]}...")

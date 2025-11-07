@@ -628,8 +628,8 @@ class DAITraderOrchestrator:
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs with configurable cadence"""
-        # Get cadence from environment (default: 60 minutes)
-        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
+        # Get cadence from environment (default: 180 minutes = 3 hours)
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
         
         # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
         schedule.every().day.at("09:25").do(self.market_open_job)  # 9:25 AM ET = 6:25 AM PT
@@ -664,7 +664,7 @@ class DAITraderOrchestrator:
         self.setup_schedule()
         
         # Get cadence for display
-        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '60'))
+        cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
         
         skip_cycle = os.getenv("DAI_SKIP_STARTUP_CYCLE", "0").lower() in {"1", "true", "yes"}
         if skip_cycle:

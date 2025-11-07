@@ -11,7 +11,7 @@ start_d_ai_trader.sh. Defaults are tuned for the initial pilot (single buy).
 
   --port       Dashboard port (default: 8080)
   --model      OpenAI model (default: gpt-4o)
-  --cadence    Minutes between intraday runs (default: 15)
+  --cadence    Minutes between intraday runs (default: 180)
       --stream     Launch Schwab streaming helper (default: on)
       --no-stream  Disable streaming helper
   --one-trade    Enforce single live buy per cycle (default)
@@ -22,7 +22,7 @@ USAGE
 
 PORT=8080
 MODEL="gpt-4o"
-CADENCE=15
+CADENCE=180
 ENABLE_STREAM=1
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
