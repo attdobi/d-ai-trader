@@ -43,23 +43,48 @@ function renderSchwabData(data) {
   const readonlyDescription = readonlyNoteEl ? readonlyNoteEl.querySelector('p') : null;
   const accountMetaEl = document.getElementById('account-meta');
 
-  const fundsAvailable = data.funds_available_effective
+  const isMarginAccount = Boolean(
+    data.is_margin_account
+    ?? data.account_info?.is_margin_account
+    ?? false
+  );
+  const baseFundsAvailable = Number(
+    data.funds_available_effective
     ?? data.funds_available_for_trading
     ?? data.account_info?.funds_available_for_trading
     ?? data.account_info?.funds_available_effective
     ?? data.cash_balance
-    ?? 0;
-  const settledCash = data.cash_balance_settled
+    ?? 0
+  );
+  const rawSettledCash = Number(
+    data.cash_balance_settled
     ?? data.cash_balance
     ?? data.account_info?.cash_balance
-    ?? 0;
-  const unsettledCash = data.unsettled_cash
+    ?? 0
+  );
+  const unsettledCash = Number(
+    data.unsettled_cash
     ?? data.account_info?.unsettled_cash
-    ?? 0;
+    ?? 0
+  );
+  let settledUsable = data.settled_funds_available
+    ?? data.account_info?.settled_funds_available;
+  if (settledUsable == null) {
+    settledUsable = Math.max(rawSettledCash - unsettledCash, 0);
+  }
+  settledUsable = Math.max(0, Number(settledUsable));
+  let fundsDisplay = data.funds_available_display
+    ?? data.account_info?.funds_available_display;
+  if (fundsDisplay == null) {
+    fundsDisplay = isMarginAccount
+      ? baseFundsAvailable
+      : Math.min(baseFundsAvailable, settledUsable);
+  }
+  fundsDisplay = Math.max(0, Number(fundsDisplay));
 
   if (total) total.textContent = formatCurrency(data.total_portfolio_value || 0);
-  if (funds) funds.textContent = formatCurrency(fundsAvailable);
-  if (cash) cash.textContent = formatCurrency(settledCash);
+  if (funds) funds.textContent = formatCurrency(fundsDisplay);
+  if (cash) cash.textContent = formatCurrency(settledUsable);
   if (unsettled) unsettled.textContent = formatCurrency(unsettledCash);
   const reserveValue = data.order_reserve
     ?? data.account_info?.order_reserve
@@ -73,15 +98,17 @@ function renderSchwabData(data) {
   const components = data.funds_available_components
     ?? data.account_info?.funds_available_components;
   if (componentsCard && componentsText) {
-    if (components) {
+    if (components || Number.isFinite(fundsDisplay)) {
       const lines = [
-        `Eff ${formatCurrency(components.effective ?? fundsAvailable)}`,
-        `Exp ${formatCurrency(components.explicit ?? 0)}`,
-        `Der ${formatCurrency(components.derived_cash ?? 0)}`,
-        `Sett ${formatCurrency(components.settled_cash ?? settledCash)}`,
-        `Unsett ${formatCurrency(components.unsettled_cash ?? unsettledCash)}`,
+        `Usable ${formatCurrency(fundsDisplay)}`,
+        `Eff ${formatCurrency(components?.effective ?? baseFundsAvailable)}`,
+        `Exp ${formatCurrency(components?.explicit ?? 0)}`,
+        `Der ${formatCurrency(components?.derived_cash ?? 0)}`,
+        `Sett ${formatCurrency(components?.settled_cash_guardrail ?? settledUsable)}`,
+        `Raw ${formatCurrency(components?.settled_cash ?? rawSettledCash)}`,
+        `Unsett ${formatCurrency(components?.unsettled_cash ?? unsettledCash)}`,
       ];
-      if (typeof components.order_reserve === 'number') {
+      if (typeof components?.order_reserve === 'number') {
         lines.push(`Orders ${formatCurrency(components.order_reserve)}`);
       }
       if (typeof data.open_orders_count === 'number') {
@@ -89,7 +116,7 @@ function renderSchwabData(data) {
       } else if (typeof data.account_info?.open_orders_count === 'number') {
         lines.push(`Open ${data.account_info.open_orders_count}`);
       }
-      if (typeof components.same_day_net === 'number') {
+      if (typeof components?.same_day_net === 'number') {
         lines.push(`Same-day ${formatCurrency(components.same_day_net)}`);
       }
       componentsText.textContent = lines.join(' · ');

@@ -1807,23 +1807,87 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
 
             from math import floor
-            shares = floor(amount / price)
-            if shares == 0:
-                print(f"Skipping buy for {ticker} due to insufficient funds for 1 share (need ${price:.2f}, have ${amount:.2f}).")
+
+            requested_shares = floor(amount / price)
+            if requested_shares == 0:
+                print(
+                    f"Skipping buy for {ticker} due to insufficient funds for 1 share "
+                    f"(need ${price:.2f}, have ${amount:.2f})."
+                )
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Insufficient funds for 1 share (need ${price:.2f}, allocated ${amount:.2f}) - no trade executed (Original: {reason})"
+                    "reason": (
+                        f"Insufficient funds for 1 share (need ${price:.2f}, allocated ${amount:.2f}) "
+                        f"- no trade executed (Original: {reason})"
+                    )
                 })
                 continue
 
-            # Calculate actual spend - prioritize using the requested dollar amount over exact shares
-            # If the AI requested $1000 for a $800 stock, buy 1 share for $800, not skip the trade
-            actual_spent = min(amount, shares * price)
-            shares = floor(actual_spent / price)  # Recalculate shares based on actual spend
+            usable_cash_cap = max(available_cash - MIN_BUFFER, 0.0)
+            if usable_cash_cap <= 0:
+                print(
+                    f"Skipping buy for {ticker} - no settled cash available after "
+                    f"${MIN_BUFFER:.2f} safety buffer (usable ${available_cash:.2f})."
+                )
+                skipped_decisions.append({
+                    "action": "buy",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": (
+                        f"Insufficient settled funds after guardrail "
+                        f"- usable cash ${available_cash:.2f} (Original: {reason})"
+                    )
+                })
+                continue
+
+            max_affordable_shares = floor(usable_cash_cap / price)
+            if max_affordable_shares == 0:
+                print(
+                    f"Skipping buy for {ticker} - settled funds limit (${available_cash:.2f}) "
+                    f"is below price + buffer (need ${price + MIN_BUFFER:.2f})."
+                )
+                skipped_decisions.append({
+                    "action": "buy",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": (
+                        f"Settled funds limit (${available_cash:.2f}) < 1 share + buffer "
+                        f"- no trade executed (Original: {reason})"
+                    )
+                })
+                continue
+
+            shares = min(requested_shares, max_affordable_shares)
+            if shares == 0:
+                print(
+                    f"Skipping buy for {ticker} - share calculation resulted in 0 after guardrail "
+                    f"(requested {requested_shares}, affordable {max_affordable_shares})."
+                )
+                skipped_decisions.append({
+                    "action": "buy",
+                    "ticker": ticker,
+                    "amount_usd": amount,
+                    "reason": (
+                        f"Share calculation dropped to 0 after settled-funds guardrail "
+                        f"(Original: {reason})"
+                    )
+                })
+                continue
+
+            if shares < requested_shares:
+                print(
+                    f"Adjusting buy for {ticker}: requested {requested_shares} share(s) "
+                    f"→ executing {shares} share(s) to respect ${available_cash:.2f} cash cap."
+                )
+
+            actual_spent = shares * price
             if available_cash - actual_spent < MIN_BUFFER:
-                print(f"Skipping buy for {ticker} - would exceed budget (need ${actual_spent:.2f}, available ${available_cash:.2f})")
+                print(
+                    f"Skipping buy for {ticker} - would exceed budget (need ${actual_spent:.2f}, "
+                    f"available ${available_cash:.2f})."
+                )
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
@@ -1831,6 +1895,10 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     "reason": f"Budget exceeded - no trade executed (Original: {reason})"
                 })
                 continue
+
+            decision["requested_amount_usd"] = amount
+            decision["amount_usd"] = round(actual_spent, 2)
+            decision["shares_executed"] = shares
 
             # Execute real-world trade if enabled
             if live_execution_enabled:

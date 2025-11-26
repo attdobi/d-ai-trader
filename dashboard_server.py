@@ -14,7 +14,16 @@ except Exception:
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
+from config import (
+    engine,
+    get_gpt_model,
+    get_prompt_version_config,
+    get_trading_mode,
+    get_current_config_hash,
+    set_gpt_model,
+    SCHWAB_ACCOUNT_HASH,
+    IS_MARGIN_ACCOUNT,
+)
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -958,7 +967,7 @@ def dashboard():
                             "reason": "📡 Synced from Schwab"
                         })
 
-                    available_cash = float(
+                    available_cash_effective = float(
                         schwab_data.get("funds_available_effective")
                         or schwab_data.get("funds_available_for_trading")
                         or schwab_data.get("cash_balance")
@@ -976,8 +985,19 @@ def dashboard():
                     total_invested = sum(row["total_value"] for row in holdings)
                     total_current_value = sum(row["current_value"] for row in holdings)
                     total_profit_loss = sum(row["gain_loss"] for row in holdings)
-                    total_portfolio_value = total_current_value + available_cash
-                    cash_balance = available_cash
+                    settled_cash_guardrail = schwab_data.get("settled_funds_available")
+                    if settled_cash_guardrail is None:
+                        settled_cash_guardrail = max(raw_cash_balance - unsettled_cash, 0.0)
+                    funds_available_display = schwab_data.get("funds_available_display")
+                    if funds_available_display is None:
+                        funds_available_display = (
+                            available_cash_effective
+                            if IS_MARGIN_ACCOUNT
+                            else min(available_cash_effective, settled_cash_guardrail)
+                        )
+                    funds_available_display = max(0.0, float(funds_available_display))
+                    total_portfolio_value = total_current_value + available_cash_effective
+                    cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
                     baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
@@ -998,7 +1018,9 @@ def dashboard():
                         "readonly": schwab_data.get("readonly_mode", False),
                         "last_updated": schwab_data.get("last_updated"),
                         "cash_balance": raw_cash_balance,
-                        "funds_available_for_trading": available_cash,
+                        "funds_available_for_trading": available_cash_effective,
+                        "funds_available_display": funds_available_display,
+                        "settled_funds_available": settled_cash_guardrail,
                         "unsettled_cash": unsettled_cash,
                         "order_reserve": schwab_data.get("order_reserve", 0.0),
                         "funds_available_explicit": account_info.get("funds_available_explicit"),
@@ -1009,15 +1031,16 @@ def dashboard():
                         "funds_available_components": funds_components,
                         "ledger_components": ledger_comp,
                         "open_orders_count": schwab_data.get("open_orders_count", 0),
+                        "is_margin_account": bool(IS_MARGIN_ACCOUNT),
                     }
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    _sync_holdings_with_database(config_hash, holdings, available_cash)
+                    _sync_holdings_with_database(config_hash, holdings, available_cash_effective)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        available_cash,
+                        available_cash_effective,
                         total_invested,
                         total_profit_loss,
                         holdings,
@@ -1092,6 +1115,7 @@ def dashboard():
             use_schwab_positions=use_schwab_positions,
             initial_account_value=initial_investment,
             current_account_value=total_portfolio_value,
+            is_margin_account=bool(IS_MARGIN_ACCOUNT),
         )
 
 @app.template_filter('from_json')
@@ -2271,6 +2295,7 @@ def get_schwab_holdings():
         schwab_data['enabled'] = True
         schwab_data['readonly_mode'] = readonly_mode
         schwab_data['live_trading_enabled'] = (trading_interface.trading_mode in {"live", "real_world"}) and not readonly_mode
+        schwab_data['is_margin_account'] = bool(IS_MARGIN_ACCOUNT)
         schwab_data.setdefault('account_info', {})
         if readonly_mode:
             schwab_data['account_info'].setdefault('account_hash', schwab_client.account_hash if hasattr(schwab_client, "account_hash") else None)

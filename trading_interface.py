@@ -10,7 +10,14 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy import text
-from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash, SCHWAB_ACCOUNT_HASH
+from config import (
+    engine,
+    TRADING_MODE,
+    DEBUG_TRADING,
+    get_current_config_hash,
+    SCHWAB_ACCOUNT_HASH,
+    IS_MARGIN_ACCOUNT,
+)
 from schwab_client import schwab_client, get_portfolio_snapshot
 from schwab_ledger import compute_effective_funds, components as ledger_components
 from feedback_agent import TradeOutcomeTracker
@@ -516,6 +523,7 @@ class TradingInterface:
             positions_raw = portfolio.get("positions_raw", [])
             ledger_state = portfolio.get("ledger_state")
             ledger_comp = portfolio.get("ledger_components") or ledger_components()
+            margin_account = bool(IS_MARGIN_ACCOUNT)
 
             total_value = sum(p.get("market_value", 0) for p in formatted_positions)
 
@@ -531,6 +539,13 @@ class TradingInterface:
             explicit_cash = baseline_cash
             derived_cash = portfolio.get("funds_available_derived", baseline_cash)
             effective_cash = compute_effective_funds(baseline_cash)
+            settled_cash_guardrail = max(float(cash_balance_settled) - float(unsettled_cash), 0.0)
+            funds_available_display = (
+                float(effective_cash)
+                if margin_account
+                else min(float(effective_cash), settled_cash_guardrail)
+            )
+            funds_available_display = max(0.0, funds_available_display)
 
             buying_power = effective_cash
             day_trading_power = 0.0
@@ -557,6 +572,8 @@ class TradingInterface:
                 "unsettled_cash": unsettled_cash,
                 "funds_available_for_trading": effective_cash,
                 "funds_available_effective": effective_cash,
+                "funds_available_display": funds_available_display,
+                "settled_funds_available": settled_cash_guardrail,
                 "funds_available_explicit": explicit_cash,
                 "funds_available_derived": derived_cash,
                 "same_day_net_activity": same_day_net,
@@ -569,10 +586,12 @@ class TradingInterface:
                     "buying_power": buying_power,
                     "day_trading_buying_power": day_trading_power,
                     "funds_available_for_trading": effective_cash,
+                    "funds_available_display": funds_available_display,
                     "funds_available_explicit": explicit_cash,
                     "funds_available_derived": derived_cash,
                     "same_day_net_activity": same_day_net,
                     "cash_balance": cash_balance_settled,
+                    "settled_funds_available": settled_cash_guardrail,
                     "unsettled_cash": unsettled_cash,
                     "order_reserve": order_reserve,
                     "balances_raw": balances_raw,
@@ -582,6 +601,7 @@ class TradingInterface:
                     "account_type": portfolio.get("account_type"),
                     "settled_funds_strict": settled_cash_strict,
                     "available_trading_funds": trading_funds,
+                    "is_margin_account": margin_account,
                 },
                 "positions_count": len(formatted_positions),
                 "last_updated": datetime.now().isoformat(),
@@ -592,10 +612,13 @@ class TradingInterface:
                     "explicit": explicit_cash,
                     "derived_cash": derived_cash,
                     "settled_cash": cash_balance_settled,
+                    "settled_cash_guardrail": settled_cash_guardrail,
+                    "funds_display": funds_available_display,
                     "unsettled_cash": unsettled_cash,
                     "same_day_net": same_day_net,
                     "order_reserve": order_reserve,
                 },
+                "is_margin_account": margin_account,
                 "ledger_state": ledger_state,
                 "ledger_components": ledger_comp,
                 "transactions_sample": portfolio.get("transactions_sample")
