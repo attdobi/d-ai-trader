@@ -381,8 +381,11 @@ class DAITraderOrchestrator:
                 decisions = []
             
             if decisions:
-                decider.store_trade_decisions(decisions, target_run_id)
-                decider.update_holdings(decisions)
+                validated_decisions = decider.store_trade_decisions(decisions, target_run_id)
+                if validated_decisions:
+                    decider.update_holdings(validated_decisions)
+                else:
+                    logger.warning("⚠️  All decisions were rejected; nothing to execute.")
                 decider.record_portfolio_snapshot()
             else:
                 logger.warning("⚠️  No decisions to process - AI returned empty or failed")

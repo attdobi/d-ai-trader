@@ -21,21 +21,25 @@ MAX_BUY_AMOUNT = float(os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 class DecisionValidator:
     """Validates trading decisions to prevent hallucinations and errors"""
     
-    def __init__(self, current_holdings: List[Dict], available_cash: float):
+    def __init__(self, current_holdings: List[Dict], available_cash: float, allow_sell_reuse: bool = True):
         """
         Initialize validator with current portfolio state
         
         Args:
             current_holdings: List of current holdings (excluding CASH)
             available_cash: Available cash balance
+            allow_sell_reuse: Whether sell proceeds can be reused immediately
         """
         self.current_tickers = set(h['ticker'].upper() for h in current_holdings if h['ticker'] != 'CASH')
         self.holdings_map = {h['ticker'].upper(): h for h in current_holdings if h['ticker'] != 'CASH'}
         self.available_cash = available_cash
+        self.allow_sell_reuse = allow_sell_reuse
         
         print(f"🛡️  Decision Validator Initialized:")
         print(f"   Current Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'}")
         print(f"   Available Cash: ${available_cash:.2f}")
+        if not allow_sell_reuse:
+            print("   ⚠️  Cash account guardrail: Sell proceeds remain unsettled until next cycle.")
     
     def validate_decisions(self, decisions: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
         """
@@ -158,10 +162,13 @@ class DecisionValidator:
                 or (holding.get('current_price', 0) * holding.get('shares', 0))
                 or 0
             )
-            self.available_cash += proceeds
+            if self.allow_sell_reuse:
+                self.available_cash += proceeds
+                print(f"      ➕ Cash after SELL {ticker}: ${self.available_cash:.2f}")
+            else:
+                print(f"      ⌛ SELL {ticker} proceeds pending settlement (${proceeds:.2f}); cash stays ${self.available_cash:.2f}")
             self.current_tickers.discard(ticker)
             self.holdings_map.pop(ticker, None)
-            print(f"      ➕ Cash after SELL {ticker}: ${self.available_cash:.2f}")
         elif action == 'buy':
             try:
                 amount = float(decision.get('amount_usd', 0))

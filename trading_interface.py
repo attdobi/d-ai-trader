@@ -435,12 +435,19 @@ class TradingInterface:
                     "reason": reason
                 }
             else:
-                return {
+                error_payload = {
                     "status": "error",
                     "error": f"Order placement failed: {order_result}",
                     "execution_type": "live",
                     "decision": decision
                 }
+                if order_result and isinstance(order_result, dict):
+                    error_payload.update({
+                        "order_id": order_result.get("order_id"),
+                        "order_status": order_result.get("order_status"),
+                        "reason": order_result.get("reason") or order_result.get("error"),
+                    })
+                return error_payload
                 
         except Exception as e:
             logger.error(f"Error executing Schwab order: {e}")
@@ -512,7 +519,8 @@ class TradingInterface:
 
             total_value = sum(p.get("market_value", 0) for p in formatted_positions)
 
-            cash_balance_settled = portfolio.get("cash_balance_settled", portfolio.get("cash_balance", 0.0))
+            cash_balance = portfolio.get("cash_balance", portfolio.get("cash_balance_settled", 0.0))
+            cash_balance_settled = cash_balance
             unsettled_cash = portfolio.get("unsettled_cash", 0.0)
             same_day_net = portfolio.get("same_day_net_activity", ledger_comp.get("same_day_net", 0.0))
             order_reserve = portfolio.get("order_reserve", ledger_comp.get("open_buy_reserve", 0.0))

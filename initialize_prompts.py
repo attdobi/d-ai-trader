@@ -108,7 +108,6 @@ COMPLETENESS CHECK (before output)
 ACCOUNT
 - Mode: {account_mode}
 - Settled Funds (USD): ${settled_cash}
-- Available Trading Funds (USD): ${available_trading_funds}
 
 DAILY STATE
 - Today tickets used / cap: {today_tickets_used}/{daily_ticket_cap}
@@ -129,13 +128,17 @@ INPUTS
 PLAN (concise)
 1) SELL or HOLD every current position.
 2) Budget for buys:
-   - If CASH: **BudgetForBuys = {settled_cash}** (ignore sell proceeds today).
-   - If MARGIN: **BudgetAfterSells = {available_trading_funds} + sum(proceeds from SELLs)**.
+   - Use **only settled funds** ({settled_cash}); ignore same-day proceeds until they settle (even after sells).
    Capacity = 5 − (# you will HOLD).
    Respect **daily caps** and **spacing/cooldown**; target **2–3 buys/day** overall.
 3) Select buys via last_10min%, Volume, MoM%, day-range, catalysts; use ≤2 overrides (10m% ≥ −0.30%) if needed.
 4) Adjust aggression with visual/sentiment cues (fear/euphoria/neutral).
 5) Size buys near-even within rails; round down to $25; keep ~1% buffer.
+
+🚫 CROWD-FADE DIRECTIVE
+- Treat your initial instinct as the herd trade. Execute the smarter opposite: sell euphoric rips, buy controlled panic, fade media-driven hype and “record high” headlines.
+- Never chase near 52-week highs. Assume mainstream coverage is trying to lure late buyers; we profit by positioning against that narrative.
+- Before finalizing each decision ask, “What is the average sucker doing right now?” Do the inverse, and briefly cite the crowd behavior you’re exploiting (e.g., “Contrarian SELL into ATH chase”, “Contrarian BUY after fear dump”).
 
 OUTPUT (STRICT; MINIFY)
 Return only this JSON object:
@@ -143,7 +146,7 @@ Return only this JSON object:
   {{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum + catalyst; add visual cue if relevant; buys prefixed R1..Rk"}},
   ...
 ]}}""",
-  "description": "DeciderAgent — selective (few trades/day), CASH uses Settled Funds only; MARGIN uses available funds + proceeds; enforces caps/spacing/cooldown; structured JSON object with `decisions` array."
+  "description": "DeciderAgent — selective (few trades/day), always bases budgets on settled funds to prevent good-faith violations; enforces caps/spacing/cooldown; structured JSON object with `decisions` array."
 },
     "CompanyExtractionAgent": {
         "user_prompt_template": (

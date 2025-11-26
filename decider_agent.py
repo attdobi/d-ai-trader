@@ -1197,15 +1197,30 @@ def update_holdings(decisions, skip_live_execution=False):
 
     live_execution_enabled = trading_mode == "real_world" and not skip_live_execution
 
+    latest_live_snapshot = {"data": None}
+
     def _sync_live_positions(stage):
         if not live_execution_enabled:
-            return
+            return None
         try:
             from trading_interface import trading_interface
             print(f"🔄 Syncing Schwab positions ({stage})...")
-            trading_interface.sync_schwab_positions(persist=True)
+            snapshot = trading_interface.sync_schwab_positions(persist=True)
+            if snapshot and snapshot.get("status") == "success":
+                latest_live_snapshot["data"] = snapshot
+            return snapshot
         except Exception as exc:
             print(f"⚠️  Schwab sync ({stage}) failed: {exc}")
+            return None
+
+    def _latest_settled_snapshot():
+        """Ensure we have the freshest Schwab snapshot before enforcing settled-funds guardrails."""
+        if not live_execution_enabled:
+            return None
+        snapshot = latest_live_snapshot.get("data")
+        if snapshot and snapshot.get("status") == "success":
+            return snapshot
+        return _sync_live_positions("settled-funds-check")
 
     def _current_cash_balance():
         with engine.begin() as _conn:
@@ -1342,6 +1357,72 @@ def update_holdings(decisions, skip_live_execution=False):
         _sync_live_positions("post-wait")
         available_cash = _current_cash_balance()
         print(f"💰 Cash after wait: ${available_cash:.2f}")
+
+    # Enforce settled-funds guardrail for cash accounts before any buys
+    if live_execution_enabled and not IS_MARGIN_ACCOUNT:
+        snapshot = _latest_settled_snapshot()
+        if snapshot and snapshot.get("status") == "success":
+            raw_settled = float(
+                snapshot.get("cash_balance")
+                or snapshot.get("cash_balance_settled")
+                or snapshot.get("settled_cash_strict")
+                or 0.0
+            )
+            unsettled_cash = float(snapshot.get("unsettled_cash") or 0.0)
+            settled_limit = max(raw_settled - unsettled_cash, 0.0)
+            print(
+                f"🔒 Settled funds check: raw_settled=${raw_settled:.2f}, unsettled=${unsettled_cash:.2f}, usable=${settled_limit:.2f}"
+            )
+            adjusted_cash = min(available_cash, settled_limit)
+            if settled_limit <= 0:
+                if buy_decisions:
+                    print("⚠️  Settled cash is $0. Skipping live buys to avoid good-faith violations.")
+                    guardrail_reason = "Trade blocked: no settled funds available (good-faith guardrail)."
+                    for dec in buy_decisions:
+                        skipped_decisions.append({**dec, "reason": guardrail_reason})
+                buy_decisions = []
+            else:
+                if abs(adjusted_cash - available_cash) > 1e-6:
+                    print(
+                        f"🔒 Settled-funds guardrail in effect: ${available_cash:.2f} → ${adjusted_cash:.2f} usable."
+                    )
+                available_cash = adjusted_cash
+        else:
+            retry_snapshot = _sync_live_positions("settled-funds-retry")
+            if retry_snapshot and retry_snapshot.get("status") == "success":
+                snapshot = retry_snapshot
+                raw_settled = float(
+                    snapshot.get("cash_balance")
+                    or snapshot.get("cash_balance_settled")
+                    or snapshot.get("settled_cash_strict")
+                    or 0.0
+                )
+                unsettled_cash = float(snapshot.get("unsettled_cash") or 0.0)
+                settled_limit = max(raw_settled - unsettled_cash, 0.0)
+                print(
+                    f"🔄 Settled funds retry succeeded: raw_settled=${raw_settled:.2f}, unsettled=${unsettled_cash:.2f}, usable=${settled_limit:.2f}"
+                )
+                adjusted_cash = min(available_cash, settled_limit)
+                if settled_limit <= 0:
+                    if buy_decisions:
+                        print("⚠️  Settled cash is $0 after retry. Skipping live buys to avoid good-faith violations.")
+                        guardrail_reason = "Trade blocked: no settled funds available (good-faith guardrail)."
+                        for dec in buy_decisions:
+                            skipped_decisions.append({**dec, "reason": guardrail_reason})
+                    buy_decisions = []
+                else:
+                    if abs(adjusted_cash - available_cash) > 1e-6:
+                        print(
+                            f"🔒 Settled-funds guardrail (retry) in effect: ${available_cash:.2f} → ${adjusted_cash:.2f} usable."
+                        )
+                    available_cash = adjusted_cash
+            else:
+                if buy_decisions:
+                    print("⚠️  Unable to verify settled funds; skipping live buys to avoid good-faith violations.")
+                    guardrail_reason = "Trade blocked: unable to verify settled-fund balance (good-faith guardrail)."
+                    for dec in buy_decisions:
+                        skipped_decisions.append({**dec, "reason": guardrail_reason})
+                buy_decisions = []
 
     # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
     if buy_decisions:
@@ -1992,7 +2073,6 @@ No explanatory text, no markdown, just pure JSON array."""
         user_prompt_template = """ACCOUNT
 - Mode: {account_mode}
 - Settled Funds (USD): ${settled_cash}
-- Available Trading Funds (USD): ${available_trading_funds}
 
 DAILY STATE
 - Today tickets used / cap: {today_tickets_used}/{daily_ticket_cap}
@@ -2008,6 +2088,15 @@ INPUT SNAPSHOT
 
 OUTPUT (STRICT)
 {{"decisions":[{{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum + catalyst; add visual cue if relevant; buys prefixed R1..Rk"}},...]}}"""
+
+    contrarian_directive = """
+🚫 CROWD-FADE DIRECTIVE
+- Treat your first instinct as the herd move. Execute the smarter opposite: sell strength chased by headlines, buy panic where catalysts are overblown, and fade media-manufactured hype.
+- NEVER chase names near 52-week highs or obvious “record high” banners. Assume mainstream news is manipulating retail entries; we make money by positioning against that narrative.
+- Before finalizing each decision, ask: “What is the average sucker doing right now?” Then plan the inverse. If instinct says BUY, only proceed when you can justify why most traders are wrong—and mention it explicitly (“fade ATH chase”, “short squeeze exhaustion”, etc.).
+- Document which crowd behavior you are exploiting in every reason (e.g., “Contrarian SELL into euphoric breakout”, “Contrarian BUY after panic dump”)."""
+    if "CROWD-FADE DIRECTIVE" not in user_prompt_template:
+        user_prompt_template = user_prompt_template.rstrip() + "\n\n" + contrarian_directive.strip()
 
     # Limit the number of summaries to process to avoid rate limiting
     # Process only the most recent summaries
@@ -2154,20 +2243,22 @@ OUTPUT (STRICT)
 
     account_mode = "MARGIN" if IS_MARGIN_ACCOUNT else "CASH"
     settled_cash_prompt = cash_balance
-    available_trading_funds_prompt = available_cash if IS_MARGIN_ACCOUNT else 0.0
 
     try:
         if account_mode == "MARGIN" or get_trading_mode() in {"live", "real_world"}:
             from trading_interface import trading_interface
             snapshot = trading_interface.sync_schwab_positions()
             if snapshot and snapshot.get("status") == "success":
-                settled_cash_prompt = float(snapshot.get("settled_cash_strict") or settled_cash_prompt)
-                available_trading_funds_prompt = float(snapshot.get("available_trading_funds") or available_trading_funds_prompt)
+                raw_settled_prompt = float(
+                    snapshot.get("cash_balance")
+                    or snapshot.get("cash_balance_settled")
+                    or snapshot.get("settled_cash_strict")
+                    or settled_cash_prompt
+                )
+                unsettled_cash_prompt = float(snapshot.get("unsettled_cash") or 0.0)
+                settled_cash_prompt = max(raw_settled_prompt - unsettled_cash_prompt, 0.0)
     except Exception as sync_error:
         print(f"⚠️  Unable to refresh Schwab funds for prompt: {sync_error}")
-
-    if IS_MARGIN_ACCOUNT and available_trading_funds_prompt <= 0:
-        available_trading_funds_prompt = max(available_cash, 0.0)
 
     daily_usage = get_daily_trade_usage(config_hash)
     minutes_since_last_entry_value = daily_usage.get("minutes_since_last_entry")
@@ -2182,7 +2273,6 @@ OUTPUT (STRICT)
     user_prompt_values = {
         "account_mode": account_mode,
         "settled_cash": f"{settled_cash_prompt:,.2f}",
-        "available_trading_funds": f"{available_trading_funds_prompt:,.2f}",
         "daily_ticket_cap": DAILY_TICKET_CAP,
         "daily_buy_cap": DAILY_BUY_CAP,
         "today_tickets_used": daily_usage.get("today_tickets_used", 0),
@@ -2413,7 +2503,11 @@ def store_trade_decisions(decisions, run_id):
     cash_balance = next((h['current_value'] for h in current_holdings if h['ticker'] == 'CASH'), 0)
     
     # Validate all decisions
-    validator = DecisionValidator(stock_holdings, cash_balance)
+    validator = DecisionValidator(
+        stock_holdings,
+        cash_balance,
+        allow_sell_reuse=IS_MARGIN_ACCOUNT
+    )
     validated_decisions, rejected_decisions = validator.validate_decisions(decisions)
     
     # Check if AI missed any holdings
@@ -2590,6 +2684,8 @@ def store_trade_decisions(decisions, run_id):
         })
         print(f"✅ Stored to trade_decisions table with enriched data")
 
+    return valid_decisions
+
 if __name__ == "__main__":
     # Get unprocessed summaries instead of just the latest run
     unprocessed_summaries = get_unprocessed_summaries()
@@ -2639,12 +2735,12 @@ if __name__ == "__main__":
             print("💡 Consider manually updating prices for accurate decision making")
 
         decisions = ask_decision_agent(unprocessed_summaries, run_id, holdings)
-        store_trade_decisions(decisions, run_id)
+        validated_decisions = store_trade_decisions(decisions, run_id)
 
         # Execute trades through the unified trading interface
         try:
             from trading_interface import trading_interface
-            execution_results = trading_interface.execute_trade_decisions(decisions)
+            execution_results = trading_interface.execute_trade_decisions(validated_decisions)
 
             # Log execution results
             if execution_results.get("summary"):
@@ -2660,11 +2756,11 @@ if __name__ == "__main__":
         except ImportError:
             # Fallback to original method if trading_interface is not available
             print("⚠️  Trading interface not available, using simulation only")
-            update_holdings(decisions)
+            update_holdings(validated_decisions)
         except Exception as e:
             print(f"❌ Error in trading interface: {e}")
             print("🔄 Falling back to simulation mode")
-            update_holdings(decisions)
+            update_holdings(validated_decisions)
 
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]

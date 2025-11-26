@@ -182,7 +182,7 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
-GPT_MODEL = "gpt-4o"  # Default: GPT-4o (most reliable for trading)
+GPT_MODEL = "gpt-5.1"  # Default upgraded to GPT-5.1 for richer reasoning
 _last_announced_model = None
 
 
@@ -198,9 +198,10 @@ _announce_model(GPT_MODEL)
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    valid_models = ["gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
     alias_map = {
         "gpt4.1": "gpt-4.1",
+        "gpt5.1": "gpt-5.1",
         "gpt-4-turbo": "gpt-4-turbo",
     }
 
@@ -462,11 +463,14 @@ class PromptManager:
         self.session = session
         self.run_id = run_id
 
-    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3):
+    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None):
         retries = 0
         while retries < max_retries:
             try:
-                model_lower = GPT_MODEL.lower() if GPT_MODEL else ""
+                model_name = (model_override or GPT_MODEL)
+                if not model_name:
+                    raise ValueError("No GPT model configured")
+                model_lower = model_name.lower()
                 decider_agent = (agent_name == "DeciderAgent")
                 # Summarizer & Feedback still benefit from json_object coercion; Decider relies on prompt rules.
                 requires_json = (agent_name in {"SummarizerAgent", "FeedbackAgent"})
@@ -475,7 +479,7 @@ class PromptManager:
                 # PARALLEL PATH 1: GPT-5 (Reasoning Model)
                 # ============================================
                 if model_lower.startswith('gpt-5'):
-                    print(f"🤖 Using {GPT_MODEL} (REASONING MODEL) for {agent_name}")
+                    print(f"🤖 Using {model_name} (REASONING MODEL) for {agent_name}")
                     
                     # GPT-5 config: Simple messages, no extra fluff
                     messages = [
@@ -498,7 +502,7 @@ class PromptManager:
                     
                     # GPT-5 parameters: Lots of tokens, NO temperature
                     api_params = {
-                        "model": GPT_MODEL,
+                        "model": model_name,
                         "messages": messages,
                         "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
                         # No temperature - GPT-5 only supports default (1.0)
@@ -510,8 +514,8 @@ class PromptManager:
                 # ============================================
                 # PARALLEL PATH 2: GPT-4o (Standard Vision Model)
                 # ============================================
-                elif _is_gpt5_model(GPT_MODEL):
-                    print(f"🤖 Using {GPT_MODEL} for {agent_name}")
+                elif _is_gpt5_model(model_name):
+                    print(f"🤖 Using {model_name} for {agent_name}")
                     
                     # GPT-4o config: Standard vision format (WORKING - DON'T CHANGE!)
                     messages = [
@@ -535,7 +539,7 @@ class PromptManager:
                     # GPT-4o parameters: Normal tokens, custom temperature
                     token_cap = 2800 if decider_agent else 2000
                     api_params = {
-                        "model": GPT_MODEL,
+                        "model": model_name,
                         "messages": messages,
                         "max_completion_tokens": token_cap,
                         "temperature": MODEL_TEMPERATURE
@@ -548,7 +552,7 @@ class PromptManager:
                 # PARALLEL PATH 3: GPT-4-turbo and older
                 # ============================================
                 else:
-                    print(f"🤖 Using {GPT_MODEL} for {agent_name}")
+                    print(f"🤖 Using {model_name} for {agent_name}")
                     
                     # Older models: Use max_tokens instead of max_completion_tokens
                     messages = [
@@ -559,7 +563,7 @@ class PromptManager:
                     # Note: GPT-4-turbo doesn't have vision support in this path
                     token_cap = 2800 if decider_agent else 1500
                     api_params = {
-                        "model": GPT_MODEL,
+                        "model": model_name,
                         "messages": messages,
                         "max_tokens": token_cap,
                         "temperature": MODEL_TEMPERATURE
@@ -577,13 +581,15 @@ class PromptManager:
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
+                response_model = model_name
+                response_model_lower = model_lower
                 
                 # ============================================
                 # Response Handling - Separate Paths
                 # ============================================
                 
                 # GPT-5 response handling
-                if model_lower.startswith('gpt-5'):
+                if response_model_lower.startswith('gpt-5'):
                     print(f"🔍 GPT-5 Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
                     # GPT-5 specific: 'length' means reasoning tokens exhausted
@@ -603,9 +609,23 @@ class PromptManager:
                             time.sleep(2)
                             continue
                         return {"error": f"GPT-5 failed: {finish_reason}", "agent": agent_name}
+
+                    normalized_content = content.strip() if content else ""
+                    if decider_agent and normalized_content in {"[]", "{}"} and not model_override:
+                        fallback_model = os.getenv("DAI_DECIDER_FALLBACK_MODEL", "gpt-4.1")
+                        print(f"⚠️  GPT-5 returned empty decisions. Falling back to {fallback_model} for DeciderAgent.")
+                        fallback_prompt = prompt + "\n\nFAILSAFE: Provide at least one HOLD decision if no trades qualify. JSON array output is mandatory."
+                        return self.ask_openai(
+                            fallback_prompt,
+                            system_prompt,
+                            agent_name=agent_name,
+                            image_paths=image_paths,
+                            max_retries=max_retries,
+                            model_override=fallback_model
+                        )
                 
                 # GPT-4o response handling (SIMPLE - this was working!)
-                elif _is_gpt5_model(GPT_MODEL):
+                elif _is_gpt5_model(model_name):
                     print(f"🔍 GPT-4o Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
                     # Only retry on actual failures
