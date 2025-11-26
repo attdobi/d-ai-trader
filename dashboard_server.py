@@ -15,6 +15,11 @@ from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
+
+# Apply model from environment if specified
+if _os.environ.get("DAI_GPT_MODEL"):
+    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
+
 import importlib
 import initialize_prompts as default_prompts_module
 from prompt_manager import initialize_config_prompts
@@ -25,10 +30,6 @@ from decider_agent import (
     store_momentum_snapshot,
     SUMMARY_MAX_CHARS,
 )
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 import json
 import pandas as pd
 import threading

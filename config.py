@@ -193,8 +193,6 @@ def _announce_model(model_name: str):
         _last_announced_model = model_name
 
 
-_announce_model(GPT_MODEL)
-
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
@@ -224,6 +222,14 @@ def set_gpt_model(model_name):
 def get_gpt_model():
     """Get the current GPT model"""
     return GPT_MODEL
+
+# Apply environment override (including .env) as early as possible so every agent process
+# announces and uses the same model even if later imports fail.
+_env_model = dotenv_first("DAI_GPT_MODEL")
+if _env_model:
+    set_gpt_model(_env_model)
+else:
+    _announce_model(GPT_MODEL)
 
 # Prompt version configuration
 PROMPT_VERSION_MODE = "auto"  # Default to auto
