@@ -1,6 +1,6 @@
 # 🤖 D-AI-Trader - AI-Powered Day Trading System
 
-An autonomous **swing/short-term trading system** powered by GPT-4o / GPT-4.1 Vision that analyzes financial news screenshots, makes selective trading decisions, and executes trades roughly every **3 hours** during market hours. Optimized for **1–3 day holding periods** so cash accounts stay within good-faith rules (buys only with settled funds), while still rotating capital aggressively when high-conviction setups appear.
+An autonomous **swing/short-term trading system** powered by **GPT-5.1 (default reasoning)** with GPT-4o/4.1 Vision for screenshots. It analyzes financial news screenshots, makes selective trading decisions, and executes trades roughly every **3 hours** during market hours. Default behavior targets **1–3 day holding periods** for cash accounts that must wait for **settled funds (T+1)**; enable margin mode only if you have $25k+ and want to reuse proceeds immediately.
 
 ---
 
@@ -8,13 +8,15 @@ An autonomous **swing/short-term trading system** powered by GPT-4o / GPT-4.1 Vi
 
 ### **Simulation Mode (Safe Testing)**
 ```bash
-# Default pacing – every 3 hours (aligns with settled-funds workflow)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 180
+# Default pacing – every 3 hours (aligns with settled-funds workflow, GPT-5.1 default)
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t simulation -c 180
 
 # Faster loops for experimentation (15 or 60 minutes)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t simulation -c 60
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t simulation -c 15
 ```
+
+> **Account type toggle:** `IS_MARGIN_ACCOUNT=0` (default) keeps buys limited to settled funds and a 1–3 day rhythm. Set `IS_MARGIN_ACCOUNT=1` only if you have a $25k+ margin account and want to reuse proceeds immediately (PDT rules apply).
 
 ### **Schwab API Read-Only Test (Before Going Live)**
 ```bash
@@ -29,7 +31,7 @@ An autonomous **swing/short-term trading system** powered by GPT-4o / GPT-4.1 Vi
 # Launch live trading in read-only mode first, then:
 
 # Single-buy pilot – will execute at most ONE buy order per cycle
-./start_live_trading.sh --port 8080 --model gpt-4o --cadence 180
+./start_live_trading.sh --port 8080 --model gpt-5.1 --cadence 180
 
 # Environment overrides (optional):
 #   export DAI_MAX_TRADES=1      # already set by start_live_trading.sh
@@ -96,7 +98,8 @@ export DAI_MAX_TRADES=5          # or your preferred limit
 export DAI_SCHWAB_READONLY=0     # ensure live orders are allowed
 export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
 
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -t real_world -c 15
+# Cash default: keep 180–60 min cadence for settled-funds compliance; use 15 min only if IS_MARGIN_ACCOUNT=1 (PDT $25k+)
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -t real_world -c 15
 ```
 
 **Dashboard:** http://localhost:8080
@@ -171,9 +174,9 @@ No trades executed - portfolio unchanged
 - Market hours: Only 6:30 AM - 1:00 PM PT (M-F)
 
 ### **Good-Faith & Margin Compliance**
-- **Cash accounts**: Buys use **settled funds only**. Sell proceeds typically settle T+1, so the 3-hour cadence plus 1–3 day holding period keeps the account clear of good-faith violations.
-- **Margin accounts**: When `IS_MARGIN_ACCOUNT=1`, the system may reuse same-day proceeds within the rails. Confirm with your broker that pattern-day-trader and maintenance requirements are satisfied before enabling margin mode.
-- **High-frequency intraday trading** (15–30 minute cadence) is only recommended with margin accounts and ample buying power.
+- **Cash accounts (default)**: Set `IS_MARGIN_ACCOUNT=0` (or leave unset). Buys use **settled funds only**, so sell proceeds settle **T+1**. The 3-hour cadence and **1–3 day holding period** keep the strategy compliant with good-faith rules.
+- **Margin accounts**: Set `IS_MARGIN_ACCOUNT=1` **only if you have a $25k+ margin account** and want to reuse same-day proceeds (“funds available for trading”) right after a sell. Pattern-day-trader and maintenance rules still apply—confirm with your broker.
+- **High-frequency intraday trading** (15–30 minute cadence) is only recommended with margin accounts that meet PDT requirements.
 
 ### **Multi-Layer Safety (Real Trading)**
 1. `DAI_SCHWAB_READONLY` flag check
@@ -202,28 +205,26 @@ No trades executed - portfolio unchanged
 ## 🤖 AI Models
 
 ### **Recommended for Trading**
-- **gpt-4o** ⭐ - BEST for real money ($2.50/$10 per 1M tokens)
-  - Reliable JSON parsing
-  - Excellent vision capabilities
-  - Custom temperature (0.3 for consistency)
-  - 2000 tokens sufficient
+- **gpt-5.1** ⭐ - Default reasoning model (strongest decisions)
+  - Uses ~8000 completion tokens for richer reasoning
+  - Decider auto-falls back to gpt-4.1 if GPT-5.1 returns empty JSON
+  - Best quality; higher cost than 4o/4.1
 
-- **gpt-4.1** - Fully supported (same API schema as gpt-4o)
-  - Great when you want GPT-4.1's math/toolchain improvements
-  - Pair with ~2800 max tokens for multi-buy JSON output
+- **gpt-4o** - Cost-efficient alt ($2.50/$10 per 1M tokens)
+  - Reliable JSON parsing + vision
+  - Use `--model gpt-4o` to cut spend if GPT-5.1 cost is a concern
 
-- **gpt-4o-mini** - Good for testing ($0.15/$0.60 per 1M tokens)
-  - Faster, cheaper
-  - Good for simulation mode
+- **gpt-4.1** - Fully supported fallback (same API schema as gpt-4o)
+  - Good math/tooling improvements
+  - Pairs well with 2800 token cap for multi-buy outputs
 
-- **gpt-4-turbo** - Legacy "GPT-4.1" equivalent
+- **gpt-4o-mini** - Cheap testing ($0.15/$0.60 per 1M tokens)
+  - Faster, lower quality; simulation only
 
 ### **Experimental**
-- **gpt-5** / **gpt-5-mini** - Reasoning models (⚠️ May hit token limits)
-  - Uses tokens for internal "thinking"
-  - Needs 8000+ tokens
+- **gpt-5** / **gpt-5-mini** - Earlier reasoning variants (⚠️ token-hungry)
   - No custom temperature
-  - Not recommended for production yet
+  - Use only for experimentation
 
 ### **NOT Supported**
 - ❌ o1/o3 models - Don't support system messages or JSON mode
@@ -258,6 +259,11 @@ cp env_template.txt .env
 # OpenAI API (Required)
 OPENAI_API_KEY=sk-proj-your_actual_api_key_here
 
+# Account type (Required decision)
+# 0 = cash account (default; buys only with settled funds, 1–3 day cadence)
+# 1 = margin account ($25k+ only; reuses same-day proceeds, PDT rules apply)
+IS_MARGIN_ACCOUNT=0
+
 # Schwab API (Optional - for live trading)
 SCHWAB_CLIENT_ID=your_client_id
 SCHWAB_CLIENT_SECRET=your_client_secret
@@ -275,7 +281,7 @@ SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
 
 Options:
   -p, --port PORT           Dashboard port (default: 8080)
-  -m, --model MODEL         AI model (default: gpt-4o)
+  -m, --model MODEL         AI model (default: gpt-5.1)
   -v, --prompt-version VER  auto | vN (default: auto)
   -t, --trading-mode MODE   simulation | real_world (default: simulation)
   -c, --cadence MINUTES     180 (default) | 60 | 30 | 15
@@ -284,14 +290,17 @@ Options:
 ### **Examples**
 ```bash
 # Default swing cadence (~3 hours)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 180
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t simulation -c 180
+
+# Cost saver (hourly loop)
+./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
 
 # Compare two models (hourly loop)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 60
-./start_d_ai_trader.sh -p 8081 -m gpt-5-mini -v auto -t simulation -c 60
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t simulation -c 60
+./start_d_ai_trader.sh -p 8081 -m gpt-4o -v auto -t simulation -c 60
 
 # Live trading (settled-funds cadence)
-./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t real_world -c 180
+./start_d_ai_trader.sh -p 8080 -m gpt-5.1 -v auto -t real_world -c 180
 ```
 
 ---
