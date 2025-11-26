@@ -139,24 +139,22 @@ class DAITraderOrchestrator:
         return True  # Always run decider to analyze summaries and record decisions
     
     def is_feedback_time(self):
-        """Check if it's time to run feedback (after market close)"""
-        # Get current time in Pacific, convert to Eastern for time checks
+        """Check if it's time to run feedback (weekly: Thursday night, post-close)."""
         now_pacific = datetime.now(PACIFIC_TIMEZONE)
         now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
         
-        # Only on weekdays
-        if now_eastern.weekday() >= 5:
+        # Weekly cadence: Thursday nights after close
+        if now_eastern.weekday() != 3:  # 0=Mon, 3=Thu
             return False
-            
-        # After market close (4pm ET) but before 6pm ET to ensure it runs daily
-        market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
-        feedback_window_end = now_eastern.replace(hour=18, minute=0, second=0, microsecond=0)
         
-        # Check if feedback already ran today
+        feedback_start = now_eastern.replace(hour=20, minute=0, second=0, microsecond=0)  # 8:00 PM ET
+        feedback_end = now_eastern.replace(hour=23, minute=30, second=0, microsecond=0)   # 11:30 PM ET
+        
+        # Skip if already ran today
         if self._feedback_already_ran_today():
             return False
-            
-        return market_close <= now_eastern <= feedback_window_end
+        
+        return feedback_start <= now_eastern <= feedback_end
     
     def _feedback_already_ran_today(self):
         """Check if feedback agent already ran today for this configuration"""
@@ -590,7 +588,7 @@ class DAITraderOrchestrator:
     def market_open_job(self):
         """
         Special job that runs at market open (9:30:05 AM ET).
-        Runs summarizers at 9:25 AM ET, then waits until exactly 9:30:05 AM ET to execute trades.
+        Runs summarizers at 9:30 AM ET, then waits until exactly 9:30:05 AM ET to execute trades.
         """
         try:
             now_pacific = datetime.now(PACIFIC_TIMEZONE)
@@ -604,10 +602,10 @@ class DAITraderOrchestrator:
             logger.info("🔔 MARKET OPEN SEQUENCE STARTING")
             logger.info(f"   Current time: {now_eastern.strftime('%I:%M:%S %p ET')}")
             
-            # Step 1: Run summarizers at 9:25 AM ET (5 min before open)
-            logger.info("📰 Step 1: Pre-market news analysis (9:25 AM ET)")
+            # Step 1: Run summarizers right at the bell (9:30 AM ET)
+            logger.info("📰 Step 1: Market-open news analysis (9:30 AM ET)")
             self.run_summarizer_agents()
-            logger.info("✅ Pre-market analysis complete")
+            logger.info("✅ Market-open analysis complete")
             
             # Step 2: Wait until exactly 9:30:05 AM ET
             now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
@@ -631,30 +629,46 @@ class DAITraderOrchestrator:
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs with configurable cadence"""
+        def _et_to_local_time_str(et_hhmm: str) -> str:
+            """Convert an ET HH:MM string to local-time HH:MM for the scheduler."""
+            try:
+                hour, minute = map(int, et_hhmm.split(":"))
+                now_et = datetime.now(EASTERN_TIMEZONE)
+                target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                target_local = target_et.astimezone(PACIFIC_TIMEZONE)
+                return target_local.strftime("%H:%M")
+            except Exception as exc:
+                logger.warning(f"Failed to convert ET time '{et_hhmm}' to local; defaulting to same string. Error: {exc}")
+                return et_hhmm
+
         # Get cadence from environment (default: 180 minutes = 3 hours)
         cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
         
-        # SPECIAL: Market open job at 9:25 AM ET (5 min before market opens)
-        schedule.every().day.at("09:25").do(self.market_open_job)  # 9:25 AM ET = 6:25 AM PT
+        # SPECIAL: Market open job at 9:30 AM ET (runs at the bell)
+        market_open_local = _et_to_local_time_str("09:30")  # e.g., 06:30 PT
+        schedule.every().day.at(market_open_local).do(self.market_open_job)
         
         # Regular cadence: Start at 9:35 AM ET (5 min after market opens) and run every N minutes
         # This avoids overlap with the market open job
-        start_time_et = "09:35"  # 5 minutes after market opens
+        first_cycle_local = _et_to_local_time_str("09:35")  # e.g., 06:35 PT
+        schedule.every().day.at(first_cycle_local).do(self.scheduled_summarizer_and_decider_job)
         schedule.every(cadence_minutes).minutes.do(self.scheduled_summarizer_and_decider_job)
         
-        # Feedback agent - once daily after market close
-        schedule.every().day.at("16:30").do(self.scheduled_feedback_job)  # 4:30pm ET
+        # Feedback agent - weekly, Thursday nights after market close (8:30 PM ET / 5:30 PM PT)
+        weekly_feedback_local = _et_to_local_time_str("20:30")  # e.g., 17:30 PT
+        schedule.every().thursday.at(weekly_feedback_local).do(self.scheduled_feedback_job)
         
         logger.info("="*60)
         logger.info("Schedule setup completed")
         logger.info(f"📊 DAY TRADING MODE:")
-        logger.info(f"   🔔 Market Open (9:25-9:30:05 AM ET):")
-        logger.info(f"      - 9:25:00 AM: Analyze pre-market news")
-        logger.info(f"      - 9:30:05 AM: Execute opening trades (5 sec after bell)")
+        logger.info(f"   🔔 Market Open (9:30:05 AM ET):")
+        logger.info(f"      - {market_open_local} local / 9:30:00 ET: Analyze news at the bell")
+        logger.info(f"      - 9:30:05 AM ET: Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
-        logger.info(f"      - Every {cadence_minutes} minutes starting at 9:35 AM ET")
+        logger.info(f"      - Kickoff at {first_cycle_local} local / 9:35 AM ET")
+        logger.info(f"      - Then every {cadence_minutes} minutes (skips outside trading window)")
         logger.info(f"      - Continues until market close (4:00 PM ET / 1:00 PM PT)")
-        logger.info(f"   📊 Feedback: Daily at 4:30 PM ET (after market close)")
+        logger.info(f"   📊 Feedback: Weekly on Thursday at 8:30 PM ET ({weekly_feedback_local} local)")
         if cadence_minutes <= 15:
             # 390 minutes of trading (9:30 AM - 4:00 PM) minus opening trade
             cycles = int(390 / cadence_minutes)
@@ -693,7 +707,7 @@ class DAITraderOrchestrator:
         logger.info("="*60)
         logger.info("")
         logger.info("🔔 OPENING BELL STRATEGY (Every Trading Day):")
-        logger.info("   9:25:00 AM ET (6:25 AM PT) - Analyze pre-market news")
+        logger.info("   9:30:00 AM ET (6:30 AM PT) - Analyze news at the bell")
         logger.info("   9:30:05 AM ET (6:30 AM PT) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")

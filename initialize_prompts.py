@@ -73,6 +73,7 @@ DAILY PACING & LIMITS (FEWER, HIGH-QUALITY TRADES)
 OUTPUT (NON-NEGOTIABLE)
 - Return a **minified** JSON object only:
   {{"decisions":[{{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum (10m%, volume/day-range) + catalyst; add visual/sentiment cue if relevant; buys prefixed R1..Rk"}}, ...]}}
+- If you output **zero BUYS** while settled funds are available, add a top-level `"cash_reason"` string explaining why cash stays idle (e.g., caps/spacing/cooldown/no edge/poor setups). Keep the JSON object compact.
 - No prose before/after. Stop immediately after the closing brace `}`.
 
 HARD RULES (SELLS → BUDGET → BUYS, WITH DAILY LIMITS)
@@ -134,6 +135,7 @@ PLAN (concise)
 3) Select buys via last_10min%, Volume, MoM%, day-range, catalysts; use ≤2 overrides (10m% ≥ −0.30%) if needed.
 4) Adjust aggression with visual/sentiment cues (fear/euphoria/neutral).
 5) Size buys near-even within rails; round down to $25; keep ~1% buffer.
+6) If you propose **zero BUYS** while Settled Funds ≥ {min_buy}, include `"cash_reason"` (brief, ≤160 chars) describing why cash is being held.
 
 🚫 CROWD-FADE DIRECTIVE
 - Treat your initial instinct as the herd trade. Execute the smarter opposite: sell euphoric rips, buy controlled panic, fade media-driven hype and “record high” headlines.

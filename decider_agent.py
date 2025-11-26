@@ -2259,6 +2259,7 @@ OUTPUT (STRICT)
                 settled_cash_prompt = max(raw_settled_prompt - unsettled_cash_prompt, 0.0)
     except Exception as sync_error:
         print(f"⚠️  Unable to refresh Schwab funds for prompt: {sync_error}")
+    settled_cash_value = settled_cash_prompt
 
     daily_usage = get_daily_trade_usage(config_hash)
     minutes_since_last_entry_value = daily_usage.get("minutes_since_last_entry")
@@ -2291,6 +2292,12 @@ OUTPUT (STRICT)
         "feedback_context": feedback_context,
     }
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
+    prompt += (
+        "\n\nCASH REASON REQUIREMENT:"
+        f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
+        " add a top-level \"cash_reason\" string explaining why cash stays idle (caps, spacing, cooldown, or no qualified setups)."
+        " Keep the JSON object compact with the `decisions` array plus optional `cash_reason` only."
+    )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
@@ -2333,6 +2340,7 @@ OUTPUT (STRICT)
     
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
+    cash_hold_reason = None
     ai_response = prompt_manager.ask_openai(
         prompt, 
         system_prompt, 
@@ -2341,6 +2349,8 @@ OUTPUT (STRICT)
     
     # Ensure response is always a list
     if isinstance(ai_response, dict):
+        if isinstance(ai_response.get("cash_reason"), str) and ai_response.get("cash_reason").strip():
+            cash_hold_reason = ai_response.get("cash_reason").strip()
         # Check if it's an error response first
         if 'error' in ai_response:
             print(f"❌ AI returned error: {ai_response.get('error')}")
@@ -2377,6 +2387,17 @@ OUTPUT (STRICT)
                 "amount_usd": 0,
                 "reason": "Auto-generated HOLD because AI omitted this position. Provide explicit reasoning next cycle."
             })
+
+    # If no buys and settled funds are available, surface the AI's cash rationale (or warn if missing)
+    buy_actions = [
+        d for d in ai_response
+        if isinstance(d, dict) and (d.get("action") or "").lower() == "buy" and float(d.get("amount_usd") or 0) > 0
+    ]
+    if settled_cash_value >= MIN_BUY_AMOUNT and not buy_actions:
+        if cash_hold_reason:
+            print(f"💬 Cash hold rationale (no buys with ${settled_cash_value:,.2f} settled): {cash_hold_reason}")
+        else:
+            print(f"⚠️  No buys chosen despite ${settled_cash_value:,.2f} settled; AI did not supply a cash_reason.")
 
     # If market is closed, modify decisions to show they're deferred
     if not market_open:
