@@ -625,7 +625,7 @@ class TradingInterface:
             }
             if persist:
                 try:
-                    self._persist_live_snapshot(formatted_positions, cash_balance_settled, result)
+                    self._persist_live_snapshot(formatted_positions, funds_available_display, result)
                 except Exception as persist_err:
                     logger.error("Failed to persist live Schwab snapshot: %s", persist_err)
             return result
@@ -696,7 +696,11 @@ class TradingInterface:
             for h in processed_holdings
         ])
 
-        total_portfolio_value = total_current + float(cash_balance)
+        cash_balance = float(cash_balance)
+        total_portfolio_value = float(
+            snapshot.get("total_portfolio_value")
+            or (total_current + cash_balance)
+        )
         total_profit_loss = total_current - total_invested
         percentage_gain = (total_profit_loss / total_invested * 100.0) if total_invested else 0.0
 

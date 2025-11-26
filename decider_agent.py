@@ -1360,18 +1360,32 @@ def update_holdings(decisions, skip_live_execution=False):
 
     # Enforce settled-funds guardrail for cash accounts before any buys
     if live_execution_enabled and not IS_MARGIN_ACCOUNT:
-        snapshot = _latest_settled_snapshot()
-        if snapshot and snapshot.get("status") == "success":
-            raw_settled = float(
-                snapshot.get("cash_balance")
-                or snapshot.get("cash_balance_settled")
-                or snapshot.get("settled_cash_strict")
+        def _extract_settled_limit(snapshot_payload):
+            usable_field = snapshot_payload.get("funds_available_display")
+            if usable_field is None:
+                usable_field = snapshot_payload.get("settled_funds_available")
+            if usable_field is not None:
+                usable_value = max(float(usable_field), 0.0)
+                return usable_value, f"usable_field=${usable_value:.2f}"
+
+            raw_settled_val = float(
+                snapshot_payload.get("cash_balance")
+                or snapshot_payload.get("cash_balance_settled")
+                or snapshot_payload.get("settled_cash_strict")
                 or 0.0
             )
-            unsettled_cash = float(snapshot.get("unsettled_cash") or 0.0)
-            settled_limit = max(raw_settled - unsettled_cash, 0.0)
+            unsettled_val = float(snapshot_payload.get("unsettled_cash") or 0.0)
+            limit = max(raw_settled_val - unsettled_val, 0.0)
+            details = (
+                f"raw_settled=${raw_settled_val:.2f}, unsettled=${unsettled_val:.2f}"
+            )
+            return limit, details
+
+        snapshot = _latest_settled_snapshot()
+        if snapshot and snapshot.get("status") == "success":
+            settled_limit, settled_debug = _extract_settled_limit(snapshot)
             print(
-                f"🔒 Settled funds check: raw_settled=${raw_settled:.2f}, unsettled=${unsettled_cash:.2f}, usable=${settled_limit:.2f}"
+                f"🔒 Settled funds check: {settled_debug}, usable=${settled_limit:.2f}"
             )
             adjusted_cash = min(available_cash, settled_limit)
             if settled_limit <= 0:
@@ -1391,16 +1405,9 @@ def update_holdings(decisions, skip_live_execution=False):
             retry_snapshot = _sync_live_positions("settled-funds-retry")
             if retry_snapshot and retry_snapshot.get("status") == "success":
                 snapshot = retry_snapshot
-                raw_settled = float(
-                    snapshot.get("cash_balance")
-                    or snapshot.get("cash_balance_settled")
-                    or snapshot.get("settled_cash_strict")
-                    or 0.0
-                )
-                unsettled_cash = float(snapshot.get("unsettled_cash") or 0.0)
-                settled_limit = max(raw_settled - unsettled_cash, 0.0)
+                settled_limit, settled_debug = _extract_settled_limit(snapshot)
                 print(
-                    f"🔄 Settled funds retry succeeded: raw_settled=${raw_settled:.2f}, unsettled=${unsettled_cash:.2f}, usable=${settled_limit:.2f}"
+                    f"🔄 Settled funds retry succeeded: {settled_debug}, usable=${settled_limit:.2f}"
                 )
                 adjusted_cash = min(available_cash, settled_limit)
                 if settled_limit <= 0:

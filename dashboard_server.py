@@ -1036,11 +1036,11 @@ def dashboard():
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    _sync_holdings_with_database(config_hash, holdings, available_cash_effective)
+                    _sync_holdings_with_database(config_hash, holdings, funds_available_display)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        available_cash_effective,
+                        funds_available_display,
                         total_invested,
                         total_profit_loss,
                         holdings,
@@ -2254,8 +2254,19 @@ def reset_portfolio():
                 total_invested += total_cost
                 total_current += market_value
 
-            cash_balance = float(schwab_snapshot.get('cash_balance', 0))
-            total_portfolio_value = total_current + cash_balance
+            cash_balance = float(
+                schwab_snapshot.get('funds_available_display')
+                or schwab_snapshot.get('settled_funds_available')
+                or schwab_snapshot.get('cash_balance')
+                or schwab_snapshot.get('cash_balance_settled')
+                or 0
+            )
+            portfolio_cash_total = float(
+                schwab_snapshot.get('funds_available_effective')
+                or schwab_snapshot.get('funds_available_for_trading')
+                or cash_balance
+            )
+            total_portfolio_value = total_current + portfolio_cash_total
             total_profit_loss = total_current - total_invested
 
             _sync_holdings_with_database(config_hash, processed, cash_balance)
