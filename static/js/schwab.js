@@ -201,5 +201,6 @@ async function refreshSchwabData() {
 }
 document.addEventListener('DOMContentLoaded', () => {
   refreshSchwabData();
-  setInterval(() => { if (!schwabLoading) refreshSchwabData(); }, 30000);
+  // Poll Schwab every 2 minutes to reduce load (was 30s but API was slow).
+  setInterval(() => { if (!schwabLoading) refreshSchwabData(); }, 120000);
 });
