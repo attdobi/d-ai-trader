@@ -1185,7 +1185,7 @@ def execute_real_world_trade(decision):
         traceback.print_exc()
         return False
 
-def update_holdings(decisions, skip_live_execution=False):
+def update_holdings(decisions, skip_live_execution=False, run_id=None):
     # Use Pacific time as naive timestamp (database stores as-is, dashboard formats correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
     timestamp = pacific_now.replace(tzinfo=None)  # Store as naive Pacific time
@@ -1453,6 +1453,8 @@ def update_holdings(decisions, skip_live_execution=False):
             })
 
     _sync_live_positions("final")
+
+    _refresh_trade_decision_record(run_id, decisions)
 
     return skipped_decisions
 
@@ -1906,6 +1908,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             decision["requested_amount_usd"] = amount
             decision["amount_usd"] = round(actual_spent, 2)
             decision["shares_executed"] = shares
+            decision["shares"] = shares
+            decision["total_value"] = round(actual_spent, 2)
 
             # Execute real-world trade if enabled
             if live_execution_enabled:
@@ -2173,9 +2177,20 @@ OUTPUT (STRICT)
     if "CROWD-FADE DIRECTIVE" not in user_prompt_template:
         user_prompt_template = user_prompt_template.rstrip() + "\n\n" + contrarian_directive.strip()
 
+    # If no summaries were passed in, attempt to pull the latest run from the database
+    if not summaries:
+        fallback_run_id = get_latest_run_id()
+        if fallback_run_id:
+            print(f"ℹ️  No summaries provided; loading latest run {fallback_run_id} for context.")
+            summaries = fetch_summaries(fallback_run_id) or []
+            if summaries:
+                print(f"📰 Loaded {len(summaries)} summaries from fallback run {fallback_run_id}.")
+        if not summaries:
+            print("⚠️  Still no summaries available; proceeding without news context.")
+
     # Limit the number of summaries to process to avoid rate limiting
-    # Process only the most recent summaries
-    max_summaries = 10
+    # Process only the most recent ones (default 6 to mirror dashboard)
+    max_summaries = int(os.getenv("DAI_DECIDER_SUMMARY_LIMIT", "6"))
     if len(summaries) > max_summaries:
         summaries = summaries[-max_summaries:]  # Take the most recent ones
         print(f"Processing only the {max_summaries} most recent summaries to avoid rate limiting")
@@ -2259,10 +2274,43 @@ OUTPUT (STRICT)
         sample = momentum_data[:3]
         print(f"🧪 Momentum data sample: {json.dumps(sample, default=str)[:500]}")
     momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
+    shortlist_limit = int(os.getenv("DAI_MOMENTUM_SHORTLIST_LIMIT", "8"))
+    momentum_shortlist_entries = momentum_data[:shortlist_limit]
+    shortlist_symbols = []
+    shortlist_lines = []
+    for entry in momentum_shortlist_entries:
+        symbol = (entry.get("symbol") or entry.get("ticker") or "").upper()
+        if not symbol:
+            continue
+        shortlist_symbols.append(symbol)
+        price = entry.get("price")
+        daily_pct = entry.get("daily_pct")
+        ten_min = entry.get("ten_min_pct")
+        day_range = f"{entry.get('day_low')}–{entry.get('day_high')}" if entry.get("day_low") is not None and entry.get("day_high") is not None else "N/A"
+        line = (
+            f"- {symbol}: "
+            f"Price ${price:.2f}" if isinstance(price, (int, float)) else f"- {symbol}: Price N/A"
+        )
+        if isinstance(price, (int, float)):
+            line = f"- {symbol}: Price ${price:.2f}"
+        else:
+            line = f"- {symbol}: Price N/A"
+        if isinstance(daily_pct, (int, float)):
+            line += f", Daily {daily_pct:+.2f}%"
+        if isinstance(ten_min, (int, float)):
+            line += f", 10m {ten_min:+.2f}%"
+        line += f", Day Range {day_range}"
+        shortlist_lines.append(line)
+    if shortlist_lines:
+        momentum_shortlist_text = "\n".join(shortlist_lines)
+    else:
+        momentum_shortlist_text = "None (no high-interest symbols extracted)."
     try:
         store_momentum_snapshot(config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
     except Exception as persist_err:
         print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
+
+    context_available = bool(parsed_summaries or momentum_data)
 
     # Pull latest decider feedback context for prompt enrichment
     feedback_context = "No recent performance feedback recorded."
@@ -2373,6 +2421,15 @@ OUTPUT (STRICT)
         " add a top-level \"cash_reason\" string explaining why cash stays idle (caps, spacing, cooldown, or no qualified setups)."
         " Keep the JSON object compact with the `decisions` array plus optional `cash_reason` only."
     )
+    prompt += "\n\n🎯 SYMBOL SHORTLIST:"
+    prompt += f"\n{momentum_shortlist_text}"
+    if shortlist_symbols:
+        prompt += (
+            f"\nMANDATE: With ${settled_cash_value:,.2f} settled and the shortlist above, "
+            "propose at least one BUY using one of these symbols unless a specific risk guardrail "
+            "(daily cap, cooldown, or open-order limit) explicitly blocks execution. "
+            "If you skip buying, cite the guardrail verbatim."
+        )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
@@ -2416,64 +2473,117 @@ OUTPUT (STRICT)
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
     cash_hold_reason = None
-    ai_response = prompt_manager.ask_openai(
-        prompt, 
-        system_prompt, 
-        agent_name="DeciderAgent"
-    )
+    retry_notes = ""
+    attempt = 1
+    max_attempts = 2
+    while True:
+        cash_hold_reason = None
+        ai_response = prompt_manager.ask_openai(
+            prompt + retry_notes,
+            system_prompt,
+            agent_name="DeciderAgent"
+        )
+        
+        # Ensure response is always a list
+        if isinstance(ai_response, dict):
+            cash_hold_reason = None
+            if isinstance(ai_response.get("cash_reason"), str) and ai_response.get("cash_reason").strip():
+                cash_hold_reason = ai_response.get("cash_reason").strip()
+            # Check if it's an error response first
+            if 'error' in ai_response:
+                print(f"❌ AI returned error: {ai_response.get('error')}")
+                ai_response = []
+            # Check if GPT-5 returned {"decisions": [...]} format
+            elif 'decisions' in ai_response and isinstance(ai_response['decisions'], list):
+                print(f"📦 Extracting decisions array from GPT-5 response object")
+                ai_response = ai_response['decisions']
+            else:
+                # Convert single dict to list (sometimes returns single decision as dict)
+                print(f"📦 Converting single decision dict to list format")
+                ai_response = [ai_response]
+        elif not isinstance(ai_response, list):
+            print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
+            ai_response = [ai_response] if ai_response else []
+        
+        # Guarantee a decision exists for every current holding
+        existing_decisions = {}
+        for decision in ai_response:
+            if isinstance(decision, dict):
+                ticker = (decision.get("ticker") or "").upper()
+                if ticker:
+                    existing_decisions[ticker] = decision
+        
+        current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
+        missing_tickers = [ticker for ticker in current_tickers if ticker not in existing_decisions]
+        
+        if missing_tickers:
+            print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} — auto-filling HOLD entries.")
+            for ticker in missing_tickers:
+                ai_response.append({
+                    "action": "hold",
+                    "ticker": ticker,
+                    "amount_usd": 0,
+                    "reason": "Auto-generated HOLD because AI omitted this position. Provide explicit reasoning next cycle."
+                })
+        
+        # If no buys and settled funds are available, surface the AI's cash rationale (or warn if missing)
+        buy_actions = [
+            d for d in ai_response
+            if isinstance(d, dict) and (d.get("action") or "").lower() == "buy" and float(d.get("amount_usd") or 0) > 0
+        ]
+        if settled_cash_value >= MIN_BUY_AMOUNT and not buy_actions:
+            if cash_hold_reason:
+                print(f"💬 Cash hold rationale (no buys with ${settled_cash_value:,.2f} settled): {cash_hold_reason}")
+                has_cash_hold = any(
+                    isinstance(d, dict) and (d.get("ticker") or "").upper() == "CASH"
+                    for d in ai_response
+                )
+                if not has_cash_hold:
+                    ai_response.append({
+                        "action": "hold",
+                        "ticker": "CASH",
+                        "amount_usd": 0,
+                        "reason": cash_hold_reason,
+                    })
+                    print("📝 Added explicit CASH hold decision to preserve runway rationale.")
+            else:
+                print(f"⚠️  No buys chosen despite ${settled_cash_value:,.2f} settled; AI did not supply a cash_reason.")
+        
+        needs_context_retry = (
+            context_available
+            and not buy_actions
+            and cash_hold_reason
+            and _claims_missing_context(cash_hold_reason)
+        )
+        needs_candidate_retry = (
+            not buy_actions
+            and shortlist_symbols
+            and attempt < max_attempts
+        )
+        needs_retry = (needs_context_retry or needs_candidate_retry) and attempt < max_attempts
+        if needs_retry:
+            if needs_context_retry:
+                print("⚠️  Decider claimed missing context despite summaries; retrying with explicit reminder.")
+                retry_notes += (
+                    "\n\nCONTEXT CONFIRMATION: You were provided "
+                    f"{len(parsed_summaries)} news summaries and a momentum recap covering "
+                    f"{len(momentum_data)} symbols. Reference them directly and identify trades. "
+                    "Do not claim the context is missing."
+                )
+            elif needs_candidate_retry:
+                print("⚠️  Decider refused to deploy capital despite shortlisted symbols; forcing BUY directive.")
+                retry_notes += (
+                    "\n\nMANDATORY EXECUTION: Settled funds are available and the SYMBOL SHORTLIST above "
+                    f"lists {len(shortlist_symbols)} liquid candidates ({', '.join(shortlist_symbols)}). "
+                    "Output at least one BUY decision referencing one of these symbols unless a concrete guardrail "
+                    "(daily cap, cooldown, or explicit risk limit stated in the input) prevents it. "
+                    "If you still skip buying, cite the specific guardrail verbatim."
+                )
+            attempt += 1
+            continue
+        
+        break
     
-    # Ensure response is always a list
-    if isinstance(ai_response, dict):
-        if isinstance(ai_response.get("cash_reason"), str) and ai_response.get("cash_reason").strip():
-            cash_hold_reason = ai_response.get("cash_reason").strip()
-        # Check if it's an error response first
-        if 'error' in ai_response:
-            print(f"❌ AI returned error: {ai_response.get('error')}")
-            ai_response = []
-        # Check if GPT-5 returned {"decisions": [...]} format
-        elif 'decisions' in ai_response and isinstance(ai_response['decisions'], list):
-            print(f"📦 Extracting decisions array from GPT-5 response object")
-            ai_response = ai_response['decisions']
-        else:
-            # Convert single dict to list (sometimes returns single decision as dict)
-            print(f"📦 Converting single decision dict to list format")
-            ai_response = [ai_response]
-    elif not isinstance(ai_response, list):
-        print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
-        ai_response = [ai_response] if ai_response else []
-
-    # Guarantee a decision exists for every current holding
-    existing_decisions = {}
-    for decision in ai_response:
-        if isinstance(decision, dict):
-            ticker = (decision.get("ticker") or "").upper()
-            if ticker:
-                existing_decisions[ticker] = decision
-
-    current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
-    missing_tickers = [ticker for ticker in current_tickers if ticker not in existing_decisions]
-
-    if missing_tickers:
-        print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} — auto-filling HOLD entries.")
-        for ticker in missing_tickers:
-            ai_response.append({
-                "action": "hold",
-                "ticker": ticker,
-                "amount_usd": 0,
-                "reason": "Auto-generated HOLD because AI omitted this position. Provide explicit reasoning next cycle."
-            })
-
-    # If no buys and settled funds are available, surface the AI's cash rationale (or warn if missing)
-    buy_actions = [
-        d for d in ai_response
-        if isinstance(d, dict) and (d.get("action") or "").lower() == "buy" and float(d.get("amount_usd") or 0) > 0
-    ]
-    if settled_cash_value >= MIN_BUY_AMOUNT and not buy_actions:
-        if cash_hold_reason:
-            print(f"💬 Cash hold rationale (no buys with ${settled_cash_value:,.2f} settled): {cash_hold_reason}")
-        else:
-            print(f"⚠️  No buys chosen despite ${settled_cash_value:,.2f} settled; AI did not supply a cash_reason.")
-
     # If market is closed, modify decisions to show they're deferred
     if not market_open:
         print("🕒 Market closed - Decisions recorded but execution deferred")
@@ -2486,6 +2596,9 @@ OUTPUT (STRICT)
                     decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
                     decision['execution_status'] = 'market_closed'
     
+    if not buy_actions and shortlist_symbols:
+        print("⚠️  AI declined to submit BUY orders despite available shortlist; storing HOLD for audit trail.")
+
     return ai_response
 
 def log_sell_analysis(decisions, holdings):
@@ -2585,6 +2698,50 @@ def extract_decision_info_from_text(text_content):
             "reason": f"Extracted from malformed response: {str(text_content)[:100]}..."
         }
     return None
+
+
+def _claims_missing_context(reason_text: str) -> bool:
+    """Detect when the AI claims context was missing despite us providing summaries."""
+    if not reason_text:
+        return False
+    lowered = reason_text.lower()
+    keywords = [
+        "no news",
+        "no context",
+        "no summaries",
+        "no valid setups provided",
+        "without tickers",
+        "no holdings",
+        "no portfolio",
+        "nothing provided",
+    ]
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _refresh_trade_decision_record(run_id, decisions):
+    """Update the stored trade decisions with execution-adjusted details."""
+    if not run_id:
+        return
+
+    try:
+        serialized = json.dumps(decisions)
+    except TypeError:
+        serialized = json.dumps(json.loads(json.dumps(decisions, default=str)))
+
+    config_hash = get_current_config_hash()
+    with engine.begin() as conn:
+        result = conn.execute(text("""
+            UPDATE trade_decisions
+               SET data = :data
+             WHERE config_hash = :config_hash
+               AND run_id = :run_id
+        """), {
+            "data": serialized,
+            "config_hash": config_hash,
+            "run_id": run_id,
+        })
+        if result.rowcount == 0:
+            print(f"⚠️  No trade_decisions row found for run_id={run_id} to refresh.")
 
 def store_trade_decisions(decisions, run_id):
     config_hash = get_current_config_hash()
@@ -2836,7 +2993,10 @@ if __name__ == "__main__":
         # Execute trades through the unified trading interface
         try:
             from trading_interface import trading_interface
-            execution_results = trading_interface.execute_trade_decisions(validated_decisions)
+            execution_results = trading_interface.execute_trade_decisions(
+                validated_decisions,
+                run_id=run_id,
+            )
 
             # Log execution results
             if execution_results.get("summary"):
@@ -2852,11 +3012,11 @@ if __name__ == "__main__":
         except ImportError:
             # Fallback to original method if trading_interface is not available
             print("⚠️  Trading interface not available, using simulation only")
-            update_holdings(validated_decisions)
+            update_holdings(validated_decisions, run_id=run_id)
         except Exception as e:
             print(f"❌ Error in trading interface: {e}")
             print("🔄 Falling back to simulation mode")
-            update_holdings(validated_decisions)
+            update_holdings(validated_decisions, run_id=run_id)
 
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]

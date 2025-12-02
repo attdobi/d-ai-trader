@@ -65,12 +65,13 @@ class TradingInterface:
             self.readonly_mode
         )
     
-    def execute_trade_decisions(self, decisions: List[Dict]) -> Dict[str, Any]:
+    def execute_trade_decisions(self, decisions: List[Dict], run_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Execute trading decisions in both simulation (dashboard) and optionally live (Schwab)
         
         Args:
             decisions: List of trading decisions from the AI agent
+            run_id: Identifier for the current decider run (used to sync UI records)
             
         Returns:
             Dictionary with execution results
@@ -92,7 +93,7 @@ class TradingInterface:
         
         try:
             # Always execute in simulation (update dashboard database)
-            sim_results = self._execute_simulation_trades(decisions)
+            sim_results = self._execute_simulation_trades(decisions, run_id=run_id)
             results["simulation_results"] = sim_results
             
             # Count simulation results
@@ -139,7 +140,7 @@ class TradingInterface:
             results["summary"]["errors"] += 1
             return results
     
-    def _execute_simulation_trades(self, decisions: List[Dict]) -> List[Dict]:
+    def _execute_simulation_trades(self, decisions: List[Dict], run_id: Optional[str] = None) -> List[Dict]:
         """
         Execute trades in simulation mode (update dashboard database)
         This mirrors the existing update_holdings function logic
@@ -150,7 +151,11 @@ class TradingInterface:
             logger.info(f"Executing {len(decisions)} decisions in simulation mode")
             
             # Use the existing update_holdings function
-            update_holdings(decisions, skip_live_execution=(self.trading_mode in {"live", "real_world"}))
+            update_holdings(
+                decisions,
+                skip_live_execution=(self.trading_mode in {"live", "real_world"}),
+                run_id=run_id,
+            )
             
             # Return success results for all decisions
             results = []

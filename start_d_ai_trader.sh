@@ -174,6 +174,25 @@ echo "   📈 Intraday:     Every ${CADENCE_MINUTES} min (6:35 AM - 1:00 PM PT)"
 echo "   📊 Feedback:     1:30 PM PT (daily performance analysis)"
 echo ""
 
+# Ensure requested port is free before launching
+echo "🧹 Ensuring port ${PORT} is free ..."
+if command -v lsof >/dev/null 2>&1; then
+  EXISTING_PIDS=($(lsof -ti tcp:"${PORT}" || true))
+  if (( ${#EXISTING_PIDS[@]} )); then
+    for pid in "${EXISTING_PIDS[@]}"; do
+      if [[ "${pid}" =~ ^[0-9]+$ ]]; then
+        echo "   Killing PID ${pid} (was listening on port ${PORT})"
+        kill -9 "${pid}" 2>/dev/null || true
+      fi
+    done
+    sleep 1
+  else
+    echo "   Port ${PORT} already free."
+  fi
+else
+  echo "⚠️  lsof not available; skipping port pre-clean."
+fi
+
 # Start the dashboard and automation concurrently.
 # Avoid passing CLI flags that may not exist in your local files;
 # rely on exported env vars which your code already reads.

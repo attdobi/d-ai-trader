@@ -128,6 +128,8 @@ class DecisionValidator:
         
         # Rule 8: HOLD validation - can only hold stocks you own
         if action == 'hold':
+            if ticker == 'CASH':
+                return True, ""
             if ticker not in self.current_tickers:
                 return False, f"AI HALLUCINATION: Cannot hold {ticker} - you don't own it! (Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'})"
         
