@@ -649,6 +649,15 @@ class PromptManager:
                 
                 content = content.strip() if content else ""
                 
+                if decider_agent:
+                    preview_limit = int(os.getenv("DAI_DECIDER_RAW_PREVIEW", "4000"))
+                    snippet = content[:preview_limit]
+                    shown = len(snippet)
+                    total = len(content)
+                    print(f"🧾 Raw Decider completion ({total} chars, showing {shown}):\n{snippet}")
+                    if total > shown:
+                        print("… (Decider completion truncated — raise DAI_DECIDER_RAW_PREVIEW to see more)")
+                
                 # Remove markdown code blocks if present (```json ... ```)
                 if content.startswith('```'):
                     # Remove opening ```json or ```

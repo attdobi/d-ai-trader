@@ -50,6 +50,13 @@ from schwab_client import schwab_client
 import subprocess
 import sys
 import os
+from update_prices import get_current_price_robust
+from d_ai_trader import (
+    DAITraderOrchestrator,
+    mark_manual_summarizer_pending,
+    clear_manual_summarizer_pending,
+    mark_manual_decider_window,
+)
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
@@ -1742,8 +1749,6 @@ def run_summary_analyzer_endpoint():
 def trigger_summarizer():
     """Manually trigger summarizer agents"""
     try:
-        # Import the orchestrator to run summarizer
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
         
         # Run summarizer in a separate thread to avoid blocking
@@ -1759,6 +1764,7 @@ def trigger_summarizer():
         
         thread = threading.Thread(target=run_summarizer, daemon=True, name="ManualSummarizer")
         thread.start()
+        mark_manual_summarizer_pending()
         
         return jsonify({
             'success': True,
@@ -1771,14 +1777,14 @@ def trigger_summarizer():
 def trigger_decider():
     """Manually trigger decider agent"""
     try:
-        # Import the orchestrator to run decider
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
+        clear_manual_summarizer_pending()
+        mark_manual_decider_window()
         
         # Run decider in a separate thread to avoid blocking
         def run_decider():
             try:
-                orchestrator.run_decider_agent()
+                orchestrator.run_decider_agent(force=True)
             except Exception as e:
                 print(f"Error in manual decider run: {e}")
             finally:
@@ -1800,8 +1806,6 @@ def trigger_decider():
 def trigger_feedback():
     """Manually trigger feedback agent"""
     try:
-        # Import the orchestrator to run feedback
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
         
         # Run feedback in a separate thread to avoid blocking
@@ -1898,17 +1902,13 @@ def trigger_agent(agent_type):
 def trigger_all():
     """Manually trigger all agents in sequence"""
     try:
-        # Import the orchestrator to run all agents
-        from d_ai_trader import DAITraderOrchestrator
-        from config import get_current_config_hash
-        import json
-        from datetime import datetime
-        
         # Ensure config hash is set before running
         config_hash = get_current_config_hash()
         print(f"🔧 Running all agents for config: {config_hash}")
         
         orchestrator = DAITraderOrchestrator()
+        mark_manual_summarizer_pending()
+        mark_manual_decider_window()
         
         # Run all agents in sequence in a separate thread
         def run_all():
@@ -1935,7 +1935,7 @@ def trigger_all():
                 
                 # 2. Run decider
                 print("🤖 Step 2/3: Running decider agent...")
-                orchestrator.run_decider_agent()
+                orchestrator.run_decider_agent(force=True)
                 print("✅ Decider completed")
                 
                 # 3. Run feedback

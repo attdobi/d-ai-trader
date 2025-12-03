@@ -63,12 +63,106 @@ TYPICAL_BUY_HIGH = float(_os.getenv("DAI_TYPICAL_BUY_HIGH", "3500"))
 MAX_BUY_AMOUNT = float(_os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 SUMMARY_MAX_CHARS = int(_os.getenv("DAI_SUMMARY_CHARS", "3000"))
 ONE_TRADE_MODE = int(_os.getenv("DAI_ONE_TRADE_MODE", "0"))
+_profit_threshold_env = _os.getenv("DAI_FORCE_PROFIT_MIN_PCT") or _os.getenv("DAI_PROFIT_TAKE_MIN_PCT") or "3.0"
+try:
+    PROFIT_ENFORCEMENT_MIN_PCT = max(0.0, float(_profit_threshold_env))
+except (TypeError, ValueError):
+    PROFIT_ENFORCEMENT_MIN_PCT = 3.0
+PROFIT_ENFORCEMENT_ENABLED = (_os.getenv("DAI_FORCE_PROFIT_TAKING", "1").strip().lower() not in {"0", "false", "off", "no"})
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
 
 # Initialize feedback tracker
 feedback_tracker = TradeOutcomeTracker()
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str) and not value.strip():
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _holding_gain_pct(holding):
+    purchase_price = _safe_float(holding.get("purchase_price"))
+    current_price = _safe_float(holding.get("current_price"))
+    if purchase_price > 0 and current_price > 0:
+        return ((current_price - purchase_price) / purchase_price) * 100.0
+    total_value = _safe_float(holding.get("total_value"))
+    gain_loss = _safe_float(holding.get("gain_loss"))
+    if total_value > 0:
+        return (gain_loss / total_value) * 100.0
+    return 0.0
+
+
+def _holding_current_value(holding):
+    current_value = _safe_float(holding.get("current_value"))
+    if current_value > 0:
+        return current_value
+    shares = _safe_float(holding.get("shares"))
+    current_price = _safe_float(holding.get("current_price"))
+    if shares > 0 and current_price > 0:
+        return shares * current_price
+    fallback = _safe_float(holding.get("total_value"))
+    if fallback > 0:
+        return fallback
+    return 0.0
+
+
+def enforce_profit_taking_guardrail(decisions, holdings_by_ticker, threshold_pct=PROFIT_ENFORCEMENT_MIN_PCT):
+    """
+    Ensure ≥threshold winners are converted to SELL actions even if the model resists.
+    Returns a list of human-readable override summaries.
+    """
+    if not PROFIT_ENFORCEMENT_ENABLED or not holdings_by_ticker or not isinstance(decisions, list):
+        return []
+
+    forced = []
+    for ticker, holding in holdings_by_ticker.items():
+        gain_pct = _holding_gain_pct(holding)
+        if gain_pct < threshold_pct:
+            continue
+
+        decision = None
+        for candidate in decisions:
+            if isinstance(candidate, dict) and (candidate.get("ticker") or "").upper() == ticker:
+                decision = candidate
+                break
+
+        existing_action = (decision.get("action") or "").lower() if decision else ""
+        if existing_action == "sell":
+            continue
+
+        if decision is None:
+            decision = {"ticker": ticker}
+            decisions.append(decision)
+
+        amount_value = _holding_current_value(holding)
+        basis_val = _safe_float(holding.get("purchase_price"))
+        basis_text = f"${basis_val:.2f}" if basis_val > 0 else "basis n/a"
+        forced_reason = (
+            f"Forced SELL {ticker}: +{gain_pct:.1f}% vs {basis_text} cost. "
+            "Profit-taking guardrail frees settled funds for the next GPT-5.1 regular cycle."
+        )
+        decision.update({
+            "action": "sell",
+            "amount_usd": amount_value,
+            "reason": forced_reason,
+            "enforced": "profit_guardrail",
+        })
+        shares = _safe_float(holding.get("shares"))
+        if shares > 0:
+            decision["shares"] = shares
+
+        forced.append(f"{ticker} +{gain_pct:.1f}% (overrode {existing_action or 'none'})")
+        print(f"🚨 Profit-taking guardrail: overriding {ticker} decision ({existing_action or 'missing'}) with SELL at +{gain_pct:.1f}%")
+
+    return forced
 
 
 def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momentum_summary, momentum_recap):
@@ -2313,6 +2407,13 @@ OUTPUT (STRICT)
     tickers_entered_today_list = daily_usage.get("tickers_entered_today", [])
     tickers_entered_today_str = ", ".join(tickers_entered_today_list) if tickers_entered_today_list else "none"
 
+    template_has_holdings = "{holdings}" in user_prompt_template
+    template_has_summaries = "{summaries}" in user_prompt_template
+    template_has_momentum = "{momentum_recap}" in user_prompt_template
+    template_has_feedback = "{feedback_context}" in user_prompt_template
+    template_has_cash = ("{settled_cash}" in user_prompt_template) or ("${settled_cash}" in user_prompt_template)
+    template_has_available_cash = "{available_cash}" in user_prompt_template
+
     user_prompt_values = {
         "account_mode": account_mode,
         "settled_cash": f"{settled_cash_prompt:,.2f}",
@@ -2329,16 +2430,33 @@ OUTPUT (STRICT)
         "typical_buy_high": f"{int(TYPICAL_BUY_HIGH):,}",
         "max_buy": f"{int(MAX_BUY_AMOUNT):,}",
         "holdings": holdings_text,
+        "available_cash": f"{available_cash:,.2f}",
         "summaries": summarized_text,
         "momentum_recap": momentum_recap,
         "feedback_context": feedback_context,
     }
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
+    auto_context_sections = []
+    if not template_has_cash:
+        auto_context_sections.append(f"Settled cash available: ${settled_cash_prompt:,.2f} (min buy ${MIN_BUY_AMOUNT:,.0f})")
+    if not template_has_available_cash:
+        auto_context_sections.append(f"Cash on hand (incl. unsettled): ${available_cash:,.2f}")
+    if not template_has_holdings:
+        auto_context_sections.append(f"Holdings snapshot:\n{holdings_text}")
+    if not template_has_summaries:
+        auto_context_sections.append("Summaries digest:\n" + summarized_text)
+    if not template_has_momentum:
+        auto_context_sections.append("Momentum recap:\n" + momentum_recap)
+    if not template_has_feedback and feedback_context and feedback_context.strip():
+        auto_context_sections.append("Feedback context:\n" + feedback_context.strip())
+    if auto_context_sections:
+        prompt += "\n\n# Auto-context (missing fields in prompt template)\n" + "\n\n".join(auto_context_sections)
     prompt += (
-        "\n\nCASH REASON REQUIREMENT:"
+        "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
         f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
-        " add a top-level \"cash_reason\" string explaining why cash stays idle (caps, spacing, cooldown, or no qualified setups)."
-        " Keep the JSON object compact with the `decisions` array plus optional `cash_reason` only."
+        " you must add a top-level \"cash_reason\" that (a) states why no BUY (caps, cooldown, min-buy unmet, lack of edge, etc.)"
+        " and (b) confirms that every ≥+3% winner was harvested or explicitly names any retained winner with its % gain and fresh catalyst justification."
+        " Keep the object compact: {\"decisions\":[...], \"cash_reason\":\"...\"}."
     )
 
 
@@ -2359,8 +2477,10 @@ OUTPUT (STRICT)
         print("… (prompt truncated for console preview)")
     print(f"🧠 Decider prompt (full {len(prompt)} chars):\n{prompt}")
     
-    # Build explicit list of required decisions for current holdings
-    current_tickers = [h['ticker'] for h in stock_holdings] if stock_holdings else []
+    # Build explicit list/map of required decisions for current holdings
+    holdings_by_ticker = {h['ticker'].upper(): h for h in stock_holdings}
+    current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
+    current_ticker_set = set(current_tickers)
     
     # Show what AI is being told
     if current_tickers:
@@ -2388,6 +2508,7 @@ OUTPUT (STRICT)
         system_prompt, 
         agent_name="DeciderAgent"
     )
+    print(f"🗒️ Parsed Decider response ({type(ai_response).__name__}): {ai_response}")
     
     # Ensure response is always a list
     if isinstance(ai_response, dict):
@@ -2409,6 +2530,21 @@ OUTPUT (STRICT)
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
 
+    # Drop HOLD decisions for tickers we don't own (e.g., "PORTFOLIO", "CASH")
+    if current_ticker_set:
+        filtered_decisions = []
+        for decision in ai_response:
+            if not isinstance(decision, dict):
+                filtered_decisions.append(decision)
+                continue
+            action = (decision.get("action") or "").lower()
+            ticker = (decision.get("ticker") or "").upper()
+            if action == "hold" and ticker and ticker not in current_ticker_set:
+                print(f"⚠️  Dropping hallucinated HOLD for unknown ticker '{ticker}'")
+                continue
+            filtered_decisions.append(decision)
+        ai_response = filtered_decisions
+
     # Guarantee a decision exists for every current holding
     existing_decisions = {}
     for decision in ai_response:
@@ -2417,18 +2553,35 @@ OUTPUT (STRICT)
             if ticker:
                 existing_decisions[ticker] = decision
 
-    current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
-    missing_tickers = [ticker for ticker in current_tickers if ticker not in existing_decisions]
+    missing_tickers = [ticker for ticker in current_ticker_set if ticker not in existing_decisions]
 
     if missing_tickers:
         print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} — auto-filling HOLD entries.")
+        def fmt_num(val):
+            try:
+                return f"{float(val):,.2f}"
+            except (TypeError, ValueError):
+                return "?"
         for ticker in missing_tickers:
+            holding = holdings_by_ticker.get(ticker)
+            shares_txt = fmt_num(holding.get("shares")) if holding else "?"
+            basis_txt = fmt_num(holding.get("purchase_price")) if holding else "?"
+            last_txt = fmt_num(holding.get("current_price")) if holding else "?"
+            gl_txt = fmt_num(holding.get("gain_loss")) if holding else "?"
             ai_response.append({
                 "action": "hold",
                 "ticker": ticker,
                 "amount_usd": 0,
-                "reason": "Auto-generated HOLD because AI omitted this position. Provide explicit reasoning next cycle."
+                "reason": (
+                    f"Auto HOLD {ticker}: AI omitted this position "
+                    f"({shares_txt} sh @ ${basis_txt}, last ${last_txt}, G/L ${gl_txt}). "
+                    "Carry forward to next cycle with explicit reasoning."
+                )
             })
+
+    forced_override_notes = enforce_profit_taking_guardrail(ai_response, holdings_by_ticker)
+    if forced_override_notes:
+        print(f"🛡️  Profit-taking guardrail executed for: {', '.join(forced_override_notes)}")
 
     # If no buys and settled funds are available, surface the AI's cash rationale (or warn if missing)
     buy_actions = [

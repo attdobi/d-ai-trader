@@ -271,6 +271,42 @@ th { background: rgba(18,28,51,0.94); font-weight:600; color:var(--muted); text-
 
 tbody tr:hover { background: rgba(66,201,255,0.1); }
 
+.ticker-cell {
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.ticker-link {
+  color: var(--accent);
+  font-weight:700;
+  text-decoration:none;
+  letter-spacing:0.08em;
+}
+
+.ticker-link:hover {
+  text-decoration:underline;
+  color: var(--accent-strong);
+}
+
+.chart-button {
+  background: rgba(66,201,255,0.18);
+  border:1px solid rgba(66,201,255,0.32);
+  color: var(--text);
+  padding:6px 12px;
+  border-radius:999px;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  cursor:pointer;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.chart-button:hover {
+  transform: translateY(-1px);
+  box-shadow:0 10px 20px rgba(66,201,255,0.25);
+}
+
 .charts-container { display:flex; gap:28px; margin-top:36px; flex-wrap:wrap; }
 
 .chart-section {

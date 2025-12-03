@@ -4,6 +4,7 @@
 <h1>Latest Trade Decisions</h1>
 {% include "partials/_config_banner.html" %}
 
+<div class="table-container">
 <table>
   <thead>
     <tr>
@@ -18,8 +19,21 @@
   <tbody>
     {% for trade in trades %}
       {% for decision in trade.data %}
+      {% set raw_ticker = decision.get('ticker', 'N/A') %}
+      {% set ticker = raw_ticker.upper() if raw_ticker %}
       <tr>
-        <td>{{ decision.get('ticker', 'N/A') }}</td>
+        <td class="ticker-cell">
+          {% if ticker and ticker != 'N/A' %}
+            <a class="ticker-link" href="https://finance.yahoo.com/quote/{{ ticker }}/" target="_blank" rel="noopener noreferrer">
+              {{ ticker }}
+            </a>
+            <button type="button" class="chart-button" data-ticker="{{ ticker }}" title="Open Yahoo Finance chart">
+              Chart
+            </button>
+          {% else %}
+            N/A
+          {% endif %}
+        </td>
         <td>{{ decision.get('action', 'N/A') }}</td>
         <td>
           {% if decision.get('shares') %}
@@ -44,4 +58,10 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script defer src="{{ url_for('static', filename='js/trades.js') }}"></script>
 {% endblock %}
