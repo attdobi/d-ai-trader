@@ -80,8 +80,12 @@ SUMMARY_WITH_IMAGES_ONLY = os.getenv("SUMMARY_WITH_IMAGES_ONLY", "0") == "1"
 if SUMMARY_WITH_IMAGES_ONLY:
     print("📷 SUMMARY_WITH_IMAGES_ONLY enabled — summaries will rely solely on screenshots.")
 
-# Automatically install correct ChromeDriver version
-chromedriver_autoinstaller.install()
+# Automatically install correct ChromeDriver version and capture the path.
+CHROMEDRIVER_BINARY = chromedriver_autoinstaller.install()
+if CHROMEDRIVER_BINARY and os.path.exists(CHROMEDRIVER_BINARY):
+    print(f"✅ Chromedriver available at {CHROMEDRIVER_BINARY}")
+else:
+    print("⚠️  Chromedriver installation path not detected; undetected_chromedriver will attempt its own download.")
 
 # Track UC cache reset to avoid repeated deletions in a single run
 UC_CACHE_RESET = False
@@ -141,6 +145,24 @@ def create_chrome_options():
     options.add_argument("--disable-plugins")  # Disable plugins
     options.add_argument("--disable-images")  # Disable image loading for faster performance
     return options
+
+
+def build_driver_kwargs():
+    """Construct keyword arguments for uc.Chrome() with consistent binaries."""
+    kwargs = {"options": create_chrome_options()}
+    version_main = chrome_major_version()
+    if version_main:
+        kwargs["version_main"] = version_main
+    if CHROMEDRIVER_BINARY and os.path.exists(CHROMEDRIVER_BINARY):
+        kwargs["driver_executable_path"] = CHROMEDRIVER_BINARY
+    chrome_binary_override = (
+        os.getenv("CHROME_BINARY")
+        or os.getenv("GOOGLE_CHROME_BIN")
+        or os.getenv("CHROME_EXECUTABLE")
+    )
+    if chrome_binary_override and os.path.exists(chrome_binary_override):
+        kwargs["browser_executable_path"] = chrome_binary_override
+    return kwargs
 
 # Global driver variable (will be created fresh for each run)
 driver = None
@@ -639,10 +661,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                     
                     # Try to create a fresh driver
                     try:
-                        driver_kwargs = {"options": create_chrome_options()}
-                        version_main = chrome_major_version()
-                        if version_main:
-                            driver_kwargs["version_main"] = version_main
+                        driver_kwargs = build_driver_kwargs()
                         current_driver = uc.Chrome(**driver_kwargs)
                         print(f"[Worker {worker_id}] ✅ New driver created for {agent_name}")
                         time.sleep(2)  # Allow Chrome to finish bootstrapping
@@ -699,10 +718,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                             current_driver = None
                             time.sleep(2)
                             try:
-                                driver_kwargs = {"options": create_chrome_options()}
-                                version_main = chrome_major_version()
-                                if version_main:
-                                    driver_kwargs["version_main"] = version_main
+                                driver_kwargs = build_driver_kwargs()
                                 current_driver = uc.Chrome(**driver_kwargs)
                                 print(f"[Worker {worker_id}] ✅ Recreated driver for {agent_name}")
                                 time.sleep(2)  # Allow Chrome to fully initialize after recreation
