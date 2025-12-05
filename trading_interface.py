@@ -10,7 +10,14 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy import text
-from config import engine, TRADING_MODE, DEBUG_TRADING, get_current_config_hash, SCHWAB_ACCOUNT_HASH
+from config import (
+    engine,
+    TRADING_MODE,
+    DEBUG_TRADING,
+    get_current_config_hash,
+    SCHWAB_ACCOUNT_HASH,
+    IS_MARGIN_ACCOUNT,
+)
 from schwab_client import schwab_client, get_portfolio_snapshot
 from schwab_ledger import compute_effective_funds, components as ledger_components
 from feedback_agent import TradeOutcomeTracker
@@ -58,12 +65,13 @@ class TradingInterface:
             self.readonly_mode
         )
     
-    def execute_trade_decisions(self, decisions: List[Dict]) -> Dict[str, Any]:
+    def execute_trade_decisions(self, decisions: List[Dict], run_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Execute trading decisions in both simulation (dashboard) and optionally live (Schwab)
         
         Args:
             decisions: List of trading decisions from the AI agent
+            run_id: Identifier for the current decider run (used to sync UI records)
             
         Returns:
             Dictionary with execution results
@@ -84,19 +92,31 @@ class TradingInterface:
         }
         
         try:
-            # Always execute in simulation (update dashboard database)
-            sim_results = self._execute_simulation_trades(decisions)
-            results["simulation_results"] = sim_results
-            
-            # Count simulation results
-            for result in sim_results:
-                if result.get("status") == "executed":
-                    results["summary"]["simulation_executed"] += 1
-                elif result.get("status") == "skipped":
-                    results["summary"]["skipped"] += 1
-                else:
-                    results["summary"]["errors"] += 1
-            
+            def tally_sim_results(sim_entries: List[Dict[str, Any]]) -> None:
+                for entry in sim_entries:
+                    status = (entry.get("status") or "").lower()
+                    if status == "executed":
+                        results["summary"]["simulation_executed"] += 1
+                    elif status == "skipped":
+                        results["summary"]["skipped"] += 1
+                    elif status == "pending":
+                        continue
+                    else:
+                        results["summary"]["errors"] += 1
+
+            should_defer_sim = (
+                self.trading_mode in {"live", "real_world"}
+                and self.schwab_enabled
+                and not self.readonly_mode
+            )
+
+            if not should_defer_sim:
+                sim_results = self._execute_simulation_trades(decisions, run_id=run_id)
+                results["simulation_results"] = sim_results
+                tally_sim_results(sim_results)
+            else:
+                logger.info("Live mode active — deferring holdings update until Schwab confirms fills.")
+
             # Execute in live trading if enabled
             if self.trading_mode in {"live", "real_world"} and self.schwab_enabled:
                 # Run safety checks before live trading
@@ -108,20 +128,39 @@ class TradingInterface:
                     results["live_results"] = live_results
                 else:
                     logger.warning("All live trades blocked by safety checks")
-                    results["live_results"] = [{
+                    live_results = [{
                         "status": "blocked",
                         "reason": "All trades blocked by safety checks",
                         "execution_type": "live"
                     }]
+                    results["live_results"] = live_results
                 
                 # Count live results
                 for result in live_results:
-                    if result.get("status") == "success":
+                    status = (result.get("status") or "").lower()
+                    if status == "success":
                         results["summary"]["live_executed"] += 1
-                    elif result.get("status") == "skipped":
+                    elif status == "skipped":
                         results["summary"]["skipped"] += 1
                     else:
                         results["summary"]["errors"] += 1
+
+                if should_defer_sim:
+                    success_decisions = [
+                        res.get("decision")
+                        for res in live_results
+                        if res.get("status") == "success" and res.get("decision")
+                    ]
+                    if success_decisions:
+                        sim_results = self._execute_simulation_trades(
+                            success_decisions,
+                            run_id=run_id,
+                            skip_live_override=True,
+                        )
+                        results["simulation_results"] = sim_results
+                        tally_sim_results(sim_results)
+                    else:
+                        logger.warning("No live orders filled — skipping holdings update for this run.")
             
             logger.info(f"Trade execution completed: {results['summary']}")
             return results
@@ -132,7 +171,12 @@ class TradingInterface:
             results["summary"]["errors"] += 1
             return results
     
-    def _execute_simulation_trades(self, decisions: List[Dict]) -> List[Dict]:
+    def _execute_simulation_trades(
+        self,
+        decisions: List[Dict],
+        run_id: Optional[str] = None,
+        skip_live_override: Optional[bool] = None,
+    ) -> List[Dict]:
         """
         Execute trades in simulation mode (update dashboard database)
         This mirrors the existing update_holdings function logic
@@ -140,10 +184,20 @@ class TradingInterface:
         from decider_agent import update_holdings
         
         try:
+            if not decisions:
+                return []
             logger.info(f"Executing {len(decisions)} decisions in simulation mode")
             
             # Use the existing update_holdings function
-            update_holdings(decisions, skip_live_execution=(self.trading_mode in {"live", "real_world"}))
+            update_holdings(
+                decisions,
+                skip_live_execution=(
+                    skip_live_override
+                    if skip_live_override is not None
+                    else (self.trading_mode in {"live", "real_world"})
+                ),
+                run_id=run_id,
+            )
             
             # Return success results for all decisions
             results = []
@@ -432,7 +486,8 @@ class TradingInterface:
                     "price": current_price,
                     "execution_type": "live",
                     "timestamp": datetime.now().isoformat(),
-                    "reason": reason
+                    "reason": reason,
+                    "decision": dict(decision),
                 }
             else:
                 error_payload = {
@@ -516,6 +571,7 @@ class TradingInterface:
             positions_raw = portfolio.get("positions_raw", [])
             ledger_state = portfolio.get("ledger_state")
             ledger_comp = portfolio.get("ledger_components") or ledger_components()
+            margin_account = bool(IS_MARGIN_ACCOUNT)
 
             total_value = sum(p.get("market_value", 0) for p in formatted_positions)
 
@@ -531,6 +587,13 @@ class TradingInterface:
             explicit_cash = baseline_cash
             derived_cash = portfolio.get("funds_available_derived", baseline_cash)
             effective_cash = compute_effective_funds(baseline_cash)
+            settled_cash_guardrail = max(float(cash_balance_settled) - float(unsettled_cash), 0.0)
+            funds_available_display = (
+                float(effective_cash)
+                if margin_account
+                else min(float(effective_cash), settled_cash_guardrail)
+            )
+            funds_available_display = max(0.0, funds_available_display)
 
             buying_power = effective_cash
             day_trading_power = 0.0
@@ -557,6 +620,8 @@ class TradingInterface:
                 "unsettled_cash": unsettled_cash,
                 "funds_available_for_trading": effective_cash,
                 "funds_available_effective": effective_cash,
+                "funds_available_display": funds_available_display,
+                "settled_funds_available": settled_cash_guardrail,
                 "funds_available_explicit": explicit_cash,
                 "funds_available_derived": derived_cash,
                 "same_day_net_activity": same_day_net,
@@ -569,10 +634,12 @@ class TradingInterface:
                     "buying_power": buying_power,
                     "day_trading_buying_power": day_trading_power,
                     "funds_available_for_trading": effective_cash,
+                    "funds_available_display": funds_available_display,
                     "funds_available_explicit": explicit_cash,
                     "funds_available_derived": derived_cash,
                     "same_day_net_activity": same_day_net,
                     "cash_balance": cash_balance_settled,
+                    "settled_funds_available": settled_cash_guardrail,
                     "unsettled_cash": unsettled_cash,
                     "order_reserve": order_reserve,
                     "balances_raw": balances_raw,
@@ -582,6 +649,7 @@ class TradingInterface:
                     "account_type": portfolio.get("account_type"),
                     "settled_funds_strict": settled_cash_strict,
                     "available_trading_funds": trading_funds,
+                    "is_margin_account": margin_account,
                 },
                 "positions_count": len(formatted_positions),
                 "last_updated": datetime.now().isoformat(),
@@ -592,17 +660,20 @@ class TradingInterface:
                     "explicit": explicit_cash,
                     "derived_cash": derived_cash,
                     "settled_cash": cash_balance_settled,
+                    "settled_cash_guardrail": settled_cash_guardrail,
+                    "funds_display": funds_available_display,
                     "unsettled_cash": unsettled_cash,
                     "same_day_net": same_day_net,
                     "order_reserve": order_reserve,
                 },
+                "is_margin_account": margin_account,
                 "ledger_state": ledger_state,
                 "ledger_components": ledger_comp,
                 "transactions_sample": portfolio.get("transactions_sample")
             }
             if persist:
                 try:
-                    self._persist_live_snapshot(formatted_positions, cash_balance_settled, result)
+                    self._persist_live_snapshot(formatted_positions, funds_available_display, result)
                 except Exception as persist_err:
                     logger.error("Failed to persist live Schwab snapshot: %s", persist_err)
             return result
@@ -673,7 +744,11 @@ class TradingInterface:
             for h in processed_holdings
         ])
 
-        total_portfolio_value = total_current + float(cash_balance)
+        cash_balance = float(cash_balance)
+        total_portfolio_value = float(
+            snapshot.get("total_portfolio_value")
+            or (total_current + cash_balance)
+        )
         total_profit_loss = total_current - total_invested
         percentage_gain = (total_profit_loss / total_invested * 100.0) if total_invested else 0.0
 

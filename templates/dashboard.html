@@ -42,7 +42,7 @@
   <div class="metric-card">
     <h3>
       {% if use_schwab_positions %}
-        Funds Available
+        Funds Available{% if not is_margin_account %} (Settled){% endif %}
       {% else %}
         Cash Balance
       {% endif %}
@@ -50,7 +50,10 @@
     <p class="value">${{ '%.2f'|format(cash_balance) }}</p>
     {% if use_schwab_positions and schwab_summary %}
     <p class="subtitle">
-      Settled funds available ${{ '%.2f'|format(schwab_summary.cash_balance or 0) }}
+      Settled funds usable ${{ '%.2f'|format(schwab_summary.settled_funds_available or 0) }}
+      {% if schwab_summary.cash_balance is not none %}
+        · Raw cash ${{ '%.2f'|format(schwab_summary.cash_balance or 0) }}
+      {% endif %}
       {% if schwab_summary.unsettled_cash is not none %}
         · Unsettled ${{ '%.2f'|format(schwab_summary.unsettled_cash or 0) }}
       {% endif %}

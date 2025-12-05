@@ -69,6 +69,10 @@ CONFIG_HASH = get_current_config_hash()
 RUN_DIR = os.path.join(SCREENSHOT_DIR, CONFIG_HASH, RUN_TIMESTAMP)
 os.makedirs(RUN_DIR, exist_ok=True)
 
+def current_capture_timestamp():
+    """Return the actual capture timestamp (Pacific) for a given summary."""
+    return datetime.now(PACIFIC_TZ).strftime("%Y%m%dT%H%M%S")
+
 print(f"Screenshot directory: {SCREENSHOT_DIR}")
 print(f"Run directory: {RUN_DIR}")
 
@@ -455,27 +459,28 @@ def summarize_page(agent_name, url, web_driver):
     # Special handling for Yahoo Finance which can be slow
     if "yahoo.com" in url.lower():
         print(f"Loading {agent_name} (Yahoo Finance - extended timeout)")
-        try:
-            # Set page load timeout for Yahoo Finance
-            web_driver.set_page_load_timeout(180)  # 3 minutes
+
+        def _attempt_load(timeout_seconds, wait_seconds):
+            web_driver.set_page_load_timeout(timeout_seconds)
             web_driver.get(url)
-            time.sleep(8)  # Extra wait for Yahoo Finance
-        except Exception as e:
-            print(f"Timeout loading {agent_name}, retrying with shorter timeout: {e}")
+            time.sleep(wait_seconds)
+
+        try:
+            _attempt_load(180, 8)  # Initial generous attempt
+        except Exception as first_error:
+            print(f"Timeout loading {agent_name}, retrying with shorter timeout: {first_error}")
             try:
-                web_driver.set_page_load_timeout(60)  # Fallback to 1 minute
-                web_driver.get(url)
-                time.sleep(5)
-            except Exception as e2:
-                print(f"Failed to load {agent_name} after retry: {e2}")
-                # Return empty summary if we can't load the page
-                return {
+                _attempt_load(60, 5)  # Fallback attempt
+            except Exception as second_error:
+                print(f"Failed to load {agent_name} after retry: {second_error}")
+                error_summary = {
                     "agent": agent_name,
-                    "timestamp": RUN_TIMESTAMP,
-                    "summary": {"error": f"Failed to load page: {e2}"},
+                    "timestamp": current_capture_timestamp(),
+                    "summary": {"error": f"Failed to load page: {second_error}"},
                     "screenshot_paths": [],
                     "run_id": RUN_TIMESTAMP
                 }
+                return error_summary
     else:
         # Normal handling for other sites
         web_driver.get(url)
@@ -572,7 +577,7 @@ def summarize_page(agent_name, url, web_driver):
 
     summary = {
         "agent": agent_name,
-        "timestamp": RUN_TIMESTAMP,
+        "timestamp": current_capture_timestamp(),
         "summary": summary_data,
         "screenshot_paths": saved_screenshots,
         "run_id": RUN_TIMESTAMP
@@ -664,7 +669,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                     try:
                         error_summary = {
                             "agent": agent_name,
-                            "timestamp": RUN_TIMESTAMP,
+                            "timestamp": current_capture_timestamp(),
                             "run_id": RUN_TIMESTAMP,
                             "summary": {
                                 "headlines": [],
@@ -730,7 +735,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                 try:
                     error_summary = {
                         "agent": agent_name,
-                        "timestamp": RUN_TIMESTAMP,
+                        "timestamp": current_capture_timestamp(),
                         "run_id": RUN_TIMESTAMP,
                         "summary": {
                             "headlines": [],

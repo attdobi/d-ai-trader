@@ -14,7 +14,16 @@ except Exception:
 from flask import Flask, render_template, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from config import engine, get_gpt_model, get_prompt_version_config, get_trading_mode, get_current_config_hash, set_gpt_model, SCHWAB_ACCOUNT_HASH
+from config import (
+    engine,
+    get_gpt_model,
+    get_prompt_version_config,
+    get_trading_mode,
+    get_current_config_hash,
+    set_gpt_model,
+    SCHWAB_ACCOUNT_HASH,
+    IS_MARGIN_ACCOUNT,
+)
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -41,6 +50,13 @@ from schwab_client import schwab_client
 import subprocess
 import sys
 import os
+from update_prices import get_current_price_robust
+from d_ai_trader import (
+    DAITraderOrchestrator,
+    mark_manual_summarizer_pending,
+    clear_manual_summarizer_pending,
+    mark_manual_decider_window,
+)
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
@@ -958,7 +974,7 @@ def dashboard():
                             "reason": "📡 Synced from Schwab"
                         })
 
-                    available_cash = float(
+                    available_cash_effective = float(
                         schwab_data.get("funds_available_effective")
                         or schwab_data.get("funds_available_for_trading")
                         or schwab_data.get("cash_balance")
@@ -976,8 +992,19 @@ def dashboard():
                     total_invested = sum(row["total_value"] for row in holdings)
                     total_current_value = sum(row["current_value"] for row in holdings)
                     total_profit_loss = sum(row["gain_loss"] for row in holdings)
-                    total_portfolio_value = total_current_value + available_cash
-                    cash_balance = available_cash
+                    settled_cash_guardrail = schwab_data.get("settled_funds_available")
+                    if settled_cash_guardrail is None:
+                        settled_cash_guardrail = max(raw_cash_balance - unsettled_cash, 0.0)
+                    funds_available_display = schwab_data.get("funds_available_display")
+                    if funds_available_display is None:
+                        funds_available_display = (
+                            available_cash_effective
+                            if IS_MARGIN_ACCOUNT
+                            else min(available_cash_effective, settled_cash_guardrail)
+                        )
+                    funds_available_display = max(0.0, float(funds_available_display))
+                    total_portfolio_value = total_current_value + available_cash_effective
+                    cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
                     baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
@@ -998,7 +1025,9 @@ def dashboard():
                         "readonly": schwab_data.get("readonly_mode", False),
                         "last_updated": schwab_data.get("last_updated"),
                         "cash_balance": raw_cash_balance,
-                        "funds_available_for_trading": available_cash,
+                        "funds_available_for_trading": available_cash_effective,
+                        "funds_available_display": funds_available_display,
+                        "settled_funds_available": settled_cash_guardrail,
                         "unsettled_cash": unsettled_cash,
                         "order_reserve": schwab_data.get("order_reserve", 0.0),
                         "funds_available_explicit": account_info.get("funds_available_explicit"),
@@ -1009,15 +1038,16 @@ def dashboard():
                         "funds_available_components": funds_components,
                         "ledger_components": ledger_comp,
                         "open_orders_count": schwab_data.get("open_orders_count", 0),
+                        "is_margin_account": bool(IS_MARGIN_ACCOUNT),
                     }
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    _sync_holdings_with_database(config_hash, holdings, available_cash)
+                    _sync_holdings_with_database(config_hash, holdings, funds_available_display)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        available_cash,
+                        funds_available_display,
                         total_invested,
                         total_profit_loss,
                         holdings,
@@ -1092,6 +1122,7 @@ def dashboard():
             use_schwab_positions=use_schwab_positions,
             initial_account_value=initial_investment,
             current_account_value=total_portfolio_value,
+            is_margin_account=bool(IS_MARGIN_ACCOUNT),
         )
 
 @app.template_filter('from_json')
@@ -1718,8 +1749,6 @@ def run_summary_analyzer_endpoint():
 def trigger_summarizer():
     """Manually trigger summarizer agents"""
     try:
-        # Import the orchestrator to run summarizer
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
         
         # Run summarizer in a separate thread to avoid blocking
@@ -1735,6 +1764,7 @@ def trigger_summarizer():
         
         thread = threading.Thread(target=run_summarizer, daemon=True, name="ManualSummarizer")
         thread.start()
+        mark_manual_summarizer_pending()
         
         return jsonify({
             'success': True,
@@ -1747,14 +1777,14 @@ def trigger_summarizer():
 def trigger_decider():
     """Manually trigger decider agent"""
     try:
-        # Import the orchestrator to run decider
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
+        clear_manual_summarizer_pending()
+        mark_manual_decider_window()
         
         # Run decider in a separate thread to avoid blocking
         def run_decider():
             try:
-                orchestrator.run_decider_agent()
+                orchestrator.run_decider_agent(force=True)
             except Exception as e:
                 print(f"Error in manual decider run: {e}")
             finally:
@@ -1776,8 +1806,6 @@ def trigger_decider():
 def trigger_feedback():
     """Manually trigger feedback agent"""
     try:
-        # Import the orchestrator to run feedback
-        from d_ai_trader import DAITraderOrchestrator
         orchestrator = DAITraderOrchestrator()
         
         # Run feedback in a separate thread to avoid blocking
@@ -1874,17 +1902,13 @@ def trigger_agent(agent_type):
 def trigger_all():
     """Manually trigger all agents in sequence"""
     try:
-        # Import the orchestrator to run all agents
-        from d_ai_trader import DAITraderOrchestrator
-        from config import get_current_config_hash
-        import json
-        from datetime import datetime
-        
         # Ensure config hash is set before running
         config_hash = get_current_config_hash()
         print(f"🔧 Running all agents for config: {config_hash}")
         
         orchestrator = DAITraderOrchestrator()
+        mark_manual_summarizer_pending()
+        mark_manual_decider_window()
         
         # Run all agents in sequence in a separate thread
         def run_all():
@@ -1911,7 +1935,7 @@ def trigger_all():
                 
                 # 2. Run decider
                 print("🤖 Step 2/3: Running decider agent...")
-                orchestrator.run_decider_agent()
+                orchestrator.run_decider_agent(force=True)
                 print("✅ Decider completed")
                 
                 # 3. Run feedback
@@ -2230,8 +2254,19 @@ def reset_portfolio():
                 total_invested += total_cost
                 total_current += market_value
 
-            cash_balance = float(schwab_snapshot.get('cash_balance', 0))
-            total_portfolio_value = total_current + cash_balance
+            cash_balance = float(
+                schwab_snapshot.get('funds_available_display')
+                or schwab_snapshot.get('settled_funds_available')
+                or schwab_snapshot.get('cash_balance')
+                or schwab_snapshot.get('cash_balance_settled')
+                or 0
+            )
+            portfolio_cash_total = float(
+                schwab_snapshot.get('funds_available_effective')
+                or schwab_snapshot.get('funds_available_for_trading')
+                or cash_balance
+            )
+            total_portfolio_value = total_current + portfolio_cash_total
             total_profit_loss = total_current - total_invested
 
             _sync_holdings_with_database(config_hash, processed, cash_balance)
@@ -2271,6 +2306,7 @@ def get_schwab_holdings():
         schwab_data['enabled'] = True
         schwab_data['readonly_mode'] = readonly_mode
         schwab_data['live_trading_enabled'] = (trading_interface.trading_mode in {"live", "real_world"}) and not readonly_mode
+        schwab_data['is_margin_account'] = bool(IS_MARGIN_ACCOUNT)
         schwab_data.setdefault('account_info', {})
         if readonly_mode:
             schwab_data['account_info'].setdefault('account_hash', schwab_client.account_hash if hasattr(schwab_client, "account_hash") else None)

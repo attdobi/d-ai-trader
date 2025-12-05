@@ -29,6 +29,7 @@ import time
 import json
 import schedule
 import logging
+import threading
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy import text
@@ -67,11 +68,55 @@ SUMMARIZER_START_TIME = "08:25"
 SUMMARIZER_END_TIME = "17:25"
 WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
+_MANUAL_SUMMARIZER_PENDING_DECIDER = threading.Event()
+_MANUAL_DECIDER_SKIP_DEADLINE = None
+_MANUAL_DECIDER_SKIP_LOCK = threading.Lock()
+
+
+def mark_manual_summarizer_pending():
+    """Signal that a manual summarizer trigger occurred and the next decider run should be skipped."""
+    _MANUAL_SUMMARIZER_PENDING_DECIDER.set()
+
+
+def clear_manual_summarizer_pending():
+    """Clear the manual summarizer flag so decider can run normally."""
+    _MANUAL_SUMMARIZER_PENDING_DECIDER.clear()
+
+
+def _consume_manual_summarizer_pending():
+    if _MANUAL_SUMMARIZER_PENDING_DECIDER.is_set():
+        _MANUAL_SUMMARIZER_PENDING_DECIDER.clear()
+        return True
+    return False
+
+
+def mark_manual_decider_window(minutes=30):
+    """Hold off scheduled cycles for a fixed window after a manual decider run."""
+    global _MANUAL_DECIDER_SKIP_DEADLINE
+    with _MANUAL_DECIDER_SKIP_LOCK:
+        _MANUAL_DECIDER_SKIP_DEADLINE = datetime.utcnow() + timedelta(minutes=minutes)
+
+
+def manual_decider_skip_seconds():
+    """Return remaining seconds in the manual-decider cooldown window (0 if inactive)."""
+    global _MANUAL_DECIDER_SKIP_DEADLINE
+    with _MANUAL_DECIDER_SKIP_LOCK:
+        if _MANUAL_DECIDER_SKIP_DEADLINE is None:
+            return 0.0
+        now = datetime.utcnow()
+        if now >= _MANUAL_DECIDER_SKIP_DEADLINE:
+            _MANUAL_DECIDER_SKIP_DEADLINE = None
+            return 0.0
+        return (_MANUAL_DECIDER_SKIP_DEADLINE - now).total_seconds()
+
+
 class DAITraderOrchestrator:
     def __init__(self):
         self.prompt_manager = PromptManager(client=openai, session=session)
         self.last_processed_summary_id = None
         self.initialize_database()
+        self._market_open_run_date = None
+        self._startup_cycle_completed = False
         
     def initialize_database(self):
         """Initialize database tables for tracking processed summaries"""
@@ -282,8 +327,11 @@ class DAITraderOrchestrator:
                     WHERE run_type = 'summarizer' AND details->>'run_id' = :run_id
                 """), {"run_id": internal_run_id})
     
-    def run_decider_agent(self):
+    def run_decider_agent(self, force=False):
         """Run the decider agent with all unprocessed summaries"""
+        if not force and _consume_manual_summarizer_pending():
+            logger.info("Manual summarizer trigger detected; skipping automatic decider run until user explicitly launches it.")
+            return
         run_id = f"decider_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Starting decider agent run: {run_id}")
         
@@ -565,6 +613,14 @@ class DAITraderOrchestrator:
     def scheduled_summarizer_and_decider_job(self):
         """Sequential job: Run summarizers first, then decider with collected summaries"""
         try:
+            remaining_seconds = manual_decider_skip_seconds()
+            if remaining_seconds > 0:
+                remaining_minutes = remaining_seconds / 60.0
+                logger.info(
+                    "⏭️  Skipping scheduled summarizer/decider cycle (manual decider cooldown active — %.1f minutes remain).",
+                    max(0.1, remaining_minutes)
+                )
+                return
             # Step 1: Run summarizers (always when scheduled)
             if self.is_summarizer_time():
                 logger.info("🔄 Step 1: Running summarizer agents")
@@ -573,7 +629,9 @@ class DAITraderOrchestrator:
                 
                 # Step 2: Run decider ALWAYS after summaries (market check happens during execution)
                 logger.info("🔄 Step 2: Running decider agent with fresh summaries")
-                self.run_decider_agent()
+                # Force-run the decider as part of the atomic scheduled cycle even if a manual
+                # summarizer trigger set the pending flag earlier.
+                self.run_decider_agent(force=True)
                 logger.info("✅ Step 2 completed: Decider agent finished (decisions marked if market closed)")
                 
                 logger.info("✅ Sequential job completed successfully")
@@ -593,10 +651,15 @@ class DAITraderOrchestrator:
         try:
             now_pacific = datetime.now(PACIFIC_TIMEZONE)
             now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
+            today_et = now_eastern.date()
             
             # Only run on weekdays
             if now_eastern.weekday() >= 5:
                 logger.info("Skipping market open job - weekend")
+                return
+            
+            if self._market_open_run_date == today_et:
+                logger.info("Market open job already executed today; skipping duplicate trigger.")
                 return
             
             logger.info("🔔 MARKET OPEN SEQUENCE STARTING")
@@ -621,11 +684,23 @@ class DAITraderOrchestrator:
             logger.info(f"🚀 EXECUTING OPENING TRADES at {now_eastern.strftime('%I:%M:%S %p ET')}")
             self.run_decider_agent()
             logger.info("✅ Opening trades executed!")
+            self._market_open_run_date = today_et
+            self._startup_cycle_completed = True
             
         except Exception as e:
             logger.error(f"❌ Market open job failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
+    
+    def _run_market_open_catchup_if_needed(self):
+        """If the orchestrator starts after 9:30 ET, immediately run the market-open sequence once."""
+        now_eastern = datetime.now(EASTERN_TIMEZONE)
+        if now_eastern.weekday() >= 5:
+            return
+        market_open_et = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
+        if now_eastern >= market_open_et and self._market_open_run_date != now_eastern.date():
+            logger.warning("⚠️  Market open time already passed today; running catch-up opening sequence now.")
+            self.market_open_job()
     
     def setup_schedule(self):
         """Setup the scheduling for all jobs with configurable cadence"""
@@ -674,6 +749,7 @@ class DAITraderOrchestrator:
             cycles = int(390 / cadence_minutes)
             logger.info(f"   ⚡ AGGRESSIVE: Up to {cycles + 1} trading cycles per day!")
         logger.info("="*60)
+        self._run_market_open_catchup_if_needed()
     
     def run(self):
         """Main run loop"""
@@ -686,6 +762,8 @@ class DAITraderOrchestrator:
         skip_cycle = os.getenv("DAI_SKIP_STARTUP_CYCLE", "0").lower() in {"1", "true", "yes"}
         if skip_cycle:
             logger.info("⏸️  Startup cycle skipped (DAI_SKIP_STARTUP_CYCLE is set).")
+        elif self._startup_cycle_completed:
+            logger.info("⚡ Startup cycle already satisfied via market-open catch-up; skipping immediate run.")
         else:
             try:
                 if self.is_summarizer_time():
