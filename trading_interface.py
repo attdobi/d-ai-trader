@@ -92,19 +92,31 @@ class TradingInterface:
         }
         
         try:
-            # Always execute in simulation (update dashboard database)
-            sim_results = self._execute_simulation_trades(decisions, run_id=run_id)
-            results["simulation_results"] = sim_results
-            
-            # Count simulation results
-            for result in sim_results:
-                if result.get("status") == "executed":
-                    results["summary"]["simulation_executed"] += 1
-                elif result.get("status") == "skipped":
-                    results["summary"]["skipped"] += 1
-                else:
-                    results["summary"]["errors"] += 1
-            
+            def tally_sim_results(sim_entries: List[Dict[str, Any]]) -> None:
+                for entry in sim_entries:
+                    status = (entry.get("status") or "").lower()
+                    if status == "executed":
+                        results["summary"]["simulation_executed"] += 1
+                    elif status == "skipped":
+                        results["summary"]["skipped"] += 1
+                    elif status == "pending":
+                        continue
+                    else:
+                        results["summary"]["errors"] += 1
+
+            should_defer_sim = (
+                self.trading_mode in {"live", "real_world"}
+                and self.schwab_enabled
+                and not self.readonly_mode
+            )
+
+            if not should_defer_sim:
+                sim_results = self._execute_simulation_trades(decisions, run_id=run_id)
+                results["simulation_results"] = sim_results
+                tally_sim_results(sim_results)
+            else:
+                logger.info("Live mode active — deferring holdings update until Schwab confirms fills.")
+
             # Execute in live trading if enabled
             if self.trading_mode in {"live", "real_world"} and self.schwab_enabled:
                 # Run safety checks before live trading
@@ -116,20 +128,39 @@ class TradingInterface:
                     results["live_results"] = live_results
                 else:
                     logger.warning("All live trades blocked by safety checks")
-                    results["live_results"] = [{
+                    live_results = [{
                         "status": "blocked",
                         "reason": "All trades blocked by safety checks",
                         "execution_type": "live"
                     }]
+                    results["live_results"] = live_results
                 
                 # Count live results
                 for result in live_results:
-                    if result.get("status") == "success":
+                    status = (result.get("status") or "").lower()
+                    if status == "success":
                         results["summary"]["live_executed"] += 1
-                    elif result.get("status") == "skipped":
+                    elif status == "skipped":
                         results["summary"]["skipped"] += 1
                     else:
                         results["summary"]["errors"] += 1
+
+                if should_defer_sim:
+                    success_decisions = [
+                        res.get("decision")
+                        for res in live_results
+                        if res.get("status") == "success" and res.get("decision")
+                    ]
+                    if success_decisions:
+                        sim_results = self._execute_simulation_trades(
+                            success_decisions,
+                            run_id=run_id,
+                            skip_live_override=True,
+                        )
+                        results["simulation_results"] = sim_results
+                        tally_sim_results(sim_results)
+                    else:
+                        logger.warning("No live orders filled — skipping holdings update for this run.")
             
             logger.info(f"Trade execution completed: {results['summary']}")
             return results
@@ -140,7 +171,12 @@ class TradingInterface:
             results["summary"]["errors"] += 1
             return results
     
-    def _execute_simulation_trades(self, decisions: List[Dict], run_id: Optional[str] = None) -> List[Dict]:
+    def _execute_simulation_trades(
+        self,
+        decisions: List[Dict],
+        run_id: Optional[str] = None,
+        skip_live_override: Optional[bool] = None,
+    ) -> List[Dict]:
         """
         Execute trades in simulation mode (update dashboard database)
         This mirrors the existing update_holdings function logic
@@ -148,12 +184,18 @@ class TradingInterface:
         from decider_agent import update_holdings
         
         try:
+            if not decisions:
+                return []
             logger.info(f"Executing {len(decisions)} decisions in simulation mode")
             
             # Use the existing update_holdings function
             update_holdings(
                 decisions,
-                skip_live_execution=(self.trading_mode in {"live", "real_world"}),
+                skip_live_execution=(
+                    skip_live_override
+                    if skip_live_override is not None
+                    else (self.trading_mode in {"live", "real_world"})
+                ),
                 run_id=run_id,
             )
             
@@ -444,7 +486,8 @@ class TradingInterface:
                     "price": current_price,
                     "execution_type": "live",
                     "timestamp": datetime.now().isoformat(),
-                    "reason": reason
+                    "reason": reason,
+                    "decision": dict(decision),
                 }
             else:
                 error_payload = {

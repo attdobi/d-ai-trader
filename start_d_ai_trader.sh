@@ -29,6 +29,7 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                           • 60  - Every hour (active monitoring)
                           • 15  - Every 15 minutes (legacy intraday testing)
   -H, --config-hash     Force a specific configuration hash for this run
+  -P, --prompt-profile  Prompt profile: standard | gpt-pro (default: standard)
   --help                Show this help
 
 Tips:
@@ -41,6 +42,7 @@ USAGE
 PORT=8080
 MODEL="gpt-4o"
 PROMPT_VERSION="auto"
+PROMPT_PROFILE="standard"
 TRADING_MODE="${TRADING_MODE:-simulation}"
 CADENCE_MINUTES=180
 CONFIG_HASH_OVERRIDE=""
@@ -52,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     -v|--prompt-version) PROMPT_VERSION="$2"; shift 2;;
     -t|--trading-mode) TRADING_MODE="$2"; shift 2;;
     -c|--cadence) CADENCE_MINUTES="$2"; shift 2;;
+    -P|--prompt-profile) PROMPT_PROFILE="$2"; shift 2;;
     -H|--config-hash) CONFIG_HASH_OVERRIDE="$2"; shift 2;;
     --help|-h) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
@@ -142,6 +145,7 @@ export TRADING_MODE="$(echo "${TRADING_MODE}" | tr '[:upper:]' '[:lower:]')"
 export DAI_PORT="${PORT}"
 export DAI_GPT_MODEL="${MODEL}"
 export DAI_PROMPT_VERSION="${PROMPT_VERSION}"
+export DAI_PROMPT_PROFILE="${PROMPT_PROFILE}"
 export TRADING_MODE="${TRADING_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE_MINUTES}"
 if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then
@@ -154,6 +158,7 @@ echo "========================================"
 echo "Dashboard Port:    ${PORT}"
 echo "AI Model:          ${MODEL}"
 echo "Prompt Version:    ${PROMPT_VERSION}"
+echo "Prompt Profile:    ${PROMPT_PROFILE}"
 echo "Trading Mode:      ${TRADING_MODE}"
 echo "Run Cadence:       Every ${CADENCE_MINUTES} minutes"
 if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then

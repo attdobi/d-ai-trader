@@ -39,7 +39,7 @@
           {% if decision.get('shares') %}
             {{ '%.2f'|format(decision.get('shares')) }}
           {% else %}
-            -
+            —
           {% endif %}
         </td>
         <td>
@@ -48,7 +48,7 @@
           {% elif decision.get('amount_usd') %}
             ${{ '%.2f'|format(decision.get('amount_usd')) }}
           {% else %}
-            -
+            —
           {% endif %}
         </td>
         <td>{{ decision.get('reason', 'N/A') }}</td>

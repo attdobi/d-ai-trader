@@ -149,10 +149,16 @@ def enforce_profit_taking_guardrail(decisions, holdings_by_ticker, threshold_pct
             f"Forced SELL {ticker}: +{gain_pct:.1f}% vs {basis_text} cost. "
             "Profit-taking guardrail frees settled funds for the next GPT-5.1 regular cycle."
         )
+        combined_reason = forced_reason
+        if existing_action and decision.get("reason"):
+            original_reason = decision.get("reason").strip()
+            if original_reason:
+                combined_reason = f"{original_reason} — {forced_reason}"
+
         decision.update({
             "action": "sell",
             "amount_usd": amount_value,
-            "reason": forced_reason,
+            "reason": combined_reason,
             "enforced": "profit_guardrail",
         })
         shares = _safe_float(holding.get("shares"))
@@ -1279,7 +1285,7 @@ def execute_real_world_trade(decision):
         traceback.print_exc()
         return False
 
-def update_holdings(decisions, skip_live_execution=False):
+def update_holdings(decisions, skip_live_execution=False, run_id=None):
     # Use Pacific time as naive timestamp (database stores as-is, dashboard formats correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
     timestamp = pacific_now.replace(tzinfo=None)  # Store as naive Pacific time
@@ -1855,10 +1861,12 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
         })
 
     if skipped_decisions:
-        # Use Pacific time for run_id consistency
-        pacific_now = datetime.now(PACIFIC_TIMEZONE)
-        run_id = pacific_now.strftime("%Y%m%dT%H%M%S")
-        store_trade_decisions(skipped_decisions, f"{run_id}_skipped")
+        # Use provided run_id when available for easier traceability
+        skip_run_id = run_id
+        if not skip_run_id:
+            pacific_now = datetime.now(PACIFIC_TIMEZONE)
+            skip_run_id = pacific_now.strftime("%Y%m%dT%H%M%S")
+        store_trade_decisions(skipped_decisions, f"{skip_run_id}_skipped")
         print(f"Stored {len(skipped_decisions)} skipped decisions due to price/data issues")
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
@@ -2158,11 +2166,6 @@ def ask_decision_agent(summaries, run_id, holdings):
         prompt_version = prompt_data["version"]
         print(f"🔧 Using DeciderAgent prompt v{prompt_version} (UNIFIED)")
         
-        # DEBUG: Check if prompt is confusing the AI
-        if "holdings" in user_prompt_template.lower() and "json array" not in user_prompt_template.lower():
-            print(f"⚠️  WARNING: Prompt v{prompt_version} might confuse AI - using fallback instead")
-            raise Exception("Prompt appears to confuse AI - using fallback")
-        
         # CRITICAL: Ensure ALL prompts end with proper JSON format requirements
         if "JSON" not in user_prompt_template.upper():
             print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
@@ -2429,6 +2432,8 @@ OUTPUT (STRICT)
         "typical_buy_low": f"{int(TYPICAL_BUY_LOW):,}",
         "typical_buy_high": f"{int(TYPICAL_BUY_HIGH):,}",
         "max_buy": f"{int(MAX_BUY_AMOUNT):,}",
+        "settled_cash_value": f"{settled_cash_value:,.2f}",
+        "min_buy_amount": f"{MIN_BUY_AMOUNT:,.0f}",
         "holdings": holdings_text,
         "available_cash": f"{available_cash:,.2f}",
         "summaries": summarized_text,

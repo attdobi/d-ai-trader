@@ -17,6 +17,8 @@ An autonomous **swing/short-term trading system** powered by **GPT-5.1 (default 
 ```
 
 > **Account type toggle:** `IS_MARGIN_ACCOUNT=0` (default) keeps buys limited to settled funds and a 1–3 day rhythm. Set `IS_MARGIN_ACCOUNT=1` only if you have a $25k+ margin account and want to reuse proceeds immediately (PDT rules apply).
+>
+> **Prompt profile toggle:** add `-P gpt-pro` (or set `DAI_PROMPT_PROFILE=gpt-pro`) to run the Decider with the GPT-Pro optimized profit-taking prompt; leave it as `standard` for the default profile.
 
 ### **Schwab API Read-Only Test (Before Going Live)**
 ```bash
@@ -269,6 +271,10 @@ SCHWAB_CLIENT_ID=your_client_id
 SCHWAB_CLIENT_SECRET=your_client_secret
 SCHWAB_ACCOUNT_HASH=your_account_hash
 SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
+
+# Prompt & logging overrides (Optional)
+# DAI_PROMPT_PROFILE=standard   # set to gpt-pro to use the GPT-Pro optimized Decider prompt
+# DAI_DECIDER_RAW_PREVIEW=4000  # number of characters from the raw Decider completion to print for debugging
 ```
 
 ---
@@ -283,6 +289,7 @@ Options:
   -p, --port PORT           Dashboard port (default: 8080)
   -m, --model MODEL         AI model (default: gpt-5.1)
   -v, --prompt-version VER  auto | vN (default: auto)
+  -P, --prompt-profile OPT  standard | gpt-pro (default: standard)
   -t, --trading-mode MODE   simulation | real_world (default: simulation)
   -c, --cadence MINUTES     180 (default) | 60 | 30 | 15
 ```
@@ -311,11 +318,12 @@ Options:
 - Portfolio value, cash balance, P&L
 - Current holdings with gain/loss
 - Interactive charts (portfolio history, performance)
+- Enhanced Schwab card (shows settled vs raw cash, funds-available components, margin indicator)
 - Manual trigger buttons (Run All Agents, etc.)
 
 ### **2. Trades**
 - All trading decisions with timestamps
-- Ticker, Action, Shares, Amount, Reason
+- Ticker, Action, Shares, Amount, Reason (tickers link to Yahoo Finance and include a quick “Chart” popup button)
 - Config-specific filtering
 - Shows "MARKET CLOSED" flag for after-hours decisions
 
@@ -552,6 +560,13 @@ Use at your own risk. This is experimental software for educational purposes.
 ---
 
 ## 🎉 Recent Updates
+
+### **December 2025 - Prompt + UI Enhancements**
+- ✅ New `-P/--prompt-profile` flag (and `DAI_PROMPT_PROFILE`) to switch between the classic and GPT-Pro optimized Decider prompts at launch.
+- ✅ Trades tab tickers now link to Yahoo Finance and include a quick “Chart” popup button for rapid inspection.
+- ✅ Schwab dashboard card now differentiates settled funds, raw cash, and margin status to keep T+1 guardrails obvious.
+- ✅ Added `DAI_DECIDER_RAW_PREVIEW` env var to dump raw Decider JSON for debugging without editing code.
+- ✅ Scheduler auto-runs a market-open catch-up if the orchestrator starts after 6:30 AM PT, and manual trigger buttons now coordinate properly with scheduled cycles.
 
 ### **October 2025 - Major Overhaul**
 - ✅ GPT-4o Vision for screenshot analysis
