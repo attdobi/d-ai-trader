@@ -53,8 +53,6 @@ import os
 from update_prices import get_current_price_robust
 from d_ai_trader import (
     DAITraderOrchestrator,
-    mark_manual_summarizer_pending,
-    clear_manual_summarizer_pending,
     mark_manual_decider_window,
 )
 
@@ -1764,7 +1762,6 @@ def trigger_summarizer():
         
         thread = threading.Thread(target=run_summarizer, daemon=True, name="ManualSummarizer")
         thread.start()
-        mark_manual_summarizer_pending()
         
         return jsonify({
             'success': True,
@@ -1778,7 +1775,6 @@ def trigger_decider():
     """Manually trigger decider agent"""
     try:
         orchestrator = DAITraderOrchestrator()
-        clear_manual_summarizer_pending()
         mark_manual_decider_window()
         
         # Run decider in a separate thread to avoid blocking
@@ -1907,7 +1903,6 @@ def trigger_all():
         print(f"🔧 Running all agents for config: {config_hash}")
         
         orchestrator = DAITraderOrchestrator()
-        mark_manual_summarizer_pending()
         mark_manual_decider_window()
         
         # Run all agents in sequence in a separate thread

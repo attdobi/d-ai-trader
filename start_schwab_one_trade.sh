@@ -221,7 +221,7 @@ print("📰 Running summarizer agents...")
 orchestrator.run_summarizer_agents()
 
 print("🤖 Running decider agent (single cycle)...")
-orchestrator.run_decider_agent()
+orchestrator.run_decider_agent(force=True)
 
 try:
     print("🔄 Syncing Schwab holdings for dashboard display...")

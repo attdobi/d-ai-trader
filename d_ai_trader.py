@@ -68,26 +68,8 @@ SUMMARIZER_START_TIME = "08:25"
 SUMMARIZER_END_TIME = "17:25"
 WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
 
-_MANUAL_SUMMARIZER_PENDING_DECIDER = threading.Event()
 _MANUAL_DECIDER_SKIP_DEADLINE = None
 _MANUAL_DECIDER_SKIP_LOCK = threading.Lock()
-
-
-def mark_manual_summarizer_pending():
-    """Signal that a manual summarizer trigger occurred and the next decider run should be skipped."""
-    _MANUAL_SUMMARIZER_PENDING_DECIDER.set()
-
-
-def clear_manual_summarizer_pending():
-    """Clear the manual summarizer flag so decider can run normally."""
-    _MANUAL_SUMMARIZER_PENDING_DECIDER.clear()
-
-
-def _consume_manual_summarizer_pending():
-    if _MANUAL_SUMMARIZER_PENDING_DECIDER.is_set():
-        _MANUAL_SUMMARIZER_PENDING_DECIDER.clear()
-        return True
-    return False
 
 
 def mark_manual_decider_window(minutes=30):
@@ -328,10 +310,16 @@ class DAITraderOrchestrator:
                 """), {"run_id": internal_run_id})
     
     def run_decider_agent(self, force=False):
-        """Run the decider agent with all unprocessed summaries"""
-        if not force and _consume_manual_summarizer_pending():
-            logger.info("Manual summarizer trigger detected; skipping automatic decider run until user explicitly launches it.")
-            return
+        """
+        Run the decider agent with all unprocessed summaries.
+        
+        Args:
+            force: If True, indicates the call is part of an orchestrated cycle (startup, scheduled,
+                market-open, etc.). Currently this flag is informational.
+        
+        Returns:
+            bool: True if the decider executed successfully, False if it failed early.
+        """
         run_id = f"decider_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Starting decider agent run: {run_id}")
         
@@ -452,6 +440,7 @@ class DAITraderOrchestrator:
                     SET end_time = CURRENT_TIMESTAMP, status = 'completed'
                     WHERE run_type = 'decider' AND details->>'run_id' = :run_id
                 """), {"run_id": run_id})
+            return True
                 
         except Exception as e:
             logger.error(f"Error running decider agent: {e}")
@@ -464,6 +453,7 @@ class DAITraderOrchestrator:
                     SET end_time = CURRENT_TIMESTAMP, status = 'failed'
                     WHERE run_type = 'decider' AND details->>'run_id' = :run_id
                 """), {"run_id": run_id})
+            return False
     
     def run_feedback_agent(self):
         """Run the feedback agent for daily analysis across all active config hashes"""
@@ -589,8 +579,11 @@ class DAITraderOrchestrator:
         """
         try:
             logger.info("Running scheduled decider job (will mark as 'MARKET CLOSED' if after hours)")
-            self.run_decider_agent()
-            logger.info("✅ Scheduled decider job completed successfully")
+            executed = self.run_decider_agent(force=True)
+            if executed:
+                logger.info("✅ Scheduled decider job completed successfully")
+            else:
+                logger.warning("⚠️  Scheduled decider job failed earlier in the log output.")
         except Exception as e:
             logger.error(f"❌ Scheduled decider job failed: {e}")
             import traceback
@@ -615,24 +608,24 @@ class DAITraderOrchestrator:
         try:
             remaining_seconds = manual_decider_skip_seconds()
             if remaining_seconds > 0:
-                remaining_minutes = remaining_seconds / 60.0
+                remaining_minutes = max(0.1, remaining_seconds / 60.0)
                 logger.info(
-                    "⏭️  Skipping scheduled summarizer/decider cycle (manual decider cooldown active — %.1f minutes remain).",
-                    max(0.1, remaining_minutes)
+                    "⏳ Manual decider cooldown active (%.1f minutes remain) — proceeding anyway to keep scheduled cycle atomic.",
+                    remaining_minutes
                 )
-                return
             # Step 1: Run summarizers (always when scheduled)
             if self.is_summarizer_time():
                 logger.info("🔄 Step 1: Running summarizer agents")
                 self.run_summarizer_agents()
                 logger.info("✅ Step 1 completed: Summarizer agents finished")
                 
-                # Step 2: Run decider ALWAYS after summaries (market check happens during execution)
+                # Step 2: Run decider after summaries (market check happens during execution).
                 logger.info("🔄 Step 2: Running decider agent with fresh summaries")
-                # Force-run the decider as part of the atomic scheduled cycle even if a manual
-                # summarizer trigger set the pending flag earlier.
-                self.run_decider_agent(force=True)
-                logger.info("✅ Step 2 completed: Decider agent finished (decisions marked if market closed)")
+                executed = self.run_decider_agent(force=True)
+                if executed:
+                    logger.info("✅ Step 2 completed: Decider agent finished (decisions marked if market closed)")
+                else:
+                    logger.warning("⚠️  Step 2 failed (see earlier logs for details).")
                 
                 logger.info("✅ Sequential job completed successfully")
             else:
@@ -682,8 +675,11 @@ class DAITraderOrchestrator:
             # Step 3: Execute trades at market open
             now_eastern = datetime.now(PACIFIC_TIMEZONE).astimezone(EASTERN_TIMEZONE)
             logger.info(f"🚀 EXECUTING OPENING TRADES at {now_eastern.strftime('%I:%M:%S %p ET')}")
-            self.run_decider_agent()
-            logger.info("✅ Opening trades executed!")
+            executed = self.run_decider_agent(force=True)
+            if executed:
+                logger.info("✅ Opening trades executed!")
+            else:
+                logger.warning("⚠️  Opening decider run failed (see earlier logs for details).")
             self._market_open_run_date = today_et
             self._startup_cycle_completed = True
             
@@ -772,8 +768,11 @@ class DAITraderOrchestrator:
                     logger.info("⚡ Startup outside preferred window – forcing immediate summarizer + decider cycle.")
                 self.run_summarizer_agents()
                 logger.info("✅ Startup summarizer run complete.")
-                self.run_decider_agent()
-                logger.info("✅ Startup decider run complete.")
+                executed = self.run_decider_agent(force=True)
+                if executed:
+                    logger.info("✅ Startup decider run complete.")
+                else:
+                    logger.warning("⚠️  Startup decider run failed (see earlier logs for details).")
             except Exception as exc:
                 logger.error(f"❌ Startup cycle failed: {exc}")
                 import traceback
