@@ -422,7 +422,7 @@ def _is_gpt5_model(model_name):
     # Exclude gpt-4-turbo which still uses the old max_tokens
     # Note: GPT-5 also doesn't support custom temperature (reasoning model behavior)
     new_model_patterns = [
-        r'^gpt-5(-.*)?$',        # gpt-5, gpt-5-mini, etc.
+        r'^gpt-5([.-].*)?$',     # gpt-5, gpt-5.1, gpt-5-mini, etc.
         r'^gpt-4o(-.*)?$',       # gpt-4o, gpt-4o-mini, etc.
         r'^chatgpt-4o(-.*)?$',   # chatgpt-4o-latest, etc.
     ]
