@@ -582,8 +582,8 @@ Use at your own risk. This is experimental software for educational purposes.
 - ✅ Pacific Time display (PDT/PST)
 - ✅ Config isolation for parallel runs
 - ✅ Feedback system simplified (no auto-rewrite)
-- ❌ Removed GPT-4.1 support
-- ❌ Removed auto-prompt generation (too aggressive)
+- ℹ️ GPT-4.1 remains supported for backward compatibility
+- ℹ️ Prompt versions can now be pinned (feedback agent no longer forced to rewrite them)
 
 ---
 
