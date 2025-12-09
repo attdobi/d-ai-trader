@@ -1,6 +1,6 @@
 # 🤖 D-AI-Trader - AI-Powered Day Trading System
 
-An autonomous **swing/short-term trading system** powered by **GPT-5.1 (default reasoning)** with GPT-4o/4.1 Vision for screenshots. It analyzes financial news screenshots, makes selective trading decisions, and executes trades roughly every **3 hours** during market hours. Default behavior targets **1–3 day holding periods** for cash accounts that must wait for **settled funds (T+1)**; enable margin mode only if you have $25k+ and want to reuse proceeds immediately.
+An autonomous **swing/short-term trading system** powered by **GPT-5.1 (default, reasoning + vision)**. It analyzes financial news screenshots, makes selective trading decisions, and executes trades roughly every **3 hours** during market hours. Default behavior targets **1–3 day holding periods** for cash accounts that must wait for **settled funds (T+1)**; enable margin mode only if you have $25k+ and want to reuse proceeds immediately.
 
 ---
 
@@ -141,10 +141,15 @@ export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
 ### **Intraday Trading**
 ```
 6:30 AM, 9:30 AM, 12:30 PM PT - Repeat cycles every ~3 hours (default 180‑min cadence)
-   ├─ Scan 6 news sources
-   ├─ Re-evaluate positions (1–3 day thesis)
-   ├─ Make selective trading decisions (respect pacing/cooldown)
+   ├─ Scan 6 news sources (Summarizer)
+   ├─ Momentum recap (scorable momentum view)
+   ├─ Decider actions (respect rails/pacing)
    └─ Execute trades (during market hours only)
+```
+
+### **Workflow (at a glance)**
+```
+Summarizer -> Momentum recap -> Decider -> Feedback (post-close)
 ```
 
 ### **End of Day**
@@ -207,20 +212,19 @@ No trades executed - portfolio unchanged
 ## 🤖 AI Models
 
 ### **Recommended for Trading**
-- **gpt-5.1** ⭐ - Default reasoning model (strongest decisions)
-  - Uses ~8000 completion tokens for richer reasoning
-  - Decider auto-falls back to gpt-4.1 if GPT-5.1 returns empty JSON
-  - Best quality; higher cost than 4o/4.1
+- **gpt-5.1 (default)** ⭐ — Reasoning + vision for summarizer, decider, and feedback
+  - Richer reasoning; auto-fallback to gpt-4.1 if a completion fails
+  - Higher quality; higher cost than 4o/4.1
 
-- **gpt-4o** - Cost-efficient alt ($2.50/$10 per 1M tokens)
+- **gpt-4o** — Cost-efficient alt ($2.50/$10 per 1M tokens)
   - Reliable JSON parsing + vision
   - Use `--model gpt-4o` to cut spend if GPT-5.1 cost is a concern
 
-- **gpt-4.1** - Fully supported fallback (same API schema as gpt-4o)
+- **gpt-4.1** — Fully supported fallback (same API schema as gpt-4o)
   - Good math/tooling improvements
   - Pairs well with 2800 token cap for multi-buy outputs
 
-- **gpt-4o-mini** - Cheap testing ($0.15/$0.60 per 1M tokens)
+- **gpt-4o-mini** — Cheap testing ($0.15/$0.60 per 1M tokens)
   - Faster, lower quality; simulation only
 
 ### **Experimental**

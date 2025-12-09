@@ -17,7 +17,13 @@ import time
 import json
 import re
 import shutil
+import stat
+import subprocess
+import platform
+import tempfile
+import zipfile
 from pathlib import Path
+from urllib import request as urllib_request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from selenium import webdriver
@@ -82,10 +88,94 @@ if SUMMARY_WITH_IMAGES_ONLY:
 
 # Automatically install correct ChromeDriver version and capture the path.
 CHROMEDRIVER_BINARY = chromedriver_autoinstaller.install()
+
+
+def _harden_chromedriver(path):
+    """Ensure chromedriver binary is executable and not blocked by Gatekeeper."""
+    if not path or not os.path.exists(path):
+        return
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR |
+                      stat.S_IRGRP | stat.S_IXGRP |
+                      stat.S_IROTH | stat.S_IXOTH)
+    except Exception as exc:
+        print(f"⚠️  Unable to chmod chromedriver: {exc}")
+    try:
+        subprocess.run(["xattr", "-cr", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        # xattr not available (non-macOS)
+        pass
+    except Exception as exc:
+        print(f"⚠️  Failed to clear chromedriver xattrs: {exc}")
+    try:
+        subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", path],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        # codesign not available (non-macOS)
+        pass
+    except Exception as exc:
+        print(f"⚠️  Failed to ad-hoc sign chromedriver: {exc}")
+
+
 if CHROMEDRIVER_BINARY and os.path.exists(CHROMEDRIVER_BINARY):
+    _harden_chromedriver(CHROMEDRIVER_BINARY)
     print(f"✅ Chromedriver available at {CHROMEDRIVER_BINARY}")
 else:
     print("⚠️  Chromedriver installation path not detected; undetected_chromedriver will attempt its own download.")
+
+
+def _download_cft_chromedriver():
+    """Download ChromeDriver from Chrome-for-Testing as a fallback (helps avoid Gatekeeper issues)."""
+    detected_version = chromedriver_autoinstaller.get_chrome_version()
+    if not detected_version:
+        return None
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    platform_map = {
+        ("darwin", "arm64"): "mac-arm64",
+        ("darwin", "x86_64"): "mac-x64",
+        ("linux", "x86_64"): "linux64",
+    }
+    label = platform_map.get((system, machine))
+    if not label:
+        return None
+    cache_dir = Path.home() / ".cache" / "d-ai-trader" / "chromedriver" / detected_version
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target_path = cache_dir / "chromedriver"
+    if target_path.exists():
+        _harden_chromedriver(target_path)
+        print(f"✅ Using cached ChromeDriver from {target_path}")
+        return str(target_path)
+    zip_name = f"chromedriver-{label}.zip"
+    download_url = f"https://storage.googleapis.com/chrome-for-testing-public/{detected_version}/{label}/{zip_name}"
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = Path(tmpdir) / zip_name
+            print(f"⬇️  Downloading ChromeDriver {detected_version} ({label}) from CFT endpoint")
+            urllib_request.urlretrieve(download_url, zip_path)
+            with zipfile.ZipFile(zip_path) as zf:
+                inner_name = f"chromedriver-{label}/chromedriver"
+                zf.extract(inner_name, tmpdir)
+                extracted_path = Path(tmpdir) / inner_name
+                shutil.copy(extracted_path, target_path)
+        _harden_chromedriver(target_path)
+        print(f"✅ ChromeDriver downloaded to {target_path}")
+        return str(target_path)
+    except Exception as exc:
+        print(f"⚠️  Failed to download ChromeDriver from CFT: {exc}")
+        return None
+
+
+# On macOS, the default chromedriver_autoinstaller path can get killed by Gatekeeper.
+# Download a Chrome-for-Testing driver and prefer that path when available.
+if platform.system().lower() == "darwin":
+    custom_driver = _download_cft_chromedriver()
+    if custom_driver:
+        CHROMEDRIVER_BINARY = custom_driver
 
 # Track UC cache reset to avoid repeated deletions in a single run
 UC_CACHE_RESET = False
