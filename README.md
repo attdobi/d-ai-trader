@@ -152,6 +152,46 @@ export DAI_SCHWAB_LIVE_VIEW=0    # full automation mode
 Summarizer -> Momentum recap -> Decider -> Feedback (post-close)
 ```
 
+#### ASCII Flow
+```
+                (6:30 AM PT / 9:30 AM ET) and every cadence cycle
+                                │
+                                ▼
+                     ┌────────────────────┐
+                     │   Summarizer       │
+                     │ (6 news sources)   │
+                     └─────────┬──────────┘
+                               │ summaries
+                               ▼
+                     ┌────────────────────┐
+                     │   Momentum Recap   │
+                     │ (scorable view)    │
+                     └─────────┬──────────┘
+                               │ recap
+                               ▼
+                     ┌────────────────────┐
+                     │     Decider        │
+                     │ (GPT-5.1 default)  │
+                     └─────────┬──────────┘
+                               │ decisions
+                               ▼
+                     ┌────────────────────┐
+                     │   Execution Layer  │
+                     │ (sim or Schwab)    │
+                     └─────────┬──────────┘
+                               │ fills / P&L
+                               ▼
+                     ┌────────────────────┐
+                     │ Portfolio Snapshot │
+                     └─────────┬──────────┘
+                               │
+                               ▼
+                     ┌────────────────────┐
+                     │   Feedback Agent   │
+                     │ (post-close)       │
+                     └────────────────────┘
+```
+
 ### **End of Day**
 ```
 1:00 PM PT (4:00 PM ET) - Market closes
