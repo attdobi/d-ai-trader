@@ -14,7 +14,7 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
 import yfinance as yf
 import pandas as pd
 
@@ -29,6 +29,42 @@ FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
+
+
+def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label: str, base_max_tokens: int, enable_reasoning: bool = True) -> dict:
+    """Assemble OpenAI parameters with reasoning defaults for feedback flows."""
+    model_name = GPT_MODEL
+    effective_system = append_reasoning_guidance(system_prompt, agent_label, model_name)
+    token_cap = get_reasoning_token_cap(agent_label, model_name, base_max_tokens)
+    token_params = get_model_token_params(model_name, token_cap)
+    temperature_params = get_model_temperature_params(model_name, MODEL_TEMPERATURE)
+    reasoning_params = get_reasoning_params(agent_label, model_name) if enable_reasoning else {}
+
+    api_params = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": effective_system},
+            {"role": "user", "content": user_prompt}
+        ],
+        **token_params,
+        **temperature_params
+    }
+    if reasoning_params:
+        api_params.update(reasoning_params)
+        print(f"🧠 Reasoning effort for {agent_label}: {get_agent_reasoning_level(agent_label)}")
+    return api_params
+
+
+def _execute_feedback_api(api_params: dict, agent_label: str):
+    """Execute feedback API call with a one-time fallback if reasoning_effort is rejected."""
+    try:
+        return prompt_manager.client.chat.completions.create(**api_params)
+    except Exception as exc:
+        if "reasoning_effort" in api_params and "reasoning_effort" in str(exc).lower():
+            print(f"⚠️ reasoning_effort rejected for {agent_label}; retrying without it.")
+            api_params = {k: v for k, v in api_params.items() if k != "reasoning_effort"}
+            return prompt_manager.client.chat.completions.create(**api_params)
+        raise
 
 class TradeOutcomeTracker:
     """Tracks outcomes of completed trades and provides feedback"""
@@ -883,27 +919,16 @@ CRITICAL INSTRUCTIONS:
 5. Make feedback cumulative - build upon previous lessons rather than replacing them'''
         
         try:
-            # Get the AI response using the same method as the new feedback system
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-
-            # Get the correct parameters and use structured JSON schema
-
-            token_params = get_model_token_params(GPT_MODEL, 2000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
+            token_cap = get_reasoning_token_cap("FeedbackAgent", GPT_MODEL, 2000)
+            api_params = _build_feedback_api_params(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                agent_label="FeedbackAgent",
+                base_max_tokens=2000,
+            )
             
-            api_params = {
-                "model": GPT_MODEL,
-                "messages": messages,
-
-                **token_params,  # Use max_tokens or max_completion_tokens based on model
-                **temperature_params  # Use temperature or omit for GPT-5
-            }
-            
-            print(f"🔧 Using simple JSON mode for FeedbackAgent")
-            response = prompt_manager.client.chat.completions.create(**api_params)
+            print(f"🔧 Using simple JSON mode for FeedbackAgent (reasoning={get_agent_reasoning_level('FeedbackAgent')}, token_cap={token_cap})")
+            response = _execute_feedback_api(api_params, "FeedbackAgent")
             ai_response = response.choices[0].message.content.strip()
             
             # Parse the response to extract summarizer and decider feedback
@@ -1116,34 +1141,25 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             )
         
         try:
-            # Get the AI response using the same method as summarizer/decider
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-
-            # Get the correct parameters and use structured JSON schema
-
-            token_params = get_model_token_params(GPT_MODEL, 2000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
+            agent_label = agent_type or "FeedbackAgent"
+            effective_system_prompt = append_reasoning_guidance(system_prompt, agent_label, GPT_MODEL)
+            token_cap = get_reasoning_token_cap(agent_label, GPT_MODEL, 2000)
+            api_params = _build_feedback_api_params(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                agent_label=agent_label,
+                base_max_tokens=2000,
+            )
             
-            api_params = {
-                "model": GPT_MODEL,
-                "messages": messages,
-
-                **token_params,  # Use max_tokens or max_completion_tokens based on model
-                **temperature_params  # Use temperature or omit for GPT-5
-            }
-            
-            print(f"🔧 Using simple JSON mode for FeedbackAgent manual")
-            response = prompt_manager.client.chat.completions.create(**api_params)
+            print(f"🔧 Using simple JSON mode for FeedbackAgent manual (reasoning={get_agent_reasoning_level(agent_label)}, token_cap={token_cap})")
+            response = _execute_feedback_api(api_params, agent_label)
             ai_response = response.choices[0].message.content.strip()
             
             # Store the response in the database
             feedback_id = self._store_ai_feedback_response(
                 agent_type=agent_type,
                 user_prompt=user_prompt,
-                system_prompt=system_prompt,
+                system_prompt=effective_system_prompt,
                 ai_response=ai_response,
                 context_data=context_data,
                 performance_metrics=performance_metrics,
@@ -1547,21 +1563,16 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
             system_prompt = """You are an expert trading analyst providing feedback on AI trading decisions. Focus on the quality of the decision-making process, stock selection logic, and risk management practices. Be constructive and specific in your recommendations."""
             
             # Get AI model parameters
-            token_params = get_model_token_params(GPT_MODEL, 1000)
-            temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
-            
-            api_params = {
-                "model": GPT_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-
-                **token_params,
-                **temperature_params
-            }
-            
-            response = prompt_manager.client.chat.completions.create(**api_params)
+            agent_label = "FeedbackAgent"
+            token_cap = get_reasoning_token_cap(agent_label, GPT_MODEL, 1000)
+            api_params = _build_feedback_api_params(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                agent_label=agent_label,
+                base_max_tokens=1000,
+            )
+            print(f"🔧 Decision-only feedback run (reasoning={get_agent_reasoning_level(agent_label)}, token_cap={token_cap})")
+            response = _execute_feedback_api(api_params, agent_label)
             ai_response = response.choices[0].message.content.strip()
             
             try:

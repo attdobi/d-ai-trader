@@ -182,7 +182,7 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
-GPT_MODEL = "gpt-5.1"  # Default upgraded to GPT-5.1 for richer reasoning
+GPT_MODEL = "gpt-5.2"  # Default upgraded to GPT-5.2 for richer reasoning
 _last_announced_model = None
 
 
@@ -196,10 +196,11 @@ def _announce_model(model_name: str):
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    valid_models = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
     alias_map = {
         "gpt4.1": "gpt-4.1",
         "gpt5.1": "gpt-5.1",
+        "gpt5.2": "gpt-5.2",
         "gpt-4-turbo": "gpt-4-turbo",
     }
 
@@ -222,6 +223,99 @@ def set_gpt_model(model_name):
 def get_gpt_model():
     """Get the current GPT model"""
     return GPT_MODEL
+
+# Reasoning level configuration (per-agent)
+REASONING_LEVEL_TOKEN_LIMITS = {
+    "light": 4000,
+    "medium": 6000,
+    "high": 8000,
+}
+DEFAULT_REASONING_LEVELS = {
+    "summarizer": "medium",  # user asked for light-to-medium; default to medium
+    "decider": "high",
+    "feedback": "high",
+    "momentum": "light",
+    "default": "medium",
+}
+AGENT_REASONING_ENV_KEYS = {
+    "summarizer": "DAI_SUMMARIZER_REASONING_LEVEL",
+    "decider": "DAI_DECIDER_REASONING_LEVEL",
+    "feedback": "DAI_FEEDBACK_REASONING_LEVEL",
+    "momentum": "DAI_MOMENTUM_REASONING_LEVEL",
+}
+
+
+def _resolve_reasoning_profile(agent_name: str) -> str:
+    if not agent_name:
+        return "default"
+    name = agent_name.lower()
+    if "summarizer" in name:
+        return "summarizer"
+    if "decider" in name:
+        return "decider"
+    if "feedback" in name:
+        return "feedback"
+    if "companyextraction" in name or "company_extraction" in name or "momentum" in name:
+        return "momentum"
+    return "default"
+
+
+def get_agent_reasoning_level(agent_name: str) -> str:
+    """Return sanitized reasoning level for an agent (light|medium|high)."""
+    profile = _resolve_reasoning_profile(agent_name)
+    env_key = AGENT_REASONING_ENV_KEYS.get(profile)
+    level = ""
+    if env_key:
+        raw = env_first(env_key, "").strip().lower()
+        if raw:
+            if raw in REASONING_LEVEL_TOKEN_LIMITS:
+                level = raw
+            else:
+                print(f"⚠️  Unknown reasoning level '{raw}' for {profile}; falling back to default.")
+    return level or DEFAULT_REASONING_LEVELS.get(profile, DEFAULT_REASONING_LEVELS["default"])
+
+
+def get_reasoning_token_cap(agent_name: str, model_name: str, default_cap: int) -> int:
+    """Map reasoning level to a token cap when using GPT-5 reasoning models."""
+    if not model_name or not model_name.lower().startswith("gpt-5"):
+        return default_cap
+    level = get_agent_reasoning_level(agent_name)
+    return REASONING_LEVEL_TOKEN_LIMITS.get(level, REASONING_LEVEL_TOKEN_LIMITS["medium"])
+
+def get_reasoning_params(agent_name: str, model_name: str) -> dict:
+    """Return OpenAI reasoning payload when supported (GPT-5.2 series)."""
+    if not model_name:
+        return {}
+    model_lower = model_name.lower()
+    # Only apply to GPT-5.2 variants (to avoid errors on 5.1/4o/etc.)
+    if "gpt-5.2" not in model_lower:
+        return {}
+    if env_first("DAI_DISABLE_REASONING_PARAM", "0").strip().lower() in {"1", "true", "yes"}:
+        return {}
+    level = get_agent_reasoning_level(agent_name)
+    if not level:
+        return {}
+    # Map internal levels to OpenAI-supported reasoning_effort values
+    level_map = {
+        "light": "low",      # Closest to "light" is "low" effort
+        "medium": "medium",
+        "high": "high",
+    }
+    reasoning_effort = level_map.get(level, level)
+    valid_levels = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    if reasoning_effort not in valid_levels:
+        reasoning_effort = "medium"
+    return {"reasoning_effort": reasoning_effort}
+
+
+def append_reasoning_guidance(system_prompt: str, agent_name: str, model_name: str) -> str:
+    """Append hidden reasoning instruction to the system prompt for GPT-5 requests."""
+    if not model_name or not model_name.lower().startswith("gpt-5"):
+        return system_prompt
+    level = get_agent_reasoning_level(agent_name)
+    if not level:
+        return system_prompt
+    return f"{system_prompt}\\n\\nREASONING DEPTH: Use {level.upper()} reasoning for this task. Keep all chain-of-thought internal and return only the requested output."
 
 # Apply environment override (including .env) as early as possible so every agent process
 # announces and uses the same model even if later imports fail.
@@ -470,7 +564,9 @@ class PromptManager:
         self.run_id = run_id
 
     def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None):
+        base_system_prompt = system_prompt or ""
         retries = 0
+        allow_reasoning_payload = True  # disable if API rejects reasoning_effort
         while retries < max_retries:
             try:
                 model_name = (model_override or GPT_MODEL)
@@ -480,6 +576,9 @@ class PromptManager:
                 decider_agent = (agent_name == "DeciderAgent")
                 # Summarizer & Feedback still benefit from json_object coercion; Decider relies on prompt rules.
                 requires_json = (agent_name in {"SummarizerAgent", "FeedbackAgent"})
+                reasoning_level = get_agent_reasoning_level(agent_name)
+                effective_system_prompt = append_reasoning_guidance(base_system_prompt, agent_name, model_name)
+                reasoning_params = get_reasoning_params(agent_name, model_name) if allow_reasoning_payload else {}
                 
                 # ============================================
                 # PARALLEL PATH 1: GPT-5 (Reasoning Model)
@@ -489,7 +588,7 @@ class PromptManager:
                     
                     # GPT-5 config: Simple messages, no extra fluff
                     messages = [
-                        {"role": "system", "content": system_prompt}
+                        {"role": "system", "content": effective_system_prompt}
                     ]
                     
                     if image_paths:
@@ -507,15 +606,19 @@ class PromptManager:
                         messages.append({"role": "user", "content": prompt})
                     
                     # GPT-5 parameters: Lots of tokens, NO temperature
+                    token_cap = get_reasoning_token_cap(agent_name, model_name, 8000 if decider_agent else 6000)
                     api_params = {
                         "model": model_name,
                         "messages": messages,
-                        "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
+                        "max_completion_tokens": token_cap  # GPT-5 needs lots for reasoning
                         # No temperature - GPT-5 only supports default (1.0)
                     }
+                    if reasoning_params:
+                        api_params.update(reasoning_params)
+                        print(f"🧠 Reasoning effort for {agent_name or 'UnknownAgent'}: {reasoning_params.get('reasoning_effort')}")
                     if requires_json:
                         api_params["response_format"] = {"type": "json_object"}
-                    print(f"📊 GPT-5 Token limit: 8000 (includes reasoning tokens)")
+                    print(f"📊 GPT-5 Token limit: {token_cap} (reasoning={reasoning_level})")
                 
                 # ============================================
                 # PARALLEL PATH 2: GPT-4o (Standard Vision Model)
@@ -525,7 +628,7 @@ class PromptManager:
                     
                     # GPT-4o config: Standard vision format (WORKING - DON'T CHANGE!)
                     messages = [
-                        {"role": "system", "content": system_prompt}
+                        {"role": "system", "content": base_system_prompt}
                     ]
                     
                     if image_paths:
@@ -562,7 +665,7 @@ class PromptManager:
                     
                     # Older models: Use max_tokens instead of max_completion_tokens
                     messages = [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": base_system_prompt},
                         {"role": "user", "content": prompt}
                     ]
                     
@@ -764,6 +867,11 @@ class PromptManager:
                     print(f"[PromptManager] ❌ {agent_name or 'UnknownAgent'} error after {elapsed:.1f}s: {e}")
                 else:
                     print(f"API Call Error: {e}")
+                if allow_reasoning_payload and reasoning_params and "reasoning_effort" in str(e).lower():
+                    print("⚠️  reasoning_effort rejected by API; retrying without reasoning payload.")
+                    allow_reasoning_payload = False
+                    retries += 1
+                    continue
                 retries += 1
                 if retries >= max_retries:
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
