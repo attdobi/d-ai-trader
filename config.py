@@ -135,6 +135,9 @@ MAX_TOTAL_INVESTMENT_FRACTION = float(os.getenv("MAX_TOTAL_INVESTMENT_FRACTION",
 MIN_CASH_BUFFER = float(os.getenv("MIN_CASH_BUFFER", "500"))
 DEBUG_TRADING = os.getenv("DEBUG_TRADING", "true").lower() == "true"
 MODEL_TEMPERATURE = float(os.getenv("DAI_MODEL_TEMPERATURE", "0.2"))
+SUMMARIZER_REASONING_EFFORT = os.getenv("DAI_SUMMARIZER_REASONING_EFFORT", "medium").strip().lower()
+DECIDER_REASONING_EFFORT = os.getenv("DAI_DECIDER_REASONING_EFFORT", "high").strip().lower()
+FEEDBACK_REASONING_EFFORT = os.getenv("DAI_FEEDBACK_REASONING_EFFORT", "high").strip().lower()
 IS_MARGIN_ACCOUNT = bool(int(os.getenv("IS_MARGIN_ACCOUNT", "0")))
 DAILY_TICKET_CAP = int(os.getenv("DAILY_TICKET_CAP", "6"))
 DAILY_BUY_CAP = int(os.getenv("DAILY_BUY_CAP", "3"))
@@ -182,7 +185,7 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
-GPT_MODEL = "gpt-5.1"  # Default upgraded to GPT-5.1 for richer reasoning
+GPT_MODEL = "gpt-5.2"  # Default upgraded to latest GPT-5 reasoning model
 _last_announced_model = None
 
 
@@ -196,9 +199,10 @@ def _announce_model(model_name: str):
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
+    valid_models = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
     alias_map = {
         "gpt4.1": "gpt-4.1",
+        "gpt5.2": "gpt-5.2",
         "gpt5.1": "gpt-5.1",
         "gpt-4-turbo": "gpt-4-turbo",
     }
@@ -329,7 +333,10 @@ def generate_configuration_hash():
         "gpt_model": GPT_MODEL,
         "prompt_mode": PROMPT_VERSION_MODE,
         "forced_prompt_version": FORCED_PROMPT_VERSION,
-        "trading_mode": TRADING_MODE
+        "trading_mode": TRADING_MODE,
+        "summarizer_reasoning": SUMMARIZER_REASONING_EFFORT,
+        "decider_reasoning": DECIDER_REASONING_EFFORT,
+        "feedback_reasoning": FEEDBACK_REASONING_EFFORT
     }
     
     # Create a stable hash from configuration
@@ -463,6 +470,45 @@ def get_model_temperature_params(model_name, temperature_value):
         # GPT-4o, GPT-4-turbo, and earlier models support custom temperature
         return {"temperature": temperature_value}
 
+
+def _normalize_reasoning_effort(effort_value, default="medium"):
+    """Normalize reasoning effort values to supported levels."""
+    if not effort_value:
+        return default
+    normalized = effort_value.strip().lower()
+    alias_map = {
+        "low": "light",
+        "lite": "light",
+        "med": "medium",
+    }
+    normalized = alias_map.get(normalized, normalized)
+    if normalized not in {"light", "medium", "high"}:
+        return default
+    return normalized
+
+
+def get_agent_reasoning_effort(agent_name):
+    """Return the reasoning effort level for a given agent."""
+    if agent_name == "SummarizerAgent":
+        return _normalize_reasoning_effort(SUMMARIZER_REASONING_EFFORT, "medium")
+    if agent_name == "DeciderAgent":
+        return _normalize_reasoning_effort(DECIDER_REASONING_EFFORT, "high")
+    if agent_name == "FeedbackAgent":
+        return _normalize_reasoning_effort(FEEDBACK_REASONING_EFFORT, "high")
+    return None
+
+
+def get_model_reasoning_params(model_name, agent_name):
+    """Attach reasoning parameters for GPT-5 models when configured."""
+    if not model_name:
+        return {}
+    if not model_name.lower().startswith("gpt-5"):
+        return {}
+    effort = get_agent_reasoning_effort(agent_name)
+    if not effort:
+        return {}
+    return {"reasoning": {"effort": effort}}
+
 class PromptManager:
     def __init__(self, client, session, run_id=None):
         self.client = client
@@ -513,6 +559,7 @@ class PromptManager:
                         "max_completion_tokens": 8000  # GPT-5 needs lots for reasoning
                         # No temperature - GPT-5 only supports default (1.0)
                     }
+                    api_params.update(get_model_reasoning_params(model_name, agent_name))
                     if requires_json:
                         api_params["response_format"] = {"type": "json_object"}
                     print(f"📊 GPT-5 Token limit: 8000 (includes reasoning tokens)")

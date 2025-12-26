@@ -14,7 +14,7 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_model_reasoning_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE
 import yfinance as yf
 import pandas as pd
 
@@ -893,13 +893,16 @@ CRITICAL INSTRUCTIONS:
 
             token_params = get_model_token_params(GPT_MODEL, 2000)
             temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
+            reasoning_params = get_model_reasoning_params(GPT_MODEL, "FeedbackAgent")
+            reasoning_params = get_model_reasoning_params(GPT_MODEL, "FeedbackAgent")
             
             api_params = {
                 "model": GPT_MODEL,
                 "messages": messages,
 
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
-                **temperature_params  # Use temperature or omit for GPT-5
+                **temperature_params,  # Use temperature or omit for GPT-5
+                **reasoning_params
             }
             
             print(f"🔧 Using simple JSON mode for FeedbackAgent")
@@ -1132,7 +1135,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 "messages": messages,
 
                 **token_params,  # Use max_tokens or max_completion_tokens based on model
-                **temperature_params  # Use temperature or omit for GPT-5
+                **temperature_params,  # Use temperature or omit for GPT-5
+                **reasoning_params
             }
             
             print(f"🔧 Using simple JSON mode for FeedbackAgent manual")
@@ -1549,6 +1553,7 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
             # Get AI model parameters
             token_params = get_model_token_params(GPT_MODEL, 1000)
             temperature_params = get_model_temperature_params(GPT_MODEL, MODEL_TEMPERATURE)
+            reasoning_params = get_model_reasoning_params(GPT_MODEL, "FeedbackAgent")
             
             api_params = {
                 "model": GPT_MODEL,
@@ -1558,7 +1563,8 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
                 ],
 
                 **token_params,
-                **temperature_params
+                **temperature_params,
+                **reasoning_params
             }
             
             response = prompt_manager.client.chat.completions.create(**api_params)
