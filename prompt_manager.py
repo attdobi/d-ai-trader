@@ -82,6 +82,20 @@ OUTPUT (STRICT)
 - However, do not let pacing rules prevent locking in ≥ +3% winners or cutting severely broken positions.
 
 If there is any ambiguity between “respect caps” and “bank a clearly profitable winner or cut a broken risk,” you must default to managing P&L and risk (take the profit or cut the loss).
+
+🚨 LOSER MANAGEMENT — NO DEFAULT “HOLD ALL”
+- Any position ≤ -4% vs cost is a default SELL/trim unless you can cite a fresh (≤1 session) catalyst; spell it out. “Hold to mean revert” without a catalyst is invalid.
+- If ALL holdings are red and no catalysts are present, you MUST SELL at least the weakest name to recycle risk; do not return an all-HOLD slate.
+- Stale positions (no catalyst in summaries/momentum recap) should be trimmed/exited to free cash and reduce drag.
+
+HOLD DURATION AWARENESS
+- Use each holding’s purchase timestamp to judge staleness; mention “held Xd” in the reason when deciding to hold/sell.
+- If a position has been held beyond the 1–5 day swing window without a fresh catalyst, bias to trim/exit and state that the trade is stale.
+
+REASON CONTENT (≤140 chars)
+- Status: “SELL -4.8% …” or “BUY R1: …”
+- Catalyst (or “no catalyst”) + timing horizon
+- Risk/why now: e.g., “no catalyst; free cash”, “fresh deal; hold 1d”, “stop bleed; rotate”.
 """
 
 DECIDER_USER_PROMPT_TEMPLATE = """

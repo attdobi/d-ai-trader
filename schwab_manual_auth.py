@@ -27,6 +27,7 @@ import base64
 import json
 import os
 import sys
+import socket
 import urllib.parse
 import webbrowser
 from datetime import datetime, timedelta, timezone
@@ -64,6 +65,30 @@ def _construct_auth_url(client_id: str, redirect_uri: str) -> str:
         "redirect_uri": redirect_uri,
     }
     return f"{AUTH_URL}?{urllib.parse.urlencode(params)}"
+
+
+def _ensure_port_available(redirect_uri: str) -> None:
+    """
+    Preflight check: ensure the redirect port is free before starting the OAuth local server.
+    Exits with a clear message if the port is already in use.
+    """
+    parsed = urllib.parse.urlparse(redirect_uri)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if not port:
+        # Default ports (mostly irrelevant here, but keep behavior sane)
+        port = 443 if parsed.scheme == "https" else 80
+    # Only check localhost-style hosts to avoid false positives on remote hosts
+    if host not in {"127.0.0.1", "localhost"}:
+        return
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+    except OSError:
+        print(f"❌ Port {port} on {host} is already in use. Stop the process using it, then retry.", file=sys.stderr)
+        print(f"   Hint: lsof -i tcp:{port}  # find the PID to kill", file=sys.stderr)
+        print("   Or update SCHWAB_REDIRECT_URI and your Schwab app redirect to a different port (consistently).", file=sys.stderr)
+        sys.exit(1)
 
 
 def _prompt_for_code(auth_url: str) -> str:
@@ -208,6 +233,7 @@ def main() -> None:
         print("🔄 Refreshing tokens...")
         tokens = _refresh_tokens(client_id, client_secret, existing["token"]["refresh_token"])
     else:
+        _ensure_port_available(args.redirect_uri)
         auth_url = _construct_auth_url(client_id, args.redirect_uri)
         code = _prompt_for_code(auth_url)
         print("🔑 Exchanging authorization code for tokens...")

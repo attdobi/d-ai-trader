@@ -179,23 +179,55 @@ echo "   📈 Intraday:     Every ${CADENCE_MINUTES} min (6:35 AM - 1:00 PM PT)"
 echo "   📊 Feedback:     1:30 PM PT (daily performance analysis)"
 echo ""
 
-# Ensure requested port is free before launching
-echo "🧹 Ensuring port ${PORT} is free ..."
-if command -v lsof >/dev/null 2>&1; then
-  EXISTING_PIDS=($(lsof -ti tcp:"${PORT}" || true))
-  if (( ${#EXISTING_PIDS[@]} )); then
-    for pid in "${EXISTING_PIDS[@]}"; do
+# Free the dashboard port and the Schwab redirect port (if local) before launch
+cleanup_port() {
+  local port="$1"
+  if [[ -z "${port}" ]]; then
+    return
+  fi
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "⚠️  lsof not available; skipping port cleanup for ${port}"
+    return
+  fi
+  local pids
+  # shellcheck disable=SC2207
+  pids=($(lsof -ti tcp:"${port}" || true))
+  if (( ${#pids[@]} )); then
+    echo "🧹 Freeing port ${port} (found ${#pids[@]} process(es))..."
+    for pid in "${pids[@]}"; do
       if [[ "${pid}" =~ ^[0-9]+$ ]]; then
-        echo "   Killing PID ${pid} (was listening on port ${PORT})"
-        kill -9 "${pid}" 2>/dev/null || true
+        kill "${pid}" 2>/dev/null || true
       fi
     done
     sleep 1
   else
-    echo "   Port ${PORT} already free."
+    echo "✅ Port ${port} already free."
   fi
-else
-  echo "⚠️  lsof not available; skipping port pre-clean."
+}
+
+resolve_redirect_port() {
+  local uri="${SCHWAB_REDIRECT_URI:-https://127.0.0.1:5556/callback}"
+  # Only handle local redirects
+  if [[ "${uri}" =~ ^https?://(127\.0\.0\.1|localhost)(:([0-9]+))? ]]; then
+    local port="${BASH_REMATCH[3]}"
+    if [[ -z "${port}" ]]; then
+      # Default if omitted: keep legacy default
+      port="5556"
+    fi
+    echo "${port}"
+  else
+    echo ""
+  fi
+}
+
+# Ensure requested port is free before launching
+echo "🧹 Ensuring port ${PORT} is free ..."
+cleanup_port "${PORT}"
+
+redirect_port="$(resolve_redirect_port)"
+if [[ -n "${redirect_port}" ]]; then
+  echo "🧹 Ensuring Schwab redirect port ${redirect_port} is free ..."
+  cleanup_port "${redirect_port}"
 fi
 
 # Start the dashboard and automation concurrently.
