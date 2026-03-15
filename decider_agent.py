@@ -2092,6 +2092,9 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
 def record_portfolio_snapshot():
     """Record current portfolio state for historical tracking - same as dashboard_server"""
     with engine.begin() as conn:
+        # Scope reads/writes to the active strategy configuration.
+        config_hash = get_current_config_hash()
+
         # Ensure portfolio_history table exists
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS portfolio_history (
@@ -2112,8 +2115,8 @@ def record_portfolio_snapshot():
             SELECT ticker, shares, purchase_price, current_price, 
                    total_value, current_value, gain_loss
             FROM holdings
-            WHERE is_active = TRUE
-        """)).fetchall()
+            WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
         
         holdings = [dict(row._mapping) for row in result]
         
@@ -2132,16 +2135,17 @@ def record_portfolio_snapshot():
         conn.execute(text("""
             INSERT INTO portfolio_history 
             (total_portfolio_value, cash_balance, total_invested, 
-             total_profit_loss, percentage_gain, holdings_snapshot)
+             total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
             VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
-                    :total_profit_loss, :percentage_gain, :holdings_snapshot)
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
         """), {
             "total_portfolio_value": total_portfolio_value,
             "cash_balance": cash_balance,
             "total_invested": total_invested,
             "total_profit_loss": total_profit_loss,
             "percentage_gain": percentage_gain,
-            "holdings_snapshot": json.dumps(holdings)
+            "holdings_snapshot": json.dumps(holdings),
+            "config_hash": config_hash
         })
 
 def ask_decision_agent(summaries, run_id, holdings):

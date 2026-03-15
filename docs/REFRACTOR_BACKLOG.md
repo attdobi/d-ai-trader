@@ -33,3 +33,8 @@ _Status: Draft pending CTO split_
 - Added `tests/test_decision_shape.py` with schema guardrail coverage for valid `buy`/`sell`/`hold` decisions, missing required field rejection, and invalid action rejection.
 - Added `tests/test_decision_validator.py` with edge-case assertions for sell-nonexistent rejection, buy-duplicate rejection, zero-amount rejection, over-cash rejection, and `allow_sell_reuse=False` cash-behavior verification.
 - Added `tests/__init__.py` test package marker.
+
+## Implemented Today (X2 Phase 2)
+- Added `tests/test_trading_interface.py` with deterministic, fixture-only simulation-mode order flow tests that stub external dependencies and avoid API/database credentials.
+- Added `tests/test_dashboard_imports.py` smoke coverage to ensure dashboard decider import bindings (`extract_companies_from_summaries`, `build_momentum_recap`, `fetch_holdings`, `store_momentum_snapshot`, `SUMMARY_MAX_CHARS`) remain valid.
+- Kept the new tests intentionally minimal and stable (no network calls, no live Schwab, no DB writes).
