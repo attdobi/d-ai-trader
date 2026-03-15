@@ -24,6 +24,12 @@ def dashboard_server_module(monkeypatch):
 
             return _decorator
 
+        def template_filter(self, *_args, **_kwargs):
+            def _decorator(func):
+                return func
+
+            return _decorator
+
     flask_stub.Flask = _DummyFlaskApp
     flask_stub.render_template = lambda *args, **kwargs: {"template": args[0] if args else None}
     flask_stub.jsonify = lambda *args, **kwargs: {"args": args, "kwargs": kwargs}
@@ -42,8 +48,22 @@ def dashboard_server_module(monkeypatch):
     sqlalchemy_exc_stub.IntegrityError = _IntegrityError
     monkeypatch.setitem(sys.modules, "sqlalchemy.exc", sqlalchemy_exc_stub)
 
+    class _DummyConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+    class _DummyEngine:
+        def begin(self):
+            return _DummyConn()
+
     config_stub = types.ModuleType("config")
-    config_stub.engine = object()
+    config_stub.engine = _DummyEngine()
     config_stub.get_gpt_model = lambda: "gpt-test"
     config_stub.get_prompt_version_config = lambda *_args, **_kwargs: {}
     config_stub.get_trading_mode = lambda: "simulation"
