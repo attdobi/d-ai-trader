@@ -14,13 +14,9 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
 import yfinance as yf
 import pandas as pd
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Performance thresholds
 SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant

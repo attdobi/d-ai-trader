@@ -33,13 +33,9 @@ import threading
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, set_gpt_model, get_trading_mode
+from config import engine, PromptManager, session, openai, get_trading_mode
 from feedback_agent import TradeOutcomeTracker
 from trading_interface import trading_interface
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Import the existing modules
 import main as summarizer_main

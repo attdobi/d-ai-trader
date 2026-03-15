@@ -32,7 +32,6 @@ from config import (
     openai,
     get_current_config_hash,
     get_trading_mode,
-    set_gpt_model,
     IS_MARGIN_ACCOUNT,
     DAILY_TICKET_CAP,
     DAILY_BUY_CAP,
@@ -42,10 +41,6 @@ from config import (
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
 from shared.ticker_normalize import normalize_ticker
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Timezone configuration
 PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')

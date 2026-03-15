@@ -44,5 +44,15 @@ _Status: Draft pending CTO split_
 - Added `tests/test_config_model_overrides.py` with isolated-import stubs to validate startup model override behavior without hitting real DB/OpenAI dependencies.
 - Covered model alias resolution (`gpt5.4` → `gpt-5.4`) and `get_agent_model` fallback to default `GPT_MODEL` when overrides are absent.
 
+## Implemented Today (X2 Phase 4)
+- Added `tests/test_startup_model_init_cleanup.py` static guardrails that inspect `main.py`, `d_ai_trader.py`, `decider_agent.py`, `feedback_agent.py`, and `dashboard_server.py` for absence of legacy per-module `if _os.environ.get("DAI_GPT_MODEL")` override blocks.
+- Extended `tests/test_config_model_overrides.py` to validate centralized `config.py` startup override behavior for `DAI_GPT_MODEL` via shell env and alias normalization (`gpt5.4` → `gpt-5.4`).
+- Kept coverage deterministic and lightweight by using import-time stubs only (no network/API/DB).
+
 ## Implemented Today (X1 Phase 3)
 - Added shared ticker canonicalization helper `shared/ticker_normalize.py` and wired it into `decision_validator._normalize_ticker` plus decider-side `clean_ticker_symbol` to reduce duplicate normalization drift.
+
+## Implemented Today (X1 Phase 4)
+- Centralized startup `DAI_GPT_MODEL` application in `config.py` only (import-time env override remains there as the single source of truth).
+- Removed duplicate import-time `DAI_GPT_MODEL` override blocks from `main.py`, `d_ai_trader.py`, `decider_agent.py`, `feedback_agent.py`, and `dashboard_server.py`.
+- Cleaned up now-unused `set_gpt_model` imports in those modules to eliminate redundant side-effect paths while preserving runtime behavior.

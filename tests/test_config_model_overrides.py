@@ -138,3 +138,17 @@ def test_get_agent_model_falls_back_to_default_when_override_absent(monkeypatch)
 
     assert config_module.AGENT_MODEL_OVERRIDES["decider"] is None
     assert config_module.get_agent_model("DeciderAgent") == config_module.GPT_MODEL
+
+
+def test_global_model_override_from_env_applies_on_config_import(monkeypatch):
+    config_module = _import_config(monkeypatch, env={"DAI_GPT_MODEL": "gpt-4o"})
+
+    assert config_module.get_gpt_model() == "gpt-4o"
+    assert config_module.get_agent_model("DeciderAgent") == "gpt-4o"
+
+
+def test_global_model_override_alias_from_env_is_normalized(monkeypatch):
+    config_module = _import_config(monkeypatch, env={"DAI_GPT_MODEL": "gpt5.4"})
+
+    assert config_module.get_gpt_model() == "gpt-5.4"
+

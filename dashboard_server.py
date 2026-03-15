@@ -20,14 +20,9 @@ from config import (
     get_prompt_version_config,
     get_trading_mode,
     get_current_config_hash,
-    set_gpt_model,
     SCHWAB_ACCOUNT_HASH,
     IS_MARGIN_ACCOUNT,
 )
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 import importlib
 import initialize_prompts as default_prompts_module

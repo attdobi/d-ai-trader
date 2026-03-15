@@ -34,15 +34,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 from sqlalchemy import text
-from config import engine, api_key, PromptManager, session, get_current_config_hash, set_gpt_model
+from config import engine, api_key, PromptManager, session, get_current_config_hash
 import chromedriver_autoinstaller
 import openai
 import undetected_chromedriver as uc
 from feedback_agent import TradeOutcomeTracker
 
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 from bs4 import BeautifulSoup
 
 # Configuration - Optimized for day trading (6 sources max for cost efficiency)
