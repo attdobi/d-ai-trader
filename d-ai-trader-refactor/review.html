@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>D-AI-Trader Refactor Review</title>
+  <style>
+    :root {
+      --bg: #f5f7f9;
+      --panel: #ffffff;
+      --ink: #102027;
+      --muted: #51606b;
+      --line: #d6dde3;
+      --good: #1d7f3f;
+      --warn: #a35c00;
+      --bad: #b42318;
+      --brand: #0f5d78;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f8fafc 0%, #eef3f6 100%);
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 18px 56px;
+    }
+
+    h1, h2, h3 { margin: 0 0 10px; }
+
+    h1 {
+      font-size: 30px;
+      letter-spacing: 0.2px;
+      color: #0b3f52;
+    }
+
+    h2 {
+      font-size: 22px;
+      margin-top: 26px;
+      color: #0f5d78;
+    }
+
+    h3 {
+      font-size: 18px;
+      color: #123f4e;
+    }
+
+    p, li {
+      color: var(--ink);
+      line-height: 1.45;
+    }
+
+    .subtle { color: var(--muted); }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(16, 32, 39, 0.06);
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid.two { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .grid.three { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    .p0 { background: #fde7e7; color: var(--bad); }
+    .p1 { background: #fff1da; color: var(--warn); }
+    .p2 { background: #e6f4eb; color: var(--good); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f0f6fa;
+      color: #0d455a;
+      font-weight: 700;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .phase-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .phase-item {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .phase-item input { margin-top: 2px; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .toolbar button {
+      border: 1px solid #b8c7d1;
+      background: #fff;
+      color: #154b60;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .toolbar button.active {
+      background: #0f5d78;
+      color: #fff;
+      border-color: #0f5d78;
+    }
+
+    .footer-note {
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px dashed #b9c8d1;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>D-AI-Trader Refactor Review</h1>
+    <p class="subtle">Planning artifact only. No runtime code changes are included in this package.</p>
+
+    <section class="panel">
+      <h2>Why Refactor Now</h2>
+      <div class="grid two">
+        <div>
+          <h3>Operational Risk</h3>
+          <ul>
+            <li>Critical execution paths have duplicated logic and mixed responsibilities.</li>
+            <li>Some state queries are not consistently isolated by config hash.</li>
+            <li>Startup side effects can produce noisy and confusing diagnostics.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Delivery Friction</h3>
+          <ul>
+            <li>Hard to add new functionality without touching high-risk files.</li>
+            <li>Testing is not deep enough in live-critical behavior paths.</li>
+            <li>Auth and token failures are not always self-explanatory.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <h2>Before vs After (Target State)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Before</th>
+            <th>After Refactor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Execution Boundary</td>
+            <td>Decisioning and execution concerns are interleaved.</td>
+            <td>Single execution boundary with consistent safety gating.</td>
+          </tr>
+          <tr>
+            <td>Run Context</td>
+            <td>Some implicit globals and runtime mutation.</td>
+            <td>Explicit run context passed through orchestrator to execution.</td>
+          </tr>
+          <tr>
+            <td>Data Isolation</td>
+            <td>Partial config scoping in critical SQL paths.</td>
+            <td>All holdings/safety/snapshot paths scoped by config hash.</td>
+          </tr>
+          <tr>
+            <td>Ticker Handling</td>
+            <td>Normalization rules differ by module.</td>
+            <td>One canonical symbol policy across decisioning and brokerage.</td>
+          </tr>
+          <tr>
+            <td>Auth Diagnostics</td>
+            <td>Refresh failures provide limited operational guidance.</td>
+            <td>Token preflight and clear remediation reason codes.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <h2>New Functionality Enabled</h2>
+      <div class="toolbar">
+        <button class="active" data-filter="all">All</button>
+        <button data-filter="p0">P0</button>
+        <button data-filter="p1">P1</button>
+        <button data-filter="p2">P2</button>
+      </div>
+
+      <div class="grid three" id="feature-grid">
+        <article class="card" data-priority="p0">
+          <span class="badge p0">P0</span>
+          <h3>Deterministic Dry-Run Preview</h3>
+          <p>Show decision -> validation -> execution outcome without placing live orders.</p>
+        </article>
+
+        <article class="card" data-priority="p0">
+          <span class="badge p0">P0</span>
+          <h3>Parallel Strategy Safety</h3>
+          <p>Run multiple configs in one database without cross-portfolio contamination.</p>
+        </article>
+
+        <article class="card" data-priority="p1">
+          <span class="badge p1">P1</span>
+          <h3>Token Health Diagnostics</h3>
+          <p>Preflight command that explains auth state and exact action needed.</p>
+        </article>
+
+        <article class="card" data-priority="p1">
+          <span class="badge p1">P1</span>
+          <h3>Unified Symbol Intelligence</h3>
+          <p>Stable symbol mapping between AI output, holdings, and broker positions.</p>
+        </article>
+
+        <article class="card" data-priority="p2">
+          <span class="badge p2">P2</span>
+          <h3>Broker Adapter Expansion</h3>
+          <p>Cleaner interfaces make adding non-Schwab execution adapters realistic.</p>
+        </article>
+
+        <article class="card" data-priority="p2">
+          <span class="badge p2">P2</span>
+          <h3>Run-Level Audit Reporting</h3>
+          <p>Consistent structured logs per run for faster incident forensics.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top: 18px;">
+      <h2>Phase Checklist for Diff Review</h2>
+      <ul class="phase-list">
+        <li class="phase-item">
+          <input type="checkbox" />
+          <div>
+            <strong>Phase 0:</strong> Baseline test harness for current behavior.
+          </div>
+        </li>
+        <li class="phase-item">
+          <input type="checkbox" />
+          <div>
+            <strong>Phase 1:</strong> Config-hash data isolation and snapshot integrity.
+          </div>
+        </li>
+        <li class="phase-item">
+          <input type="checkbox" />
+          <div>
+            <strong>Phase 2:</strong> Deterministic run context, no monkey-patching.
+          </div>
+        </li>
+        <li class="phase-item">
+          <input type="checkbox" />
+          <div>
+            <strong>Phase 3:</strong> Unified execution path with mandatory safety checks.
+          </div>
+        </li>
+        <li class="phase-item">
+          <input type="checkbox" />
+          <div>
+            <strong>Phase 4-8:</strong> Normalization, startup hardening, auth lifecycle, cleanup, tests.
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <p class="footer-note">
+      Recommended review order: data correctness -> execution behavior -> observability -> test coverage.
+    </p>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll('.toolbar button');
+    const cards = document.querySelectorAll('#feature-grid .card');
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        buttons.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const filter = btn.dataset.filter;
+        cards.forEach((card) => {
+          if (filter === 'all' || card.dataset.priority === filter) {
+            card.style.display = '';
+          } else {
+            card.style.display = 'none';
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

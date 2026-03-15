@@ -184,6 +184,35 @@ openai.api_key = api_key
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
 GPT_MODEL = "gpt-5.2"  # Default upgraded to GPT-5.2 for richer reasoning
 _last_announced_model = None
+_VALID_GPT_MODELS = [
+    "gpt-5.4",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4-turbo",
+    "gpt-4",
+    "chatgpt-4o-latest",
+]
+_MODEL_ALIASES = {
+    "gpt4.1": "gpt-4.1",
+    "gpt5.1": "gpt-5.1",
+    "gpt5.2": "gpt-5.2",
+    "gpt5.4": "gpt-5.4",
+    "gpt-4-turbo": "gpt-4-turbo",
+}
+
+
+def _normalize_model_name(model_name):
+    raw_input = (model_name or "").strip()
+    if not raw_input:
+        return "", ""
+    lookup_key = raw_input.lower()
+    normalized = _MODEL_ALIASES.get(lookup_key, lookup_key)
+    return raw_input, normalized
 
 
 def _announce_model(model_name: str):
@@ -196,29 +225,65 @@ def _announce_model(model_name: str):
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
-    alias_map = {
-        "gpt4.1": "gpt-4.1",
-        "gpt5.1": "gpt-5.1",
-        "gpt5.2": "gpt-5.2",
-        "gpt-4-turbo": "gpt-4-turbo",
-    }
-
-    raw_input = (model_name or "").strip()
-    lookup_key = raw_input.lower()
-    normalized = alias_map.get(lookup_key, lookup_key)
-    if normalized != lookup_key:
+    raw_input, normalized = _normalize_model_name(model_name)
+    if normalized != raw_input.lower() and raw_input:
         print(f"ℹ️  Model alias '{raw_input}' resolved to '{normalized}'")
 
-    if normalized in valid_models:
+    if normalized in _VALID_GPT_MODELS:
         if GPT_MODEL != normalized:
             GPT_MODEL = normalized
             _announce_model(GPT_MODEL)
         else:
             print(f"ℹ️  GPT model already set to {GPT_MODEL}")
     else:
-        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models + list(alias_map.keys())}")
+        print(f"❌ Invalid model '{model_name}'. Valid models are: {_VALID_GPT_MODELS + list(_MODEL_ALIASES.keys())}")
         print(f"⚠️  Keeping current model: {GPT_MODEL}")
+
+
+def _load_agent_model_override(env_key: str, agent_label: str):
+    """Load and validate a per-agent model override from env/.env."""
+    raw_value = os.getenv(env_key)
+    if raw_value is None:
+        raw_value = DOTENV_VALUES.get(env_key)
+    if raw_value is None:
+        return None
+
+    trimmed_value = str(raw_value).strip()
+    if not trimmed_value:
+        return None
+
+    raw_input, normalized = _normalize_model_name(trimmed_value)
+    if normalized != raw_input.lower():
+        print(f"ℹ️  {agent_label} model alias '{raw_input}' resolved to '{normalized}'")
+
+    if normalized in _VALID_GPT_MODELS:
+        return normalized
+
+    print(
+        f"⚠️  Ignoring invalid {agent_label} model override '{trimmed_value}' from {env_key}. "
+        f"Using default model '{GPT_MODEL}'."
+    )
+    return None
+
+
+AGENT_MODEL_OVERRIDES = {
+    "summarizer": _load_agent_model_override("DAI_MODEL_SUMMARIZER", "summarizer"),
+    "decider": _load_agent_model_override("DAI_MODEL_DECIDER", "decider"),
+    "feedback": _load_agent_model_override("DAI_MODEL_FEEDBACK", "feedback"),
+}
+
+
+def get_agent_model(agent_name):
+    """Get model override for a specific agent profile, else default GPT model."""
+    name = (agent_name or "").lower()
+    if "summarizer" in name:
+        return AGENT_MODEL_OVERRIDES.get("summarizer") or GPT_MODEL
+    if "decider" in name:
+        return AGENT_MODEL_OVERRIDES.get("decider") or GPT_MODEL
+    if "feedback" in name:
+        return AGENT_MODEL_OVERRIDES.get("feedback") or GPT_MODEL
+    return GPT_MODEL
+
 
 def get_gpt_model():
     """Get the current GPT model"""
@@ -283,12 +348,12 @@ def get_reasoning_token_cap(agent_name: str, model_name: str, default_cap: int) 
     return REASONING_LEVEL_TOKEN_LIMITS.get(level, REASONING_LEVEL_TOKEN_LIMITS["medium"])
 
 def get_reasoning_params(agent_name: str, model_name: str) -> dict:
-    """Return OpenAI reasoning payload when supported (GPT-5.2 series)."""
+    """Return OpenAI reasoning payload when supported (GPT-5 series)."""
     if not model_name:
         return {}
     model_lower = model_name.lower()
-    # Only apply to GPT-5.2 variants (to avoid errors on 5.1/4o/etc.)
-    if "gpt-5.2" not in model_lower:
+    # Apply to GPT-5 variants (5.2/5.4/etc.).
+    if not model_lower.startswith("gpt-5"):
         return {}
     if env_first("DAI_DISABLE_REASONING_PARAM", "0").strip().lower() in {"1", "true", "yes"}:
         return {}
@@ -569,7 +634,10 @@ class PromptManager:
         allow_reasoning_payload = True  # disable if API rejects reasoning_effort
         while retries < max_retries:
             try:
-                model_name = (model_override or GPT_MODEL)
+                if model_override is not None:
+                    _, model_name = _normalize_model_name(model_override)
+                else:
+                    model_name = get_agent_model(agent_name)
                 if not model_name:
                     raise ValueError("No GPT model configured")
                 model_lower = model_name.lower()
