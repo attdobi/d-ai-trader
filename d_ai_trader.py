@@ -33,9 +33,10 @@ import threading
 from datetime import datetime, timedelta
 import pytz
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, get_trading_mode
+from config import engine, PromptManager, session, openai, get_trading_mode, get_current_config_hash
 from feedback_agent import TradeOutcomeTracker
 from trading_interface import trading_interface
+from shared.run_context import RunContext
 
 # Import the existing modules
 import main as summarizer_main
@@ -402,14 +403,17 @@ class DAITraderOrchestrator:
                 target_run_id = datetime.now().strftime("%Y%m%dT%H%M%S")
                 logger.info(f"No summarizer run_id detected; using fallback decider run id {target_run_id}")
 
-            # Temporarily override the get_latest_run_id function
-            original_get_latest_run_id = decider.get_latest_run_id
-            
-            def mock_get_latest_run_id():
-                return target_run_id
-            
-            decider.get_latest_run_id = mock_get_latest_run_id
-            
+            # Explicit run context propagation (Phase 2): no monkey-patching.
+            run_context = RunContext.create(
+                config_hash=get_current_config_hash(),
+                run_id=target_run_id,
+            )
+            logger.info(
+                "RunContext created for decider: run_id=%s config_hash=%s",
+                run_context.run_id,
+                run_context.config_hash,
+            )
+
             # Update current prices before making decisions
             decider.update_all_current_prices()
             
@@ -418,7 +422,7 @@ class DAITraderOrchestrator:
             holdings = decider.fetch_holdings()
             
             try:
-                decisions = decider.ask_decision_agent(summaries, target_run_id, holdings)
+                decisions = decider.ask_decision_agent(summaries, target_run_id, holdings, run_context=run_context)
                 logger.info(f"✅ Decider AI returned {len(decisions) if isinstance(decisions, list) else 1} decisions")
             except Exception as e:
                 logger.error(f"❌ Decider AI call failed: {e}")
@@ -440,9 +444,6 @@ class DAITraderOrchestrator:
             # Mark summaries as processed
             summary_ids = [s['id'] for s in summaries]
             self.mark_summaries_processed(summary_ids, 'decider')
-            
-            # Restore original function
-            decider.get_latest_run_id = original_get_latest_run_id
             
             logger.info(f"Decider agent completed successfully: {run_id}")
             

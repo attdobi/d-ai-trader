@@ -56,3 +56,12 @@ _Status: Draft pending CTO split_
 - Centralized startup `DAI_GPT_MODEL` application in `config.py` only (import-time env override remains there as the single source of truth).
 - Removed duplicate import-time `DAI_GPT_MODEL` override blocks from `main.py`, `d_ai_trader.py`, `decider_agent.py`, `feedback_agent.py`, and `dashboard_server.py`.
 - Cleaned up now-unused `set_gpt_model` imports in those modules to eliminate redundant side-effect paths while preserving runtime behavior.
+
+## Implemented Today (Phase 2 — Deterministic RunContext)
+- Added `shared/run_context.py` with an immutable `RunContext` dataclass and a `create()` factory.
+- Updated `d_ai_trader.py` decider flow to create and pass explicit `RunContext` (`run_id` + `config_hash`) into decider calls.
+- Removed runtime monkey-patching of `decider.get_latest_run_id` from orchestrator flow.
+- Extended `decider_agent.ask_decision_agent(...)` to accept optional `run_context` while preserving backward compatibility.
+- Added fixture/static regression tests:
+  - `tests/test_run_context.py`
+  - `tests/test_propagation_contract.py`

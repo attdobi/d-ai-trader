@@ -21,7 +21,7 @@ import atexit
 from math import floor
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from functools import lru_cache
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import pandas as pd
 import re
 from sqlalchemy import text
@@ -41,6 +41,7 @@ from config import (
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
 from shared.ticker_normalize import normalize_ticker
+from shared.run_context import RunContext
 
 # Timezone configuration
 PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
@@ -2142,8 +2143,12 @@ def record_portfolio_snapshot():
             "config_hash": config_hash
         })
 
-def ask_decision_agent(summaries, run_id, holdings):
+def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunContext] = None):
     config_hash = get_current_config_hash()
+    if run_context is not None:
+        run_id = run_id or run_context.run_id
+        config_hash = run_context.config_hash or config_hash
+        print(f"📋 RunContext: run_id={run_context.run_id}, config_hash={run_context.config_hash}")
     market_open = is_market_open()
     print(f"⏰ Market status at decision time: {'OPEN' if market_open else 'CLOSED'}")
     # Limit summaries to the targeted run_id when provided
