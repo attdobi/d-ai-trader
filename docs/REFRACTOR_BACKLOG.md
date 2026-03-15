@@ -38,3 +38,11 @@ _Status: Draft pending CTO split_
 - Added `tests/test_trading_interface.py` with deterministic, fixture-only simulation-mode order flow tests that stub external dependencies and avoid API/database credentials.
 - Added `tests/test_dashboard_imports.py` smoke coverage to ensure dashboard decider import bindings (`extract_companies_from_summaries`, `build_momentum_recap`, `fetch_holdings`, `store_momentum_snapshot`, `SUMMARY_MAX_CHARS`) remain valid.
 - Kept the new tests intentionally minimal and stable (no network calls, no live Schwab, no DB writes).
+
+## Implemented Today (X2 Phase 3)
+- Added `tests/test_ticker_normalize.py` safety-net coverage for `shared.ticker_normalize.normalize_ticker`, including uppercase normalization, rank-prefix stripping, and invalid-input handling.
+- Added `tests/test_config_model_overrides.py` with isolated-import stubs to validate startup model override behavior without hitting real DB/OpenAI dependencies.
+- Covered model alias resolution (`gpt5.4` → `gpt-5.4`) and `get_agent_model` fallback to default `GPT_MODEL` when overrides are absent.
+
+## Implemented Today (X1 Phase 3)
+- Added shared ticker canonicalization helper `shared/ticker_normalize.py` and wired it into `decision_validator._normalize_ticker` plus decider-side `clean_ticker_symbol` to reduce duplicate normalization drift.

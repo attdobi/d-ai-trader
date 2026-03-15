@@ -102,3 +102,18 @@ def test_allow_sell_reuse_false_keeps_cash_unchanged_after_sell():
     assert "exceeds available cash" in invalid[0]["validation_error"], (
         "BUY rejection should explicitly state that amount exceeds available cash"
     )
+
+
+def test_rank_prefixed_ticker_is_normalized_for_validation():
+    _set_amount_limits_for_deterministic_tests()
+
+    validator = dv_module.DecisionValidator(
+        current_holdings=[{"ticker": "TSLA", "shares": 2, "current_price": 180.0}],
+        available_cash=5000.0,
+    )
+
+    decisions = [{"action": "sell", "ticker": "r2/tsla", "amount_usd": 500.0, "reason": "Trim"}]
+    valid, invalid = validator.validate_decisions(decisions)
+
+    assert not invalid, "Rank-prefixed ticker should normalize and pass holdings check"
+    assert valid[0]["ticker"] == "TSLA", "Validated decision should store canonical uppercase ticker"

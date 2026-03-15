@@ -12,8 +12,9 @@ This is critical for real-money trading - no AI hallucinations allowed!
 """
 
 import os
-import re
 from typing import List, Dict, Any, Tuple
+
+from shared.ticker_normalize import normalize_ticker
 
 MIN_BUY_AMOUNT = float(os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 MAX_BUY_AMOUNT = float(os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
@@ -137,16 +138,7 @@ class DecisionValidator:
         return True, ""
 
     def _normalize_ticker(self, ticker: Any) -> str:
-        if not isinstance(ticker, str):
-            return ''
-        cleaned = ticker.strip().upper()
-        if not cleaned:
-            return ''
-        # Strip ranking prefixes like R1-KVUE, r2/TSLA, etc.
-        match = re.match(r'^R(\d+)\s*[-_:/\\\s]+([A-Z0-9.]+)$', cleaned)
-        if match:
-            cleaned = match.group(2)
-        return cleaned
+        return normalize_ticker(ticker)
     
     def _apply_decision_effects(self, decision: Dict) -> None:
         """

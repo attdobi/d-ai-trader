@@ -41,6 +41,7 @@ from config import (
 )
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
+from shared.ticker_normalize import normalize_ticker
 
 # Apply model from environment if specified
 if _os.environ.get("DAI_GPT_MODEL"):
@@ -806,10 +807,8 @@ def clean_ticker_symbol(ticker):
     # Remove any remaining parentheses and clean up
     ticker = ticker.replace('(', '').replace(')', '').strip()
     
-    # Apply symbol corrections
-    ticker = SYMBOL_CORRECTIONS.get(ticker.upper(), ticker)
-    
-    return ticker
+    # Canonicalize + apply symbol corrections (also strips rank prefixes like R1-TSLA)
+    return normalize_ticker(ticker, alias_map=SYMBOL_CORRECTIONS)
 
 def validate_ticker_symbol(ticker):
     """Validate that a ticker symbol exists and can be traded"""
