@@ -6,6 +6,8 @@ An autonomous **swing/short-term trading system** powered by **GPT-5.1 (default,
 
 ## 🚀 Quick Start
 
+> **Before first run:** complete the **Database Setup** section below (`createdb adobi` + `python init_database.py`) so Postgres is ready. If Postgres is unavailable, the app will automatically fall back to local SQLite.
+
 ### **Simulation Mode (Safe Testing)**
 ```bash
 # Default pacing – every 3 hours (aligns with settled-funds workflow, GPT-5.1 default)
@@ -294,14 +296,42 @@ cd d-ai-trader
 
 # 2. Configure environment
 cp env_template.txt .env
-# Edit .env with your API keys
+# Edit .env with your API keys (and DATABASE_URI if needed)
 
-# 3. Start the system (auto-creates venv & installs dependencies)
+# 3. Initialize the database
+python init_database.py
+
+# 4. Start the system (auto-creates venv & installs dependencies)
 ./start_d_ai_trader.sh -p 8080 -m gpt-4o -v auto -t simulation -c 15
 ```
 
+### **Database Setup**
+Use this once on a fresh machine before Quick Start.
+
+```bash
+# 1) Install PostgreSQL 17 and start the service
+brew install postgresql@17 && brew services start postgresql@17
+
+# 2) Add Postgres binaries to PATH (current shell)
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+
+# 3) Create the local database
+createdb adobi
+
+# 4) Set DATABASE_URI in .env
+DATABASE_URI=postgresql://$(whoami)@localhost/adobi
+
+# 5) Initialize tables/schema
+python init_database.py
+```
+
+> If PostgreSQL is not available, the app still boots using the built-in SQLite fallback (`d_ai_trader.sqlite3`).
+
 ### **Required in `.env`**
 ```bash
+# Database (Recommended: PostgreSQL local)
+DATABASE_URI=postgresql://$(whoami)@localhost/adobi
+
 # OpenAI API (Required)
 OPENAI_API_KEY=sk-proj-your_actual_api_key_here
 

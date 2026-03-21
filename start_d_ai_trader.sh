@@ -230,6 +230,9 @@ if [[ -n "${redirect_port}" ]]; then
   cleanup_port "${redirect_port}"
 fi
 
+echo "🗄️ Initializing database schema ..."
+python "${PROJECT_ROOT}/init_database.py"
+
 # Start the dashboard and automation concurrently.
 # Avoid passing CLI flags that may not exist in your local files;
 # rely on exported env vars which your code already reads.
