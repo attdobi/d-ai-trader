@@ -155,24 +155,43 @@
       <th>Total Value</th>
       <th>Current Value</th>
       <th>Gain/Loss</th>
-      <th>Reason</th>
+      <th>Position Size</th>
     </tr>
   </thead>
   <tbody>
     {% for row in holdings %}
-    <tr onclick="loadChart('{{ row.ticker }}')">
-      <td>{{ row.ticker }}</td>
+    <tr onclick="loadChart('{{ row.ticker }}')" style="cursor:pointer;">
+      <td><span class="ticker-pill">{{ row.ticker }}</span></td>
       <td>{{ row.shares }}</td>
-      <td>{{ '%.2f'|format(row.purchase_price) }}</td>
-      <td>{{ '%.2f'|format(row.current_price) }}</td>
-      <td>{{ '%.2f'|format(row.total_value) }}</td>
-      <td>{{ '%.2f'|format(row.current_value) }}</td>
-      <td class="{{ 'gain' if row.gain_loss >= 0 else 'loss' }}">{{ '%.2f'|format(row.gain_loss) }}</td>
-      <td>{{ row.reason }}</td>
+      <td>${{ '%.2f'|format(row.purchase_price) }}</td>
+      <td>${{ '%.2f'|format(row.current_price) }}</td>
+      <td>${{ '%.2f'|format(row.total_value) }}</td>
+      <td>${{ '%.2f'|format(row.current_value) }}</td>
+      <td>
+        {% set gain_pct = ((row.gain_loss / row.total_value) * 100) if row.total_value > 0 else 0 %}
+        <span class="badge {{ 'badge-success' if row.gain_loss >= 0 else 'badge-danger' }}">
+          {{ '+' if row.gain_loss >= 0 else '' }}${{ '%.2f'|format(row.gain_loss) }}
+          ({{ '+' if gain_pct >= 0 else '' }}{{ '%.1f'|format(gain_pct) }}%)
+        </span>
+      </td>
+      <td>
+        {% if row.ticker != 'CASH' %}
+        <div class="position-bar-container">
+          <div class="position-bar" style="width: {{ [((row.total_value / 4000) * 100), 100] | min }}%"></div>
+        </div>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+
+<div class="sparkline-section">
+  <h2 class="section-title">📈 5-Day Price Trends</h2>
+  <div class="sparkline-row" id="sparklineRow">
+    <p style="color: var(--muted); font-size: 13px;">Loading sparklines...</p>
+  </div>
+</div>
 
 <div class="charts-container">
   <div class="chart-section">

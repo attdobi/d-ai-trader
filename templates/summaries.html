@@ -4,16 +4,64 @@
 <h1>Latest Summaries</h1>
 {% include "partials/_config_banner.html" %}
 
-{% for summary in summaries %}
-  <div style="border:1px solid #ccc; padding:15px; margin-bottom:20px;">
-    <h3>{{ summary.agent }} — {{ summary.timestamp }}</h3>
-    <p><strong>Headlines:</strong></p>
-    <ul>
-      {% for headline in summary.headlines %}
+<div class="search-container">
+  <input type="text" class="search-input" id="summarySearch" placeholder="🔍 Filter summaries by keyword..." oninput="filterSummaries()">
+</div>
+
+<div class="summaries-grid" id="summariesGrid">
+  {% for summary in summaries %}
+  <div class="summary-card" data-searchable="{{ summary.agent }} {{ summary.headlines|join(' ') }} {{ summary.insights }}">
+    <div class="summary-source">
+      <span class="source-icon">
+        {% if 'yahoo' in summary.agent|lower %}📊
+        {% elif 'benzinga' in summary.agent|lower %}📰
+        {% elif 'reuters' in summary.agent|lower %}🌐
+        {% elif 'finviz' in summary.agent|lower %}📈
+        {% else %}🤖{% endif %}
+      </span>
+      <div class="source-info">
+        <span class="source-name">{{ summary.agent }}</span>
+        <span class="source-timestamp">{{ summary.timestamp }}</span>
+      </div>
+      <span class="freshness-dot {% if summary.timestamp %}freshness-recent{% else %}freshness-stale{% endif %}" title="Data freshness"></span>
+    </div>
+
+    {% if summary.headlines %}
+    <div class="summary-headlines">
+      <h4>Headlines</h4>
+      <ul>
+        {% for headline in summary.headlines %}
         <li>{{ headline }}</li>
-      {% endfor %}
-    </ul>
-    <p><strong>Insights:</strong> {{ summary.insights }}</p>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if summary.insights %}
+    <div class="summary-insights">
+      <h4>Insights</h4>
+      <p>{{ summary.insights }}</p>
+    </div>
+    {% endif %}
   </div>
-{% endfor %}
+  {% endfor %}
+</div>
+
+{% if not summaries %}
+<div class="empty-state">
+  <p>📊 No summaries available yet. Run the summarizer agents to generate market summaries.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterSummaries() {
+  const query = document.getElementById('summarySearch').value.toLowerCase();
+  document.querySelectorAll('.summary-card').forEach(card => {
+    const text = (card.dataset.searchable || '').toLowerCase();
+    card.style.display = text.includes(query) ? '' : 'none';
+  });
+}
+</script>
 {% endblock %}

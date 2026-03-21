@@ -4,6 +4,29 @@
 <h1>Latest Trade Decisions</h1>
 {% include "partials/_config_banner.html" %}
 
+<div class="daily-summary-bar" id="dailySummaryBar">
+  <div class="summary-stat">
+    <span class="summary-label">Today's Buys</span>
+    <span class="summary-value badge-info" id="todayBuys">—</span>
+  </div>
+  <div class="summary-stat">
+    <span class="summary-label">Today's Sells</span>
+    <span class="summary-value badge-success" id="todaySells">—</span>
+  </div>
+  <div class="summary-stat">
+    <span class="summary-label">Net Activity</span>
+    <span class="summary-value" id="todayNet">—</span>
+  </div>
+</div>
+
+<div class="filter-chips" id="filterChips">
+  <button class="chip active" data-filter="all">All</button>
+  <button class="chip" data-filter="buy">📈 Buys</button>
+  <button class="chip" data-filter="sell">📉 Sells</button>
+  <button class="chip" data-filter="hold">⏸ Holds</button>
+  <button class="chip" data-filter="market_closed">⛔ Market Closed</button>
+</div>
+
 <div class="table-container">
 <table>
   <thead>
@@ -21,7 +44,10 @@
       {% for decision in trade.data %}
       {% set raw_ticker = decision.get('ticker', 'N/A') %}
       {% set ticker = raw_ticker.upper() if raw_ticker %}
-      <tr>
+      {% set action = decision.get('action', 'N/A').lower() %}
+      {% set exec_status = decision.get('execution_status', '') %}
+      <tr data-action="{{ action }}{% if 'market' in (exec_status|lower) or 'closed' in (exec_status|lower) %} market_closed{% endif %}"
+          class="trade-row {% if action == 'buy' %}row-buy{% elif action == 'sell' %}row-sell{% elif action == 'hold' %}row-hold{% endif %}{% if 'market' in (exec_status|default('')|lower) or 'closed' in (exec_status|default('')|lower) %} row-market-closed{% endif %}">
         <td class="ticker-cell">
           {% if ticker and ticker != 'N/A' %}
             <a class="ticker-link" href="https://finance.yahoo.com/quote/{{ ticker }}/" target="_blank" rel="noopener noreferrer">
@@ -34,7 +60,11 @@
             N/A
           {% endif %}
         </td>
-        <td>{{ decision.get('action', 'N/A') }}</td>
+        <td>
+          {% set action = decision.get('action', 'N/A').lower() %}
+          {% if action == 'buy' %}📈{% elif action == 'sell' %}📉{% elif action == 'hold' %}⏸{% elif 'market' in action or 'closed' in action %}⛔{% endif %}
+          {{ decision.get('action', 'N/A') }}
+        </td>
         <td>
           {% if decision.get('shares') %}
             {{ '%.2f'|format(decision.get('shares')) }}
@@ -51,7 +81,16 @@
             —
           {% endif %}
         </td>
-        <td>{{ decision.get('reason', 'N/A') }}</td>
+        <td class="reason-cell">
+          {% set reason = decision.get('reason', 'N/A') %}
+          {% if reason|length > 80 %}
+            <span class="reason-truncated">{{ reason[:80] }}...</span>
+            <span class="reason-full" style="display:none;">{{ reason }}</span>
+            <button class="reason-toggle" onclick="this.previousElementSibling.style.display='inline';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';">more</button>
+          {% else %}
+            {{ reason }}
+          {% endif %}
+        </td>
         <td>{{ trade.timestamp }}</td>
       </tr>
       {% endfor %}

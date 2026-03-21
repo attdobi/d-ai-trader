@@ -1307,6 +1307,30 @@ def api_holdings():
         """), {"config_hash": config_hash}).fetchall()
         return jsonify([dict(row._mapping) for row in result])
 
+@app.route('/api/sparklines')
+def api_sparklines():
+    """Return 5-day price history for each active holding (for sparkline charts)."""
+    config_hash = get_current_config_hash()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT ticker FROM holdings
+            WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
+        tickers = [row.ticker for row in result if row.ticker]
+
+    sparklines = {}
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
+            if hist is not None and not hist.empty:
+                sparklines[ticker] = [round(float(p), 2) for p in hist['Close'].tolist()]
+        except Exception as e:
+            print(f"Sparkline error for {ticker}: {e}")
+            continue
+
+    return jsonify(sparklines)
+
 @app.route("/api/history")
 def api_history():
     ticker = request.args.get("ticker")
