@@ -182,7 +182,7 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
-GPT_MODEL = "gpt-5.2"  # Default upgraded to GPT-5.2 for richer reasoning
+GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
 _VALID_GPT_MODELS = [
     "gpt-5.4",
@@ -293,7 +293,7 @@ def get_gpt_model():
 REASONING_LEVEL_TOKEN_LIMITS = {
     "light": 4000,
     "medium": 6000,
-    "high": 8000,
+    "high": 12000,
 }
 DEFAULT_REASONING_LEVELS = {
     "summarizer": "medium",  # user asked for light-to-medium; default to medium
@@ -674,7 +674,7 @@ class PromptManager:
                         messages.append({"role": "user", "content": prompt})
                     
                     # GPT-5 parameters: Lots of tokens, NO temperature
-                    token_cap = get_reasoning_token_cap(agent_name, model_name, 8000 if decider_agent else 6000)
+                    token_cap = get_reasoning_token_cap(agent_name, model_name, 12000 if decider_agent else 6000)
                     api_params = {
                         "model": model_name,
                         "messages": messages,
