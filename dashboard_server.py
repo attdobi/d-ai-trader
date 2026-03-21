@@ -25,6 +25,7 @@ from config import (
 )
 
 import importlib
+import difflib
 import initialize_prompts as default_prompts_module
 from prompt_manager import initialize_config_prompts
 from decider_agent import (
@@ -2349,6 +2350,436 @@ def get_schwab_account_info():
             'enabled': True,
             'status': 'error'
         })
+
+def _safe_isoformat(value):
+    if value is None:
+        return None
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
+
+
+def _extract_headline_from_summary_data(raw_data):
+    payload = raw_data
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if not stripped:
+            return ""
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            return stripped[:200]
+
+    summary_payload = payload.get('summary') if isinstance(payload, dict) else payload
+    if isinstance(summary_payload, str):
+        stripped_summary = summary_payload.strip()
+        if not stripped_summary:
+            return ""
+        try:
+            summary_payload = json.loads(stripped_summary)
+        except (json.JSONDecodeError, TypeError):
+            return stripped_summary[:200]
+
+    if isinstance(summary_payload, dict):
+        headlines = summary_payload.get('headlines')
+        if isinstance(headlines, (list, tuple)):
+            for headline in headlines:
+                if headline:
+                    return str(headline).strip()[:200]
+
+        for key in ('headline', 'title', 'insights'):
+            value = summary_payload.get(key)
+            if value:
+                if not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                value = value.strip()
+                if value:
+                    return value[:200]
+
+    if isinstance(summary_payload, (list, tuple)):
+        for item in summary_payload:
+            if item:
+                headline = str(item).strip()
+                if headline:
+                    return headline[:200]
+
+    if isinstance(payload, dict):
+        for key in ('headline', 'title', 'insights'):
+            value = payload.get(key)
+            if value:
+                if not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                value = value.strip()
+                if value:
+                    return value[:200]
+
+    return ""
+
+
+def _load_prompt_evolution_context():
+    config_hash = get_current_config_hash()
+
+    with engine.connect() as conn:
+        try:
+            outcome_rows = conn.execute(text("""
+                SELECT ticker, gain_loss_percentage
+                FROM trade_outcomes
+                WHERE config_hash = :config_hash
+                ORDER BY created_at DESC
+                LIMIT 50
+            """), {"config_hash": config_hash}).fetchall()
+        except Exception:
+            outcome_rows = conn.execute(text("""
+                SELECT ticker, gain_loss_percentage
+                FROM trade_outcomes
+                WHERE config_hash = :config_hash
+                ORDER BY sell_timestamp DESC
+                LIMIT 50
+            """), {"config_hash": config_hash}).fetchall()
+
+        summary_rows = conn.execute(text("""
+            SELECT data, timestamp
+            FROM summaries
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """), {"config_hash": config_hash}).fetchall()
+
+    trade_rows = []
+    for row in outcome_rows:
+        try:
+            gain_pct = float(row.gain_loss_percentage if row.gain_loss_percentage is not None else 0.0)
+        except (TypeError, ValueError):
+            gain_pct = 0.0
+        trade_rows.append({
+            'ticker': (row.ticker or '').upper(),
+            'gain_loss_percentage': gain_pct,
+        })
+
+    total_trades = len(trade_rows)
+    win_count = sum(1 for trade in trade_rows if trade['gain_loss_percentage'] > 0)
+    avg_profit_pct = (sum(trade['gain_loss_percentage'] for trade in trade_rows) / total_trades) if total_trades else 0.0
+
+    best_trade = max(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
+    worst_trade = min(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
+
+    stats = {
+        'win_rate': round((win_count / total_trades) * 100, 2) if total_trades else 0.0,
+        'avg_profit_pct': round(avg_profit_pct, 2),
+        'total_trades': total_trades,
+        'best_trade': best_trade,
+        'worst_trade': worst_trade,
+    }
+
+    headlines = []
+    for row in summary_rows:
+        headline = _extract_headline_from_summary_data(row.data)
+        if headline:
+            headlines.append(headline)
+
+    return {
+        'stats': stats,
+        'headlines': headlines,
+    }
+
+
+def _parse_generated_prompt_payload(raw_content):
+    content = raw_content
+
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                text_value = part.get('text')
+            else:
+                text_value = getattr(part, 'text', None)
+            if text_value is None:
+                text_value = str(part)
+            parts.append(str(text_value))
+        content = "\n".join(parts)
+
+    content = (content or '').strip()
+    if not content:
+        raise ValueError('Model returned an empty response')
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find('{')
+        end = content.rfind('}')
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError('Model response was not valid JSON')
+        parsed = json.loads(content[start:end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError('Model response JSON must be an object')
+
+    return parsed
+
+
+@app.route('/prompt-evolution')
+def prompt_evolution_page():
+    return render_template('prompt_evolution.html')
+
+
+@app.route('/api/prompt-evolution/history')
+def get_prompt_evolution_history():
+    try:
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT agent_type, version, system_prompt, user_prompt_template, description, is_active, created_at
+                FROM prompt_versions
+                WHERE config_hash = :config_hash
+                ORDER BY agent_type ASC, version DESC
+            """), {"config_hash": config_hash}).fetchall()
+
+        history = {}
+        for row in rows:
+            history.setdefault(row.agent_type, []).append({
+                'version': row.version,
+                'created_at': _safe_isoformat(row.created_at),
+                'description': row.description,
+                'is_active': bool(row.is_active),
+                'system_prompt_preview': (row.system_prompt or '')[:200],
+                'user_prompt_template_preview': (row.user_prompt_template or '')[:200],
+            })
+
+        return jsonify(history)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/diff/<agent_type>/<int:version_a>/<int:version_b>')
+def get_prompt_evolution_diff(agent_type, version_a, version_b):
+    try:
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT version, system_prompt, user_prompt_template
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+                  AND (version = :version_a OR version = :version_b)
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+                'version_a': version_a,
+                'version_b': version_b,
+            }).fetchall()
+
+        by_version = {row.version: row for row in rows}
+        row_a = by_version.get(version_a)
+        row_b = by_version.get(version_b)
+
+        if not row_a or not row_b:
+            return jsonify({'error': 'One or both prompt versions were not found'}), 404
+
+        system_prompt_diff = list(difflib.unified_diff(
+            (row_a.system_prompt or '').splitlines(),
+            (row_b.system_prompt or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_system_prompt',
+            tofile=f'{agent_type}_v{version_b}_system_prompt',
+            lineterm=''
+        ))
+
+        user_prompt_diff = list(difflib.unified_diff(
+            (row_a.user_prompt_template or '').splitlines(),
+            (row_b.user_prompt_template or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_user_prompt_template',
+            tofile=f'{agent_type}_v{version_b}_user_prompt_template',
+            lineterm=''
+        ))
+
+        return jsonify({
+            'system_prompt_diff': system_prompt_diff,
+            'user_prompt_diff': user_prompt_diff,
+            'version_a': version_a,
+            'version_b': version_b,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/performance-context')
+def get_prompt_evolution_performance_context():
+    try:
+        context_payload = _load_prompt_evolution_context()
+        return jsonify(context_payload)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/generate', methods=['POST'])
+def generate_prompt_evolution_candidate():
+    try:
+        data = request.get_json(silent=True) or {}
+        agent_type = data.get('agent_type')
+
+        if not agent_type:
+            return jsonify({'error': 'agent_type is required'}), 400
+
+        config_hash = get_current_config_hash()
+
+        with engine.connect() as conn:
+            current_prompt = conn.execute(text("""
+                SELECT version, system_prompt, user_prompt_template, description
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+                  AND is_active = TRUE
+                ORDER BY version DESC
+                LIMIT 1
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            }).fetchone()
+
+        if not current_prompt:
+            return jsonify({'error': f'No active prompt found for {agent_type}'}), 404
+
+        context_payload = _load_prompt_evolution_context()
+        stats = context_payload.get('stats', {})
+        headlines = context_payload.get('headlines', [])
+
+        prompt_payload = {
+            'agent_type': agent_type,
+            'current_prompt': {
+                'version': current_prompt.version,
+                'description': current_prompt.description,
+                'system_prompt': current_prompt.system_prompt,
+                'user_prompt_template': current_prompt.user_prompt_template,
+            },
+            'performance_stats': stats,
+            'recent_headlines': headlines,
+            'goal': (
+                'Improve prompt quality based on current performance. '
+                'Preserve placeholders/tokens and actionable structure while tightening clarity.'
+            ),
+        }
+
+        from openai import OpenAI
+
+        client = OpenAI()
+        model = get_gpt_model()
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are an expert prompt engineer for an autonomous trading workflow. '
+                        'Given the current prompt and performance context, produce improved prompts. '
+                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, reasoning.'
+                    ),
+                },
+                {
+                    'role': 'user',
+                    'content': (
+                        'Generate an improved prompt package from this input:\n\n'
+                        f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+                    ),
+                },
+            ],
+        )
+
+        content = ''
+        if response and getattr(response, 'choices', None):
+            content = response.choices[0].message.content
+
+        parsed = _parse_generated_prompt_payload(content)
+
+        system_prompt = (parsed.get('system_prompt') or '').strip()
+        user_prompt_template = (parsed.get('user_prompt_template') or '').strip()
+        reasoning = (parsed.get('reasoning') or '').strip()
+
+        if not system_prompt or not user_prompt_template:
+            return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
+
+        return jsonify({
+            'system_prompt': system_prompt,
+            'user_prompt_template': user_prompt_template,
+            'reasoning': reasoning,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/apply', methods=['POST'])
+def apply_prompt_evolution_candidate():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        agent_type = data.get('agent_type')
+        system_prompt = (data.get('system_prompt') or '').strip()
+        user_prompt_template = (data.get('user_prompt_template') or '').strip()
+        description = (data.get('description') or '').strip()
+
+        if not agent_type:
+            return jsonify({'error': 'agent_type is required'}), 400
+        if not system_prompt or not user_prompt_template:
+            return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
+
+        config_hash = get_current_config_hash()
+
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            })
+
+            version_row = conn.execute(text("""
+                SELECT COALESCE(MAX(version), -1) AS max_version
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            }).fetchone()
+
+            new_version = int(version_row.max_version) + 1 if version_row and version_row.max_version is not None else 0
+
+            conn.execute(text("""
+                INSERT INTO prompt_versions (
+                    agent_type,
+                    version,
+                    system_prompt,
+                    user_prompt_template,
+                    description,
+                    created_by,
+                    is_active,
+                    config_hash
+                ) VALUES (
+                    :agent_type,
+                    :version,
+                    :system_prompt,
+                    :user_prompt_template,
+                    :description,
+                    :created_by,
+                    TRUE,
+                    :config_hash
+                )
+            """), {
+                'agent_type': agent_type,
+                'version': new_version,
+                'system_prompt': system_prompt,
+                'user_prompt_template': user_prompt_template,
+                'description': description,
+                'created_by': 'prompt_lab',
+                'config_hash': config_hash,
+            })
+
+        return jsonify({'success': True, 'version': new_version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/schwab')
 def schwab_dashboard():

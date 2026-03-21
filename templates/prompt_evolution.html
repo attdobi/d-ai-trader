@@ -1,0 +1,501 @@
+{% extends "tabs.html" %}
+
+{% block title %}Prompt Evolution{% endblock %}
+
+{% block head %}
+<style>
+  .pe-page {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .pe-card {
+    background: rgba(15, 22, 40, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 22px;
+  }
+
+  .pe-card h1,
+  .pe-card h2,
+  .pe-card h3,
+  .pe-card h4 {
+    margin-top: 0;
+  }
+
+  .pe-subtitle {
+    color: var(--muted);
+    margin-top: -4px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+
+  .pe-loading,
+  .pe-empty {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 10px 0;
+  }
+
+  .pe-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+
+  .pe-hidden {
+    display: none !important;
+  }
+
+  .pe-error {
+    margin-top: 12px;
+    color: #ff8a9a;
+    background: rgba(255, 95, 115, 0.12);
+    border: 1px solid rgba(255, 95, 115, 0.22);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .pe-success {
+    margin-top: 12px;
+    color: #29d697;
+    background: rgba(41, 214, 151, 0.12);
+    border: 1px solid rgba(41, 214, 151, 0.22);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .pe-stats-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    margin-bottom: 18px;
+  }
+
+  .pe-stat-box {
+    background: rgba(10, 15, 27, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 12px;
+  }
+
+  .pe-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .pe-stat-label {
+    display: block;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .pe-headlines {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 8px;
+    color: var(--text);
+  }
+
+  .pe-headlines li {
+    line-height: 1.45;
+    color: #d8deef;
+  }
+
+  .pe-timeline-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .pe-column {
+    background: rgba(10, 15, 27, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 14px;
+    min-height: 240px;
+  }
+
+  .pe-column h3 {
+    margin-bottom: 12px;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .pe-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: relative;
+    padding-left: 14px;
+  }
+
+  .pe-timeline::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    bottom: 2px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .pe-version-item {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(15, 22, 40, 0.95);
+    border-radius: 12px;
+    padding: 10px;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text);
+    position: relative;
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .pe-version-item::before {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    left: -15px;
+    top: 16px;
+    background: rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(10, 15, 27, 1);
+  }
+
+  .pe-version-item:hover {
+    border-color: rgba(66, 201, 255, 0.5);
+    transform: translateY(-1px);
+  }
+
+  .pe-version-item.is-selected {
+    border-color: rgba(66, 201, 255, 0.8);
+    box-shadow: 0 10px 24px rgba(66, 201, 255, 0.22);
+  }
+
+  .pe-version-item.is-selected::before {
+    background: var(--accent);
+  }
+
+  .pe-version-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .pe-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 12px;
+    border: 1px solid rgba(66, 201, 255, 0.35);
+    color: var(--accent);
+    background: rgba(66, 201, 255, 0.14);
+    font-weight: 600;
+  }
+
+  .pe-date {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .pe-description {
+    color: #d5dcf0;
+    font-size: 13px;
+    line-height: 1.45;
+    margin: 0;
+  }
+
+  .pe-active {
+    display: inline-flex;
+    margin-top: 8px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: rgba(41, 214, 151, 0.16);
+    color: #29d697;
+    border: 1px solid rgba(41, 214, 151, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+
+  .pe-diff-panel {
+    margin-top: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    background: rgba(8, 12, 22, 0.95);
+    padding: 14px;
+  }
+
+  .pe-diff-meta {
+    margin: 0 0 10px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .pe-diff-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pe-diff-block h4 {
+    margin-bottom: 8px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .pe-diff-view {
+    margin: 0;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(15, 22, 40, 0.92);
+    overflow: auto;
+    max-height: 320px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .pe-diff-line {
+    display: block;
+    padding: 1px 10px;
+    white-space: pre;
+  }
+
+  .pe-diff-line.add { background: rgba(41, 214, 151, 0.14); color: #8ef0cc; }
+  .pe-diff-line.remove { background: rgba(255, 95, 115, 0.14); color: #ffb2bd; }
+  .pe-diff-line.hunk { background: rgba(66, 201, 255, 0.14); color: #9bdfff; }
+
+  .pe-form-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 10px;
+  }
+
+  .pe-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .pe-field label {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+
+  .pe-input,
+  .pe-select,
+  .pe-textarea {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(8, 12, 22, 0.92);
+    color: var(--text);
+    padding: 10px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+
+  .pe-textarea {
+    min-height: 180px;
+    resize: vertical;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .pe-btn {
+    border-radius: 999px;
+    border: none;
+    background: var(--accent);
+    color: #03121d;
+    font-weight: 700;
+    padding: 11px 18px;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .pe-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 30px rgba(66, 201, 255, 0.3);
+  }
+
+  .pe-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+
+  .pe-btn.secondary {
+    background: rgba(41, 214, 151, 0.2);
+    border: 1px solid rgba(41, 214, 151, 0.4);
+    color: #98f2cf;
+  }
+
+  .pe-reasoning {
+    background: rgba(66, 201, 255, 0.08);
+    border: 1px solid rgba(66, 201, 255, 0.2);
+    border-radius: 12px;
+    padding: 12px;
+    color: #d9eff8;
+    white-space: pre-wrap;
+    line-height: 1.45;
+    margin-bottom: 12px;
+  }
+
+  @media (max-width: 980px) {
+    .pe-timeline-grid,
+    .pe-diff-grid,
+    .pe-form-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pe-page">
+  <section class="pe-card" id="performanceContextCard">
+    <h1>Prompt Evolution</h1>
+    <p class="pe-subtitle">Performance context for the last 7 days and recent market headlines.</p>
+
+    <div id="performanceLoading" class="pe-loading">
+      <span class="pe-spinner" aria-hidden="true"></span>
+      <span>Loading performance context…</span>
+    </div>
+
+    <div id="performanceContent" class="pe-hidden">
+      <div id="performanceStats" class="pe-stats-grid"></div>
+
+      <h3>Recent Headlines</h3>
+      <ul id="recentHeadlines" class="pe-headlines"></ul>
+    </div>
+
+    <div id="performanceError" class="pe-error pe-hidden"></div>
+  </section>
+
+  <section class="pe-card" id="promptTimelineCard">
+    <h2>Prompt Version Timeline</h2>
+    <p class="pe-subtitle">Select two versions in the same column to compare unified diffs.</p>
+
+    <div id="historyLoading" class="pe-loading">
+      <span class="pe-spinner" aria-hidden="true"></span>
+      <span>Loading prompt history…</span>
+    </div>
+
+    <div id="timelineColumns" class="pe-timeline-grid pe-hidden">
+      <article class="pe-column">
+        <h3>Summarizer</h3>
+        <div id="timeline-SummarizerAgent" class="pe-timeline"></div>
+      </article>
+      <article class="pe-column">
+        <h3>Decider</h3>
+        <div id="timeline-DeciderAgent" class="pe-timeline"></div>
+      </article>
+      <article class="pe-column">
+        <h3>Feedback</h3>
+        <div id="timeline-FeedbackAgent" class="pe-timeline"></div>
+      </article>
+    </div>
+
+    <div id="historyError" class="pe-error pe-hidden"></div>
+
+    <div id="diffPanel" class="pe-diff-panel pe-hidden">
+      <p id="diffMeta" class="pe-diff-meta"></p>
+      <div class="pe-diff-grid">
+        <section class="pe-diff-block">
+          <h4>System Prompt Diff</h4>
+          <div id="systemDiff" class="pe-diff-view" role="region" aria-label="System prompt diff"></div>
+        </section>
+        <section class="pe-diff-block">
+          <h4>User Prompt Template Diff</h4>
+          <div id="userDiff" class="pe-diff-view" role="region" aria-label="User prompt template diff"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section class="pe-card" id="promptLabCard">
+    <h2>Prompt Lab</h2>
+    <p class="pe-subtitle">Generate and apply improved prompt versions for each agent.</p>
+
+    <div class="pe-form-grid">
+      <div class="pe-field">
+        <label for="promptLabAgentType">Agent Type</label>
+        <select id="promptLabAgentType" class="pe-select">
+          <option value="SummarizerAgent">Summarizer</option>
+          <option value="DeciderAgent">Decider</option>
+          <option value="FeedbackAgent">Feedback</option>
+        </select>
+      </div>
+      <div class="pe-field" style="justify-content: flex-end;">
+        <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
+      </div>
+    </div>
+
+    <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
+    <div id="promptLabError" class="pe-error pe-hidden"></div>
+    <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
+
+    <div id="promptLabResults" class="pe-hidden">
+      <div class="pe-field">
+        <label>Reasoning</label>
+        <div id="generatedReasoning" class="pe-reasoning"></div>
+      </div>
+
+      <div class="pe-form-grid">
+        <div class="pe-field">
+          <label for="generatedSystemPrompt">System Prompt</label>
+          <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+        </div>
+        <div class="pe-field">
+          <label for="generatedUserPrompt">User Prompt Template</label>
+          <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <div class="pe-field">
+        <label for="promptDescription">Description</label>
+        <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
+      </div>
+
+      <div style="margin-top: 14px;">
+        <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('static', filename='js/prompt-evolution.js') }}"></script>
+{% endblock %}
