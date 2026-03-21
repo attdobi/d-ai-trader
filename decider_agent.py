@@ -42,6 +42,7 @@ import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
 from shared.ticker_normalize import normalize_ticker
 from shared.run_context import RunContext
+from shared.market_clock import MarketClock
 
 # Timezone configuration
 PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
@@ -541,19 +542,7 @@ price_fetcher = YFinancePriceFetcher()
 
 def is_market_open():
     """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
-    # Get current time in Pacific, convert to Eastern for market hours check
-    now_pacific = datetime.now(PACIFIC_TIMEZONE)
-    now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
-    
-    # Check if it's a weekday (Monday = 0, Sunday = 6)
-    if now_eastern.weekday() >= 5:  # Saturday or Sunday
-        return False
-        
-    # Check if it's within market hours (Eastern Time)
-    market_open = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
-    
-    return market_open <= now_eastern <= market_close
+    return MarketClock.is_market_open()
 
 def get_latest_run_id():
     with engine.connect() as conn:

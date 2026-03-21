@@ -37,6 +37,7 @@ from config import engine, PromptManager, session, openai, get_trading_mode, get
 from feedback_agent import TradeOutcomeTracker
 from trading_interface import trading_interface
 from shared.run_context import RunContext
+from shared.market_clock import MarketClock
 
 # Import the existing modules
 import main as summarizer_main
@@ -74,6 +75,7 @@ EASTERN_TIMEZONE = pytz.timezone('US/Eastern')
 # Market hours configuration (Eastern Time - market hours are always ET)
 MARKET_OPEN_TIME = "09:30"
 MARKET_CLOSE_TIME = "16:00"
+# MarketClock provides the canonical timezone logic; module constants kept for backward compat
 SUMMARIZER_START_TIME = "08:25"
 SUMMARIZER_END_TIME = "17:25"
 WEEKEND_SUMMARIZER_TIME = "15:00"  # 3pm ET
@@ -140,19 +142,7 @@ class DAITraderOrchestrator:
     
     def is_market_open(self):
         """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
-        # Get current time in local tz, convert to Eastern for market hours check
-        now_local = datetime.now(LOCAL_TIMEZONE)
-        now_eastern = now_local.astimezone(EASTERN_TIMEZONE)
-        
-        # Check if it's a weekday (Monday = 0, Sunday = 6)
-        if now_eastern.weekday() >= 5:  # Saturday or Sunday
-            return False
-            
-        # Check if it's within market hours (Eastern Time)
-        market_open = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
-        
-        return market_open <= now_eastern <= market_close
+        return MarketClock.is_market_open()
     
     def is_summarizer_time(self):
         """Check if it's time to run summarizers"""
@@ -764,15 +754,7 @@ class DAITraderOrchestrator:
         """Setup the scheduling for all jobs with configurable cadence"""
         def _et_to_local_time_str(et_hhmm: str) -> str:
             """Convert an ET HH:MM string to local-time HH:MM for the scheduler."""
-            try:
-                hour, minute = map(int, et_hhmm.split(":"))
-                now_et = datetime.now(EASTERN_TIMEZONE)
-                target_et = now_et.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                target_local = target_et.astimezone(LOCAL_TIMEZONE)
-                return target_local.strftime("%H:%M")
-            except Exception as exc:
-                logger.warning(f"Failed to convert ET time '{et_hhmm}' to local; defaulting to same string. Error: {exc}")
-                return et_hhmm
+            return MarketClock.et_to_local(et_hhmm)
 
         # Get cadence from environment (default: 180 minutes = 3 hours)
         cadence_minutes = self._cadence_minutes
