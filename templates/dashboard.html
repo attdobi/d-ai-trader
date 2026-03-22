@@ -135,11 +135,11 @@
   <h3>Manual System Triggers</h3>
   <p class="trigger-description">Use these buttons to manually trigger system components for testing:</p>
   <div class="trigger-buttons">
-    <button class="trigger-btn" onclick="triggerAgent('summarizer')"><span class="btn-icon">📰</span>Run Summarizer Agents</button>
-    <button class="trigger-btn" onclick="triggerAgent('decider')"><span class="btn-icon">🤖</span>Run Decider Agent</button>
-    <button class="trigger-btn" onclick="triggerAgent('feedback')"><span class="btn-icon">📊</span>Run Feedback Agent</button>
-    <button class="trigger-btn" id="summary-analyzer-btn" onclick="runSummaryAnalyzer()"><span class="btn-icon">🧠</span>Run Summary Analyzer &amp; Momentum</button>
-    <button class="trigger-btn trigger-all" onclick="triggerAgent('all')"><span class="btn-icon">🚀</span>Run All Agents</button>
+    <button class="trigger-btn" onclick="triggerAgent('summarizer')" aria-label="Run Summarizer Agents"><span class="btn-icon">📰</span>Run Summarizer Agents</button>
+    <button class="trigger-btn" onclick="triggerAgent('decider')" aria-label="Run Decider Agent"><span class="btn-icon">🤖</span>Run Decider Agent</button>
+    <button class="trigger-btn" onclick="triggerAgent('feedback')" aria-label="Run Feedback Agent"><span class="btn-icon">📊</span>Run Feedback Agent</button>
+    <button class="trigger-btn" id="summary-analyzer-btn" onclick="runSummaryAnalyzer()" aria-label="Run Summary Analyzer and Momentum"><span class="btn-icon">🧠</span>Run Summary Analyzer &amp; Momentum</button>
+    <button class="trigger-btn trigger-all" onclick="triggerAgent('all')" aria-label="Run All Agents"><span class="btn-icon">🚀</span>Run All Agents</button>
   </div>
   <div id="trigger-status" class="trigger-status"></div>
   <div id="summary-analyzer-output" class="trigger-status"></div>
@@ -209,17 +209,20 @@
 </div>
 
 <div class="price-update-container">
-  <button class="price-update-btn" onclick="updatePrices()"><span class="btn-icon">📈</span>Update Stock Prices</button>
+  <button class="price-update-btn" onclick="updatePrices()" aria-label="Refresh stock prices"><span class="btn-icon">📈</span>Update Stock Prices</button>
   <div id="price-update-status" class="price-update-status"></div>
 </div>
 
 <div class="reset-container">
-  <button class="reset-btn-small" onclick="resetPortfolio()"><span class="btn-icon">🔄</span>Reset Portfolio</button>
+  <button class="reset-btn-small" onclick="resetPortfolio()" aria-label="Reset portfolio"><span class="btn-icon">🔄</span>Reset Portfolio</button>
   <div id="reset-status" class="reset-status-small"></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
+/cdn.jsdelivr.net/npm/chart.js"></script>
 <script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

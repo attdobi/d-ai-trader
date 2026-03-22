@@ -1,14 +1,15 @@
 {% extends "base.html" %}
+{% block title %}Summaries{% endblock %}
 
 {% block content %}
 <h1>Latest Summaries</h1>
 {% include "partials/_config_banner.html" %}
 
 <div class="search-container">
-  <input type="text" class="search-input" id="summarySearch" placeholder="🔍 Filter summaries by keyword..." oninput="filterSummaries()">
+  <input type="text" class="search-input" id="summarySearch" placeholder="🔍 Filter summaries by keyword..." oninput="filterSummaries()" aria-label="Filter summaries">
 </div>
 
-<div class="summaries-grid" id="summariesGrid">
+<div class="summaries-grid" id="summariesGrid" role="region" aria-label="News summaries">
   {% for summary in summaries %}
   <div class="summary-card" data-searchable="{{ summary.agent }} {{ summary.headlines|join(' ') }} {{ summary.insights }}">
     <div class="summary-source">
@@ -65,3 +66,4 @@ function filterSummaries() {
 }
 </script>
 {% endblock %}
+endblock %}

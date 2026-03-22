@@ -412,10 +412,10 @@ function triggerAgent(agentType) {
   fetch(`/api/trigger/${agentType}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json())
     .then(data => {
-      if (data.success) { statusDiv.innerHTML = `✅ ${data.message}`; statusDiv.className = 'trigger-status success'; setTimeout(() => location.reload(), 2000); }
-      else { statusDiv.innerHTML = `❌ Error: ${data.error}`; statusDiv.className = 'trigger-status error'; }
+      if (data.success) { showToast(data.message, 'success'); statusDiv.innerHTML = ''; statusDiv.className = 'trigger-status'; setTimeout(() => location.reload(), 2000); }
+      else { showToast('Error: ' + (data.error || 'Unknown error'), 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'trigger-status'; }
     })
-    .catch(err => { statusDiv.innerHTML = `❌ Network error: ${err.message}`; statusDiv.className = 'trigger-status error'; })
+    .catch(err => { showToast('Network error: ' + err.message, 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'trigger-status'; })
     .finally(() => { buttons.forEach(b => b.disabled = false); });
 }
 function runSummaryAnalyzer() {
@@ -474,10 +474,10 @@ function resetPortfolio() {
   fetch('/api/reset-portfolio', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json())
     .then(data => {
-      if (data.success) { statusDiv.innerHTML = `✅ ${data.message}`; statusDiv.className = 'reset-status-small success'; setTimeout(() => location.reload(), 2000); }
-      else { statusDiv.innerHTML = `❌ Error: ${data.error}`; statusDiv.className = 'reset-status-small error'; }
+      if (data.success) { showToast(data.message, 'success'); statusDiv.innerHTML = ''; statusDiv.className = 'reset-status-small'; setTimeout(() => location.reload(), 2000); }
+      else { showToast('Error: ' + (data.error || 'Unknown error'), 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'reset-status-small'; }
     })
-    .catch(err => { statusDiv.innerHTML = `❌ Network error: ${err.message}`; statusDiv.className = 'reset-status-small error'; })
+    .catch(err => { showToast('Network error: ' + err.message, 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'reset-status-small'; })
     .finally(() => { if (button) button.disabled = false; });
 }
 function updatePrices() {
@@ -487,10 +487,10 @@ function updatePrices() {
   fetch('/api/trigger/price-update', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json())
     .then(data => {
-      if (data.success) { statusDiv.innerHTML = `✅ ${data.message}`; statusDiv.className = 'price-update-status success'; setTimeout(() => location.reload(), 3000); }
-      else { statusDiv.innerHTML = `❌ Error: ${data.error}`; statusDiv.className = 'price-update-status error'; }
+      if (data.success) { showToast(data.message, 'success'); statusDiv.innerHTML = ''; statusDiv.className = 'price-update-status'; setTimeout(() => location.reload(), 3000); }
+      else { showToast('Error: ' + (data.error || 'Unknown error'), 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'price-update-status'; }
     })
-    .catch(err => { statusDiv.innerHTML = `❌ Network error: ${err.message}`; statusDiv.className = 'price-update-status error'; })
+    .catch(err => { showToast('Network error: ' + err.message, 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'price-update-status'; })
     .finally(() => { if (button) button.disabled = false; });
 }
 window.addEventListener('load', () => {
@@ -498,4 +498,16 @@ window.addEventListener('load', () => {
   loadPerformanceChart();
   loadBreakdownChart();
   loadSparklines();
+
+  // Auto-refresh metric data every 60s
+  setInterval(() => {
+    fetch('/api/holdings').then(r => r.json()).then(data => {
+      // Silently refresh — only update if we get valid data
+      if (data && Array.isArray(data)) {
+        // Refresh charts on interval
+        loadChart();
+        loadSparklines();
+      }
+    }).catch(() => {}); // Silent fail on auto-refresh
+  }, 60000);
 });

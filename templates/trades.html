@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Trades{% endblock %}
 
 {% block content %}
 <h1>Latest Trade Decisions</h1>
@@ -19,7 +20,7 @@
   </div>
 </div>
 
-<div class="filter-chips" id="filterChips">
+<div class="filter-chips" id="filterChips" aria-label="Filter trades">
   <button class="chip active" data-filter="all">All</button>
   <button class="chip" data-filter="buy">📈 Buys</button>
   <button class="chip" data-filter="sell">📉 Sells</button>
@@ -28,7 +29,7 @@
 </div>
 
 <div class="table-container">
-<table>
+<table aria-label="Trade decisions">
   <thead>
     <tr>
       <th>Ticker</th>
@@ -98,9 +99,16 @@
   </tbody>
 </table>
 </div>
+
+<div class="pagination" id="tradesPagination">
+  <button class="pagination-btn" id="prevPage" onclick="changePage(-1)">← Previous</button>
+  <span class="pagination-info" id="pageInfo">Page 1</span>
+  <button class="pagination-btn" id="nextPage" onclick="changePage(1)">Next →</button>
+</div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script defer src="{{ url_for('static', filename='js/trades.js') }}"></script>
 {% endblock %}
+}

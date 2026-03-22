@@ -1,4 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const PAGE_SIZE = 25;
+  let currentPage = 1;
+  let activeFilter = 'all';
+  const allRows = Array.from(document.querySelectorAll('.trade-row'));
+  
   // Chart button popup
   const popupFeatures = () => {
     const width = Math.min(window.outerWidth - 120, 1200);
@@ -17,44 +22,111 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  function getFilteredRows() {
+    return allRows.filter(row => {
+      const action = (row.dataset.action || '').toLowerCase();
+      if (activeFilter === 'all') return true;
+      if (activeFilter === 'today') {
+        const cells = row.querySelectorAll('td');
+        const tsText = cells[cells.length - 1]?.textContent?.trim() || '';
+        const today = new Date().toLocaleDateString();
+        try {
+          const rowDate = new Date(tsText).toLocaleDateString();
+          return rowDate === today;
+        } catch { return false; }
+      }
+      if (activeFilter === 'market_closed') {
+        return action.includes('market_closed') || action.includes('market closed');
+      }
+      return action.includes(activeFilter);
+    });
+  }
+
+  function renderPage() {
+    const filtered = getFilteredRows();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+
+    // Hide all, show only current page
+    allRows.forEach(r => r.style.display = 'none');
+    filtered.forEach((row, i) => {
+      row.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+
+    // Update pagination controls
+    const pageInfo = document.getElementById('pageInfo');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    if (pageInfo) pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${filtered.length} trades)`;
+    if (prevBtn) prevBtn.disabled = currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+  }
+
   // Filter chips
   const chips = document.querySelectorAll('.chip[data-filter]');
-  const rows = document.querySelectorAll('.trade-row');
-
   chips.forEach(chip => {
     chip.addEventListener('click', () => {
       chips.forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
-      const filter = chip.dataset.filter;
-      rows.forEach(row => {
-        const action = (row.dataset.action || '').toLowerCase();
-        if (filter === 'all') {
-          row.style.display = '';
-        } else if (filter === 'market_closed') {
-          row.style.display = action.includes('market_closed') || action.includes('market closed') ? '' : 'none';
-        } else {
-          row.style.display = action.includes(filter) ? '' : 'none';
-        }
-      });
+      activeFilter = chip.dataset.filter;
+      currentPage = 1;
+      renderPage();
+      updateDailySummary();
     });
   });
 
-  // Daily summary calculation
-  let buyCount = 0, sellCount = 0, buyTotal = 0, sellTotal = 0;
-  const today = new Date().toLocaleDateString();
-  rows.forEach(row => {
-    const cells = row.querySelectorAll('td');
-    const timestamp = cells[cells.length - 1]?.textContent?.trim() || '';
-    // Check if trade is from today (rough match)
-    const action = (row.dataset.action || '').toLowerCase();
-    if (action.includes('buy')) { buyCount++; }
-    if (action.includes('sell')) { sellCount++; }
-  });
+  window.changePage = function(delta) {
+    currentPage += delta;
+    renderPage();
+  };
 
-  const buysEl = document.getElementById('todayBuys');
-  const sellsEl = document.getElementById('todaySells');
-  const netEl = document.getElementById('todayNet');
-  if (buysEl) buysEl.textContent = buyCount;
-  if (sellsEl) sellsEl.textContent = sellCount;
-  if (netEl) netEl.textContent = `${buyCount + sellCount} trades`;
+  function updateDailySummary() {
+    const today = new Date().toLocaleDateString();
+    let buyCount = 0, sellCount = 0;
+    allRows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      const tsText = cells[cells.length - 1]?.textContent?.trim() || '';
+      let isToday = false;
+      try { isToday = new Date(tsText).toLocaleDateString() === today; } catch {}
+      if (!isToday) return;
+      const action = (row.dataset.action || '').toLowerCase();
+      if (action.includes('buy')) buyCount++;
+      if (action.includes('sell')) sellCount++;
+    });
+    const buysEl = document.getElementById('todayBuys');
+    const sellsEl = document.getElementById('todaySells');
+    const netEl = document.getElementById('todayNet');
+    if (buysEl) buysEl.textContent = buyCount;
+    if (sellsEl) sellsEl.textContent = sellCount;
+    if (netEl) netEl.textContent = `${buyCount + sellCount} trades`;
+  }
+
+  // Add "Today" chip if not present
+  const filterContainer = document.getElementById('filterChips');
+  if (filterContainer && !filterContainer.querySelector('[data-filter="today"]')) {
+    const todayChip = document.createElement('button');
+    todayChip.className = 'chip';
+    todayChip.dataset.filter = 'today';
+    todayChip.textContent = '📅 Today';
+    // Insert after "All" chip
+    const allChip = filterContainer.querySelector('[data-filter="all"]');
+    if (allChip && allChip.nextSibling) {
+      filterContainer.insertBefore(todayChip, allChip.nextSibling);
+    } else {
+      filterContainer.appendChild(todayChip);
+    }
+    todayChip.addEventListener('click', () => {
+      chips.forEach(c => c.classList.remove('active'));
+      todayChip.classList.add('active');
+      activeFilter = 'today';
+      currentPage = 1;
+      renderPage();
+      updateDailySummary();
+    });
+  }
+
+  updateDailySummary();
+  renderPage();
 });

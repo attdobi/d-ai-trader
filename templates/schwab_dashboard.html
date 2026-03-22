@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Schwab Live{% endblock %}
 
 {% block content %}
 <h1>Schwab Live Portfolio</h1>
@@ -9,7 +10,7 @@
     <span id="status-icon">🔄</span>
     <span id="status-text">Checking connection...</span>
   </div>
-  <button id="refresh-btn" class="refresh-btn" onclick="refreshSchwabData()">
+  <button id="refresh-btn" class="refresh-btn" onclick="refreshSchwabData()" aria-label="Refresh Schwab data">
     <span>🔄</span> Refresh
   </button>
 </div>
@@ -84,7 +85,7 @@
 <div id="holdings-section" style="display: none;">
   <h2>Current Holdings</h2>
   <div class="table-container">
-    <table id="holdings-table" class="holdings-table">
+    <table id="holdings-table" class="holdings-table" aria-label="Schwab holdings">
       <thead>
         <tr>
           <th>Symbol</th>
@@ -120,3 +121,4 @@
 {% block scripts %}
 <script defer src="{{ url_for('static', filename='js/schwab.js') }}"></script>
 {% endblock %}
+ %}

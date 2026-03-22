@@ -2,26 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>{% block title %}Trading Dashboard{% endblock %}</title>
+  <title>{% block title %}Trading Dashboard{% endblock %} — D-AI-Trader</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#05070f" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polyline points='4,24 12,16 18,20 28,6' fill='none' stroke='%2342c9ff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/><polyline points='22,6 28,6 28,12' fill='none' stroke='%2342c9ff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet" />
   {% block head %}{% endblock %}
 </head>
 <body>
-  <nav class="nav">
+  <a href="#main-content" class="skip-nav">Skip to content</a>
+  <nav class="nav" role="navigation" aria-label="Main navigation">
     <a href="/" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
     <a href="/schwab" class="{{ 'active' if request.path.startswith('/schwab') else '' }}">Schwab Live</a>
     <a href="/trades" class="{{ 'active' if request.path.startswith('/trades') else '' }}">Trades</a>
     <a href="/summaries" class="{{ 'active' if request.path.startswith('/summaries') else '' }}">Summaries</a>
     <a href="/feedback" class="{{ 'active' if request.path.startswith('/feedback') else '' }}">Feedback</a>
+    <a href="/prompt-evolution" class="{{ 'active' if request.path.startswith('/prompt-evolution') else '' }}">Prompt Lab</a>
   </nav>
 
-  <main class="container">
+  <main class="container" id="main-content" role="main">
     {% block content %}{% endblock %}
   </main>
 
   <script defer src="{{ url_for('static', filename='js/common.js') }}"></script>
   <script defer src="{{ url_for('static', filename='js/time.js') }}"></script>
   {% block scripts %}{% endblock %}
+  <div class="toast-container" id="toastContainer" aria-live="polite" role="status"></div>
 </body>
 </html>
