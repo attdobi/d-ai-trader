@@ -511,3 +511,13 @@ window.addEventListener('load', () => {
     }).catch(() => {}); // Silent fail on auto-refresh
   }, 60000);
 });
+
+// Persist system controls open/closed state
+const systemControls = document.querySelector('.system-controls-panel');
+if (systemControls) {
+  const savedState = localStorage.getItem('systemControlsOpen');
+  if (savedState === 'true') systemControls.open = true;
+  systemControls.addEventListener('toggle', () => {
+    localStorage.setItem('systemControlsOpen', systemControls.open);
+  });
+}

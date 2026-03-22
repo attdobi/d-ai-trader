@@ -126,7 +126,89 @@ body {
   color: var(--accent);
 }
 
-.portfolio-summary { display:flex; gap:24px; margin-bottom:36px; flex-wrap:wrap; }
+.portfolio-summary { display:flex; gap:24px; margin-bottom:24px; flex-wrap:wrap; }
+
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.hero-card {
+  background: linear-gradient(160deg, rgba(21,31,53,0.97), rgba(13,18,32,0.94));
+  border-radius: var(--radius);
+  padding: 32px;
+  border: 1px solid var(--card-border);
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.hero-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(66,201,255,0.12), transparent 50%);
+  pointer-events: none;
+}
+
+.hero-card h3 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+.hero-card .value {
+  font-size: 36px;
+  font-weight: 800;
+  margin: 0;
+  line-height: 1.1;
+}
+
+.hero-card .percentage {
+  margin-top: 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.hero-card .subtitle {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Gain/loss colors on hero cards */
+.hero-card.gain .value { color: var(--success); }
+.hero-card.gain .percentage { color: var(--success); }
+.hero-card.loss .value { color: var(--danger); }
+.hero-card.loss .percentage { color: var(--danger); }
+
+.secondary-metrics {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+
+.secondary-metrics .metric-card {
+  flex: 1;
+  min-width: 180px;
+  padding: 20px;
+}
+
+.secondary-metrics .metric-card h3 {
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.secondary-metrics .metric-card .value {
+  font-size: 22px;
+}
 
 .metric-card {
   flex: 1;
@@ -165,7 +247,7 @@ body {
   border:1px solid rgba(255,255,255,0.05);
   border-radius: var(--radius);
   padding:26px;
-  margin-bottom:36px;
+  margin-bottom:24px;
   box-shadow: var(--shadow);
 }
 
@@ -192,6 +274,62 @@ body {
 .config-value.real-mode { color: var(--danger); font-weight:700; }
 
 .config-value.sim-mode { color: var(--success); font-weight:700; }
+
+.system-controls-panel {
+  background: linear-gradient(140deg, rgba(15,22,40,0.85), rgba(11,18,32,0.82));
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: var(--radius);
+  margin-top: 36px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.system-controls-toggle {
+  padding: 20px 26px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.system-controls-toggle::-webkit-details-marker { display: none; }
+
+.system-controls-toggle::after {
+  content: "▸";
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  font-size: 14px;
+}
+
+.system-controls-panel[open] > .system-controls-toggle::after {
+  transform: rotate(90deg);
+}
+
+.system-controls-panel > .system-controls-content {
+  padding: 0 26px 26px;
+}
+
+.account-details-panel {
+  margin-bottom: 24px;
+}
+
+.account-details-panel > summary {
+  padding: 14px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
 
 .connection-status {
   display:flex;
@@ -1070,6 +1208,9 @@ tbody tr:hover { background: rgba(66,201,255,0.1); }
   .nav a { padding: 8px 14px; font-size: 13px; }
   .portfolio-summary { flex-direction: column; }
   .metric-card { min-width: unset; }
+  .hero-metrics { grid-template-columns: 1fr 1fr; }
+  .hero-card .value { font-size: 28px; }
+  .hero-card { padding: 24px; }
   .config-cards { flex-direction: column; }
   .account-meta { grid-template-columns: 1fr 1fr; }
   .summaries-grid { grid-template-columns: 1fr; }
@@ -1085,5 +1226,6 @@ tbody tr:hover { background: rgba(66,201,255,0.1); }
 
 @media (max-width: 480px) {
   .account-meta { grid-template-columns: 1fr; }
+  .hero-metrics { grid-template-columns: 1fr; }
   .nav a { padding: 6px 10px; font-size: 12px; }
 }
