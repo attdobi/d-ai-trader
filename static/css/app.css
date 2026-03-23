@@ -1229,3 +1229,52 @@ tbody tr:hover { background: rgba(66,201,255,0.1); }
   .hero-metrics { grid-template-columns: 1fr; }
   .nav a { padding: 6px 10px; font-size: 12px; }
 }
+
+/* ========== Schwab Dashboard Additions ========== */
+
+.schwab-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.holdings-table tbody tr.row-gain {
+  background: rgba(54,179,126,0.06);
+}
+
+.holdings-table tbody tr.row-loss {
+  background: rgba(255,95,115,0.06);
+}
+
+.holdings-table tfoot td {
+  border-top: 2px solid var(--card-border);
+  font-weight: 700;
+}
+
+#schwab-account-details {
+  margin-bottom: 24px;
+}
+
+#schwab-account-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 12px 0;
+  user-select: none;
+}
+
+#schwab-account-details summary:hover {
+  color: var(--accent);
+}
+
+@media (max-width: 768px) {
+  .schwab-charts-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 480px) {
+  .schwab-charts-row { grid-template-columns: 1fr; }
+}

@@ -43,46 +43,39 @@
   <p>No live orders will be submitted while this mode is active.</p>
 </div>
 
-<div id="schwab-summary" class="portfolio-summary" style="display: none;">
-  <div class="metric-card">
+<!-- Hero Section -->
+<div id="schwab-hero" class="hero-metrics" style="display:none;">
+  <div class="hero-card">
     <h3>Total Portfolio Value</h3>
     <p id="total-value" class="value">$0.00</p>
+    <p class="subtitle">Live from Schwab</p>
   </div>
-  <div class="metric-card">
-    <h3>Funds Available</h3>
+  <div id="hero-pnl" class="hero-card">
+    <h3>Unrealized P&amp;L</h3>
+    <p id="total-pnl-value" class="value">$0.00</p>
+    <p id="total-pnl-pct" class="percentage"></p>
+  </div>
+  <div class="hero-card">
+    <h3>Cash / Invested</h3>
     <p id="funds-available" class="value">$0.00</p>
-  </div>
-  <div class="metric-card">
-    <h3>Settled Cash Balance</h3>
-    <p id="cash-balance" class="value">$0.00</p>
-  </div>
-  <div class="metric-card">
-    <h3>Unsettled Cash</h3>
-    <p id="unsettled-cash" class="value">$0.00</p>
-  </div>
-  <div class="metric-card">
-    <h3>Order Reserve</h3>
-    <p id="order-reserve" class="value">$0.00</p>
-  </div>
-  <div class="metric-card" id="funds-components-card" style="display:none;">
-    <h3>Funds Breakdown</h3>
-    <p id="funds-components" class="value" style="font-size:0.9rem; line-height:1.4;">—</p>
-  </div>
-  <div class="metric-card">
-    <h3>Open Orders</h3>
-    <p id="open-orders" class="value">0</p>
-  </div>
-  <div class="metric-card">
-    <h3>Buying Power</h3>
-    <p id="buying-power" class="value">$0.00</p>
-  </div>
-  <div class="metric-card">
-    <h3>Day Trading Power</h3>
-    <p id="day-trading-power" class="value">$0.00</p>
+    <p id="cash-invested-subtitle" class="subtitle">—</p>
   </div>
 </div>
 
-<div id="holdings-section" style="display: none;">
+<!-- Charts Row -->
+<div id="schwab-charts-row" class="schwab-charts-row" style="display:none;">
+  <div class="chart-section">
+    <h2>Portfolio Allocation</h2>
+    <canvas id="allocationChart"></canvas>
+  </div>
+  <div class="chart-section">
+    <h2>Portfolio Value Over Time</h2>
+    <canvas id="schwabHistoryChart"></canvas>
+  </div>
+</div>
+
+<!-- Holdings Table -->
+<div id="holdings-section" style="display:none;">
   <h2>Current Holdings</h2>
   <div class="table-container">
     <table id="holdings-table" class="holdings-table" aria-label="Schwab holdings">
@@ -96,14 +89,72 @@
           <th>Total Cost</th>
           <th>Gain/Loss</th>
           <th>Gain/Loss %</th>
+          <th>% of Portfolio</th>
         </tr>
       </thead>
       <tbody id="holdings-body"></tbody>
+      <tfoot id="holdings-foot"></tfoot>
     </table>
   </div>
 </div>
 
-<div id="error-section" class="error-section" style="display: none;">
+<!-- Collapsible Account Details -->
+<details id="schwab-account-details">
+  <summary>Account Details</summary>
+  <div id="schwab-summary" class="portfolio-summary" style="display:none;">
+    <div class="metric-card">
+      <h3>Settled Cash Balance</h3>
+      <p id="cash-balance" class="value">$0.00</p>
+    </div>
+    <div class="metric-card">
+      <h3>Unsettled Cash</h3>
+      <p id="unsettled-cash" class="value">$0.00</p>
+    </div>
+    <div class="metric-card">
+      <h3>Order Reserve</h3>
+      <p id="order-reserve" class="value">$0.00</p>
+    </div>
+    <div class="metric-card">
+      <h3>Buying Power</h3>
+      <p id="buying-power" class="value">$0.00</p>
+    </div>
+    <div class="metric-card">
+      <h3>Day Trading Power</h3>
+      <p id="day-trading-power" class="value">$0.00</p>
+    </div>
+    <div class="metric-card" id="funds-components-card" style="display:none;">
+      <h3>Funds Breakdown</h3>
+      <p id="funds-components" class="value" style="font-size:0.9rem; line-height:1.4;">—</p>
+    </div>
+    <div class="metric-card">
+      <h3>Open Orders</h3>
+      <p id="open-orders" class="value">0</p>
+    </div>
+  </div>
+</details>
+
+<!-- Recent Trades -->
+<div id="recent-trades-section" class="chart-section" style="display:none;">
+  <h2>Recent Trades</h2>
+  <div class="table-container">
+    <table id="recent-trades-table" class="holdings-table" aria-label="Recent trades">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Date</th>
+          <th>Gain/Loss $</th>
+          <th>Gain/Loss %</th>
+          <th>Hold Duration</th>
+          <th>Category</th>
+        </tr>
+      </thead>
+      <tbody id="recent-trades-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Error / Simulation sections -->
+<div id="error-section" class="error-section" style="display:none;">
   <h3>⚠️ Connection Error</h3>
   <p id="error-message"></p>
   <div class="error-actions">
@@ -111,7 +162,7 @@
   </div>
 </div>
 
-<div id="simulation-warning" class="warning-section" style="display: none;">
+<div id="simulation-warning" class="warning-section" style="display:none;">
   <h3>ℹ️ Simulation Mode</h3>
   <p>Schwab API is configured but system is in simulation mode. Live trading is disabled.</p>
   <p>To enable live trading, set <code>TRADING_MODE=live</code> in your environment variables.</p>
@@ -119,6 +170,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script defer src="{{ url_for('static', filename='js/schwab.js') }}"></script>
 {% endblock %}
- %}

@@ -56,6 +56,16 @@ from d_ai_trader import (
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
 
+# Manual "Run All" concurrency guard and state tracking
+_manual_run_lock = threading.Lock()
+_manual_run_state = {
+    "status": "idle",        # idle, running, completed, failed
+    "started_at": None,
+    "completed_at": None,
+    "error": None,
+    "step": None,            # summarizer, decider, feedback
+}
+
 FEEDBACK_DEFAULTS = default_prompts_module.DEFAULT_PROMPTS["FeedbackAgent"]
 DEFAULT_FEEDBACK_SYSTEM_PROMPT = FEEDBACK_DEFAULTS["system_prompt"]
 DEFAULT_FEEDBACK_USER_PROMPT = FEEDBACK_DEFAULTS["user_prompt_template"]
@@ -1955,54 +1965,102 @@ def trigger_agent(agent_type):
 @app.route('/api/trigger/all', methods=['POST'])
 def trigger_all():
     """Manually trigger all agents in sequence"""
+    # Guard against concurrent manual runs
+    with _manual_run_lock:
+        if _manual_run_state["status"] == "running":
+            return jsonify({
+                'error': 'A manual run is already in progress',
+                'step': _manual_run_state.get("step"),
+                'started_at': _manual_run_state.get("started_at"),
+            }), 409
+
+        # Reserve the slot before releasing the lock
+        _manual_run_state["status"] = "running"
+        _manual_run_state["started_at"] = datetime.now().isoformat()
+        _manual_run_state["completed_at"] = None
+        _manual_run_state["error"] = None
+        _manual_run_state["step"] = None
+
     try:
         # Ensure config hash is set before running
         config_hash = get_current_config_hash()
         print(f"🔧 Running all agents for config: {config_hash}")
-        
+
         orchestrator = DAITraderOrchestrator()
         mark_manual_decider_window()
-        
+
         # Run all agents in sequence in a separate thread
         def run_all():
             try:
                 # Use the SAME config hash that's displayed on the website
                 # This was set when the .sh script started and should never change
                 thread_config_hash = config_hash  # Use the hash from the outer scope
-                
+
                 # Ensure config hash is available in this thread
                 import os
                 os.environ['CURRENT_CONFIG_HASH'] = thread_config_hash
-                
+
                 print("🚀 Starting manual run of all agents...")
                 print(f"🔧 Config hash in thread: {thread_config_hash} (from website display)")
-                
+
                 # 1. Run summarizer
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "summarizer"
                 print("📰 Step 1/3: Running summarizer agents...")
-                orchestrator.run_summarizer_agents()
+                try:
+                    orchestrator.run_summarizer_agents()
+                except Exception as e:
+                    print(f"❌ Summarizer failed: {type(e).__name__}: {e}")
+                    with _manual_run_lock:
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = f"Summarizer failed: {e}"
+                    raise  # Don't continue to decider on stale data
                 print("✅ Summarizer completed")
-                
+
                 # Small delay to ensure summarizer data is committed
-                import time
                 time.sleep(2)
-                
+
                 # 2. Run decider
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "decider"
                 print("🤖 Step 2/3: Running decider agent...")
-                orchestrator.run_decider_agent(force=True)
+                try:
+                    orchestrator.run_decider_agent(force=True)
+                except Exception as e:
+                    print(f"❌ Decider failed: {type(e).__name__}: {e}")
+                    with _manual_run_lock:
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = f"Decider failed: {e}"
+                    raise  # Don't continue to feedback
                 print("✅ Decider completed")
-                
+
                 # 3. Run feedback
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "feedback"
                 print("📊 Step 3/3: Running feedback agent...")
                 orchestrator.run_feedback_agent()
                 print("✅ Feedback completed")
-                
+
                 print("🎉 All agents completed successfully!")
-                
+                with _manual_run_lock:
+                    _manual_run_state["status"] = "completed"
+                    _manual_run_state["completed_at"] = datetime.now().isoformat()
+                    _manual_run_state["error"] = None
+
             except Exception as e:
                 print(f"❌ Error in manual all agents run: {type(e).__name__}: {e}")
                 import traceback
                 traceback.print_exc()
-                
+
+                # Mark as failed (may already be set by per-step handler above)
+                with _manual_run_lock:
+                    if _manual_run_state["status"] != "failed":
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = str(e)
+
                 # Store the error in the database so we can see it
                 try:
                     with engine.begin() as conn:
@@ -2022,16 +2080,28 @@ def trigger_all():
                 # Clean up resources to prevent semaphore leaks
                 import gc
                 gc.collect()
-        
+
         thread = threading.Thread(target=run_all, daemon=True, name="ManualAllAgents")
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'All agents triggered successfully (running in background)'
         })
     except Exception as e:
+        # If we fail before even starting the thread, reset state
+        with _manual_run_lock:
+            _manual_run_state["status"] = "failed"
+            _manual_run_state["completed_at"] = datetime.now().isoformat()
+            _manual_run_state["error"] = str(e)
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/trigger/all/status')
+def trigger_all_status():
+    """Get the current status of the manual Run All operation"""
+    with _manual_run_lock:
+        return jsonify(dict(_manual_run_state))
 
 @app.route('/api/run-status')
 def get_run_status():
