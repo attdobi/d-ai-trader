@@ -168,6 +168,11 @@
       <div class="config-card">
         <h4>AI Model</h4>
         <p class="config-value">{{ current_config.gpt_model }}</p>
+        {% if model_history and model_history|length > 1 %}
+        <p class="config-subtitle" style="font-size: 0.75em; color: #7f8ca6; margin-top: 4px;">
+          {% for m in model_history %}{{ m.model_name }} ({{ m.started_at }} – {{ m.ended_at }}){% if not loop.last %} → {% endif %}{% endfor %}
+        </p>
+        {% endif %}
       </div>
       <div class="config-card">
         <h4>Prompt Mode</h4>

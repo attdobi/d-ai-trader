@@ -1098,6 +1098,22 @@ def dashboard():
             net_gain_loss = total_portfolio_value - baseline_total_value
             net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
 
+        # Fetch model transitions for config panel
+        try:
+            model_transitions = conn.execute(text("""
+                SELECT model_name, started_at, ended_at
+                FROM model_transitions
+                WHERE config_hash = :config_hash
+                ORDER BY started_at ASC
+            """), {"config_hash": config_hash}).fetchall()
+            model_history = [{
+                "model_name": row.model_name,
+                "started_at": row.started_at.strftime('%b %d') if row.started_at else '?',
+                "ended_at": row.ended_at.strftime('%b %d') if row.ended_at else 'present'
+            } for row in model_transitions]
+        except Exception:
+            model_history = []
+
         return render_template(
             "dashboard.html",
             active_tab="dashboard",
@@ -1117,6 +1133,7 @@ def dashboard():
             initial_account_value=initial_investment,
             current_account_value=total_portfolio_value,
             is_margin_account=bool(IS_MARGIN_ACCOUNT),
+            model_history=model_history,
         )
 
 @app.template_filter('from_json')
@@ -1297,6 +1314,27 @@ def api_configuration():
         return jsonify(current_config)
     except Exception as e:
         return jsonify({'error': str(e)})
+
+@app.route("/api/model-transitions")
+def api_model_transitions():
+    config_hash = request.args.get("config_hash", get_current_config_hash())
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT model_name, started_at, ended_at, notes
+                FROM model_transitions
+                WHERE config_hash = :config_hash
+                ORDER BY started_at ASC
+            """), {"config_hash": config_hash}).fetchall()
+            return jsonify([{
+                "model_name": row.model_name,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+                "notes": row.notes
+            } for row in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/holdings")
 def api_holdings():

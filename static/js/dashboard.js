@@ -1,4 +1,60 @@
 let chart, performanceChart, breakdownChart;
+let modelTransitions = [];
+
+function fetchModelTransitions() {
+  return fetch('/api/model-transitions')
+    .then(r => r.json())
+    .then(data => {
+      if (Array.isArray(data)) modelTransitions = data;
+      return modelTransitions;
+    })
+    .catch(() => {
+      modelTransitions = [];
+      return [];
+    });
+}
+
+function getTransitionAnnotations(labels) {
+  if (!modelTransitions || modelTransitions.length <= 1) return [];
+  const annotations = [];
+
+  // For each transition boundary (where ended_at is not null = model changed)
+  for (let i = 0; i < modelTransitions.length - 1; i++) {
+    const current = modelTransitions[i];
+    const next = modelTransitions[i + 1];
+    if (!current.ended_at) continue;
+
+    // Find the chart label index closest to the transition date
+    const transitionDate = new Date(next.started_at).toLocaleDateString();
+    let labelIndex = labels.indexOf(transitionDate);
+
+    // If exact match not found, find closest
+    if (labelIndex === -1) {
+      const transitionTime = new Date(next.started_at).getTime();
+      let closestDist = Infinity;
+      labels.forEach((label, idx) => {
+        const dist = Math.abs(new Date(label).getTime() - transitionTime);
+        if (dist < closestDist) {
+          closestDist = dist;
+          labelIndex = idx;
+        }
+      });
+    }
+
+    if (labelIndex === -1) continue;
+
+    // Shorten model names for the label
+    const fromShort = current.model_name.replace('gpt-', 'GPT-');
+    const toShort = next.model_name.replace('gpt-', 'GPT-');
+
+    annotations.push({
+      labelIndex,
+      label: `${fromShort} → ${toShort}`
+    });
+  }
+
+  return annotations;
+}
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -69,6 +125,53 @@ const crosshairPlugin = {
 
 Chart.register(crosshairPlugin);
 
+const modelTransitionPlugin = {
+  id: 'modelTransitionLines',
+  afterDraw(chartInstance) {
+    const meta = chartInstance.config._modelTransitionAnnotations;
+    if (!meta || meta.length === 0) return;
+
+    const ctx = chartInstance.ctx;
+    const xScale = chartInstance.scales.x;
+    const yScale = chartInstance.scales.y;
+
+    meta.forEach(ann => {
+      const x = xScale.getPixelForValue(ann.labelIndex);
+      if (x < xScale.left || x > xScale.right) return;
+
+      ctx.save();
+      // Draw dashed vertical line
+      ctx.beginPath();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(255, 165, 0, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.moveTo(x, yScale.top);
+      ctx.lineTo(x, yScale.bottom);
+      ctx.stroke();
+
+      // Draw label
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255, 165, 0, 0.85)';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.textAlign = 'center';
+
+      // Background for label
+      const textWidth = ctx.measureText(ann.label).width;
+      ctx.fillStyle = 'rgba(21, 31, 53, 0.9)';
+      ctx.fillRect(x - textWidth / 2 - 4, yScale.top - 18, textWidth + 8, 16);
+      ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - textWidth / 2 - 4, yScale.top - 18, textWidth + 8, 16);
+
+      ctx.fillStyle = 'rgba(255, 165, 0, 0.9)';
+      ctx.fillText(ann.label, x, yScale.top - 6);
+      ctx.restore();
+    });
+  }
+};
+
+Chart.register(modelTransitionPlugin);
+
 function renderChart(data, label = 'Portfolio Value') {
   const el = document.getElementById('historyChart');
   const canvas = el;
@@ -96,8 +199,9 @@ function renderChart(data, label = 'Portfolio Value') {
   const ctx = canvas.getContext('2d');
   const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
   const values = data.map(row => row.total_portfolio_value);
+  const transitionAnnotations = getTransitionAnnotations(labels);
   if (chart) chart.destroy();
-  chart = new Chart(ctx, {
+  const chartConfig = {
     type: 'line',
     data: {
       labels,
@@ -137,7 +241,9 @@ function renderChart(data, label = 'Portfolio Value') {
         }
       }
     }
-  });
+  };
+  chartConfig._modelTransitionAnnotations = transitionAnnotations;
+  chart = new Chart(ctx, chartConfig);
 }
 
 function renderPerformanceChart(data) {
@@ -146,8 +252,9 @@ function renderPerformanceChart(data) {
   try {
     const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
     const netGainLoss = data.map(row => parseFloat(row.net_gain_loss) || 0);
+    const transitionAnnotations = getTransitionAnnotations(labels);
     if (performanceChart) performanceChart.destroy();
-    performanceChart = new Chart(el, {
+    const chartConfig = {
       type: 'line',
       data: {
         labels,
@@ -190,7 +297,9 @@ function renderPerformanceChart(data) {
           legend: { labels: { color: '#7f8ca6', usePointStyle: true } }
         }
       }
-    });
+    };
+    chartConfig._modelTransitionAnnotations = transitionAnnotations;
+    performanceChart = new Chart(el, chartConfig);
   } catch (err) {
     el.style.display = 'flex';
     el.style.alignItems = 'center';
@@ -231,8 +340,9 @@ function renderBreakdownChart(data) {
   const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
   const cashBalance = data.map(row => row.cash_balance);
   const totalInvested = data.map(row => row.total_invested);
+  const transitionAnnotations = getTransitionAnnotations(labels);
   if (breakdownChart) breakdownChart.destroy();
-  breakdownChart = new Chart(ctx, {
+  const chartConfig = {
     type: 'line',
     data: {
       labels,
@@ -285,7 +395,9 @@ function renderBreakdownChart(data) {
         }
       }
     }
-  });
+  };
+  chartConfig._modelTransitionAnnotations = transitionAnnotations;
+  breakdownChart = new Chart(ctx, chartConfig);
 }
 
 function loadChart(ticker = null) {
@@ -494,9 +606,11 @@ function updatePrices() {
     .finally(() => { if (button) button.disabled = false; });
 }
 window.addEventListener('load', () => {
-  loadChart();
-  loadPerformanceChart();
-  loadBreakdownChart();
+  fetchModelTransitions().then(() => {
+    loadChart();
+    loadPerformanceChart();
+    loadBreakdownChart();
+  });
   loadSparklines();
 
   // Auto-refresh metric data every 60s

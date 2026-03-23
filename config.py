@@ -549,6 +549,10 @@ def initialize_configuration_hash():
     # Store in environment variable for this process (process-specific isolation)
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
+
+    # Check for model transitions
+    check_model_transition(config_hash)
+
     return config_hash
 
 def get_current_config_hash():
@@ -564,6 +568,68 @@ def get_current_config_hash():
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Generated and set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
     return config_hash
+
+
+def check_model_transition(config_hash=None, model_name=None):
+    """Check and record model transitions for a config hash."""
+    if config_hash is None:
+        config_hash = get_current_config_hash()
+    if model_name is None:
+        model_name = GPT_MODEL
+
+    try:
+        with engine.begin() as conn:
+            # Ensure table exists (idempotent)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS model_transitions (
+                    id SERIAL PRIMARY KEY,
+                    config_hash TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    ended_at TIMESTAMP,
+                    notes TEXT
+                )
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_model_transitions_hash
+                ON model_transitions(config_hash)
+            """))
+
+            # Find current active transition
+            result = conn.execute(text("""
+                SELECT id, model_name FROM model_transitions
+                WHERE config_hash = :config_hash AND ended_at IS NULL
+                ORDER BY started_at DESC LIMIT 1
+            """), {"config_hash": config_hash}).fetchone()
+
+            if result is None:
+                # First time — insert initial record
+                conn.execute(text("""
+                    INSERT INTO model_transitions (config_hash, model_name, notes)
+                    VALUES (:config_hash, :model_name, 'Initial model for this config')
+                """), {"config_hash": config_hash, "model_name": model_name})
+                print(f"📋 Model tracking initialized: {model_name} for config {config_hash}")
+            elif result.model_name != model_name:
+                # Model changed — close old, open new
+                old_model = result.model_name
+                conn.execute(text("""
+                    UPDATE model_transitions SET ended_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                """), {"id": result.id})
+                conn.execute(text("""
+                    INSERT INTO model_transitions (config_hash, model_name, notes)
+                    VALUES (:config_hash, :model_name, :notes)
+                """), {
+                    "config_hash": config_hash,
+                    "model_name": model_name,
+                    "notes": f"Upgraded from {old_model}"
+                })
+                print(f"🔄 Model transition detected: {old_model} → {model_name}")
+            else:
+                print(f"📋 Model unchanged: {model_name} for config {config_hash}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check model transition: {e}")
+
 
 def _is_gpt5_model(model_name):
     """

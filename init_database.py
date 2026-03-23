@@ -707,6 +707,27 @@ def initialize_database() -> None:
                 """
             ))
 
+        ensure_table(
+            conn,
+            stats,
+            "model_transitions",
+            """
+            CREATE TABLE IF NOT EXISTS model_transitions (
+                id SERIAL PRIMARY KEY,
+                config_hash TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP,
+                notes TEXT
+            )
+            """,
+        )
+        # Index for fast lookups by config_hash
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_model_transitions_hash
+            ON model_transitions(config_hash)
+        """))
+
         # 7) Seed v0 baseline prompts from initialize_prompts.py
         print("🧠 Seeding v0 baseline prompts...")
         seed_v0_prompts(conn, stats, "global")
