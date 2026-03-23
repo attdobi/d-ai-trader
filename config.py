@@ -384,7 +384,7 @@ def append_reasoning_guidance(system_prompt: str, agent_name: str, model_name: s
 
 # Apply environment override (including .env) as early as possible so every agent process
 # announces and uses the same model even if later imports fail.
-_env_model = dotenv_first("DAI_GPT_MODEL")
+_env_model = env_first("DAI_GPT_MODEL")
 if _env_model:
     set_gpt_model(_env_model)
 else:
