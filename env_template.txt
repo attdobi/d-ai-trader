@@ -1,0 +1,43 @@
+# d-ai-trader environment template
+# Copy to .env and edit values as needed.
+
+# --- Database ---
+# Primary Postgres URI (recommended)
+DATABASE_URI=postgresql://$(whoami)@localhost/adobi
+# Optional alias checked by config.py
+DATABASE_URL=
+# Fallback if Postgres is unavailable
+FALLBACK_DATABASE_URI=sqlite:///d_ai_trader.sqlite3
+
+# --- Required ---
+OPENAI_API_KEY=sk-proj-your_actual_api_key_here
+
+# --- Trading behavior ---
+TRADING_MODE=simulation
+IS_MARGIN_ACCOUNT=0
+MAX_POSITION_VALUE=2000
+MAX_POSITION_FRACTION=0
+MAX_TOTAL_INVESTMENT=10000
+MAX_TOTAL_INVESTMENT_FRACTION=0
+MIN_CASH_BUFFER=500
+DEBUG_TRADING=true
+DAILY_TICKET_CAP=6
+DAILY_BUY_CAP=3
+MIN_ENTRY_SPACING_MIN=45
+REENTRY_COOLDOWN_MIN=240
+
+# --- Model / Decider overrides ---
+DAI_MODEL_TEMPERATURE=0.2
+# DAI_GPT_MODEL=gpt-5.1
+# DAI_DISABLE_REASONING_PARAM=0
+# DAI_DECIDER_FALLBACK_MODEL=gpt-4.1
+# DAI_DECIDER_RAW_PREVIEW=4000
+
+# --- Optional debug ---
+# PRINT_OPENAI_KEY=0
+
+# --- Schwab (optional, required for live trading) ---
+SCHWAB_CLIENT_ID=
+SCHWAB_CLIENT_SECRET=
+SCHWAB_ACCOUNT_HASH=
+SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback

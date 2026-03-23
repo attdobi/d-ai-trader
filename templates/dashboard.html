@@ -1,45 +1,30 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% include "partials/_config_banner.html" %}
 
-<h1>Portfolio Dashboard</h1>
-
-{% if schwab_summary %}
-<div class="account-meta">
-  <div class="account-card">
-    <span class="account-label">Account Hash</span>
-    <span class="account-value">{{ schwab_summary.account_hash or '—' }}</span>
-  </div>
-  <div class="account-card">
-    <span class="account-label">Account #</span>
-    <span class="account-value">{{ schwab_summary.account_number or '—' }}</span>
-  </div>
-  <div class="account-card">
-    <span class="account-label">Account Type</span>
-    <span class="account-value">{{ schwab_summary.account_type or '—' }}</span>
-  </div>
-  <div class="account-card">
-    <span class="account-label">Mode</span>
-    <span class="account-value">{{ 'Read-Only' if schwab_summary.readonly else 'Live Trading' }}</span>
-  </div>
-  <div class="account-card">
-    <span class="account-label">Last Update</span>
-    <span class="account-value">{{ schwab_summary.last_updated or '—' }}</span>
-  </div>
-</div>
-{% endif %}
-
-<div class="portfolio-summary">
-  <div class="metric-card">
-    <h3>Initial Account Value</h3>
-    <p class="value">${{ '%.2f'|format(initial_account_value) }}</p>
-  </div>
-  <div class="metric-card">
+<div class="hero-metrics">
+  <div class="metric-card hero-card">
     <h3>Current Account Value</h3>
     <p class="value">${{ '%.2f'|format(current_account_value) }}</p>
   </div>
-  <div class="metric-card">
+  <div class="metric-card hero-card {% if total_profit_loss >= 0 %}gain{% else %}loss{% endif %}">
+    <h3>Total P&amp;L</h3>
+    <p class="value">${{ '%.2f'|format(total_profit_loss) }}</p>
+    <p class="percentage">({{ '%.2f'|format(percentage_gain) }}%)</p>
+  </div>
+  <div class="metric-card hero-card {% if net_gain_loss >= 0 %}gain{% else %}loss{% endif %}">
+    <h3>Net Gain/Loss</h3>
+    <p class="value">${{ '%.2f'|format(net_gain_loss) }}</p>
+    <p class="percentage">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
+    <p class="subtitle">
+      {% if use_schwab_positions %}
+        Account cost basis ${{ '%.2f'|format(initial_investment) }}
+      {% else %}
+        on ${{ '%.0f'|format(initial_investment) }} initial
+      {% endif %}
+    </p>
+  </div>
+  <div class="metric-card hero-card">
     <h3>
       {% if use_schwab_positions %}
         Funds Available{% if not is_margin_account %} (Settled){% endif %}
@@ -63,86 +48,23 @@
     </p>
     {% endif %}
   </div>
+</div>
+
+<div class="portfolio-summary secondary-metrics">
+  <div class="metric-card">
+    <h3>Initial Account Value</h3>
+    <p class="value">${{ '%.2f'|format(initial_account_value) }}</p>
+  </div>
+  <div class="metric-card">
+    <h3>Invested Amount</h3>
+    <p class="value">${{ '%.2f'|format(total_invested) }}</p>
+  </div>
   {% if use_schwab_positions and schwab_summary %}
   <div class="metric-card">
     <h3>Open Orders</h3>
     <p class="value">{{ schwab_summary.open_orders_count or 0 }}</p>
   </div>
   {% endif %}
-  <div class="metric-card">
-    <h3>Invested Amount</h3>
-    <p class="value">${{ '%.2f'|format(total_invested) }}</p>
-  </div>
-  <div class="metric-card {% if total_profit_loss >= 0 %}gain{% else %}loss{% endif %}">
-    <h3>Total P&L</h3>
-    <p class="value">${{ '%.2f'|format(total_profit_loss) }}</p>
-    <p class="percentage">({{ '%.2f'|format(percentage_gain) }}%)</p>
-  </div>
-  <div class="metric-card {% if net_gain_loss >= 0 %}gain{% else %}loss{% endif %}">
-    <h3>Net Gain/Loss</h3>
-    <p class="value">${{ '%.2f'|format(net_gain_loss) }}</p>
-    <p class="percentage">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
-    <p class="subtitle">
-      {% if use_schwab_positions %}
-        Account cost basis ${{ '%.2f'|format(initial_investment) }}
-      {% else %}
-        on ${{ '%.0f'|format(initial_investment) }} initial
-      {% endif %}
-    </p>
-  </div>
-</div>
-
-<div class="config-section">
-  <h3>🤖 Current System Configuration</h3>
-  <div class="config-cards">
-    <div class="config-card">
-      <h4>AI Model</h4>
-      <p class="config-value">{{ current_config.gpt_model }}</p>
-    </div>
-    <div class="config-card">
-      <h4>Prompt Mode</h4>
-      <p class="config-value">
-        {% if current_config.prompt_config.mode == 'auto' %}
-          AUTO (v{{ current_config.prompt_versions.summarizer_version }}/v{{ current_config.prompt_versions.decider_version }})
-        {% else %}
-          FIXED v{{ current_config.prompt_config.forced_version }}
-        {% endif %}
-      </p>
-    </div>
-    {% set is_live_mode = current_config.trading_mode in ['real_world', 'live'] %}
-    <div class="config-card">
-      <h4>Trading Mode</h4>
-      <p class="config-value {{ 'real-mode' if is_live_mode else 'sim-mode' }}">
-        {% if use_schwab_positions %}
-          {% if schwab_summary and not schwab_summary.readonly %}
-            LIVE TRADING 💰
-          {% else %}
-            LIVE (READ-ONLY) 🔒
-          {% endif %}
-        {% else %}
-          {{ 'REAL_WORLD' if is_live_mode else current_config.trading_mode.upper() }} {% if is_live_mode %}💰{% else %}🎮{% endif %}
-        {% endif %}
-      </p>
-    </div>
-    <div class="config-card">
-      <h4>Configuration Hash</h4>
-      <p class="config-value hash">{{ current_config.config_hash }}</p>
-    </div>
-  </div>
-</div>
-
-<div class="trigger-section">
-  <h3>Manual System Triggers</h3>
-  <p class="trigger-description">Use these buttons to manually trigger system components for testing:</p>
-  <div class="trigger-buttons">
-    <button class="trigger-btn" onclick="triggerAgent('summarizer')"><span class="btn-icon">📰</span>Run Summarizer Agents</button>
-    <button class="trigger-btn" onclick="triggerAgent('decider')"><span class="btn-icon">🤖</span>Run Decider Agent</button>
-    <button class="trigger-btn" onclick="triggerAgent('feedback')"><span class="btn-icon">📊</span>Run Feedback Agent</button>
-    <button class="trigger-btn" id="summary-analyzer-btn" onclick="runSummaryAnalyzer()"><span class="btn-icon">🧠</span>Run Summary Analyzer &amp; Momentum</button>
-    <button class="trigger-btn trigger-all" onclick="triggerAgent('all')"><span class="btn-icon">🚀</span>Run All Agents</button>
-  </div>
-  <div id="trigger-status" class="trigger-status"></div>
-  <div id="summary-analyzer-output" class="trigger-status"></div>
 </div>
 
 <table>
@@ -155,24 +77,43 @@
       <th>Total Value</th>
       <th>Current Value</th>
       <th>Gain/Loss</th>
-      <th>Reason</th>
+      <th>Position Size</th>
     </tr>
   </thead>
   <tbody>
     {% for row in holdings %}
-    <tr onclick="loadChart('{{ row.ticker }}')">
-      <td>{{ row.ticker }}</td>
+    <tr onclick="loadChart('{{ row.ticker }}')" style="cursor:pointer;">
+      <td><span class="ticker-pill">{{ row.ticker }}</span></td>
       <td>{{ row.shares }}</td>
-      <td>{{ '%.2f'|format(row.purchase_price) }}</td>
-      <td>{{ '%.2f'|format(row.current_price) }}</td>
-      <td>{{ '%.2f'|format(row.total_value) }}</td>
-      <td>{{ '%.2f'|format(row.current_value) }}</td>
-      <td class="{{ 'gain' if row.gain_loss >= 0 else 'loss' }}">{{ '%.2f'|format(row.gain_loss) }}</td>
-      <td>{{ row.reason }}</td>
+      <td>${{ '%.2f'|format(row.purchase_price) }}</td>
+      <td>${{ '%.2f'|format(row.current_price) }}</td>
+      <td>${{ '%.2f'|format(row.total_value) }}</td>
+      <td>${{ '%.2f'|format(row.current_value) }}</td>
+      <td>
+        {% set gain_pct = ((row.gain_loss / row.total_value) * 100) if row.total_value > 0 else 0 %}
+        <span class="badge {{ 'badge-success' if row.gain_loss >= 0 else 'badge-danger' }}">
+          {{ '+' if row.gain_loss >= 0 else '' }}${{ '%.2f'|format(row.gain_loss) }}
+          ({{ '+' if gain_pct >= 0 else '' }}{{ '%.1f'|format(gain_pct) }}%)
+        </span>
+      </td>
+      <td>
+        {% if row.ticker != 'CASH' %}
+        <div class="position-bar-container">
+          <div class="position-bar" style="width: {{ [((row.total_value / 4000) * 100), 100] | min }}%"></div>
+        </div>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+
+<div class="sparkline-section">
+  <h2 class="section-title">📈 5-Day Price Trends</h2>
+  <div class="sparkline-row" id="sparklineRow">
+    <p style="color: var(--muted); font-size: 13px;">Loading sparklines...</p>
+  </div>
+</div>
 
 <div class="charts-container">
   <div class="chart-section">
@@ -189,15 +130,107 @@
   </div>
 </div>
 
-<div class="price-update-container">
-  <button class="price-update-btn" onclick="updatePrices()"><span class="btn-icon">📈</span>Update Stock Prices</button>
-  <div id="price-update-status" class="price-update-status"></div>
-</div>
+<details class="system-controls-panel">
+  <summary class="system-controls-toggle">⚙️ System Controls &amp; Configuration</summary>
+  <div class="system-controls-content">
 
-<div class="reset-container">
-  <button class="reset-btn-small" onclick="resetPortfolio()"><span class="btn-icon">🔄</span>Reset Portfolio</button>
-  <div id="reset-status" class="reset-status-small"></div>
-</div>
+  <details class="account-details-panel" {% if schwab_summary %}open{% endif %}>
+    <summary>Account Details</summary>
+    {% if schwab_summary %}
+    <div class="account-meta">
+      <div class="account-card">
+        <span class="account-label">Account Hash</span>
+        <span class="account-value">{{ schwab_summary.account_hash or '—' }}</span>
+      </div>
+      <div class="account-card">
+        <span class="account-label">Account #</span>
+        <span class="account-value">{{ schwab_summary.account_number or '—' }}</span>
+      </div>
+      <div class="account-card">
+        <span class="account-label">Account Type</span>
+        <span class="account-value">{{ schwab_summary.account_type or '—' }}</span>
+      </div>
+      <div class="account-card">
+        <span class="account-label">Mode</span>
+        <span class="account-value">{{ 'Read-Only' if schwab_summary.readonly else 'Live Trading' }}</span>
+      </div>
+      <div class="account-card">
+        <span class="account-label">Last Update</span>
+        <span class="account-value">{{ schwab_summary.last_updated or '—' }}</span>
+      </div>
+    </div>
+    {% endif %}
+  </details>
+
+  <div class="config-section">
+    <h3>🤖 Current System Configuration</h3>
+    <div class="config-cards">
+      <div class="config-card">
+        <h4>AI Model</h4>
+        <p class="config-value">{{ current_config.gpt_model }}</p>
+        {% if model_history and model_history|length > 1 %}
+        <p class="config-subtitle" style="font-size: 0.75em; color: #7f8ca6; margin-top: 4px;">
+          {% for m in model_history %}{{ m.model_name }} ({{ m.started_at }} – {{ m.ended_at }}){% if not loop.last %} → {% endif %}{% endfor %}
+        </p>
+        {% endif %}
+      </div>
+      <div class="config-card">
+        <h4>Prompt Mode</h4>
+        <p class="config-value">
+          {% if current_config.prompt_config.mode == 'auto' %}
+            AUTO (v{{ current_config.prompt_versions.summarizer_version }}/v{{ current_config.prompt_versions.decider_version }})
+          {% else %}
+            FIXED v{{ current_config.prompt_config.forced_version }}
+          {% endif %}
+        </p>
+      </div>
+      {% set is_live_mode = current_config.trading_mode in ['real_world', 'live'] %}
+      <div class="config-card">
+        <h4>Trading Mode</h4>
+        <p class="config-value {{ 'real-mode' if is_live_mode else 'sim-mode' }}">
+          {% if use_schwab_positions %}
+            {% if schwab_summary and not schwab_summary.readonly %}
+              LIVE TRADING 💰
+            {% else %}
+              LIVE (READ-ONLY) 🔒
+            {% endif %}
+          {% else %}
+            {{ 'REAL_WORLD' if is_live_mode else current_config.trading_mode.upper() }} {% if is_live_mode %}💰{% else %}🎮{% endif %}
+          {% endif %}
+        </p>
+      </div>
+      <div class="config-card">
+        <h4>Configuration Hash</h4>
+        <p class="config-value hash">{{ current_config.config_hash }}</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="trigger-section">
+    <h3>Manual System Triggers</h3>
+    <p class="trigger-description">Use these buttons to manually trigger system components for testing:</p>
+    <div class="trigger-buttons">
+      <button class="trigger-btn" onclick="triggerAgent('summarizer')" aria-label="Run Summarizer Agents"><span class="btn-icon">📰</span>Run Summarizer Agents</button>
+      <button class="trigger-btn" onclick="triggerAgent('decider')" aria-label="Run Decider Agent"><span class="btn-icon">🤖</span>Run Decider Agent</button>
+      <button class="trigger-btn" onclick="triggerAgent('feedback')" aria-label="Run Feedback Agent"><span class="btn-icon">📊</span>Run Feedback Agent</button>
+      <button class="trigger-btn" id="summary-analyzer-btn" onclick="runSummaryAnalyzer()" aria-label="Run Summary Analyzer and Momentum"><span class="btn-icon">🧠</span>Run Summary Analyzer &amp; Momentum</button>
+      <button class="trigger-btn trigger-all" onclick="triggerAgent('all')" aria-label="Run All Agents"><span class="btn-icon">🚀</span>Run All Agents</button>
+    </div>
+    <div id="trigger-status" class="trigger-status"></div>
+    <div id="summary-analyzer-output" class="trigger-status"></div>
+  </div>
+
+  <div class="price-update-container">
+    <button class="price-update-btn" onclick="updatePrices()" aria-label="Refresh stock prices"><span class="btn-icon">📈</span>Update Stock Prices</button>
+    <div id="price-update-status" class="price-update-status"></div>
+  </div>
+
+  <div class="reset-container">
+    <button class="reset-btn-small" onclick="resetPortfolio()" aria-label="Reset portfolio"><span class="btn-icon">🔄</span>Reset Portfolio</button>
+    <div id="reset-status" class="reset-status-small"></div>
+  </div>
+  </div>
+</details>
 {% endblock %}
 
 {% block scripts %}

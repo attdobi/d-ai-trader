@@ -24,7 +24,6 @@ chromedriver*
 *.jpg
 *.jpeg
 screenshots/
-tests/
 
 # Logs
 *.log

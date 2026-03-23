@@ -182,8 +182,37 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
-GPT_MODEL = "gpt-5.2"  # Default upgraded to GPT-5.2 for richer reasoning
+GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
+_VALID_GPT_MODELS = [
+    "gpt-5.4",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4-turbo",
+    "gpt-4",
+    "chatgpt-4o-latest",
+]
+_MODEL_ALIASES = {
+    "gpt4.1": "gpt-4.1",
+    "gpt5.1": "gpt-5.1",
+    "gpt5.2": "gpt-5.2",
+    "gpt5.4": "gpt-5.4",
+    "gpt-4-turbo": "gpt-4-turbo",
+}
+
+
+def _normalize_model_name(model_name):
+    raw_input = (model_name or "").strip()
+    if not raw_input:
+        return "", ""
+    lookup_key = raw_input.lower()
+    normalized = _MODEL_ALIASES.get(lookup_key, lookup_key)
+    return raw_input, normalized
 
 
 def _announce_model(model_name: str):
@@ -196,29 +225,65 @@ def _announce_model(model_name: str):
 def set_gpt_model(model_name):
     """Update the global GPT model"""
     global GPT_MODEL
-    valid_models = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4-turbo", "gpt-4", "chatgpt-4o-latest"]
-    alias_map = {
-        "gpt4.1": "gpt-4.1",
-        "gpt5.1": "gpt-5.1",
-        "gpt5.2": "gpt-5.2",
-        "gpt-4-turbo": "gpt-4-turbo",
-    }
-
-    raw_input = (model_name or "").strip()
-    lookup_key = raw_input.lower()
-    normalized = alias_map.get(lookup_key, lookup_key)
-    if normalized != lookup_key:
+    raw_input, normalized = _normalize_model_name(model_name)
+    if normalized != raw_input.lower() and raw_input:
         print(f"ℹ️  Model alias '{raw_input}' resolved to '{normalized}'")
 
-    if normalized in valid_models:
+    if normalized in _VALID_GPT_MODELS:
         if GPT_MODEL != normalized:
             GPT_MODEL = normalized
             _announce_model(GPT_MODEL)
         else:
             print(f"ℹ️  GPT model already set to {GPT_MODEL}")
     else:
-        print(f"❌ Invalid model '{model_name}'. Valid models are: {valid_models + list(alias_map.keys())}")
+        print(f"❌ Invalid model '{model_name}'. Valid models are: {_VALID_GPT_MODELS + list(_MODEL_ALIASES.keys())}")
         print(f"⚠️  Keeping current model: {GPT_MODEL}")
+
+
+def _load_agent_model_override(env_key: str, agent_label: str):
+    """Load and validate a per-agent model override from env/.env."""
+    raw_value = os.getenv(env_key)
+    if raw_value is None:
+        raw_value = DOTENV_VALUES.get(env_key)
+    if raw_value is None:
+        return None
+
+    trimmed_value = str(raw_value).strip()
+    if not trimmed_value:
+        return None
+
+    raw_input, normalized = _normalize_model_name(trimmed_value)
+    if normalized != raw_input.lower():
+        print(f"ℹ️  {agent_label} model alias '{raw_input}' resolved to '{normalized}'")
+
+    if normalized in _VALID_GPT_MODELS:
+        return normalized
+
+    print(
+        f"⚠️  Ignoring invalid {agent_label} model override '{trimmed_value}' from {env_key}. "
+        f"Using default model '{GPT_MODEL}'."
+    )
+    return None
+
+
+AGENT_MODEL_OVERRIDES = {
+    "summarizer": _load_agent_model_override("DAI_MODEL_SUMMARIZER", "summarizer"),
+    "decider": _load_agent_model_override("DAI_MODEL_DECIDER", "decider"),
+    "feedback": _load_agent_model_override("DAI_MODEL_FEEDBACK", "feedback"),
+}
+
+
+def get_agent_model(agent_name):
+    """Get model override for a specific agent profile, else default GPT model."""
+    name = (agent_name or "").lower()
+    if "summarizer" in name:
+        return AGENT_MODEL_OVERRIDES.get("summarizer") or GPT_MODEL
+    if "decider" in name:
+        return AGENT_MODEL_OVERRIDES.get("decider") or GPT_MODEL
+    if "feedback" in name:
+        return AGENT_MODEL_OVERRIDES.get("feedback") or GPT_MODEL
+    return GPT_MODEL
+
 
 def get_gpt_model():
     """Get the current GPT model"""
@@ -228,7 +293,7 @@ def get_gpt_model():
 REASONING_LEVEL_TOKEN_LIMITS = {
     "light": 4000,
     "medium": 6000,
-    "high": 8000,
+    "high": 12000,
 }
 DEFAULT_REASONING_LEVELS = {
     "summarizer": "medium",  # user asked for light-to-medium; default to medium
@@ -283,12 +348,12 @@ def get_reasoning_token_cap(agent_name: str, model_name: str, default_cap: int) 
     return REASONING_LEVEL_TOKEN_LIMITS.get(level, REASONING_LEVEL_TOKEN_LIMITS["medium"])
 
 def get_reasoning_params(agent_name: str, model_name: str) -> dict:
-    """Return OpenAI reasoning payload when supported (GPT-5.2 series)."""
+    """Return OpenAI reasoning payload when supported (GPT-5 series)."""
     if not model_name:
         return {}
     model_lower = model_name.lower()
-    # Only apply to GPT-5.2 variants (to avoid errors on 5.1/4o/etc.)
-    if "gpt-5.2" not in model_lower:
+    # Apply to GPT-5 variants (5.2/5.4/etc.).
+    if not model_lower.startswith("gpt-5"):
         return {}
     if env_first("DAI_DISABLE_REASONING_PARAM", "0").strip().lower() in {"1", "true", "yes"}:
         return {}
@@ -319,7 +384,7 @@ def append_reasoning_guidance(system_prompt: str, agent_name: str, model_name: s
 
 # Apply environment override (including .env) as early as possible so every agent process
 # announces and uses the same model even if later imports fail.
-_env_model = dotenv_first("DAI_GPT_MODEL")
+_env_model = env_first("DAI_GPT_MODEL")
 if _env_model:
     set_gpt_model(_env_model)
 else:
@@ -484,6 +549,10 @@ def initialize_configuration_hash():
     # Store in environment variable for this process (process-specific isolation)
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
+
+    # Check for model transitions
+    check_model_transition(config_hash)
+
     return config_hash
 
 def get_current_config_hash():
@@ -499,6 +568,68 @@ def get_current_config_hash():
     os.environ['CURRENT_CONFIG_HASH'] = config_hash
     print(f"🔧 Generated and set CURRENT_CONFIG_HASH environment variable to: {config_hash}")
     return config_hash
+
+
+def check_model_transition(config_hash=None, model_name=None):
+    """Check and record model transitions for a config hash."""
+    if config_hash is None:
+        config_hash = get_current_config_hash()
+    if model_name is None:
+        model_name = GPT_MODEL
+
+    try:
+        with engine.begin() as conn:
+            # Ensure table exists (idempotent)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS model_transitions (
+                    id SERIAL PRIMARY KEY,
+                    config_hash TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    ended_at TIMESTAMP,
+                    notes TEXT
+                )
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_model_transitions_hash
+                ON model_transitions(config_hash)
+            """))
+
+            # Find current active transition
+            result = conn.execute(text("""
+                SELECT id, model_name FROM model_transitions
+                WHERE config_hash = :config_hash AND ended_at IS NULL
+                ORDER BY started_at DESC LIMIT 1
+            """), {"config_hash": config_hash}).fetchone()
+
+            if result is None:
+                # First time — insert initial record
+                conn.execute(text("""
+                    INSERT INTO model_transitions (config_hash, model_name, notes)
+                    VALUES (:config_hash, :model_name, 'Initial model for this config')
+                """), {"config_hash": config_hash, "model_name": model_name})
+                print(f"📋 Model tracking initialized: {model_name} for config {config_hash}")
+            elif result.model_name != model_name:
+                # Model changed — close old, open new
+                old_model = result.model_name
+                conn.execute(text("""
+                    UPDATE model_transitions SET ended_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                """), {"id": result.id})
+                conn.execute(text("""
+                    INSERT INTO model_transitions (config_hash, model_name, notes)
+                    VALUES (:config_hash, :model_name, :notes)
+                """), {
+                    "config_hash": config_hash,
+                    "model_name": model_name,
+                    "notes": f"Upgraded from {old_model}"
+                })
+                print(f"🔄 Model transition detected: {old_model} → {model_name}")
+            else:
+                print(f"📋 Model unchanged: {model_name} for config {config_hash}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check model transition: {e}")
+
 
 def _is_gpt5_model(model_name):
     """
@@ -569,7 +700,10 @@ class PromptManager:
         allow_reasoning_payload = True  # disable if API rejects reasoning_effort
         while retries < max_retries:
             try:
-                model_name = (model_override or GPT_MODEL)
+                if model_override is not None:
+                    _, model_name = _normalize_model_name(model_override)
+                else:
+                    model_name = get_agent_model(agent_name)
                 if not model_name:
                     raise ValueError("No GPT model configured")
                 model_lower = model_name.lower()
@@ -606,7 +740,7 @@ class PromptManager:
                         messages.append({"role": "user", "content": prompt})
                     
                     # GPT-5 parameters: Lots of tokens, NO temperature
-                    token_cap = get_reasoning_token_cap(agent_name, model_name, 8000 if decider_agent else 6000)
+                    token_cap = get_reasoning_token_cap(agent_name, model_name, 12000 if decider_agent else 6000)
                     api_params = {
                         "model": model_name,
                         "messages": messages,

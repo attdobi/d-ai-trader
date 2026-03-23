@@ -21,7 +21,7 @@ import atexit
 from math import floor
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from functools import lru_cache
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import pandas as pd
 import re
 from sqlalchemy import text
@@ -32,7 +32,6 @@ from config import (
     openai,
     get_current_config_hash,
     get_trading_mode,
-    set_gpt_model,
     IS_MARGIN_ACCOUNT,
     DAILY_TICKET_CAP,
     DAILY_BUY_CAP,
@@ -41,10 +40,9 @@ from config import (
 )
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
+from shared.ticker_normalize import normalize_ticker
+from shared.run_context import RunContext
+from shared.market_clock import MarketClock
 
 # Timezone configuration
 PACIFIC_TIMEZONE = pytz.timezone('US/Pacific')
@@ -544,19 +542,7 @@ price_fetcher = YFinancePriceFetcher()
 
 def is_market_open():
     """Check if the market is currently open (M-F, 9:30am-4pm ET)"""
-    # Get current time in Pacific, convert to Eastern for market hours check
-    now_pacific = datetime.now(PACIFIC_TIMEZONE)
-    now_eastern = now_pacific.astimezone(EASTERN_TIMEZONE)
-    
-    # Check if it's a weekday (Monday = 0, Sunday = 6)
-    if now_eastern.weekday() >= 5:  # Saturday or Sunday
-        return False
-        
-    # Check if it's within market hours (Eastern Time)
-    market_open = now_eastern.replace(hour=9, minute=30, second=0, microsecond=0)
-    market_close = now_eastern.replace(hour=16, minute=0, second=0, microsecond=0)
-    
-    return market_open <= now_eastern <= market_close
+    return MarketClock.is_market_open()
 
 def get_latest_run_id():
     with engine.connect() as conn:
@@ -806,10 +792,8 @@ def clean_ticker_symbol(ticker):
     # Remove any remaining parentheses and clean up
     ticker = ticker.replace('(', '').replace(')', '').strip()
     
-    # Apply symbol corrections
-    ticker = SYMBOL_CORRECTIONS.get(ticker.upper(), ticker)
-    
-    return ticker
+    # Canonicalize + apply symbol corrections (also strips rank prefixes like R1-TSLA)
+    return normalize_ticker(ticker, alias_map=SYMBOL_CORRECTIONS)
 
 def validate_ticker_symbol(ticker):
     """Validate that a ticker symbol exists and can be traded"""
@@ -1693,183 +1677,6 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
             return available_cash
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
-    if buy_decisions:
-        price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
-        with engine.begin() as conn:
-            cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash})\
-                .fetchone()
-            cash = float(cash_row.current_value) if cash_row else MAX_FUNDS
-
-            for decision in buy_decisions:
-                ticker = decision.get("ticker")
-                amount = float(decision.get("amount_usd", 0))
-                reason = decision.get("reason", "")
-
-                clean_ticker = clean_ticker_symbol(ticker)
-                if not clean_ticker:
-                    print(f"Skipping buy for {ticker} due to invalid ticker symbol.")
-                    continue
-
-                if not is_market_open():
-                    print(f"⛔ Skipping buy for {ticker} - market is closed.")
-                    skipped_decisions.append({
-                        "action": "buy",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"⛔ MARKET CLOSED - No action taken. AI suggested buy. Original: {reason}"
-                    })
-                    continue
-
-                price = get_current_price(ticker)
-                if not price:
-                    print(f"Skipping buy for {ticker} due to missing price.")
-                    skipped_decisions.append({
-                        "action": "buy",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Price data unavailable - no trade executed (Original: {reason})"
-                    })
-                    continue
-
-                shares = floor(amount / price)
-                if shares == 0:
-                    print(f"Skipping buy for {ticker} due to insufficient funds for 1 share.")
-                    skipped_decisions.append({
-                        "action": "buy",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Insufficient funds for 1 share - no trade executed (Original: {reason})"
-                    })
-                    continue
-
-                actual_spent = shares * price
-                if cash - actual_spent < MIN_BUFFER:
-                    print(f"Skipping buy for {ticker}, would breach minimum buffer.")
-                    skipped_decisions.append({
-                        "action": "buy",
-                        "ticker": ticker,
-                        "amount_usd": amount,
-                        "reason": f"Would breach minimum buffer - no trade executed (Original: {reason})"
-                    })
-                    continue
-
-                existing = conn.execute(
-                    text("SELECT shares, total_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
-                    {"ticker": clean_ticker, "config_hash": config_hash}
-                ).fetchone()
-
-                if existing and existing.is_active:
-                    new_shares = float(existing.shares) + shares
-                    new_total_value = float(existing.total_value) + actual_spent
-                    new_current_value = new_shares * price
-                    new_gain_loss = new_current_value - new_total_value
-                    new_avg_price = new_total_value / new_shares
-
-                    conn.execute(text("""
-                        UPDATE holdings SET
-                            shares = :shares,
-                            purchase_price = :avg_price,
-                            current_price = :current_price,
-                            purchase_timestamp = :timestamp,
-                            current_price_timestamp = :timestamp,
-                            total_value = :total_value,
-                            current_value = :current_value,
-                            gain_loss = :gain_loss,
-                            reason = :reason
-                        WHERE ticker = :ticker AND config_hash = :config_hash
-                    """), {
-                        "ticker": clean_ticker,
-                        "shares": new_shares,
-                        "avg_price": new_avg_price,
-                        "current_price": float(price),
-                        "timestamp": timestamp,
-                        "total_value": new_total_value,
-                        "current_value": new_current_value,
-                        "gain_loss": new_gain_loss,
-                        "reason": f"{existing.reason if existing.reason else ''} + {reason}",
-                        "config_hash": config_hash
-                    })
-                    print(f"Added {shares} shares of {clean_ticker}. Total: {new_shares} shares, Avg cost: ${new_avg_price:.2f}")
-                elif existing and not existing.is_active:
-                    conn.execute(text("""
-                        UPDATE holdings SET
-                            shares = :shares,
-                            purchase_price = :purchase_price,
-                            current_price = :current_price,
-                            purchase_timestamp = :timestamp,
-                            current_price_timestamp = :timestamp,
-                            total_value = :total_value,
-                            current_value = :current_value,
-                            gain_loss = :gain_loss,
-                            reason = :reason,
-                            is_active = TRUE
-                        WHERE ticker = :ticker AND config_hash = :config_hash
-                    """), {
-                        "ticker": clean_ticker,
-                        "shares": float(shares),
-                        "purchase_price": float(price),
-                        "current_price": float(price),
-                        "timestamp": timestamp,
-                        "total_value": float(shares * price),
-                        "current_value": float(shares * price),
-                        "gain_loss": 0.0,
-                        "reason": reason,
-                        "config_hash": config_hash
-                    })
-                    print(f"Reactivated {clean_ticker}: {shares} shares at ${price:.2f}")
-                else:
-                    conn.execute(text("""
-                        INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
-                        VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price, :purchase_timestamp, :current_price_timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
-                    """), {
-                        "config_hash": config_hash,
-                        "ticker": clean_ticker,
-                        "shares": float(shares),
-                        "purchase_price": float(price),
-                        "current_price": float(price),
-                        "purchase_timestamp": timestamp,
-                        "current_price_timestamp": timestamp,
-                        "total_value": float(shares * price),
-                        "current_value": float(shares * price),
-                        "gain_loss": 0.0,
-                        "reason": reason
-                    })
-                    print(f"First purchase: {shares} shares of {clean_ticker} at ${price:.2f}")
-
-                cash -= actual_spent
-
-            # Persist updated cash after buys
-            conn.execute(text("""
-                UPDATE holdings SET
-                    current_price = :cash,
-                    current_value = :cash,
-                    total_value = :cash,
-                    current_price_timestamp = :timestamp
-                WHERE ticker = 'CASH' AND config_hash = :config_hash
-            """), {"cash": cash, "timestamp": timestamp, "config_hash": config_hash})
-
-    # 3) Handle HOLD records for visibility
-    for decision in hold_decisions:
-        ticker = decision.get("ticker")
-        reason = decision.get("reason", "")
-        print(f"Holding {ticker} - no action taken")
-        skipped_decisions.append({
-            "action": "hold",
-            "ticker": ticker,
-            "amount_usd": 0,
-            "reason": f"Hold decision: {reason}"
-        })
-
-    if skipped_decisions:
-        # Use provided run_id when available for easier traceability
-        skip_run_id = run_id
-        if not skip_run_id:
-            pacific_now = datetime.now(PACIFIC_TIMEZONE)
-            skip_run_id = pacific_now.strftime("%Y%m%dT%H%M%S")
-        store_trade_decisions(skipped_decisions, f"{skip_run_id}_skipped")
-        print(f"Stored {len(skipped_decisions)} skipped decisions due to price/data issues")
-
-def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all buy decisions and return updated cash balance"""
     
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
@@ -2092,6 +1899,9 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
 def record_portfolio_snapshot():
     """Record current portfolio state for historical tracking - same as dashboard_server"""
     with engine.begin() as conn:
+        # Scope reads/writes to the active strategy configuration.
+        config_hash = get_current_config_hash()
+
         # Ensure portfolio_history table exists
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS portfolio_history (
@@ -2112,8 +1922,8 @@ def record_portfolio_snapshot():
             SELECT ticker, shares, purchase_price, current_price, 
                    total_value, current_value, gain_loss
             FROM holdings
-            WHERE is_active = TRUE
-        """)).fetchall()
+            WHERE is_active = TRUE AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
         
         holdings = [dict(row._mapping) for row in result]
         
@@ -2132,20 +1942,25 @@ def record_portfolio_snapshot():
         conn.execute(text("""
             INSERT INTO portfolio_history 
             (total_portfolio_value, cash_balance, total_invested, 
-             total_profit_loss, percentage_gain, holdings_snapshot)
+             total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
             VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
-                    :total_profit_loss, :percentage_gain, :holdings_snapshot)
+                    :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
         """), {
             "total_portfolio_value": total_portfolio_value,
             "cash_balance": cash_balance,
             "total_invested": total_invested,
             "total_profit_loss": total_profit_loss,
             "percentage_gain": percentage_gain,
-            "holdings_snapshot": json.dumps(holdings)
+            "holdings_snapshot": json.dumps(holdings),
+            "config_hash": config_hash
         })
 
-def ask_decision_agent(summaries, run_id, holdings):
+def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunContext] = None):
     config_hash = get_current_config_hash()
+    if run_context is not None:
+        run_id = run_id or run_context.run_id
+        config_hash = run_context.config_hash or config_hash
+        print(f"📋 RunContext: run_id={run_context.run_id}, config_hash={run_context.config_hash}")
     market_open = is_market_open()
     print(f"⏰ Market status at decision time: {'OPEN' if market_open else 'CLOSED'}")
     # Limit summaries to the targeted run_id when provided

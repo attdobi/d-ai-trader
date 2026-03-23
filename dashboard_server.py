@@ -20,16 +20,12 @@ from config import (
     get_prompt_version_config,
     get_trading_mode,
     get_current_config_hash,
-    set_gpt_model,
     SCHWAB_ACCOUNT_HASH,
     IS_MARGIN_ACCOUNT,
 )
 
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
-
 import importlib
+import difflib
 import initialize_prompts as default_prompts_module
 from prompt_manager import initialize_config_prompts
 from decider_agent import (
@@ -59,6 +55,16 @@ from d_ai_trader import (
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
+
+# Manual "Run All" concurrency guard and state tracking
+_manual_run_lock = threading.Lock()
+_manual_run_state = {
+    "status": "idle",        # idle, running, completed, failed
+    "started_at": None,
+    "completed_at": None,
+    "error": None,
+    "step": None,            # summarizer, decider, feedback
+}
 
 FEEDBACK_DEFAULTS = default_prompts_module.DEFAULT_PROMPTS["FeedbackAgent"]
 DEFAULT_FEEDBACK_SYSTEM_PROMPT = FEEDBACK_DEFAULTS["system_prompt"]
@@ -1102,6 +1108,22 @@ def dashboard():
             net_gain_loss = total_portfolio_value - baseline_total_value
             net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
 
+        # Fetch model transitions for config panel
+        try:
+            model_transitions = conn.execute(text("""
+                SELECT model_name, started_at, ended_at
+                FROM model_transitions
+                WHERE config_hash = :config_hash
+                ORDER BY started_at ASC
+            """), {"config_hash": config_hash}).fetchall()
+            model_history = [{
+                "model_name": row.model_name,
+                "started_at": row.started_at.strftime('%b %d') if row.started_at else '?',
+                "ended_at": row.ended_at.strftime('%b %d') if row.ended_at else 'present'
+            } for row in model_transitions]
+        except Exception:
+            model_history = []
+
         return render_template(
             "dashboard.html",
             active_tab="dashboard",
@@ -1121,6 +1143,7 @@ def dashboard():
             initial_account_value=initial_investment,
             current_account_value=total_portfolio_value,
             is_margin_account=bool(IS_MARGIN_ACCOUNT),
+            model_history=model_history,
         )
 
 @app.template_filter('from_json')
@@ -1302,6 +1325,27 @@ def api_configuration():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+@app.route("/api/model-transitions")
+def api_model_transitions():
+    config_hash = request.args.get("config_hash", get_current_config_hash())
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT model_name, started_at, ended_at, notes
+                FROM model_transitions
+                WHERE config_hash = :config_hash
+                ORDER BY started_at ASC
+            """), {"config_hash": config_hash}).fetchall()
+            return jsonify([{
+                "model_name": row.model_name,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+                "notes": row.notes
+            } for row in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/holdings")
 def api_holdings():
     config_hash = get_current_config_hash()
@@ -1310,6 +1354,30 @@ def api_holdings():
             SELECT * FROM holdings WHERE is_active = TRUE AND config_hash = :config_hash
         """), {"config_hash": config_hash}).fetchall()
         return jsonify([dict(row._mapping) for row in result])
+
+@app.route('/api/sparklines')
+def api_sparklines():
+    """Return 5-day price history for each active holding (for sparkline charts)."""
+    config_hash = get_current_config_hash()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT ticker FROM holdings
+            WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchall()
+        tickers = [row.ticker for row in result if row.ticker]
+
+    sparklines = {}
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
+            if hist is not None and not hist.empty:
+                sparklines[ticker] = [round(float(p), 2) for p in hist['Close'].tolist()]
+        except Exception as e:
+            print(f"Sparkline error for {ticker}: {e}")
+            continue
+
+    return jsonify(sparklines)
 
 @app.route("/api/history")
 def api_history():
@@ -1897,54 +1965,102 @@ def trigger_agent(agent_type):
 @app.route('/api/trigger/all', methods=['POST'])
 def trigger_all():
     """Manually trigger all agents in sequence"""
+    # Guard against concurrent manual runs
+    with _manual_run_lock:
+        if _manual_run_state["status"] == "running":
+            return jsonify({
+                'error': 'A manual run is already in progress',
+                'step': _manual_run_state.get("step"),
+                'started_at': _manual_run_state.get("started_at"),
+            }), 409
+
+        # Reserve the slot before releasing the lock
+        _manual_run_state["status"] = "running"
+        _manual_run_state["started_at"] = datetime.now().isoformat()
+        _manual_run_state["completed_at"] = None
+        _manual_run_state["error"] = None
+        _manual_run_state["step"] = None
+
     try:
         # Ensure config hash is set before running
         config_hash = get_current_config_hash()
         print(f"🔧 Running all agents for config: {config_hash}")
-        
+
         orchestrator = DAITraderOrchestrator()
         mark_manual_decider_window()
-        
+
         # Run all agents in sequence in a separate thread
         def run_all():
             try:
                 # Use the SAME config hash that's displayed on the website
                 # This was set when the .sh script started and should never change
                 thread_config_hash = config_hash  # Use the hash from the outer scope
-                
+
                 # Ensure config hash is available in this thread
                 import os
                 os.environ['CURRENT_CONFIG_HASH'] = thread_config_hash
-                
+
                 print("🚀 Starting manual run of all agents...")
                 print(f"🔧 Config hash in thread: {thread_config_hash} (from website display)")
-                
+
                 # 1. Run summarizer
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "summarizer"
                 print("📰 Step 1/3: Running summarizer agents...")
-                orchestrator.run_summarizer_agents()
+                try:
+                    orchestrator.run_summarizer_agents()
+                except Exception as e:
+                    print(f"❌ Summarizer failed: {type(e).__name__}: {e}")
+                    with _manual_run_lock:
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = f"Summarizer failed: {e}"
+                    raise  # Don't continue to decider on stale data
                 print("✅ Summarizer completed")
-                
+
                 # Small delay to ensure summarizer data is committed
-                import time
                 time.sleep(2)
-                
+
                 # 2. Run decider
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "decider"
                 print("🤖 Step 2/3: Running decider agent...")
-                orchestrator.run_decider_agent(force=True)
+                try:
+                    orchestrator.run_decider_agent(force=True)
+                except Exception as e:
+                    print(f"❌ Decider failed: {type(e).__name__}: {e}")
+                    with _manual_run_lock:
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = f"Decider failed: {e}"
+                    raise  # Don't continue to feedback
                 print("✅ Decider completed")
-                
+
                 # 3. Run feedback
+                with _manual_run_lock:
+                    _manual_run_state["step"] = "feedback"
                 print("📊 Step 3/3: Running feedback agent...")
                 orchestrator.run_feedback_agent()
                 print("✅ Feedback completed")
-                
+
                 print("🎉 All agents completed successfully!")
-                
+                with _manual_run_lock:
+                    _manual_run_state["status"] = "completed"
+                    _manual_run_state["completed_at"] = datetime.now().isoformat()
+                    _manual_run_state["error"] = None
+
             except Exception as e:
                 print(f"❌ Error in manual all agents run: {type(e).__name__}: {e}")
                 import traceback
                 traceback.print_exc()
-                
+
+                # Mark as failed (may already be set by per-step handler above)
+                with _manual_run_lock:
+                    if _manual_run_state["status"] != "failed":
+                        _manual_run_state["status"] = "failed"
+                        _manual_run_state["completed_at"] = datetime.now().isoformat()
+                        _manual_run_state["error"] = str(e)
+
                 # Store the error in the database so we can see it
                 try:
                     with engine.begin() as conn:
@@ -1964,16 +2080,28 @@ def trigger_all():
                 # Clean up resources to prevent semaphore leaks
                 import gc
                 gc.collect()
-        
+
         thread = threading.Thread(target=run_all, daemon=True, name="ManualAllAgents")
         thread.start()
-        
+
         return jsonify({
             'success': True,
             'message': 'All agents triggered successfully (running in background)'
         })
     except Exception as e:
+        # If we fail before even starting the thread, reset state
+        with _manual_run_lock:
+            _manual_run_state["status"] = "failed"
+            _manual_run_state["completed_at"] = datetime.now().isoformat()
+            _manual_run_state["error"] = str(e)
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/trigger/all/status')
+def trigger_all_status():
+    """Get the current status of the manual Run All operation"""
+    with _manual_run_lock:
+        return jsonify(dict(_manual_run_state))
 
 @app.route('/api/run-status')
 def get_run_status():
@@ -2354,6 +2482,436 @@ def get_schwab_account_info():
             'enabled': True,
             'status': 'error'
         })
+
+def _safe_isoformat(value):
+    if value is None:
+        return None
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
+
+
+def _extract_headline_from_summary_data(raw_data):
+    payload = raw_data
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if not stripped:
+            return ""
+        try:
+            payload = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            return stripped[:200]
+
+    summary_payload = payload.get('summary') if isinstance(payload, dict) else payload
+    if isinstance(summary_payload, str):
+        stripped_summary = summary_payload.strip()
+        if not stripped_summary:
+            return ""
+        try:
+            summary_payload = json.loads(stripped_summary)
+        except (json.JSONDecodeError, TypeError):
+            return stripped_summary[:200]
+
+    if isinstance(summary_payload, dict):
+        headlines = summary_payload.get('headlines')
+        if isinstance(headlines, (list, tuple)):
+            for headline in headlines:
+                if headline:
+                    return str(headline).strip()[:200]
+
+        for key in ('headline', 'title', 'insights'):
+            value = summary_payload.get(key)
+            if value:
+                if not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                value = value.strip()
+                if value:
+                    return value[:200]
+
+    if isinstance(summary_payload, (list, tuple)):
+        for item in summary_payload:
+            if item:
+                headline = str(item).strip()
+                if headline:
+                    return headline[:200]
+
+    if isinstance(payload, dict):
+        for key in ('headline', 'title', 'insights'):
+            value = payload.get(key)
+            if value:
+                if not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                value = value.strip()
+                if value:
+                    return value[:200]
+
+    return ""
+
+
+def _load_prompt_evolution_context():
+    config_hash = get_current_config_hash()
+
+    with engine.connect() as conn:
+        try:
+            outcome_rows = conn.execute(text("""
+                SELECT ticker, gain_loss_percentage
+                FROM trade_outcomes
+                WHERE config_hash = :config_hash
+                ORDER BY created_at DESC
+                LIMIT 50
+            """), {"config_hash": config_hash}).fetchall()
+        except Exception:
+            outcome_rows = conn.execute(text("""
+                SELECT ticker, gain_loss_percentage
+                FROM trade_outcomes
+                WHERE config_hash = :config_hash
+                ORDER BY sell_timestamp DESC
+                LIMIT 50
+            """), {"config_hash": config_hash}).fetchall()
+
+        summary_rows = conn.execute(text("""
+            SELECT data, timestamp
+            FROM summaries
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """), {"config_hash": config_hash}).fetchall()
+
+    trade_rows = []
+    for row in outcome_rows:
+        try:
+            gain_pct = float(row.gain_loss_percentage if row.gain_loss_percentage is not None else 0.0)
+        except (TypeError, ValueError):
+            gain_pct = 0.0
+        trade_rows.append({
+            'ticker': (row.ticker or '').upper(),
+            'gain_loss_percentage': gain_pct,
+        })
+
+    total_trades = len(trade_rows)
+    win_count = sum(1 for trade in trade_rows if trade['gain_loss_percentage'] > 0)
+    avg_profit_pct = (sum(trade['gain_loss_percentage'] for trade in trade_rows) / total_trades) if total_trades else 0.0
+
+    best_trade = max(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
+    worst_trade = min(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
+
+    stats = {
+        'win_rate': round((win_count / total_trades) * 100, 2) if total_trades else 0.0,
+        'avg_profit_pct': round(avg_profit_pct, 2),
+        'total_trades': total_trades,
+        'best_trade': best_trade,
+        'worst_trade': worst_trade,
+    }
+
+    headlines = []
+    for row in summary_rows:
+        headline = _extract_headline_from_summary_data(row.data)
+        if headline:
+            headlines.append(headline)
+
+    return {
+        'stats': stats,
+        'headlines': headlines,
+    }
+
+
+def _parse_generated_prompt_payload(raw_content):
+    content = raw_content
+
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                text_value = part.get('text')
+            else:
+                text_value = getattr(part, 'text', None)
+            if text_value is None:
+                text_value = str(part)
+            parts.append(str(text_value))
+        content = "\n".join(parts)
+
+    content = (content or '').strip()
+    if not content:
+        raise ValueError('Model returned an empty response')
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find('{')
+        end = content.rfind('}')
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError('Model response was not valid JSON')
+        parsed = json.loads(content[start:end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError('Model response JSON must be an object')
+
+    return parsed
+
+
+@app.route('/prompt-evolution')
+def prompt_evolution_page():
+    return render_template('prompt_evolution.html')
+
+
+@app.route('/api/prompt-evolution/history')
+def get_prompt_evolution_history():
+    try:
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT agent_type, version, system_prompt, user_prompt_template, description, is_active, created_at
+                FROM prompt_versions
+                WHERE config_hash = :config_hash
+                ORDER BY agent_type ASC, version DESC
+            """), {"config_hash": config_hash}).fetchall()
+
+        history = {}
+        for row in rows:
+            history.setdefault(row.agent_type, []).append({
+                'version': row.version,
+                'created_at': _safe_isoformat(row.created_at),
+                'description': row.description,
+                'is_active': bool(row.is_active),
+                'system_prompt_preview': (row.system_prompt or '')[:200],
+                'user_prompt_template_preview': (row.user_prompt_template or '')[:200],
+            })
+
+        return jsonify(history)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/diff/<agent_type>/<int:version_a>/<int:version_b>')
+def get_prompt_evolution_diff(agent_type, version_a, version_b):
+    try:
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT version, system_prompt, user_prompt_template
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+                  AND (version = :version_a OR version = :version_b)
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+                'version_a': version_a,
+                'version_b': version_b,
+            }).fetchall()
+
+        by_version = {row.version: row for row in rows}
+        row_a = by_version.get(version_a)
+        row_b = by_version.get(version_b)
+
+        if not row_a or not row_b:
+            return jsonify({'error': 'One or both prompt versions were not found'}), 404
+
+        system_prompt_diff = list(difflib.unified_diff(
+            (row_a.system_prompt or '').splitlines(),
+            (row_b.system_prompt or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_system_prompt',
+            tofile=f'{agent_type}_v{version_b}_system_prompt',
+            lineterm=''
+        ))
+
+        user_prompt_diff = list(difflib.unified_diff(
+            (row_a.user_prompt_template or '').splitlines(),
+            (row_b.user_prompt_template or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_user_prompt_template',
+            tofile=f'{agent_type}_v{version_b}_user_prompt_template',
+            lineterm=''
+        ))
+
+        return jsonify({
+            'system_prompt_diff': system_prompt_diff,
+            'user_prompt_diff': user_prompt_diff,
+            'version_a': version_a,
+            'version_b': version_b,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/performance-context')
+def get_prompt_evolution_performance_context():
+    try:
+        context_payload = _load_prompt_evolution_context()
+        return jsonify(context_payload)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/generate', methods=['POST'])
+def generate_prompt_evolution_candidate():
+    try:
+        data = request.get_json(silent=True) or {}
+        agent_type = data.get('agent_type')
+
+        if not agent_type:
+            return jsonify({'error': 'agent_type is required'}), 400
+
+        config_hash = get_current_config_hash()
+
+        with engine.connect() as conn:
+            current_prompt = conn.execute(text("""
+                SELECT version, system_prompt, user_prompt_template, description
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+                  AND is_active = TRUE
+                ORDER BY version DESC
+                LIMIT 1
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            }).fetchone()
+
+        if not current_prompt:
+            return jsonify({'error': f'No active prompt found for {agent_type}'}), 404
+
+        context_payload = _load_prompt_evolution_context()
+        stats = context_payload.get('stats', {})
+        headlines = context_payload.get('headlines', [])
+
+        prompt_payload = {
+            'agent_type': agent_type,
+            'current_prompt': {
+                'version': current_prompt.version,
+                'description': current_prompt.description,
+                'system_prompt': current_prompt.system_prompt,
+                'user_prompt_template': current_prompt.user_prompt_template,
+            },
+            'performance_stats': stats,
+            'recent_headlines': headlines,
+            'goal': (
+                'Improve prompt quality based on current performance. '
+                'Preserve placeholders/tokens and actionable structure while tightening clarity.'
+            ),
+        }
+
+        from openai import OpenAI
+
+        client = OpenAI()
+        model = get_gpt_model()
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are an expert prompt engineer for an autonomous trading workflow. '
+                        'Given the current prompt and performance context, produce improved prompts. '
+                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, reasoning.'
+                    ),
+                },
+                {
+                    'role': 'user',
+                    'content': (
+                        'Generate an improved prompt package from this input:\n\n'
+                        f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+                    ),
+                },
+            ],
+        )
+
+        content = ''
+        if response and getattr(response, 'choices', None):
+            content = response.choices[0].message.content
+
+        parsed = _parse_generated_prompt_payload(content)
+
+        system_prompt = (parsed.get('system_prompt') or '').strip()
+        user_prompt_template = (parsed.get('user_prompt_template') or '').strip()
+        reasoning = (parsed.get('reasoning') or '').strip()
+
+        if not system_prompt or not user_prompt_template:
+            return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
+
+        return jsonify({
+            'system_prompt': system_prompt,
+            'user_prompt_template': user_prompt_template,
+            'reasoning': reasoning,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/apply', methods=['POST'])
+def apply_prompt_evolution_candidate():
+    try:
+        data = request.get_json(silent=True) or {}
+
+        agent_type = data.get('agent_type')
+        system_prompt = (data.get('system_prompt') or '').strip()
+        user_prompt_template = (data.get('user_prompt_template') or '').strip()
+        description = (data.get('description') or '').strip()
+
+        if not agent_type:
+            return jsonify({'error': 'agent_type is required'}), 400
+        if not system_prompt or not user_prompt_template:
+            return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
+
+        config_hash = get_current_config_hash()
+
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            })
+
+            version_row = conn.execute(text("""
+                SELECT COALESCE(MAX(version), -1) AS max_version
+                FROM prompt_versions
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            }).fetchone()
+
+            new_version = int(version_row.max_version) + 1 if version_row and version_row.max_version is not None else 0
+
+            conn.execute(text("""
+                INSERT INTO prompt_versions (
+                    agent_type,
+                    version,
+                    system_prompt,
+                    user_prompt_template,
+                    description,
+                    created_by,
+                    is_active,
+                    config_hash
+                ) VALUES (
+                    :agent_type,
+                    :version,
+                    :system_prompt,
+                    :user_prompt_template,
+                    :description,
+                    :created_by,
+                    TRUE,
+                    :config_hash
+                )
+            """), {
+                'agent_type': agent_type,
+                'version': new_version,
+                'system_prompt': system_prompt,
+                'user_prompt_template': user_prompt_template,
+                'description': description,
+                'created_by': 'prompt_lab',
+                'config_hash': config_hash,
+            })
+
+        return jsonify({'success': True, 'version': new_version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/schwab')
 def schwab_dashboard():

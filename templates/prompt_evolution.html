@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Prompt Evolution{% endblock %}
+
+{% block content %}
+<div class="pe-page">
+  <section class="pe-card" id="performanceContextCard">
+    <h1>Prompt Evolution</h1>
+    <p class="pe-subtitle">Performance context for the last 7 days and recent market headlines.</p>
+
+    <div id="performanceLoading" class="pe-loading">
+      <span class="pe-spinner" aria-hidden="true"></span>
+      <span>Loading performance context…</span>
+    </div>
+
+    <div id="performanceContent" class="pe-hidden">
+      <div id="performanceStats" class="pe-stats-grid"></div>
+
+      <h3>Recent Headlines</h3>
+      <ul id="recentHeadlines" class="pe-headlines"></ul>
+    </div>
+
+    <div id="performanceError" class="pe-error pe-hidden"></div>
+  </section>
+
+  <section class="pe-card" id="promptTimelineCard">
+    <h2>Prompt Version Timeline</h2>
+    <p class="pe-subtitle">Select two versions in the same column to compare unified diffs.</p>
+
+    <div id="historyLoading" class="pe-loading">
+      <span class="pe-spinner" aria-hidden="true"></span>
+      <span>Loading prompt history…</span>
+    </div>
+
+    <div id="timelineColumns" class="pe-timeline-grid pe-hidden">
+      <article class="pe-column">
+        <h3>Summarizer</h3>
+        <div id="timeline-SummarizerAgent" class="pe-timeline"></div>
+      </article>
+      <article class="pe-column">
+        <h3>Decider</h3>
+        <div id="timeline-DeciderAgent" class="pe-timeline"></div>
+      </article>
+      <article class="pe-column">
+        <h3>Feedback</h3>
+        <div id="timeline-FeedbackAgent" class="pe-timeline"></div>
+      </article>
+    </div>
+
+    <div id="historyError" class="pe-error pe-hidden"></div>
+
+    <div id="diffPanel" class="pe-diff-panel pe-hidden">
+      <p id="diffMeta" class="pe-diff-meta"></p>
+      <div class="pe-diff-grid">
+        <section class="pe-diff-block">
+          <h4>System Prompt Diff</h4>
+          <div id="systemDiff" class="pe-diff-view" role="region" aria-label="System prompt diff"></div>
+        </section>
+        <section class="pe-diff-block">
+          <h4>User Prompt Template Diff</h4>
+          <div id="userDiff" class="pe-diff-view" role="region" aria-label="User prompt template diff"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section class="pe-card" id="promptLabCard">
+    <h2>Prompt Lab</h2>
+    <p class="pe-subtitle">Generate and apply improved prompt versions for each agent.</p>
+
+    <div class="pe-form-grid">
+      <div class="pe-field">
+        <label for="promptLabAgentType">Agent Type</label>
+        <select id="promptLabAgentType" class="pe-select">
+          <option value="SummarizerAgent">Summarizer</option>
+          <option value="DeciderAgent">Decider</option>
+          <option value="FeedbackAgent">Feedback</option>
+        </select>
+      </div>
+      <div class="pe-field" style="justify-content: flex-end;">
+        <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
+      </div>
+    </div>
+
+    <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
+    <div id="promptLabError" class="pe-error pe-hidden"></div>
+    <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
+
+    <div id="promptLabResults" class="pe-hidden">
+      <div class="pe-field">
+        <label>Reasoning</label>
+        <div id="generatedReasoning" class="pe-reasoning"></div>
+      </div>
+
+      <div class="pe-form-grid">
+        <div class="pe-field">
+          <label for="generatedSystemPrompt">System Prompt</label>
+          <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+        </div>
+        <div class="pe-field">
+          <label for="generatedUserPrompt">User Prompt Template</label>
+          <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
+        </div>
+      </div>
+
+      <div class="pe-field">
+        <label for="promptDescription">Description</label>
+        <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
+      </div>
+
+      <div style="margin-top: 14px;">
+        <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script defer src="{{ url_for('static', filename='js/prompt-evolution.js') }}"></script>
+{% endblock %}

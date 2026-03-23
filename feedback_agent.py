@@ -14,13 +14,9 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, set_gpt_model, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
 import yfinance as yf
 import pandas as pd
-
-# Apply model from environment if specified
-if _os.environ.get("DAI_GPT_MODEL"):
-    set_gpt_model(_os.environ["DAI_GPT_MODEL"])
 
 # Performance thresholds
 SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant
@@ -368,12 +364,6 @@ class TradeOutcomeTracker:
             "feedback": feedback
         }
 
-    def _get_historical_feedback_summary(self, agent_type, max_feedbacks=10):
-        """Get and summarize historical feedback for an agent type"""
-        from config import get_current_config_hash
-        config_hash = get_current_config_hash()
-        return self._get_historical_feedback_summary_for_config(agent_type, config_hash, max_feedbacks)
-    
     def _get_historical_feedback_summary_for_config(self, agent_type, config_hash, max_feedbacks=10):
         """Get and summarize historical feedback for an agent type and specific config"""
         with engine.begin() as conn:
@@ -402,102 +392,6 @@ class TradeOutcomeTracker:
                     continue
             
             return historical_insights
-
-    def _auto_generate_prompts_from_feedback(self, feedback, feedback_id):
-        """Automatically generate new prompts based on feedback analysis with historical context"""
-        try:
-            # Get the config hash from environment (should be set by calling method)
-            from config import get_current_config_hash
-            config_hash = get_current_config_hash()
-            
-            summarizer_feedback = feedback.get('summarizer_feedback', '')
-            decider_feedback = feedback.get('decider_feedback', '')
-            
-            # DISABLED: Auto-prompt generation is too aggressive
-            # Instead, feedback is stored in database for manual review
-            
-            print("📊 Feedback Analysis Complete:")
-            if summarizer_feedback:
-                # Extract just 2-3 key lessons (high-level only)
-                lessons = str(summarizer_feedback)[:200]  # First 200 chars only
-                print(f"   📰 Summarizer: {lessons}...")
-            if decider_feedback:
-                lessons = str(decider_feedback)[:200]  # First 200 chars only
-                print(f"   🎯 Decider: {lessons}...")
-            
-            print("   ✅ Feedback saved to database")
-            print("   💡 Review on Feedback tab and manually adjust prompts if needed")
-            print("   ⚠️  Prompts remain stable - only change if critical issues found")
-            
-            # All feedback logic is now disabled - prompts remain stable
-            return
-            
-            # LEGACY CODE BELOW - DISABLED
-            if False and decider_feedback:
-                # Get historical feedback for context - use the specific config hash
-                historical_decider = self._get_historical_feedback_summary_for_config('decider', config_hash, max_feedbacks=5)
-                
-                # Create comprehensive decider prompt with historical context
-                historical_context = ""
-                if historical_decider:
-                    historical_context = "\n\nHISTORICAL LESSONS LEARNED:\n"
-                    for i, insight in enumerate(historical_decider[:3], 1):
-                        historical_context += f"{i}. ({insight['date']}) {insight['feedback']}\n"
-                
-                # FIXED TEMPLATE COMPONENTS (never change) - using hardcoded constants to avoid circular imports
-                DECIDER_BASE_INSTRUCTIONS = '''You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-
-Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than the total available balance for trading.
-Retain at least $100 in funds.'''
-
-                DECIDER_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent tuned on extracting market insights and turning a profit. You are aggressive and focused on short-term gains and capital rotation. Learn from past performance feedback to improve decisions.'''
-
-                # MODIFIABLE COMPONENTS (updated based on feedback)
-                performance_guidance = f'''
-LATEST PERFORMANCE FEEDBACK: {decider_feedback}{historical_context}
-
-SPECIFIC INSIGHTS TO APPLY:
-- Timing Patterns: {feedback.get('timing_patterns', 'Focus on optimal entry/exit timing')}
-- Risk Management: {feedback.get('risk_management', 'Implement strict risk controls')}
-- Sector Analysis: {feedback.get('sector_insights', 'Consider sector momentum')}'''
-
-                # COMBINE: Fixed template + Modifiable feedback + JSON format requirement
-                new_decider_user = f'''{DECIDER_BASE_INSTRUCTIONS}
-
-{performance_guidance}
-
-Current Portfolio: {{holdings}}
-Available Cash: {{available_cash}}
-News Summaries: {{summaries}}
-
-🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
-[
-  {{
-    "action": "buy" or "sell" or "hold",
-    "ticker": "SYMBOL",
-    "amount_usd": dollar_amount_number,
-    "reason": "brief explanation"
-  }}
-]
-No explanatory text, no markdown, just pure JSON array.'''
-
-                new_decider_system = f'''{DECIDER_SYSTEM_BASE}
-
-INCORPORATE THE FOLLOWING PERFORMANCE INSIGHTS:
-{decider_feedback}'''
-
-                # Save the new decider prompt
-                decider_version = self.save_prompt_version(
-                    'decider',
-                    new_decider_user, 
-                    new_decider_system,
-                    f'Auto-generated from feedback analysis (ID: {feedback_id}) - performance-based improvements with fixed format',
-                    'feedback_automation'
-                )
-                print(f'✅ Auto-generated new decider prompt v{decider_version} from feedback (with fixed format)')
-        
-        except Exception as e:
-            print(f"⚠️  Error auto-generating prompts from feedback: {e}")
 
     def compute_recent_outcomes_metrics(self, days_back=FEEDBACK_LOOKBACK_DAYS):
         """Compute recent outcome metrics only (no AI call)"""
@@ -919,12 +813,12 @@ CRITICAL INSTRUCTIONS:
 5. Make feedback cumulative - build upon previous lessons rather than replacing them'''
         
         try:
-            token_cap = get_reasoning_token_cap("FeedbackAgent", GPT_MODEL, 2000)
+            token_cap = get_reasoning_token_cap("FeedbackAgent", GPT_MODEL, 4000)
             api_params = _build_feedback_api_params(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
                 agent_label="FeedbackAgent",
-                base_max_tokens=2000,
+                base_max_tokens=4000,
             )
             
             print(f"🔧 Using simple JSON mode for FeedbackAgent (reasoning={get_agent_reasoning_level('FeedbackAgent')}, token_cap={token_cap})")
@@ -956,34 +850,6 @@ CRITICAL INSTRUCTIONS:
                 "decider_feedback": "Unable to generate AI feedback",
                 "key_insights": []
             }
-    
-    def _store_feedback(self, lookback_days, total_trades, success_rate, avg_profit, analysis, feedback):
-        """Store the generated feedback in the database"""
-        from config import get_current_config_hash
-        config_hash = get_current_config_hash()
-        
-        with engine.begin() as conn:
-            result = conn.execute(text("""
-                INSERT INTO agent_feedback 
-                (config_hash, lookback_period_days, total_trades_analyzed, success_rate, avg_profit_percentage,
-                 top_performing_patterns, underperforming_patterns, recommended_adjustments,
-                 summarizer_feedback, decider_feedback)
-                VALUES (:config_hash, :lookback_days, :total_trades, :success_rate, :avg_profit,
-                        :top_patterns, :under_patterns, :adjustments, :summarizer_fb, :decider_fb)
-                RETURNING id
-            """), {
-                "config_hash": config_hash,
-                "lookback_days": lookback_days,
-                "total_trades": total_trades,
-                "success_rate": success_rate,
-                "avg_profit": avg_profit,
-                "top_patterns": json.dumps(analysis["successful_reasons"]),
-                "under_patterns": json.dumps(analysis["unsuccessful_reasons"]),
-                "adjustments": json.dumps(feedback),
-                "summarizer_fb": json.dumps(feedback.get("summarizer_feedback", "")),
-                "decider_fb": json.dumps(feedback.get("decider_feedback", ""))
-            })
-            return result.fetchone()[0]
     
     def get_latest_feedback(self):
         """Get the most recent feedback for agent improvement"""
@@ -1465,7 +1331,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         feedback = self._generate_decision_pattern_feedback(parsed_decisions, decision_analysis)
         
         # Store feedback
-        feedback_id = self._store_feedback(days_back, total_decisions, 0, 0, decision_analysis, feedback)
+        feedback_id = self._store_feedback_for_config(days_back, total_decisions, 0, 0, decision_analysis, feedback, config_hash)
         
         return {
             "feedback_id": feedback_id,
