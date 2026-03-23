@@ -1010,7 +1010,13 @@ def dashboard():
                             else min(available_cash_effective, settled_cash_guardrail)
                         )
                     funds_available_display = max(0.0, float(funds_available_display))
-                    total_portfolio_value = total_current_value + available_cash_effective
+                    # Use actual account value (positions + ALL cash) for portfolio tracking,
+                    # not just effective trading funds (which excludes unsettled cash)
+                    account_value_from_schwab = schwab_data.get("account_info", {}).get("account_value")
+                    if account_value_from_schwab and float(account_value_from_schwab) > 0:
+                        total_portfolio_value = float(account_value_from_schwab)
+                    else:
+                        total_portfolio_value = total_current_value + raw_cash_balance + unsettled_cash
                     cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
@@ -2883,16 +2889,21 @@ def apply_prompt_evolution_candidate():
 
         config_hash = get_current_config_hash()
 
+        # Feedback agent aliases: deactivate both feedback_analyzer and FeedbackAgent together
+        _FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
+        types_to_deactivate = list(_FEEDBACK_ALIASES) if agent_type in _FEEDBACK_ALIASES else [agent_type]
+
         with engine.begin() as conn:
-            conn.execute(text("""
-                UPDATE prompt_versions
-                SET is_active = FALSE
-                WHERE agent_type = :agent_type
-                  AND config_hash = :config_hash
-            """), {
-                'agent_type': agent_type,
-                'config_hash': config_hash,
-            })
+            for t in types_to_deactivate:
+                conn.execute(text("""
+                    UPDATE prompt_versions
+                    SET is_active = FALSE
+                    WHERE agent_type = :agent_type
+                      AND config_hash = :config_hash
+                """), {
+                    'agent_type': t,
+                    'config_hash': config_hash,
+                })
 
             version_row = conn.execute(text("""
                 SELECT COALESCE(MAX(version), -1) AS max_version

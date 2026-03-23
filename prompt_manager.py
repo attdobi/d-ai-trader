@@ -172,6 +172,14 @@ def get_active_prompt_emergency_patch(agent_type):
     prompt = baselines.get(agent_type, baselines["FeedbackAgent"])
     return prompt
 
+_FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
+
+def _feedback_agent_types(agent_type):
+    """Return all alias names that should be deactivated together for feedback agents."""
+    if agent_type in _FEEDBACK_ALIASES:
+        return list(_FEEDBACK_ALIASES)
+    return [agent_type]
+
 def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system", strategy_directives=None):
     """Create a new prompt version for the current config, reusing version numbers when possible"""
     from config import get_current_config_hash
@@ -201,12 +209,14 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             target_version = result.next_version
             print(f"📈 Creating new version v{target_version} for {agent_type}")
         
-        # Deactivate current prompts for this config
-        conn.execute(text("""
-            UPDATE prompt_versions
-            SET is_active = FALSE
-            WHERE agent_type = :agent_type AND config_hash = :config_hash
-        """), {"agent_type": agent_type, "config_hash": config_hash})
+        # Deactivate current prompts for this config (including aliases like feedback_analyzer/FeedbackAgent)
+        types_to_deactivate = _feedback_agent_types(agent_type)
+        for t in types_to_deactivate:
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
+            """), {"agent_type": t, "config_hash": config_hash})
         
         # Check if target version already exists - if so, update it; if not, insert it
         existing_version = conn.execute(text("""

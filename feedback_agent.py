@@ -1159,7 +1159,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 }
             return None
     
-    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None):
+    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None, strategy_directives=None):
         """Save a new version of prompts for an agent type"""
         from prompt_manager import create_new_prompt_version
         
@@ -1178,7 +1178,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             system_prompt=system_prompt,
             user_prompt_template=user_prompt,
             description=f"{description} (Auto-generated from feedback)",
-            created_by=created_by
+            created_by=created_by,
+            strategy_directives=strategy_directives,
         )
         
         print(f"✅ Created new prompt version for {mapped_agent_type} (ID: {prompt_id})")
