@@ -297,6 +297,14 @@ def get_openai_summary(agent_name, html_content, image_paths):
         system_prompt_template = prompt_data["system_prompt"]
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
+
+        # Inject strategy directives
+        strategy = prompt_data.get("strategy_directives", "")
+        if strategy and "{strategy_directives}" in system_prompt_template:
+            system_prompt_template = system_prompt_template.replace("{strategy_directives}", strategy)
+        elif strategy and "{strategy_directives}" not in system_prompt_template:
+            system_prompt_template = system_prompt_template + "\n\n" + strategy
+
         print(f"🔧 Using SummarizerAgent prompt v{prompt_version} (UNIFIED)")
     except Exception as e:
         print(f"⚠️  Could not load unified prompt: {e}, using fallback")
