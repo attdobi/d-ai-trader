@@ -27,6 +27,13 @@ FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
 prompt_manager = PromptManager(client=openai, session=session)
 
 
+def _canonical_agent_type(agent_type):
+    """Normalize legacy agent names to canonical prompt_versions keys."""
+    if agent_type == "feedback_analyzer":
+        return "FeedbackAgent"
+    return agent_type
+
+
 def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label: str, base_max_tokens: int, enable_reasoning: bool = True) -> dict:
     """Assemble OpenAI parameters with reasoning defaults for feedback flows."""
     model_name = GPT_MODEL
@@ -136,7 +143,7 @@ class TradeOutcomeTracker:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS ai_agent_feedback_responses (
                     id SERIAL PRIMARY KEY,
-                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer', 'FeedbackAgent')),
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user_prompt TEXT NOT NULL,
                     system_prompt TEXT NOT NULL,
@@ -152,7 +159,7 @@ class TradeOutcomeTracker:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS ai_agent_prompts (
                     id SERIAL PRIMARY KEY,
-                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer', 'FeedbackAgent')),
                     prompt_version INTEGER NOT NULL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user_prompt TEXT NOT NULL,
@@ -997,7 +1004,8 @@ CRITICAL INSTRUCTIONS:
     
     def generate_ai_feedback_response(self, agent_type, context_data=None, performance_metrics=None, is_manual_request=False):
         """Generate AI feedback response for a specific agent and store it"""
-        
+        agent_type = _canonical_agent_type(agent_type)
+
         # Try to get active prompt from database first
         active_prompt = self.get_active_prompt(agent_type)
         
@@ -1051,7 +1059,7 @@ Focus on actionable improvements that can be incorporated into the decider's tra
                 system_prompt = """You are an expert trading strategist providing feedback to improve AI trading decisions. 
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the decider agent make better decisions."""
                 
-            elif agent_type == "feedback_analyzer":
+            elif agent_type == "FeedbackAgent":
                 # FIXED TEMPLATE COMPONENTS (never change)
                 FEEDBACK_BASE_INSTRUCTIONS = '''You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
 
@@ -1216,6 +1224,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def get_active_prompt(self, agent_type):
         """Get the currently active prompt for an agent type"""
+        agent_type = _canonical_agent_type(agent_type)
+
         # Import here to avoid circular imports
         from config import should_use_specific_prompt_version, get_prompt_version_config
         
@@ -1308,6 +1318,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def get_prompt_history(self, agent_type, limit=10):
         """Get prompt history for an agent type and current config"""
+        agent_type = _canonical_agent_type(agent_type)
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
         

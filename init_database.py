@@ -106,6 +106,38 @@ def ensure_constraint(conn, stats: InitStats, constraint_name: str, alter_sql: s
         print(f"   ⚠️  Could not add constraint {constraint_name}: {exc}")
 
 
+def migrate_legacy_feedback_agent_checks(conn) -> None:
+    """Expand legacy CHECK constraints that only allow feedback_analyzer."""
+    rows = conn.execute(text(
+        """
+        SELECT c.conname, t.relname AS table_name, pg_get_constraintdef(c.oid) AS constraint_def
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public'
+          AND t.relname IN ('ai_agent_feedback_responses', 'ai_agent_prompts')
+          AND c.contype = 'c'
+        """
+    )).fetchall()
+
+    for row in rows:
+        definition = row.constraint_def or ""
+        if "agent_type" not in definition:
+            continue
+        if "feedback_analyzer" not in definition or "FeedbackAgent" in definition:
+            continue
+
+        print(f"   🔧 Updating legacy CHECK constraint {row.conname} on {row.table_name}")
+        conn.execute(text(f'ALTER TABLE "{row.table_name}" DROP CONSTRAINT IF EXISTS "{row.conname}"'))
+        conn.execute(text(
+            f"""
+            ALTER TABLE "{row.table_name}"
+            ADD CONSTRAINT "{row.conname}"
+            CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer', 'FeedbackAgent'))
+            """
+        ))
+
+
 def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
     rows: Dict[str, Dict[str, str]] = {}
     for agent_type, payload in DEFAULT_PROMPTS.items():
@@ -668,6 +700,9 @@ def initialize_database() -> None:
             "ALTER TABLE ai_agent_prompts ADD COLUMN IF NOT EXISTS config_hash VARCHAR(50)",
         )
 
+        # Expand legacy CHECK constraints so FeedbackAgent rows are accepted.
+        migrate_legacy_feedback_agent_checks(conn)
+
         # 6) Unified prompt versions table (used by prompt_manager / dashboard)
         ensure_table(
             conn,
@@ -787,8 +822,42 @@ def initialize_database() -> None:
             "SELECT count(*) FROM prompt_versions WHERE agent_type = 'feedback_analyzer'"
         )).scalar()
         if fa_count and fa_count > 0:
-            # For each feedback_analyzer row, if a FeedbackAgent row with same version+config exists, delete the alias.
-            # Otherwise rename it.
+            # Merge duplicate rows first (same config+version) to preserve richer/evolved content.
+            merged = conn.execute(text("""
+                UPDATE prompt_versions fb
+                SET
+                    system_prompt = CASE
+                        WHEN COALESCE(length(trim(fa.system_prompt)), 0) > COALESCE(length(trim(fb.system_prompt)), 0)
+                            THEN fa.system_prompt ELSE fb.system_prompt END,
+                    user_prompt_template = CASE
+                        WHEN COALESCE(length(trim(fa.user_prompt_template)), 0) > COALESCE(length(trim(fb.user_prompt_template)), 0)
+                            THEN fa.user_prompt_template ELSE fb.user_prompt_template END,
+                    strategy_directives = CASE
+                        WHEN COALESCE(length(trim(fa.strategy_directives)), 0) > COALESCE(length(trim(fb.strategy_directives)), 0)
+                            THEN fa.strategy_directives ELSE fb.strategy_directives END,
+                    description = CASE
+                        WHEN COALESCE(length(trim(fa.description)), 0) > COALESCE(length(trim(fb.description)), 0)
+                            THEN fa.description ELSE fb.description END,
+                    soul = CASE
+                        WHEN COALESCE(length(trim(fa.soul)), 0) > COALESCE(length(trim(fb.soul)), 0)
+                            THEN fa.soul ELSE fb.soul END,
+                    memory = CASE
+                        WHEN COALESCE(length(trim(fa.memory)), 0) > COALESCE(length(trim(fb.memory)), 0)
+                            THEN fa.memory ELSE fb.memory END,
+                    created_by = CASE
+                        WHEN (fb.created_by IS NULL OR fb.created_by IN ('init_database', 'system'))
+                          AND (fa.created_by IS NOT NULL AND fa.created_by NOT IN ('init_database', 'system'))
+                            THEN fa.created_by ELSE fb.created_by END,
+                    created_at = GREATEST(COALESCE(fb.created_at, 'epoch'::timestamp), COALESCE(fa.created_at, 'epoch'::timestamp)),
+                    is_active = fb.is_active OR fa.is_active
+                FROM prompt_versions fa
+                WHERE fa.agent_type = 'feedback_analyzer'
+                  AND fb.agent_type = 'FeedbackAgent'
+                  AND fa.config_hash = fb.config_hash
+                  AND fa.version = fb.version
+            """)).rowcount
+
+            # Remove now-duplicated alias rows after merge.
             conn.execute(text("""
                 DELETE FROM prompt_versions fa
                 USING prompt_versions fb
@@ -797,13 +866,17 @@ def initialize_database() -> None:
                   AND fa.config_hash = fb.config_hash
                   AND fa.version = fb.version
             """))
+
+            # Rename any remaining alias rows that had no canonical duplicate.
             renamed = conn.execute(text("""
                 UPDATE prompt_versions
                 SET agent_type = 'FeedbackAgent'
                 WHERE agent_type = 'feedback_analyzer'
             """)).rowcount
-            if renamed:
-                print(f"   🔄 Migrated {renamed} feedback_analyzer rows → FeedbackAgent")
+
+            total_migrated = (renamed or 0) + (merged or 0)
+            if total_migrated:
+                print(f"   🔄 Migrated feedback_analyzer rows → FeedbackAgent (merged={merged or 0}, renamed={renamed or 0})")
 
         # 7b) Seed v0 baseline prompts from initialize_prompts.py
         print("🧠 Seeding v0 baseline prompts...")

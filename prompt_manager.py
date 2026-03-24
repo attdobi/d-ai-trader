@@ -144,6 +144,7 @@ def get_active_prompt_emergency_patch(agent_type):
     from config import get_current_config_hash, engine
     from sqlalchemy import text
 
+    agent_type = _canonical_agent_type(agent_type)
     config_hash = get_current_config_hash()
 
     def _fetch_prompt(conn):

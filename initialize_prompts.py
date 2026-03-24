@@ -296,7 +296,8 @@ def initialize_default_prompts():
     
     # Save default prompts for each agent type
     for agent_type, prompt_data in default_prompts.items():
-        if agent_type == "FeedbackAgent":
+        # Legacy alias points at the same payload; seed canonical key only.
+        if agent_type == "feedback_analyzer":
             continue
         try:
             # Use correct field names based on the prompt data structure
