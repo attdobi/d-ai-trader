@@ -1758,6 +1758,7 @@ def get_active_prompt(agent_type):
             # Format as expected by frontend
             formatted_prompt = {
                 "user_prompt": prompt["user_prompt_template"],
+                "user_prompt_template": prompt["user_prompt_template"],
                 "system_prompt": prompt["system_prompt"],
                 "strategy_directives": prompt.get("strategy_directives", ""),
                 "prompt_version": prompt["version"],
@@ -2897,12 +2898,20 @@ def generate_prompt_evolution_candidate():
 
         parsed = _parse_generated_prompt_payload(content)
 
-        system_prompt = (parsed.get('system_prompt') or '').strip()
-        user_prompt_template = (parsed.get('user_prompt_template') or '').strip()
-        strategy_directives = (parsed.get('strategy_directives') or '').strip()
-        reasoning = (parsed.get('reasoning') or '').strip()
-        soul_out = (current_prompt.soul or '').strip()
-        memory_out = (current_prompt.memory or '').strip()
+        def _to_str(val):
+            """Safely convert any value to a stripped string."""
+            if val is None:
+                return ''
+            if isinstance(val, list):
+                return '\n'.join(str(v) for v in val).strip()
+            return str(val).strip()
+
+        system_prompt = _to_str(parsed.get('system_prompt'))
+        user_prompt_template = _to_str(parsed.get('user_prompt_template'))
+        strategy_directives = _to_str(parsed.get('strategy_directives'))
+        reasoning = _to_str(parsed.get('reasoning'))
+        soul_out = _to_str(current_prompt.soul)
+        memory_out = _to_str(current_prompt.memory)
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
