@@ -784,6 +784,46 @@ def initialize_database() -> None:
         seed_v0_prompts(conn, stats, "global")
         seed_v0_prompts(conn, stats, current_config_hash)
 
+        # Backfill soul/memory on ALL active prompts that have empty values
+        # This handles production DBs where active prompts (e.g. v15) were created
+        # before soul/memory columns existed
+        prompt_rows = _normalized_prompt_rows()
+        _AGENT_FILE_MAP = {
+            "DeciderAgent": "decider",
+            "SummarizerAgent": "summarizer",
+            "FeedbackAgent": "feedback",
+            "feedback_analyzer": "feedback",
+        }
+        backfilled = 0
+        for agent_type, file_name in _AGENT_FILE_MAP.items():
+            default_soul = prompt_rows.get(agent_type, {}).get("soul", "")
+            default_memory = prompt_rows.get(agent_type, {}).get("memory", "")
+            if not default_soul and not default_memory:
+                continue
+
+            # Find active prompts with empty soul/memory
+            active_rows = conn.execute(text("""
+                SELECT id, soul, memory FROM prompt_versions
+                WHERE agent_type = :agent_type AND is_active = TRUE
+                  AND (COALESCE(soul, '') = '' OR COALESCE(memory, '') = '')
+            """), {"agent_type": agent_type}).fetchall()
+
+            for row in active_rows:
+                updates = {}
+                if not (row.soul or "").strip() and default_soul:
+                    updates["soul"] = default_soul
+                if not (row.memory or "").strip() and default_memory:
+                    updates["memory"] = default_memory
+                if updates:
+                    set_clauses = ", ".join(f"{k} = :{k}" for k in updates)
+                    updates["id"] = row.id
+                    conn.execute(text(f"UPDATE prompt_versions SET {set_clauses} WHERE id = :id"), updates)
+                    backfilled += 1
+                    print(f"   🧠 Backfilled soul/memory for {agent_type} (id={row.id})")
+
+        if backfilled:
+            print(f"   🧠 Backfilled {backfilled} active prompts with default soul/memory")
+
     print("\n📋 Database initialization summary")
     print("---------------------------------")
     print(f"Tables created:        {stats.created_tables}")
