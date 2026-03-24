@@ -1,6 +1,10 @@
 let chart, performanceChart, breakdownChart;
 let modelTransitions = [];
 
+// Store references to all data for range filtering
+let historyData = null;
+let performanceData = null;
+
 function fetchModelTransitions() {
   return fetch('/api/model-transitions')
     .then(r => r.json())
@@ -178,6 +182,7 @@ function renderChart(data, label = 'Portfolio Value') {
 
   // Handle empty data for new configs
   if (!data || data.length === 0) {
+    historyData = null;
     if (chart) chart.destroy();
     const parent = canvas.parentElement;
     canvas.style.display = 'none';
@@ -196,6 +201,7 @@ function renderChart(data, label = 'Portfolio Value') {
   if (noDataMsg) noDataMsg.remove();
   canvas.style.display = 'block';
 
+  historyData = data;
   const ctx = canvas.getContext('2d');
   const labels = data.map(row => new Date(row.timestamp).toLocaleDateString());
   const values = data.map(row => row.total_portfolio_value);
@@ -223,7 +229,28 @@ function renderChart(data, label = 'Portfolio Value') {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         tooltip: tooltipConfig,
-        legend: { labels: { color: '#7f8ca6', usePointStyle: true } }
+        legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
+        zoom: {
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(66,201,255,0.15)',
+              borderColor: 'rgba(66,201,255,0.5)',
+              borderWidth: 1
+            },
+            mode: 'x',
+          },
+          pan: {
+            enabled: true,
+            mode: 'x',
+            modifierKey: 'shift',
+          },
+          limits: {
+            x: { minRange: 3 },
+          }
+        }
       },
       scales: {
         x: {
@@ -247,6 +274,7 @@ function renderChart(data, label = 'Portfolio Value') {
 }
 
 function renderPerformanceChart(data) {
+  performanceData = data;
   const el = document.getElementById('performanceChart');
   const ctx = el.getContext('2d');
   try {
@@ -294,7 +322,28 @@ function renderPerformanceChart(data) {
         },
         plugins: {
           tooltip: tooltipConfig,
-          legend: { labels: { color: '#7f8ca6', usePointStyle: true } }
+          legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: 'rgba(66,201,255,0.15)',
+                borderColor: 'rgba(66,201,255,0.5)',
+                borderWidth: 1
+              },
+              mode: 'x',
+            },
+            pan: {
+              enabled: true,
+              mode: 'x',
+              modifierKey: 'shift',
+            },
+            limits: {
+              x: { minRange: 3 },
+            }
+          }
         }
       }
     };
@@ -378,7 +427,28 @@ function renderBreakdownChart(data) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         tooltip: tooltipConfig,
-        legend: { labels: { color: '#7f8ca6', usePointStyle: true } }
+        legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
+        zoom: {
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(66,201,255,0.15)',
+              borderColor: 'rgba(66,201,255,0.5)',
+              borderWidth: 1
+            },
+            mode: 'x',
+          },
+          pan: {
+            enabled: true,
+            mode: 'x',
+            modifierKey: 'shift',
+          },
+          limits: {
+            x: { minRange: 3 },
+          }
+        }
       },
       scales: {
         x: {
@@ -605,6 +675,45 @@ function updatePrices() {
     .catch(err => { showToast('Network error: ' + err.message, 'error', 6000); statusDiv.innerHTML = ''; statusDiv.className = 'price-update-status'; })
     .finally(() => { if (button) button.disabled = false; });
 }
+
+function applyTimeRange(days) {
+  // Update active button state
+  document.querySelectorAll('.chart-range-btn').forEach(btn => btn.classList.remove('active'));
+  if (days === 'all') {
+    document.querySelector('[data-range="all"]')?.classList.add('active');
+    // Reset zoom on all charts
+    if (chart) chart.resetZoom();
+    if (performanceChart) performanceChart.resetZoom();
+    if (breakdownChart) breakdownChart.resetZoom();
+    return;
+  }
+  if (days === 'ytd') {
+    document.querySelector('[data-range="ytd"]')?.classList.add('active');
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    days = Math.ceil((now - startOfYear) / (1000 * 60 * 60 * 24));
+  } else {
+    document.querySelector(`[data-range="${days}"]`)?.classList.add('active');
+  }
+
+  // Apply zoom to x-axis on all charts
+  const charts = [chart, performanceChart, breakdownChart].filter(Boolean);
+  charts.forEach(c => {
+    const totalPoints = c.data.labels.length;
+    if (totalPoints === 0) return;
+    const minIndex = Math.max(0, totalPoints - days);
+    c.zoomScale('x', { min: minIndex, max: totalPoints - 1 });
+  });
+}
+
+function resetAllChartZoom() {
+  if (chart) chart.resetZoom();
+  if (performanceChart) performanceChart.resetZoom();
+  if (breakdownChart) breakdownChart.resetZoom();
+  document.querySelectorAll('.chart-range-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector('[data-range="all"]')?.classList.add('active');
+}
+
 window.addEventListener('load', () => {
   fetchModelTransitions().then(() => {
     loadChart();
@@ -624,6 +733,20 @@ window.addEventListener('load', () => {
       }
     }).catch(() => {}); // Silent fail on auto-refresh
   }, 60000);
+
+  // Time range button listeners
+  document.querySelectorAll('.chart-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const range = btn.dataset.range;
+      if (range === 'all') {
+        resetAllChartZoom();
+      } else if (range === 'ytd') {
+        applyTimeRange('ytd');
+      } else {
+        applyTimeRange(parseInt(range, 10));
+      }
+    });
+  });
 });
 
 // Persist system controls open/closed state

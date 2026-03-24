@@ -378,6 +378,27 @@ async function loadPortfolioHistory() {
               title: function(items) { return items[0]?.label || ''; },
               label: function(ctx) { return formatCurrency(ctx.parsed.y); }
             }
+          },
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: 'rgba(66,201,255,0.15)',
+                borderColor: 'rgba(66,201,255,0.5)',
+                borderWidth: 1
+              },
+              mode: 'x',
+            },
+            pan: {
+              enabled: true,
+              mode: 'x',
+              modifierKey: 'shift',
+            },
+            limits: {
+              x: { minRange: 3 },
+            }
           }
         },
         scales: {
@@ -473,6 +494,35 @@ async function refreshSchwabData() {
   }
 }
 
+function applySchwabTimeRange(days) {
+  document.querySelectorAll('#schwab-charts-row .chart-range-btn').forEach(btn => btn.classList.remove('active'));
+  if (days === 'all') {
+    document.querySelector('#schwab-charts-row [data-range="all"]')?.classList.add('active');
+    if (historyChartInstance) historyChartInstance.resetZoom();
+    return;
+  }
+  if (days === 'ytd') {
+    document.querySelector('#schwab-charts-row [data-range="ytd"]')?.classList.add('active');
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    days = Math.ceil((now - startOfYear) / (1000 * 60 * 60 * 24));
+  } else {
+    document.querySelector(`#schwab-charts-row [data-range="${days}"]`)?.classList.add('active');
+  }
+  if (historyChartInstance) {
+    const totalPoints = historyChartInstance.data.labels.length;
+    if (totalPoints === 0) return;
+    const minIndex = Math.max(0, totalPoints - days);
+    historyChartInstance.zoomScale('x', { min: minIndex, max: totalPoints - 1 });
+  }
+}
+
+function resetSchwabChartZoom() {
+  if (historyChartInstance) historyChartInstance.resetZoom();
+  document.querySelectorAll('#schwab-charts-row .chart-range-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector('#schwab-charts-row [data-range="all"]')?.classList.add('active');
+}
+
 /* ========== Init ========== */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -486,4 +536,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('schwab-details-open') === 'true') details.open = true;
     details.addEventListener('toggle', () => localStorage.setItem('schwab-details-open', details.open));
   }
+
+  // Schwab time range button listeners
+  document.querySelectorAll('#schwab-charts-row .chart-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const range = btn.dataset.range;
+      if (range === 'all') {
+        resetSchwabChartZoom();
+      } else if (range === 'ytd') {
+        applySchwabTimeRange('ytd');
+      } else {
+        applySchwabTimeRange(parseInt(range, 10));
+      }
+    });
+  });
 });
