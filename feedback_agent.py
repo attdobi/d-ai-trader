@@ -1279,7 +1279,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         agent_type_mapping = {
             'summarizer': 'SummarizerAgent',
             'decider': 'DeciderAgent',
-            'feedback_analyzer': 'FeedbackAgent'
+            'feedback_analyzer': 'FeedbackAgent',
+            'FeedbackAgent': 'FeedbackAgent'
         }
         
         mapped_agent_type = agent_type_mapping.get(agent_type, agent_type)

@@ -135,7 +135,10 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
 def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
     prompt_rows = _normalized_prompt_rows()
 
+    # Skip seeding the legacy alias — FeedbackAgent is the canonical name
     for agent_type, payload in prompt_rows.items():
+        if agent_type == "feedback_analyzer":
+            continue
         existing = conn.execute(
             text(
                 """
@@ -779,7 +782,30 @@ def initialize_database() -> None:
             ON model_transitions(config_hash)
         """))
 
-        # 7) Seed v0 baseline prompts from initialize_prompts.py
+        # 7a) Migrate feedback_analyzer → FeedbackAgent (one-time cleanup)
+        fa_count = conn.execute(text(
+            "SELECT count(*) FROM prompt_versions WHERE agent_type = 'feedback_analyzer'"
+        )).scalar()
+        if fa_count and fa_count > 0:
+            # For each feedback_analyzer row, if a FeedbackAgent row with same version+config exists, delete the alias.
+            # Otherwise rename it.
+            conn.execute(text("""
+                DELETE FROM prompt_versions fa
+                USING prompt_versions fb
+                WHERE fa.agent_type = 'feedback_analyzer'
+                  AND fb.agent_type = 'FeedbackAgent'
+                  AND fa.config_hash = fb.config_hash
+                  AND fa.version = fb.version
+            """))
+            renamed = conn.execute(text("""
+                UPDATE prompt_versions
+                SET agent_type = 'FeedbackAgent'
+                WHERE agent_type = 'feedback_analyzer'
+            """)).rowcount
+            if renamed:
+                print(f"   🔄 Migrated {renamed} feedback_analyzer rows → FeedbackAgent")
+
+        # 7b) Seed v0 baseline prompts from initialize_prompts.py
         print("🧠 Seeding v0 baseline prompts...")
         seed_v0_prompts(conn, stats, "global")
         seed_v0_prompts(conn, stats, current_config_hash)

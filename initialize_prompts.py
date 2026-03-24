@@ -228,7 +228,7 @@ No explanation, no markdown, just JSON."""
         "soul": "",
         "memory": "",
     },
-    "feedback_analyzer": {
+    "FeedbackAgent": {
         "user_prompt_template": (
 r"""You are the end-of-day Feedback Agent in a four-stage trading system.
 
@@ -281,8 +281,8 @@ DeciderFeedbackSnippet:   "≤220-char actionable rule for Decider"
     },
 }
 
-# Provide alias matching dashboard expectations
-DEFAULT_PROMPTS["FeedbackAgent"] = DEFAULT_PROMPTS["feedback_analyzer"]
+# Legacy alias — keep for any code that still references the old name
+DEFAULT_PROMPTS["feedback_analyzer"] = DEFAULT_PROMPTS["FeedbackAgent"]
 
 
 def initialize_default_prompts():

@@ -834,7 +834,7 @@ def _get_active_prompts_bundle():
 
     feedback_payload = _collect_prompt_payload(
         tracker,
-        ["FeedbackAgent", "feedback_analyzer", "feedback"],
+        ["FeedbackAgent"],
         "FeedbackAgent",
         replacements=dict(replacements_common)
     )
@@ -2699,10 +2699,6 @@ def get_prompt_evolution_history():
     try:
         config_hash = get_current_config_hash()
 
-        # Unify feedback_analyzer / FeedbackAgent aliases — merge into FeedbackAgent
-        _FEEDBACK_CANONICAL = "FeedbackAgent"
-        _FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
-
         with engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, is_active, created_at, soul, memory
@@ -2711,37 +2707,13 @@ def get_prompt_evolution_history():
                 ORDER BY agent_type ASC, version DESC
             """), {"config_hash": config_hash}).fetchall()
 
-        # Find the highest active version per canonical agent type to enforce single-active display
-        highest_active = {}  # canonical_type -> highest active version number
-
         history = {}
         for row in rows:
-            # Map feedback aliases to canonical name
-            display_type = _FEEDBACK_CANONICAL if row.agent_type in _FEEDBACK_ALIASES else row.agent_type
-
-            # Track highest active version per canonical type
-            if row.is_active:
-                prev = highest_active.get(display_type, -1)
-                if row.version > prev:
-                    highest_active[display_type] = row.version
-
-        # Second pass: build history, only mark the highest version as active
-        seen_versions = {}  # (display_type, version) -> True, to deduplicate alias rows
-        for row in rows:
-            display_type = _FEEDBACK_CANONICAL if row.agent_type in _FEEDBACK_ALIASES else row.agent_type
-            version_key = (display_type, row.version)
-            if version_key in seen_versions:
-                continue  # skip duplicate alias rows for same version
-            seen_versions[version_key] = True
-
-            # Only show ACTIVE badge on the single highest active version
-            show_active = bool(row.is_active) and row.version == highest_active.get(display_type, -1)
-
-            history.setdefault(display_type, []).append({
+            history.setdefault(row.agent_type, []).append({
                 'version': row.version,
                 'created_at': _safe_isoformat(row.created_at),
                 'description': row.description,
-                'is_active': show_active,
+                'is_active': bool(row.is_active),
                 'system_prompt_preview': (row.system_prompt or '')[:200],
                 'user_prompt_template_preview': (row.user_prompt_template or '')[:200],
                 'strategy_directives_preview': (row.strategy_directives or '')[:200],
@@ -3026,21 +2998,20 @@ def apply_prompt_evolution_candidate():
 
         config_hash = get_current_config_hash()
 
-        # Feedback agent aliases: deactivate both feedback_analyzer and FeedbackAgent together
-        _FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
-        types_to_deactivate = list(_FEEDBACK_ALIASES) if agent_type in _FEEDBACK_ALIASES else [agent_type]
+        # Normalize legacy name
+        if agent_type == "feedback_analyzer":
+            agent_type = "FeedbackAgent"
 
         with engine.begin() as conn:
-            for t in types_to_deactivate:
-                conn.execute(text("""
-                    UPDATE prompt_versions
-                    SET is_active = FALSE
-                    WHERE agent_type = :agent_type
-                      AND config_hash = :config_hash
-                """), {
-                    'agent_type': t,
-                    'config_hash': config_hash,
-                })
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type
+                  AND config_hash = :config_hash
+            """), {
+                'agent_type': agent_type,
+                'config_hash': config_hash,
+            })
 
             version_row = conn.execute(text("""
                 SELECT COALESCE(MAX(version), -1) AS max_version
