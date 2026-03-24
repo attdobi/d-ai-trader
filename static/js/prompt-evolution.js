@@ -346,7 +346,43 @@ function setupPromptLab() {
   const soulEl = document.getElementById('generatedSoul');
   const memoryEl = document.getElementById('generatedMemory');
 
+  const loadActiveBtn = document.getElementById('loadActiveBtn');
+
   if (!agentSelect || !generateBtn || !applyBtn) return;
+
+  // Load active version into editing area
+  if (loadActiveBtn) {
+    loadActiveBtn.addEventListener('click', async () => {
+      const agentType = agentSelect.value;
+      clearPromptLabAlerts();
+      setPromptLabMessage('Loading active version...');
+      const originalLabel = loadActiveBtn.textContent;
+      loadActiveBtn.disabled = true;
+      loadActiveBtn.textContent = 'Loading...';
+
+      try {
+        const data = await apiJSON(`/api/prompts/${encodeURIComponent(agentType)}/active`);
+        if (!data || data.error) throw new Error(data?.error || 'No active prompt found');
+
+        reasoningEl.textContent = `Loaded active v${data.version ?? '?'} for ${AGENT_LABELS[agentType]}. Edit any field and apply as a new version.`;
+        systemPromptEl.value = data.system_prompt || '';
+        userPromptEl.value = data.user_prompt_template || '';
+        if (strategyDirectivesEl) strategyDirectivesEl.value = data.strategy_directives || '';
+        if (soulEl) soulEl.value = data.soul || '';
+        if (memoryEl) memoryEl.value = data.memory || '';
+        descriptionEl.value = '';
+
+        setHidden(resultsEl, false);
+        setPromptLabMessage(`Active v${data.version ?? '?'} loaded. Edit and apply to create a new version.`);
+      } catch (error) {
+        showPromptLabError(`Failed to load active version: ${error.message}`);
+        setPromptLabMessage('');
+      } finally {
+        loadActiveBtn.disabled = false;
+        loadActiveBtn.textContent = originalLabel;
+      }
+    });
+  }
 
   generateBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
@@ -480,6 +516,16 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPerformanceContext();
   loadPromptHistory();
   setupPromptLab();
+
+  // Auto-load active version on page load and when agent changes
+  const loadActiveBtn = document.getElementById('loadActiveBtn');
+  if (loadActiveBtn) {
+    setTimeout(() => loadActiveBtn.click(), 500);
+    const agentSelect = document.getElementById('promptLabAgentType');
+    if (agentSelect) {
+      agentSelect.addEventListener('change', () => loadActiveBtn.click());
+    }
+  }
 
   // Auto-refresh performance context every 5 minutes
   setInterval(loadPerformanceContext, 5 * 60 * 1000);
