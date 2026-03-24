@@ -386,8 +386,13 @@ function setupPromptLab() {
 
   generateBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
+    const generateSoul = document.getElementById('generateSoulCheck')?.checked || false;
+    const generateMemory = document.getElementById('generateMemoryCheck')?.checked || false;
     clearPromptLabAlerts();
-    setPromptLabMessage('Generating prompt candidate...');
+    const genParts = ['prompt'];
+    if (generateSoul) genParts.push('soul');
+    if (generateMemory) genParts.push('memory');
+    setPromptLabMessage(`Generating ${genParts.join(' + ')}...`);
 
     const originalLabel = generateBtn.textContent;
     generateBtn.disabled = true;
@@ -396,7 +401,7 @@ function setupPromptLab() {
     try {
       const data = await apiJSON('/api/prompt-evolution/generate', {
         method: 'POST',
-        body: JSON.stringify({ agent_type: agentType })
+        body: JSON.stringify({ agent_type: agentType, generate_soul: generateSoul, generate_memory: generateMemory })
       });
 
       reasoningEl.textContent = data.reasoning || 'No reasoning returned by API.';

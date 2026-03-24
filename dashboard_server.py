@@ -2844,6 +2844,51 @@ def generate_prompt_evolution_candidate():
         stats = context_payload.get('stats', {})
         headlines = context_payload.get('headlines', [])
 
+        # Pull prompt version history for this agent
+        with engine.connect() as conn:
+            version_history = conn.execute(text("""
+                SELECT version, description, created_at
+                FROM prompt_versions
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
+                ORDER BY version DESC LIMIT 10
+            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchall()
+
+            # Pull recent feedback for context
+            feedback_rows = conn.execute(text("""
+                SELECT summarizer_feedback, decider_feedback, analysis_timestamp, success_rate, avg_profit_percentage
+                FROM agent_feedback
+                WHERE config_hash = :config_hash
+                ORDER BY analysis_timestamp DESC LIMIT 5
+            """), {"config_hash": config_hash}).fetchall()
+
+        prompt_history = [{
+            'version': r.version,
+            'description': r.description,
+            'created_at': _safe_isoformat(r.created_at),
+        } for r in version_history]
+
+        recent_feedback = [{
+            'timestamp': _safe_isoformat(r.analysis_timestamp),
+            'success_rate': float(r.success_rate or 0),
+            'avg_profit': float(r.avg_profit_percentage or 0),
+            'summarizer_feedback': (r.summarizer_feedback or '')[:500],
+            'decider_feedback': (r.decider_feedback or '')[:500],
+        } for r in feedback_rows]
+
+        generate_soul = data.get('generate_soul', False)
+        generate_memory = data.get('generate_memory', False)
+
+        soul_memory_instruction = ""
+        if generate_soul or generate_memory:
+            parts = []
+            if generate_soul:
+                parts.append("'soul' — a persistent identity for this agent based on its evolution history and trading performance. Include core philosophy, decision style, and personality traits that emerge from the data.")
+            if generate_memory:
+                parts.append("'memory' — distilled lessons learned from actual trading outcomes, feedback cycles, and prompt evolution history. Include specific patterns, mistakes to avoid, and calibration notes.")
+            soul_memory_instruction = f"\n\nIMPORTANT: Also generate the following fields:\n" + "\n".join(f"- {p}" for p in parts)
+        else:
+            soul_memory_instruction = "\n\nDo NOT generate soul or memory fields — return them as empty strings. Only improve system_prompt, user_prompt_template, and strategy_directives."
+
         prompt_payload = {
             'agent_type': agent_type,
             'current_prompt': {
@@ -2855,11 +2900,14 @@ def generate_prompt_evolution_candidate():
                 'soul': current_prompt.soul or '',
                 'memory': current_prompt.memory or '',
             },
+            'prompt_evolution_history': prompt_history,
+            'recent_feedback': recent_feedback,
             'performance_stats': stats,
             'recent_headlines': headlines,
             'goal': (
-                'Improve prompt quality based on current performance. '
+                'Improve prompt quality based on current performance and feedback history. '
                 'Preserve placeholders/tokens and actionable structure while tightening clarity.'
+                + soul_memory_instruction
             ),
         }
 
@@ -2910,8 +2958,9 @@ def generate_prompt_evolution_candidate():
         user_prompt_template = _to_str(parsed.get('user_prompt_template'))
         strategy_directives = _to_str(parsed.get('strategy_directives'))
         reasoning = _to_str(parsed.get('reasoning'))
-        soul_out = _to_str(current_prompt.soul)
-        memory_out = _to_str(current_prompt.memory)
+        # Use AI-generated soul/memory if requested, otherwise keep existing
+        soul_out = _to_str(parsed.get('soul')) if generate_soul else _to_str(current_prompt.soul)
+        memory_out = _to_str(parsed.get('memory')) if generate_memory else _to_str(current_prompt.memory)
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
