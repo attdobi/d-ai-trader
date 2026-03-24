@@ -1012,11 +1012,10 @@ def dashboard():
                             else min(available_cash_effective, settled_cash_guardrail)
                         )
                     funds_available_display = max(0.0, float(funds_available_display))
-                    # Total portfolio value = positions market value + ALL cash (settled + unsettled)
-                    # Schwab's "account_value" (longMarketValue/liquidationValue) is positions only,
-                    # so we always compute: positions + settled cash + unsettled cash
-                    actual_total_cash = raw_cash_balance + unsettled_cash
-                    total_portfolio_value = total_current_value + actual_total_cash
+                    # Total portfolio value = positions market value + total cash in account
+                    # raw_cash_balance already includes unsettled cash (it's the total),
+                    # so do NOT add unsettled_cash again
+                    total_portfolio_value = total_current_value + raw_cash_balance
                     # cash_balance for the hero card: show funds available for trading
                     # (the subtitle shows the full settled/unsettled/reserve breakdown)
                     cash_balance = funds_available_display
@@ -1058,14 +1057,12 @@ def dashboard():
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    # Use actual total cash (settled + unsettled) for the holdings CASH row
-                    # so portfolio_history and charts reflect true account value
-                    actual_total_cash = raw_cash_balance + unsettled_cash
-                    _sync_holdings_with_database(config_hash, holdings, actual_total_cash)
+                    # raw_cash_balance is total cash in account (settled + unsettled combined)
+                    _sync_holdings_with_database(config_hash, holdings, raw_cash_balance)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        actual_total_cash,
+                        raw_cash_balance,
                         total_invested,
                         total_profit_loss,
                         holdings,
