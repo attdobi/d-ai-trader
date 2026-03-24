@@ -224,16 +224,16 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
             if use_version:
                 _insert_row("ai_agent_prompts", """
                     INSERT INTO ai_agent_prompts
-                        (agent_type, version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
+                        (agent_type, version, prompt_version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
                     VALUES
-                        (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+                        (:agent_type, 0, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
                 """)
             else:
                 _insert_row("ai_agent_prompts", """
                     INSERT INTO ai_agent_prompts
-                        (agent_type, system_prompt, user_prompt, description, created_by, is_active, config_hash)
+                        (agent_type, prompt_version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
                     VALUES
-                        (:agent_type, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+                        (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
                 """)
 
     if _table_exists('unified_prompts') and _table_has_column('unified_prompts', 'agent_type'):
