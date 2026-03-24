@@ -1012,16 +1012,14 @@ def dashboard():
                             else min(available_cash_effective, settled_cash_guardrail)
                         )
                     funds_available_display = max(0.0, float(funds_available_display))
-                    # Use actual account value (positions + ALL cash) for portfolio tracking,
-                    # not just effective trading funds (which excludes unsettled cash)
+                    # Total portfolio value = positions market value + ALL cash (settled + unsettled)
+                    # Schwab's "account_value" (longMarketValue/liquidationValue) is positions only,
+                    # so we always compute: positions + settled cash + unsettled cash
                     actual_total_cash = raw_cash_balance + unsettled_cash
-                    account_value_from_schwab = schwab_data.get("account_info", {}).get("account_value")
-                    if account_value_from_schwab and float(account_value_from_schwab) > 0:
-                        total_portfolio_value = float(account_value_from_schwab)
-                    else:
-                        total_portfolio_value = total_current_value + actual_total_cash
-                    # cash_balance for display: show actual cash in account, not just tradeable
-                    cash_balance = actual_total_cash
+                    total_portfolio_value = total_current_value + actual_total_cash
+                    # cash_balance for the hero card: show funds available for trading
+                    # (the subtitle shows the full settled/unsettled/reserve breakdown)
+                    cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
                     baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
