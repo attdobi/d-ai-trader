@@ -2062,9 +2062,9 @@ OUTPUT (STRICT)
     contrarian_directive = """
 🚫 CROWD-FADE AWARENESS
 - Be aware of herd behavior: when headlines are euphoric, consider taking profits; when panic dominates, look for entry opportunities.
-- Avoid chasing names that are up big on stale/recycled news with no fresh catalyst. But if the macro thesis is strong and momentum confirms (volume, relative strength), buying into the trend is valid — not every strong move is a "crowd chase."
-- Document your contrarian read in each reason when relevant (e.g., "Contrarian SELL into euphoria", "Buying strength — macro thesis intact, not a crowd chase").
-- CRITICAL: Crowd-fade is a LENS, not a veto. It must NEVER prevent you from making BUY decisions when the data supports them. If you have cash, good setups, and the tape supports entry — BUY. Being contrarian does not mean sitting in cash while opportunities pass."""
+- Avoid chasing names that are up big on stale/recycled news with no fresh catalyst. But if the macro thesis is strong and momentum confirms (volume, relative strength), buying into the trend is valid - not every strong move is a "crowd chase."
+- Document your contrarian read in each reason when relevant (e.g., "Contrarian SELL into euphoria", "Buying strength - macro thesis intact, not a crowd chase").
+- CRITICAL: Crowd-fade is a LENS, not a veto. It must NEVER prevent you from making BUY decisions when the data supports them. If you have cash, good setups, and the tape supports entry - BUY. Being contrarian does not mean sitting in cash while opportunities pass."""
     if "CROWD-FADE" not in user_prompt_template and "CROWD-FADE" not in (strategy or ""):
         user_prompt_template = user_prompt_template.rstrip() + "\n\n" + contrarian_directive.strip()
 
@@ -2371,7 +2371,7 @@ OUTPUT (STRICT)
             print(f"📦 Converting single decision dict to list format")
             ai_response = [ai_response]
     elif isinstance(ai_response, list):
-        # Handle list responses — extract cash_reason from any "action":"cash" items
+        # Handle list responses - extract cash_reason from any "action":"cash" items
         for item in ai_response:
             if isinstance(item, dict) and (item.get("action") or "").lower() == "cash":
                 reason = item.get("cash_reason") or item.get("reason") or ""
@@ -2381,8 +2381,8 @@ OUTPUT (STRICT)
     else:
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
-    
-    # Filter out invalid "action":"cash" entries — these are not real trade decisions
+
+    # Filter out invalid "action":"cash" entries - these are not real trade decisions
     if isinstance(ai_response, list):
         valid_actions = {"buy", "sell", "hold"}
         cleaned = []
@@ -2390,11 +2390,11 @@ OUTPUT (STRICT)
             if isinstance(item, dict):
                 action = (item.get("action") or "").lower()
                 if action == "cash":
-                    # Not a valid trade action — extract reason and skip
+                    # Not a valid trade action - extract reason and skip
                     reason = item.get("cash_reason") or item.get("reason") or ""
                     if reason and not cash_hold_reason:
                         cash_hold_reason = reason
-                    print(f"⚠️  Dropping 'action':'cash' — not a valid trade action (use cash_reason instead)")
+                    print(f"⚠️  Dropping 'action':'cash' - not a valid trade action (use cash_reason instead)")
                     continue
                 if action not in valid_actions and action:
                     print(f"⚠️  Dropping unknown action '{action}' for ticker '{item.get('ticker', 'N/A')}'")
@@ -2722,18 +2722,11 @@ def store_trade_decisions(decisions, run_id):
                     extracted_from_full['execution_status'] = 'market_closed'
             valid_decisions = [extracted_from_full]
         else:
-            # Absolute fallback
-            fallback_decision = {
-                "action": "hold",
-                "ticker": "SPY",  # Use SPY instead of UNKNOWN
-                "amount_usd": 0,
-                "reason": "AI response was completely unparseable - defaulting to hold SPY"
-            }
-
-            if not market_open:
-                fallback_decision["reason"] = "⛔ MARKET CLOSED - No action taken (AI response was unparseable)"
-
-            valid_decisions = [fallback_decision]
+            # No valid decisions at all — do NOT fabricate a fake hold for a ticker we don't own.
+            # Log the failure and return empty so the system records "no action" rather than a hallucinated position.
+            print("❌ FALLBACK: No parseable decisions and no extractable data. Recording zero decisions for this cycle.")
+            print("💡 This usually means the model returned an invalid format (e.g., 'action':'cash' without a ticker).")
+            valid_decisions = []
 
     # Get current Pacific time as NAIVE timestamp (dashboard will format it correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
