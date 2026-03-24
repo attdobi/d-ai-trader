@@ -939,6 +939,8 @@ def dashboard():
         total_current_value = sum(h["current_value"] for h in stock_holdings)
         total_invested = sum(h["total_value"] for h in stock_holdings)
         total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+        # cash_balance from holdings CASH row may only reflect available trading funds;
+        # Schwab path below will override with actual account value
         total_portfolio_value = total_current_value + cash_balance
         
         # Calculate metrics relative to initial $10,000 investment by default
@@ -1012,12 +1014,14 @@ def dashboard():
                     funds_available_display = max(0.0, float(funds_available_display))
                     # Use actual account value (positions + ALL cash) for portfolio tracking,
                     # not just effective trading funds (which excludes unsettled cash)
+                    actual_total_cash = raw_cash_balance + unsettled_cash
                     account_value_from_schwab = schwab_data.get("account_info", {}).get("account_value")
                     if account_value_from_schwab and float(account_value_from_schwab) > 0:
                         total_portfolio_value = float(account_value_from_schwab)
                     else:
-                        total_portfolio_value = total_current_value + raw_cash_balance + unsettled_cash
-                    cash_balance = funds_available_display
+                        total_portfolio_value = total_current_value + actual_total_cash
+                    # cash_balance for display: show actual cash in account, not just tradeable
+                    cash_balance = actual_total_cash
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
                     baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
@@ -1056,11 +1060,14 @@ def dashboard():
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    _sync_holdings_with_database(config_hash, holdings, funds_available_display)
+                    # Use actual total cash (settled + unsettled) for the holdings CASH row
+                    # so portfolio_history and charts reflect true account value
+                    actual_total_cash = raw_cash_balance + unsettled_cash
+                    _sync_holdings_with_database(config_hash, holdings, actual_total_cash)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        funds_available_display,
+                        actual_total_cash,
                         total_invested,
                         total_profit_loss,
                         holdings,
