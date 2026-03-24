@@ -151,7 +151,7 @@ def enforce_profit_taking_guardrail(decisions, holdings_by_ticker, threshold_pct
         if existing_action and decision.get("reason"):
             original_reason = decision.get("reason").strip()
             if original_reason:
-                combined_reason = f"{original_reason} — {forced_reason}"
+                combined_reason = f"{original_reason} - {forced_reason}"
 
         decision.update({
             "action": "sell",
@@ -581,7 +581,7 @@ def mark_summaries_processed(summary_ids):
             # Use Pacific time for run_id consistency
             pacific_now = datetime.now(PACIFIC_TIMEZONE)
             run_id_timestamp = pacific_now.strftime("%Y%m%dT%H%M%S")
-            
+
             conn.execute(text("""
                 INSERT INTO processed_summaries (summary_id, processed_by, run_id)
                 VALUES (:summary_id, 'decider', :run_id)
@@ -593,7 +593,7 @@ def mark_summaries_processed(summary_ids):
 def update_all_current_prices():
     """Update current prices for all active holdings before decision making"""
     print("=== Updating Current Prices for Decision Making ===")
-    
+
     # Check market status
     market_open = is_market_open()
     if not market_open:
@@ -601,44 +601,44 @@ def update_all_current_prices():
         print("💡 For real-time prices, try during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)")
     else:
         print("✅ Market is OPEN - fetching real-time prices")
-    
+
     with engine.begin() as conn:
         # Get all active holdings
         config_hash = get_current_config_hash()
         result = conn.execute(text("""
             SELECT ticker, shares, total_value, current_price
-            FROM holdings 
+            FROM holdings
             WHERE is_active = TRUE AND ticker != 'CASH' AND config_hash = :config_hash
         """), {"config_hash": config_hash})
-        
+
         holdings = [dict(row._mapping) for row in result]
-        
+
         if not holdings:
             print("No active holdings to update.")
             return
 
         price_fetcher.prefetch_prices([holding["ticker"] for holding in holdings])
-        
+
         updated_count = 0
         api_failures = []
-        
+
         for holding in holdings:
             ticker = holding['ticker']
             shares = holding['shares']
             old_price = holding['current_price']
-            
+
             # Get new price
             new_price = get_current_price(ticker)
-            
+
             if new_price is None:
                 print(f"⚠️  Could not get price for {ticker}, using last known price: ${old_price:.2f}")
                 api_failures.append(ticker)
                 continue
-            
+
             # Calculate new values
             new_current_value = shares * new_price
             new_gain_loss = new_current_value - holding['total_value']
-            
+
             # Update the database
             conn.execute(text("""
                 UPDATE holdings
@@ -655,12 +655,12 @@ def update_all_current_prices():
                 "ticker": ticker,
                 "config_hash": config_hash
             })
-            
+
             print(f"✅ Updated {ticker}: ${old_price:.2f} → ${new_price:.2f} (Gain/Loss: ${new_gain_loss:.2f})")
             updated_count += 1
-        
+
         print(f"Updated {updated_count} out of {len(holdings)} holdings")
-        
+
         # If API failures occurred, provide manual update option
         if api_failures:
             print(f"\n🚨 API failures detected for: {', '.join(api_failures)}")
@@ -690,9 +690,9 @@ def fetch_holdings():
 
         # Get current configuration hash
         config_hash = get_current_config_hash()
-        
+
         # Ensure cash row exists for this configuration
-        result = conn.execute(text("SELECT 1 FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), 
+        result = conn.execute(text("SELECT 1 FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"),
                             {"config_hash": config_hash})
         if not result.fetchone():
             print(f"🚀 Initializing new configuration {config_hash} with ${MAX_FUNDS} cash")
@@ -700,15 +700,15 @@ def fetch_holdings():
                 INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, purchase_timestamp, current_price_timestamp, total_value, current_value, gain_loss, reason, is_active)
                 VALUES (:config_hash, 'CASH', 1, :initial_cash, :initial_cash, now(), now(), :initial_cash, :initial_cash, 0, 'Initial cash', TRUE)
             """), {"config_hash": config_hash, "initial_cash": MAX_FUNDS})
-            
+
             # Create initial portfolio snapshot for new configuration
             print(f"📊 Recording initial portfolio snapshot for config {config_hash}")
             # Use inline approach to avoid transaction issues
             conn.execute(text("""
-                INSERT INTO portfolio_history 
-                (total_portfolio_value, cash_balance, total_invested, 
+                INSERT INTO portfolio_history
+                (total_portfolio_value, cash_balance, total_invested,
                  total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
-                VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+                VALUES (:total_portfolio_value, :cash_balance, :total_invested,
                         :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
             """), {
                 "total_portfolio_value": MAX_FUNDS,
@@ -731,39 +731,39 @@ def clean_ticker_symbol(ticker):
     """Clean up ticker symbol to extract just the symbol"""
     if not ticker:
         return None
-    
+
     # Common symbol corrections and company name mappings
     SYMBOL_CORRECTIONS = {
         # Circle Internet Financial
         'CIRCL': 'CRCL',
-        
+
         # Alphabet/Google - use Class C (GOOG) as it's more commonly traded
         'GOOGL': 'GOOG',
         'GOOGLE': 'GOOG',
         'ALPHABET': 'GOOG',
-        
+
         # Meta/Facebook
         'FACEBOOK': 'META',
         'FB': 'META',
-        
+
         # Tesla
         'TESLA': 'TSLA',
-        
+
         # Apple
         'APPLE': 'AAPL',
-        
-        # Microsoft  
+
+        # Microsoft
         'MICROSOFT': 'MSFT',
-        
+
         # Amazon
         'AMAZON': 'AMZN',
-        
+
         # Netflix
         'NETFLIX': 'NFLX',
-        
+
         # NVIDIA
         'NVIDIA': 'NVDA',
-        
+
         # Common ETFs
         'SP500': 'SPY',
         'S&P500': 'SPY',
@@ -771,13 +771,13 @@ def clean_ticker_symbol(ticker):
         'NASDAQ': 'QQQ',
         'NASDAQ100': 'QQQ',
         'NASDAQ 100': 'QQQ',
-        
+
         # Add more corrections as needed
     }
-    
+
     # Remove common prefixes/suffixes and extract just the symbol
     ticker = str(ticker).strip()
-    
+
     # Handle cases like "S&P500 ETF (SPY)" -> "SPY"
     if '(' in ticker and ')' in ticker:
         # Extract text between parentheses
@@ -785,13 +785,13 @@ def clean_ticker_symbol(ticker):
         end = ticker.rfind(')')
         if start > 0 and end > start:
             ticker = ticker[start:end]
-    
+
     # Remove common words that might be added by AI
     ticker = ticker.replace('ETF', '').replace('Stock', '').replace('Shares', '').strip()
-    
+
     # Remove any remaining parentheses and clean up
     ticker = ticker.replace('(', '').replace(')', '').strip()
-    
+
     # Canonicalize + apply symbol corrections (also strips rank prefixes like R1-TSLA)
     return normalize_ticker(ticker, alias_map=SYMBOL_CORRECTIONS)
 
@@ -803,7 +803,7 @@ def validate_ticker_symbol(ticker):
         info = stock.info
         # Check if we can get basic info (name, sector, etc.)
         has_valid_data = info.get('symbol') == ticker.upper() or info.get('shortName') is not None
-        
+
         return has_valid_data
     except Exception as e:
         print(f"⚠️  Ticker validation failed for {ticker}: {e}")
@@ -816,12 +816,12 @@ def get_current_price(ticker):
     if not clean_ticker:
         print(f"Invalid ticker symbol: {ticker}")
         return None
-    
+
     # Validate ticker exists before trying to get price
     if not validate_ticker_symbol(clean_ticker):
         print(f"🚫 Ticker {clean_ticker} does not exist or is not tradeable")
         return None
-    
+
     try:
         price = price_fetcher.get_price(clean_ticker)
     except Exception as e:
@@ -1190,7 +1190,7 @@ def build_momentum_recap(entities):
 def execute_real_world_trade(decision):
     """
     Execute a real trade through Schwab API when in real_world mode.
-    
+
     MULTI-LAYER SAFETY PROTECTION:
     1. DAI_SCHWAB_READONLY flag check (for testing)
     2. Trading mode check (must be 'real_world')
@@ -1198,7 +1198,7 @@ def execute_real_world_trade(decision):
     4. Safety manager validation
     """
     import os
-    
+
     # SAFETY LAYER 1: Read-only mode check (for safe API testing)
     readonly_mode = os.environ.get('DAI_SCHWAB_READONLY', '0') == '1'
     if readonly_mode:
@@ -1207,34 +1207,34 @@ def execute_real_world_trade(decision):
         print(f"   Decision would be: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')} ${decision.get('amount_usd', 0)}")
         print("   To enable trades: Remove DAI_SCHWAB_READONLY flag")
         return False
-    
+
     # SAFETY LAYER 2: Trading mode check
     trading_mode = get_trading_mode()
     if trading_mode != "real_world":
         return True  # Skip real execution in simulation mode
-    
+
     # SAFETY LAYER 3: Market hours check
     if not is_market_open():
         print(f"⛔ Cannot execute real trade - market is closed")
         return False
-    
+
     try:
         # Import trading interface (only when needed)
         from trading_interface import trading_interface
-        
+
         action = decision.get('action', '').lower()
         ticker = decision.get('ticker', '')
         amount_usd = decision.get('amount_usd', 0)
-        
+
         # SAFETY LAYER 4: Action validation
         if action not in ['buy', 'sell']:
             return True  # Hold decisions don't require real execution
-        
+
         print(f"💰 EXECUTING REAL TRADE via Schwab API:")
         print(f"   Action: {action.upper()}")
         print(f"   Ticker: {ticker}")
         print(f"   Amount: ${amount_usd}")
-        
+
         if action == 'buy':
             result = trading_interface.execute_buy_order(ticker, amount_usd)
         elif action == 'sell':
@@ -1263,7 +1263,7 @@ def execute_real_world_trade(decision):
             if isinstance(order_status, dict):
                 print(f"   Schwab Status: {order_status.get('status')} Reason: {order_status.get('reason')}")
             return False
-            
+
     except ImportError:
         print("⚠️  Trading interface not available for real-world trading")
         print("🔄 Falling back to simulation mode for this trade")
@@ -1326,9 +1326,9 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
                 break
         if allowed_buy_idx is None:
             print("⚠️  One-trade mode: no BUY decision provided; all live trades will be skipped")
-    
+
     print(f"🔄 Updating holdings in {trading_mode.upper()} mode (config: {config_hash})")
-    
+
     # CRITICAL: Check market hours BEFORE executing ANY trades
     if not is_market_open():
         eastern_now = pacific_now.astimezone(EASTERN_TIMEZONE)
@@ -1336,21 +1336,21 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
         print(f"   Current time: {eastern_now.strftime('%I:%M %p %Z')}")
         print(f"   Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday")
         print(f"   Decisions recorded for review only")
-        
+
         # Record decisions but don't execute
         print(f"📝 Recording {len(decisions)} decisions without execution:")
         for decision in decisions:
             action = decision.get('action', 'N/A')
             ticker = decision.get('ticker', 'N/A')
             print(f"   - {action.upper()} {ticker} (deferred until market open)")
-        
+
         # DO NOT call process_sell_decisions or process_buy_decisions
         # Just return - decisions are already stored by store_trade_decisions()
         return
-    
+
     # Market is open - proceed with execution
     print(f"✅ Market is OPEN - Proceeding with trade execution")
-    
+
     if not live_execution_enabled:
         print("🎮 Running in simulation mode - no real trades executed")
 
@@ -1416,7 +1416,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             print(f"⏭️  Live mode capped additional {len(overflow)} buy decision(s)")
 
     print(f"📊 Processing {len(sell_decisions)} sells, {len(buy_decisions)} buys, {len(hold_decisions)} holds")
-    
+
     # Get current cash balance
     with engine.begin() as conn:
         cash_row = conn.execute(text("SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"), {"config_hash": config_hash}).fetchone()
@@ -1513,7 +1513,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
                         skipped_decisions.append({**dec, "reason": guardrail_reason})
                 buy_decisions = []
 
-    # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT  
+    # 2) EXECUTE BUYS IN ORDER UNTIL CASH RUNS OUT
     if buy_decisions:
         print(f"💸 Executing buy orders with ${available_cash:.2f} available...")
         available_cash = process_buy_decisions(
@@ -1524,7 +1524,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             skipped_decisions,
             live_execution_enabled,
         )
-    
+
     # 3) Log hold decisions
     if hold_decisions:
         print(f"⏸️  {len(hold_decisions)} hold decisions (no action needed)")
@@ -1540,12 +1540,12 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
 
 def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all sell decisions and return updated cash balance"""
-    
+
     # Track the cash we're adding from sells
     cash_from_sells = 0.0
 
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in sell_decisions])
-    
+
     with engine.begin() as conn:
         for decision in sell_decisions:
             ticker = decision.get("ticker")
@@ -1637,7 +1637,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                     text("SELECT shares, is_active FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
                     {"ticker": clean_ticker, "config_hash": config_hash}
                 ).fetchone()
-                
+
                 if inactive_check:
                     if not inactive_check.is_active:
                         print(f"⚠️  {ticker} is already INACTIVE (previously sold) - skipping duplicate sell")
@@ -1648,7 +1648,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 else:
                     print(f"❌ No holding found for {ticker} (cleaned: {clean_ticker}) - cannot sell")
                     reason_msg = f"No holding found to sell (Original: {reason})"
-                
+
                 skipped_decisions.append({
                     "action": "sell",
                     "ticker": ticker,
@@ -1660,13 +1660,13 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
         if cash_from_sells > 0:
             # Get current cash balance and add the proceeds from sells
             cash_result = conn.execute(text("""
-                SELECT current_value FROM holdings 
+                SELECT current_value FROM holdings
                 WHERE ticker = 'CASH' AND config_hash = :config_hash
             """), {"config_hash": config_hash}).fetchone()
-            
+
             current_cash = float(cash_result.current_value) if cash_result else 0.0
             new_cash_balance = current_cash + cash_from_sells
-            
+
             conn.execute(text("""
                 UPDATE holdings SET
                     current_price = :cash,
@@ -1676,14 +1676,14 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 WHERE ticker = 'CASH' AND config_hash = :config_hash
             """), {"cash": new_cash_balance, "timestamp": timestamp, "config_hash": config_hash})
             print(f"💰 Cash updated: ${current_cash:.2f} + ${cash_from_sells:.2f} = ${new_cash_balance:.2f}")
-            
+
             return new_cash_balance
         else:
             return available_cash
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all buy decisions and return updated cash balance"""
-    
+
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
 
     with engine.begin() as conn:
@@ -1786,7 +1786,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 if not real_trade_success:
                     print(f"⚠️  Real buy execution failed for {ticker}, recording in simulation only")
 
-            # Execute the buy in simulation (always) 
+            # Execute the buy in simulation (always)
             try:
                 existing = conn.execute(
                     text("SELECT shares, purchase_price, total_value, current_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
@@ -1859,10 +1859,10 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     print(f"Reactivated {clean_ticker} with {shares} shares at ${price:.2f}")
                 else:
                     conn.execute(text("""
-                        INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price, 
-                                            purchase_timestamp, current_price_timestamp, total_value, 
+                        INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
+                                            purchase_timestamp, current_price_timestamp, total_value,
                                             current_value, gain_loss, reason, is_active)
-                        VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price, 
+                        VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price,
                                 :timestamp, :timestamp, :total_value, :current_value, :gain_loss, :reason, TRUE)
                     """), {
                         "config_hash": config_hash,
@@ -1921,34 +1921,34 @@ def record_portfolio_snapshot():
                 holdings_snapshot JSONB
             )
         """))
-        
+
         # Get current holdings
         result = conn.execute(text("""
-            SELECT ticker, shares, purchase_price, current_price, 
+            SELECT ticker, shares, purchase_price, current_price,
                    total_value, current_value, gain_loss
             FROM holdings
             WHERE is_active = TRUE AND config_hash = :config_hash
         """), {"config_hash": config_hash}).fetchall()
-        
+
         holdings = [dict(row._mapping) for row in result]
-        
+
         # Calculate portfolio metrics
         cash_balance = next((h["current_value"] for h in holdings if h["ticker"] == "CASH"), 0)
         stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
-        
+
         total_current_value = sum(h["current_value"] for h in stock_holdings)
         total_invested = sum(h["total_value"] for h in stock_holdings)
         total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
         total_portfolio_value = total_current_value + cash_balance
-        
+
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
-        
+
         # Record snapshot
         conn.execute(text("""
-            INSERT INTO portfolio_history 
-            (total_portfolio_value, cash_balance, total_invested, 
+            INSERT INTO portfolio_history
+            (total_portfolio_value, cash_balance, total_invested,
              total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
-            VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
+            VALUES (:total_portfolio_value, :cash_balance, :total_invested,
                     :total_profit_loss, :percentage_gain, :holdings_snapshot, :config_hash)
         """), {
             "total_portfolio_value": total_portfolio_value,
@@ -1995,7 +1995,7 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
         if strategy and "{strategy_directives}" in system_prompt:
             system_prompt = system_prompt.replace("{strategy_directives}", strategy)
         elif strategy and "{strategy_directives}" not in system_prompt:
-            # Legacy prompt without placeholder — append strategy
+            # Legacy prompt without placeholder - append strategy
             system_prompt = system_prompt + "\n\n" + strategy
 
         # Inject memory (lessons from experience)
@@ -2004,7 +2004,7 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
             system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{memory}"
 
         print(f"🔧 Using DeciderAgent prompt v{prompt_version} (UNIFIED)")
-        
+
         # CRITICAL: Ensure ALL prompts end with proper JSON format requirements
         if "JSON" not in user_prompt_template.upper():
             print(f"⚠️  Prompt v{prompt_version} missing JSON formatting - adding required JSON template")
@@ -2022,7 +2022,7 @@ For each EXISTING holding, you MUST provide a sell decision or explicit reasonin
 [
   {{
     "action": "sell" or "buy" or "hold",
-    "ticker": "SYMBOL", 
+    "ticker": "SYMBOL",
     "amount_usd": dollar_amount_number,
     "reason": "detailed explanation including sell analysis for existing positions"
   }}
@@ -2034,11 +2034,11 @@ IMPORTANT:
 - For HOLD: amount_usd = 0, but provide detailed reasoning why not selling
 
 No explanatory text, no markdown, just pure JSON array."""
-        
+
     except Exception as e:
         print(f"⚠️  Could not load versioned prompt: {e}, using fallback")
         # Fallback minimal prompt when versioned template is unavailable
-        system_prompt = """You are a selective intraday trading AI. Focus on 1–2 day tactical opportunities, keep trades limited by daily caps, and output a JSON object with a `decisions` array."""
+        system_prompt = """You are a selective intraday trading AI. Focus on 1-2 day tactical opportunities, keep trades limited by daily caps, and output a JSON object with a `decisions` array."""
 
         user_prompt_template = """ACCOUNT
 - Mode: {account_mode}
@@ -2060,17 +2060,17 @@ OUTPUT (STRICT)
 {{"decisions":[{{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum + catalyst; add visual cue if relevant; buys prefixed R1..Rk"}},...]}}"""
 
     contrarian_directive = """
-🚫 CROWD-FADE DIRECTIVE
-- Treat your first instinct as the herd move. Execute the smarter opposite: sell strength chased by headlines, buy panic where catalysts are overblown, and fade media-manufactured hype.
-- NEVER chase names near 52-week highs or obvious “record high” banners. Assume mainstream news is manipulating retail entries; we make money by positioning against that narrative.
-- Before finalizing each decision, ask: “What is the average sucker doing right now?” Then plan the inverse. If instinct says BUY, only proceed when you can justify why most traders are wrong—and mention it explicitly (“fade ATH chase”, “short squeeze exhaustion”, etc.).
-- Document which crowd behavior you are exploiting in every reason (e.g., “Contrarian SELL into euphoric breakout”, “Contrarian BUY after panic dump”)."""
-    if "CROWD-FADE DIRECTIVE" not in user_prompt_template:
+🚫 CROWD-FADE AWARENESS
+- Be aware of herd behavior: when headlines are euphoric, consider taking profits; when panic dominates, look for entry opportunities.
+- Avoid chasing names that are up big on stale/recycled news with no fresh catalyst. But if the macro thesis is strong and momentum confirms (volume, relative strength), buying into the trend is valid — not every strong move is a "crowd chase."
+- Document your contrarian read in each reason when relevant (e.g., "Contrarian SELL into euphoria", "Buying strength — macro thesis intact, not a crowd chase").
+- CRITICAL: Crowd-fade is a LENS, not a veto. It must NEVER prevent you from making BUY decisions when the data supports them. If you have cash, good setups, and the tape supports entry — BUY. Being contrarian does not mean sitting in cash while opportunities pass."""
+    if "CROWD-FADE" not in user_prompt_template and "CROWD-FADE" not in (strategy or ""):
         user_prompt_template = user_prompt_template.rstrip() + "\n\n" + contrarian_directive.strip()
 
     cash_horizon_block = """
-⏳ CASH ACCOUNT PLAYBOOK (1–5 TRADING DAYS)
-- This is a non-margin cash run; every BUY/SELL should assume a 1–5 session holding window, not a same-day scalp.
+⏳ CASH ACCOUNT PLAYBOOK (1-5 TRADING DAYS)
+- This is a non-margin cash run; every BUY/SELL should assume a 1-5 session holding window, not a same-day scalp.
 - Default to HOLD unless the trade thesis or catalyst broke, price hit your stop, or a clearly superior setup needs the slot. Small mark-to-market noise is not a sell reason.
 - Treat the holdings block as the ground-truth P&L (purchase price, current price, gain/loss). Quote those numbers accurately; never describe a loss as a gain."""
     if not IS_MARGIN_ACCOUNT and "⏳ CASH ACCOUNT PLAYBOOK" not in user_prompt_template:
@@ -2082,7 +2082,7 @@ OUTPUT (STRICT)
     if len(summaries) > max_summaries:
         summaries = summaries[-max_summaries:]  # Take the most recent ones
         print(f"Processing only the {max_summaries} most recent summaries to avoid rate limiting")
-    
+
     parsed_summaries = []
     for s in summaries:
         try:
@@ -2148,7 +2148,7 @@ OUTPUT (STRICT)
     summary_snippet = summarized_text[:summary_preview_limit]
     print(f"🧾 Summaries preview (showing {len(summary_snippet)} of {len(summarized_text)} chars):\n{summary_snippet}")
     if len(summary_snippet) < len(summarized_text):
-        print("… (summaries truncated for console preview)")
+        print("... (summaries truncated for console preview)")
 
     company_entities = extract_companies_from_summaries(summaries_for_extraction)
     momentum_data, momentum_summary = build_momentum_recap(company_entities)
@@ -2197,7 +2197,7 @@ OUTPUT (STRICT)
     # Separate cash and stock holdings
     cash_balance = next((h['current_value'] for h in holdings if h['ticker'] == 'CASH'), 0)
     stock_holdings = [h for h in holdings if h['ticker'] != 'CASH']
-    
+
     # Enhanced holdings display with performance metrics
     holdings_text = ""
     if stock_holdings:
@@ -2214,7 +2214,7 @@ OUTPUT (STRICT)
         holdings_text = "\n".join(holdings_parts)
     else:
         holdings_text = "No current stock holdings."
-    
+
     # Calculate available funds and pacing stats
     available_cash = cash_balance
     total_portfolio_value = available_cash + sum(h.get("total_value", 0) for h in stock_holdings)
@@ -2313,47 +2313,47 @@ OUTPUT (STRICT)
     else:
         head = prompt[:prompt_preview_head]
         tail = prompt[-prompt_preview_tail:] if prompt_preview_tail > 0 else ""
-        prompt_snippet = "".join([head, "\n… [middle omitted]\n", tail])
+        prompt_snippet = "".join([head, "\n... [middle omitted]\n", tail])
         shown_chars = min(len(prompt), prompt_coverage)
 
     print(f"🧠 Decider prompt preview (showing {shown_chars} of {len(prompt)} chars | head {prompt_preview_head}, tail {prompt_preview_tail}):\n{prompt_snippet}")
     if len(prompt) > prompt_coverage:
-        print("… (prompt truncated for console preview)")
+        print("... (prompt truncated for console preview)")
     print(f"🧠 Decider prompt (full {len(prompt)} chars):\n{prompt}")
-    
+
     # Build explicit list/map of required decisions for current holdings
     holdings_by_ticker = {h['ticker'].upper(): h for h in stock_holdings}
     current_tickers = [h['ticker'].upper() for h in stock_holdings] if stock_holdings else []
     current_ticker_set = set(current_tickers)
-    
+
     # Show what AI is being told
     if current_tickers:
         print(f"💼 Current Holdings AI MUST Analyze: {', '.join(current_tickers)}")
     else:
         print(f"💼 Portfolio: NO positions (cash only)")
-    
+
     # Create clear instructions with actual ticker examples
-    # Logging current holdings – informational only
+    # Logging current holdings - informational only
     if current_tickers:
         print(f"🚨 YOU CURRENTLY OWN: {', '.join(current_tickers)}")
     else:
         print('✅ You have NO current positions - scanning for new setups')
 
 
-    
+
     # Debug: Print first 300 chars of prompt
     print(f"📝 Prompt preview: {prompt[:300]}...")
-    
+
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
     cash_hold_reason = None
     ai_response = prompt_manager.ask_openai(
-        prompt, 
-        system_prompt, 
+        prompt,
+        system_prompt,
         agent_name="DeciderAgent"
     )
     print(f"🗒️ Parsed Decider response ({type(ai_response).__name__}): {ai_response}")
-    
+
     # Ensure response is always a list
     if isinstance(ai_response, dict):
         if isinstance(ai_response.get("cash_reason"), str) and ai_response.get("cash_reason").strip():
@@ -2370,9 +2370,37 @@ OUTPUT (STRICT)
             # Convert single dict to list (sometimes returns single decision as dict)
             print(f"📦 Converting single decision dict to list format")
             ai_response = [ai_response]
-    elif not isinstance(ai_response, list):
+    elif isinstance(ai_response, list):
+        # Handle list responses — extract cash_reason from any "action":"cash" items
+        for item in ai_response:
+            if isinstance(item, dict) and (item.get("action") or "").lower() == "cash":
+                reason = item.get("cash_reason") or item.get("reason") or ""
+                if reason and not cash_hold_reason:
+                    cash_hold_reason = reason
+                    print(f"📦 Extracted cash_reason from 'action':'cash' item: {reason[:100]}")
+    else:
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
+    
+    # Filter out invalid "action":"cash" entries — these are not real trade decisions
+    if isinstance(ai_response, list):
+        valid_actions = {"buy", "sell", "hold"}
+        cleaned = []
+        for item in ai_response:
+            if isinstance(item, dict):
+                action = (item.get("action") or "").lower()
+                if action == "cash":
+                    # Not a valid trade action — extract reason and skip
+                    reason = item.get("cash_reason") or item.get("reason") or ""
+                    if reason and not cash_hold_reason:
+                        cash_hold_reason = reason
+                    print(f"⚠️  Dropping 'action':'cash' — not a valid trade action (use cash_reason instead)")
+                    continue
+                if action not in valid_actions and action:
+                    print(f"⚠️  Dropping unknown action '{action}' for ticker '{item.get('ticker', 'N/A')}'")
+                    continue
+            cleaned.append(item)
+        ai_response = cleaned
 
     # Drop HOLD decisions for tickers we don't own (e.g., "PORTFOLIO", "CASH", or hallucinated symbols)
     # NOTE: This filter ALWAYS runs, including when portfolio is empty (no holdings).
@@ -2400,7 +2428,7 @@ OUTPUT (STRICT)
     missing_tickers = [ticker for ticker in current_ticker_set if ticker not in existing_decisions]
 
     if missing_tickers:
-        print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} — auto-filling HOLD entries.")
+        print(f"⚠️  AI omitted decisions for: {', '.join(missing_tickers)} - auto-filling HOLD entries.")
         def fmt_num(val):
             try:
                 return f"{float(val):,.2f}"
@@ -2449,7 +2477,7 @@ OUTPUT (STRICT)
                 if not original_reason.startswith('⛔ MARKET CLOSED'):
                     decision['reason'] = f"⛔ MARKET CLOSED - No action taken. AI suggested: {original_reason}"
                     decision['execution_status'] = 'market_closed'
-    
+
     return ai_response
 
 def log_sell_analysis(decisions, holdings):
@@ -2457,28 +2485,28 @@ def log_sell_analysis(decisions, holdings):
     print("\n" + "="*50)
     print("📊 SELL ANALYSIS FOR EXISTING POSITIONS")
     print("="*50)
-    
+
     stock_holdings = [h for h in holdings if h['ticker'] != 'CASH']
-    
+
     if not stock_holdings:
         print("✅ No existing positions to analyze")
         return
-    
+
     # Create a map of decisions by ticker
     decision_map = {d.get('ticker', '').upper(): d for d in decisions if isinstance(d, dict)}
-    
+
     for holding in stock_holdings:
         ticker = holding['ticker']
         current_value = holding.get('current_value', 0)
         gain_loss = holding.get('gain_loss', 0)
         gain_loss_pct = (gain_loss / holding['total_value'] * 100) if holding.get('total_value', 0) > 0 else 0
-        
+
         decision = decision_map.get(ticker.upper())
-        
+
         if decision:
             action = decision.get('action', 'unknown')
             reason = decision.get('reason', 'No reason provided')
-            
+
             if action == 'sell':
                 print(f"🔴 SELL {ticker}: {reason}")
             elif action == 'hold':
@@ -2487,22 +2515,22 @@ def log_sell_analysis(decisions, holdings):
                 print(f"❓ {action.upper()} {ticker}: {reason}")
         else:
             print(f"⚠️  NO DECISION for {ticker} (Value: ${current_value:.2f}, G/L: {gain_loss_pct:.1f}%) - AI SHOULD HAVE PROVIDED SELL/HOLD REASONING")
-    
+
     print("="*50 + "\n")
 
 def extract_decision_info_from_text(text_content):
     """Try to extract decision info from malformed text responses"""
     import re
     import json
-    
+
     # First try to extract JSON-like structures and fix common issues
     try:
         text_str = str(text_content)
-        
+
         # Try to find JSON objects in the text
         json_pattern = r'\{[^{}]*\}'
         json_matches = re.findall(json_pattern, text_str)
-        
+
         for json_str in json_matches:
             try:
                 # Try to parse the JSON
@@ -2511,7 +2539,7 @@ def extract_decision_info_from_text(text_content):
                     # Fix field name inconsistencies - 'reasoning' should be 'reason'
                     if 'reasoning' in parsed and 'reason' not in parsed:
                         parsed['reason'] = parsed.pop('reasoning')
-                    
+
                     # Check if it has the required fields
                     if 'action' in parsed and parsed.get('action'):
                         # Set defaults for missing fields
@@ -2523,22 +2551,22 @@ def extract_decision_info_from_text(text_content):
                             parsed['amount_usd'] = parsed.pop('amount')
                         if 'reason' not in parsed:
                             parsed['reason'] = f"Extracted from response: {text_str[:50]}..."
-                        
+
                         print(f"✅ Successfully parsed JSON with field fixes: {parsed}")
                         return parsed
-                        
+
             except json.JSONDecodeError:
                 continue
     except Exception as e:
         print(f"⚠️  Error in JSON extraction: {e}")
-    
+
     # Fallback to regex pattern matching
     action_pattern = r'\b(buy|sell|hold)\s+([A-Z]{1,5})\b'
     amount_pattern = r'\$(\d+(?:,\d{3})*(?:\.\d{2})?)'
-    
+
     matches = re.findall(action_pattern, str(text_content), re.IGNORECASE)
     amounts = re.findall(amount_pattern, str(text_content))
-    
+
     if matches:
         action, ticker = matches[0]
         amount = float(amounts[0].replace(',', '')) if amounts else 1000
@@ -2553,15 +2581,15 @@ def extract_decision_info_from_text(text_content):
 def store_trade_decisions(decisions, run_id):
     config_hash = get_current_config_hash()
     print(f"🔍 Storing decisions for {config_hash}: {decisions}")
-    
+
     # CRITICAL: VALIDATE decisions to prevent AI hallucinations
     from decision_validator import DecisionValidator
-    
+
     # Get current portfolio state for validation
     current_holdings = fetch_holdings()
     stock_holdings = [h for h in current_holdings if h['ticker'] != 'CASH']
     cash_balance = next((h['current_value'] for h in current_holdings if h['ticker'] == 'CASH'), 0)
-    
+
     # Validate all decisions
     validator = DecisionValidator(
         stock_holdings,
@@ -2569,26 +2597,26 @@ def store_trade_decisions(decisions, run_id):
         allow_sell_reuse=IS_MARGIN_ACCOUNT
     )
     validated_decisions, rejected_decisions = validator.validate_decisions(decisions)
-    
+
     # Check if AI missed any holdings
     missing_holdings = validator.get_missing_holdings_decisions(validated_decisions)
-    
+
     # Log rejected decisions
     if rejected_decisions:
         print(f"⚠️  REJECTED {len(rejected_decisions)} INVALID DECISIONS:")
         for rej in rejected_decisions:
             print(f"   ❌ {rej['validation_error']}")
-    
+
     # Use validated decisions only
     decisions = validated_decisions
-    
+
     # Enrich decisions with shares and total_value for better display
     print("💎 Enriching decisions with shares and dollar values...")
     for decision in decisions:
         if isinstance(decision, dict):
             action = decision.get('action', '').lower()
             ticker = decision.get('ticker', '').upper()
-            
+
             if action == 'sell' or action == 'hold':
                 # Look up current holding to get shares and value
                 holding = next((h for h in stock_holdings if h['ticker'].upper() == ticker), None)
@@ -2614,14 +2642,14 @@ def store_trade_decisions(decisions, run_id):
                         print(f"   ✅ BUY {ticker}: {estimated_shares} shares (est.), ${amount:.2f}")
                     else:
                         print(f"   ⚠️  BUY {ticker}: Cannot get price for share calculation")
-    
+
     # CRITICAL: Check market hours and modify decisions BEFORE storing
     market_open = is_market_open()
     if not market_open:
         pacific_now = datetime.now(PACIFIC_TIMEZONE)
         eastern_now = pacific_now.astimezone(EASTERN_TIMEZONE)
         print(f"⛔ MARKET CLOSED at {eastern_now.strftime('%I:%M %p ET')} - Marking all decisions as deferred")
-    
+
     # Filter out error responses before storing
     valid_decisions = []
     for decision in decisions:
@@ -2645,7 +2673,7 @@ def store_trade_decisions(decisions, run_id):
                         print(f"   Modified {action.upper()} {decision.get('ticker')} → MARKET CLOSED")
                     else:
                         print(f"   Already marked: {action.upper()} {decision.get('ticker')}")
-            
+
             valid_decisions.append(decision)
         else:
             print(f"⚠️  Invalid decision format: {decision}")
@@ -2664,7 +2692,7 @@ def store_trade_decisions(decisions, run_id):
                     extracted['reason'] = f"{prefix}{original_reason}"
                     extracted['execution_status'] = 'market_closed'
                 valid_decisions.append(extracted)
-    
+
     # Only store if we have valid decisions
     # Log sell analysis for transparency regardless of validity
     try:
@@ -2672,13 +2700,13 @@ def store_trade_decisions(decisions, run_id):
         log_sell_analysis(valid_decisions, current_holdings)
     except Exception as e:
         print(f"⚠️  Could not log sell analysis: {e}")
-    
+
     if not valid_decisions:
         print("❌ No valid trade decisions to store - AI response was malformed")
         # Try to extract info from the entire response text
         print(f"📋 Attempting to extract from full response: {decisions}")
         extracted_from_full = extract_decision_info_from_text(str(decisions))
-        
+
         if extracted_from_full:
             print(f"✅ Extracted from full response: {extracted_from_full}")
             # If market is closed, modify the reason
@@ -2701,19 +2729,19 @@ def store_trade_decisions(decisions, run_id):
                 "amount_usd": 0,
                 "reason": "AI response was completely unparseable - defaulting to hold SPY"
             }
-            
+
             if not market_open:
                 fallback_decision["reason"] = "⛔ MARKET CLOSED - No action taken (AI response was unparseable)"
-            
+
             valid_decisions = [fallback_decision]
-    
+
     # Get current Pacific time as NAIVE timestamp (dashboard will format it correctly)
     pacific_now = datetime.now(PACIFIC_TIMEZONE)
     # Remove timezone info so PostgreSQL stores it as-is without converting to UTC
     naive_pacific_timestamp = pacific_now.replace(tzinfo=None)
-    
+
     print(f"🕐 Storing timestamp (naive Pacific): {pacific_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
-    
+
     # Debug: Show what's being stored
     print(f"💾 Storing {len(valid_decisions)} decisions to database:")
     for vd in valid_decisions:
@@ -2723,7 +2751,7 @@ def store_trade_decisions(decisions, run_id):
         amount = vd.get('amount_usd', 'NO_AMOUNT')
         total_val = vd.get('total_value', 'NO_TOTAL')
         print(f"   - {action.upper()} {ticker}: shares={shares}, amount_usd={amount}, total_value={total_val}")
-    
+
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
@@ -2749,7 +2777,7 @@ def store_trade_decisions(decisions, run_id):
 if __name__ == "__main__":
     # Get unprocessed summaries instead of just the latest run
     unprocessed_summaries = get_unprocessed_summaries()
-    
+
     if not unprocessed_summaries:
         print("No unprocessed summaries found.")
         # Still record initial portfolio snapshot
@@ -2758,14 +2786,14 @@ if __name__ == "__main__":
             print("Initial portfolio snapshot recorded")
         except Exception as e:
             print(f"Failed to record initial snapshot: {e}")
-        
+
         # Create empty run and proceed to decision making (will record N/A if market closed)
         pacific_now = datetime.now(PACIFIC_TIMEZONE)
         run_id = pacific_now.strftime("%Y%m%dT%H%M%S") + "_no_summaries"
         unprocessed_summaries = []  # Empty list will trigger market status check
     else:
         print(f"Found {len(unprocessed_summaries)} unprocessed summaries")
-    
+
         # Determine target run_id from summaries (prefer actual run metadata)
         run_id_candidates = []
         for summary in unprocessed_summaries:
@@ -2781,12 +2809,12 @@ if __name__ == "__main__":
         else:
             latest_timestamp = max((s.get('timestamp') for s in unprocessed_summaries if s.get('timestamp')), default=None)
             run_id = latest_timestamp.strftime("%Y%m%dT%H%M%S") if latest_timestamp else datetime.now().strftime("%Y%m%dT%H%M%S")
-        
+
         # Update current prices before making decisions
         update_all_current_prices()
-        
+
         holdings = fetch_holdings()
-        
+
         # Check if we have current prices for decision making
         holdings_without_prices = [h for h in holdings if h['ticker'] != 'CASH' and h['current_price'] == h['purchase_price']]
         if holdings_without_prices:
