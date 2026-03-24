@@ -617,90 +617,78 @@ class TradeOutcomeTracker:
         try:
             summarizer_feedback = feedback.get('summarizer_feedback', '')
             decider_feedback = feedback.get('decider_feedback', '')
-            
+
             if summarizer_feedback:
                 snippet = self._extract_feedback_snippet(summarizer_feedback)
-
-                new_summarizer_system = (
-                    "You are an intelligent, machiavellian day trading agent tuned on extracting market "
-                    "insights and turning a profit. You specialize in analyzing financial news articles and "
-                    "extracting actionable trading insights.\n\n"
-                    '🚨 CRITICAL: You must ALWAYS respond with valid JSON format containing "headlines" array and "insights" string.'
-                )
-
-                new_summarizer_user = f"""Analyze the following financial news and extract the most important actionable insights.
-
-Latest Feedback Reminder: {snippet}
-
-{{feedback_context}}
-
-Content: {{content}}
-
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY valid JSON in this EXACT format:
-{{
-    "headlines": ["headline 1", "headline 2", "headline 3"],
-    "insights": "A comprehensive analysis paragraph focusing on actionable trading insights, market sentiment, and specific companies or sectors mentioned."
-}}
-
-⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
-✅ ONLY pure JSON starting with {{ and ending with }}"""
-
-                version = self._create_new_prompt_version_for_config(
+                strategy_update = f"Latest Feedback Reminder: {snippet}"
+                self._update_strategy_directives_for_config(
                     'SummarizerAgent',
-                    new_summarizer_user,
-                    new_summarizer_system,
-                    f'Auto-generated from feedback (ID: {feedback_id})',
+                    strategy_update,
+                    f'Strategy updated from feedback (ID: {feedback_id})',
                     config_hash
                 )
-                print(f"✅ Created summarizer prompt v{version} for config {config_hash}")
+                print(f"✅ Updated SummarizerAgent strategy_directives for config {config_hash}")
 
             if decider_feedback:
                 snippet = self._extract_feedback_snippet(decider_feedback)
-
-                new_decider_system = (
-                    "You are an intelligent, machiavellian day trading agent tuned on extracting market "
-                    "insights and turning a profit. You are aggressive and focused on short-term gains and "
-                    "capital rotation."
-                )
-
-                new_decider_user = f"""You are an AGGRESSIVE DAY TRADING AI. Make buy/sell recommendations for short-term trading based on the summaries and current portfolio.
-
-Focus on INTRADAY to MAX 1-DAY holding periods for momentum and day trading. Target hourly opportunities, oversold bounces, and earnings-driven moves. Do not exceed 5 total trades, never allocate more than the total available balance for trading.
-Retain at least $100 in funds.
-
-Latest Feedback Reminder: {snippet}
-
-Current Portfolio: {{holdings}}
-Available Cash: {{available_cash}}
-News Summaries: {{summaries}}
-
-🚨 CRITICAL: You must respond ONLY with valid JSON in this exact format:
-[
-  {{
-    "action": "buy" or "sell" or "hold",
-    "ticker": "SYMBOL",
-    "amount_usd": dollar_amount_number,
-    "reason": "brief explanation"
-  }}
-]
-No explanatory text, no markdown, just pure JSON array."""
-
-                # Save the updated prompt directly
-                version = self._create_new_prompt_version_for_config(
-                    'DeciderAgent', 
-                    new_decider_user, 
-                    new_decider_system,
-                    f'Auto-generated from feedback (ID: {feedback_id})',
+                strategy_update = f"Latest Feedback Reminder: {snippet}"
+                self._update_strategy_directives_for_config(
+                    'DeciderAgent',
+                    strategy_update,
+                    f'Strategy updated from feedback (ID: {feedback_id})',
                     config_hash
                 )
-                print(f"✅ Created decider prompt v{version} for config {config_hash}")
+                print(f"✅ Updated DeciderAgent strategy_directives for config {config_hash}")
                 
         except Exception as e:
             print(f"❌ Error generating prompts for config {config_hash}: {e}")
             import traceback
             traceback.print_exc()
-    
+
+    def _update_strategy_directives_for_config(self, agent_type, new_strategy_directives, description, config_hash):
+        """Update only strategy_directives while keeping structural template intact"""
+        try:
+            import os
+            original_hash = os.environ.get('CURRENT_CONFIG_HASH')
+            os.environ['CURRENT_CONFIG_HASH'] = config_hash
+
+            try:
+                # Get current active prompt to preserve structure
+                from prompt_manager import get_active_prompt
+                current = get_active_prompt(agent_type)
+
+                if not current:
+                    print(f"⚠️ No active prompt found for {agent_type}, skipping strategy update")
+                    return
+
+                # Create new version with same structural template but updated strategy
+                from prompt_manager import create_new_prompt_version
+                prompt_id = create_new_prompt_version(
+                    agent_type,
+                    current["system_prompt"],
+                    current["user_prompt_template"],
+                    description,
+                    strategy_directives=new_strategy_directives
+                )
+
+                with engine.connect() as conn:
+                    result = conn.execute(text("""
+                        SELECT version FROM prompt_versions WHERE id = :id
+                    """), {"id": prompt_id}).fetchone()
+                    version = result.version if result else "?"
+
+                print(f"✅ Updated {agent_type} strategy_directives → v{version} for config {config_hash}")
+                return version
+            finally:
+                if original_hash is not None:
+                    os.environ['CURRENT_CONFIG_HASH'] = original_hash
+                elif 'CURRENT_CONFIG_HASH' in os.environ:
+                    del os.environ['CURRENT_CONFIG_HASH']
+        except Exception as e:
+            print(f"❌ Error updating strategy_directives for {agent_type}: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _create_new_prompt_version_for_config(self, agent_type, user_prompt, system_prompt, description, config_hash):
         """Create a new prompt version for a specific config hash"""
         try:
@@ -1171,7 +1159,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 }
             return None
     
-    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None):
+    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None, strategy_directives=None):
         """Save a new version of prompts for an agent type"""
         from prompt_manager import create_new_prompt_version
         
@@ -1190,7 +1178,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             system_prompt=system_prompt,
             user_prompt_template=user_prompt,
             description=f"{description} (Auto-generated from feedback)",
-            created_by=created_by
+            created_by=created_by,
+            strategy_directives=strategy_directives,
         )
         
         print(f"✅ Created new prompt version for {mapped_agent_type} (ID: {prompt_id})")

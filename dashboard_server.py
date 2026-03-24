@@ -118,6 +118,7 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
 
     system_prompt = prompt_payload.get("system_prompt")
     user_prompt = prompt_payload.get("user_prompt_template") or prompt_payload.get("user_prompt")
+    strategy_directives = prompt_payload.get("strategy_directives", "")
     description = prompt_payload.get("description")
 
     if not system_prompt or not user_prompt:
@@ -139,6 +140,8 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
             "description": description,
             "config_hash": 'global' if config_hash == "global" else config_hash,
         }
+        if ":strategy_directives" in insert_sql:
+            values["strategy_directives"] = strategy_directives
         conn.execute(text(insert_sql), values)
 
     # Base table
@@ -159,9 +162,9 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
 
     _insert_row("prompt_versions", """
         INSERT INTO prompt_versions
-            (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
+            (agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, created_by, is_active, config_hash)
         VALUES
-            (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
+            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :description, 'prompt_reset', TRUE, :config_hash)
     """)
 
     def _table_exists(table_name):
@@ -936,6 +939,8 @@ def dashboard():
         total_current_value = sum(h["current_value"] for h in stock_holdings)
         total_invested = sum(h["total_value"] for h in stock_holdings)
         total_profit_loss = sum(h["gain_loss"] for h in stock_holdings)
+        # cash_balance from holdings CASH row may only reflect available trading funds;
+        # Schwab path below will override with actual account value
         total_portfolio_value = total_current_value + cash_balance
         
         # Calculate metrics relative to initial $10,000 investment by default
@@ -1007,7 +1012,12 @@ def dashboard():
                             else min(available_cash_effective, settled_cash_guardrail)
                         )
                     funds_available_display = max(0.0, float(funds_available_display))
-                    total_portfolio_value = total_current_value + available_cash_effective
+                    # Total portfolio value = positions market value + total cash in account
+                    # raw_cash_balance already includes unsettled cash (it's the total),
+                    # so do NOT add unsettled_cash again
+                    total_portfolio_value = total_current_value + raw_cash_balance
+                    # cash_balance for the hero card: show funds available for trading
+                    # (the subtitle shows the full settled/unsettled/reserve breakdown)
                     cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
@@ -1047,11 +1057,12 @@ def dashboard():
                     use_schwab_positions = True
 
                     # Persist live snapshot for dashboards/charts
-                    _sync_holdings_with_database(config_hash, holdings, funds_available_display)
+                    # raw_cash_balance is total cash in account (settled + unsettled combined)
+                    _sync_holdings_with_database(config_hash, holdings, raw_cash_balance)
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,
-                        funds_available_display,
+                        raw_cash_balance,
                         total_invested,
                         total_profit_loss,
                         holdings,
@@ -1707,6 +1718,7 @@ def get_prompts(agent_type):
                     "timestamp": "2025-01-01T00:00:00",  # Placeholder timestamp
                     "user_prompt": current_prompt["user_prompt_template"],
                     "system_prompt": current_prompt["system_prompt"],
+                    "strategy_directives": current_prompt.get("strategy_directives", ""),
                     "description": f"Current active prompt v{current_prompt['version']} for config {config_hash[:8]}",
                     "is_active": True,
                     "created_by": "emergency_patch"
@@ -1739,6 +1751,7 @@ def get_active_prompt(agent_type):
             formatted_prompt = {
                 "user_prompt": prompt["user_prompt_template"],
                 "system_prompt": prompt["system_prompt"],
+                "strategy_directives": prompt.get("strategy_directives", ""),
                 "prompt_version": prompt["version"],
                 "version": prompt["version"],
                 "description": f"Active prompt v{prompt['version']}"
@@ -1759,19 +1772,26 @@ def save_prompt(agent_type):
         data = request.get_json()
         user_prompt = data.get('user_prompt')
         system_prompt = data.get('system_prompt')
+        strategy_directives = data.get('strategy_directives', '')
         description = data.get('description', '')
         created_by = data.get('created_by', 'system')
         
         if not user_prompt or not system_prompt:
             return jsonify({'error': 'user_prompt and system_prompt are required'}), 400
         
-        version = feedback_tracker.save_prompt_version(
-            agent_type=agent_type,
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            description=description,
-            created_by=created_by
-        )
+        save_kwargs = {
+            'agent_type': agent_type,
+            'user_prompt': user_prompt,
+            'system_prompt': system_prompt,
+            'description': description,
+            'created_by': created_by,
+            'strategy_directives': strategy_directives,
+        }
+        try:
+            version = feedback_tracker.save_prompt_version(**save_kwargs)
+        except TypeError:
+            save_kwargs.pop('strategy_directives', None)
+            version = feedback_tracker.save_prompt_version(**save_kwargs)
         
         return jsonify({
             'success': True,
@@ -2660,7 +2680,7 @@ def get_prompt_evolution_history():
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT agent_type, version, system_prompt, user_prompt_template, description, is_active, created_at
+                SELECT agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, is_active, created_at
                 FROM prompt_versions
                 WHERE config_hash = :config_hash
                 ORDER BY agent_type ASC, version DESC
@@ -2675,6 +2695,7 @@ def get_prompt_evolution_history():
                 'is_active': bool(row.is_active),
                 'system_prompt_preview': (row.system_prompt or '')[:200],
                 'user_prompt_template_preview': (row.user_prompt_template or '')[:200],
+                'strategy_directives_preview': (row.strategy_directives or '')[:200],
             })
 
         return jsonify(history)
@@ -2688,7 +2709,7 @@ def get_prompt_evolution_diff(agent_type, version_a, version_b):
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT version, system_prompt, user_prompt_template
+                SELECT version, system_prompt, user_prompt_template, strategy_directives
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND config_hash = :config_hash
@@ -2723,9 +2744,18 @@ def get_prompt_evolution_diff(agent_type, version_a, version_b):
             lineterm=''
         ))
 
+        strategy_directives_diff = list(difflib.unified_diff(
+            (row_a.strategy_directives or '').splitlines(),
+            (row_b.strategy_directives or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_strategy_directives',
+            tofile=f'{agent_type}_v{version_b}_strategy_directives',
+            lineterm=''
+        ))
+
         return jsonify({
             'system_prompt_diff': system_prompt_diff,
             'user_prompt_diff': user_prompt_diff,
+            'strategy_directives_diff': strategy_directives_diff,
             'version_a': version_a,
             'version_b': version_b,
         })
@@ -2755,7 +2785,7 @@ def generate_prompt_evolution_candidate():
 
         with engine.connect() as conn:
             current_prompt = conn.execute(text("""
-                SELECT version, system_prompt, user_prompt_template, description
+                SELECT version, system_prompt, user_prompt_template, strategy_directives, description
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND config_hash = :config_hash
@@ -2781,6 +2811,7 @@ def generate_prompt_evolution_candidate():
                 'description': current_prompt.description,
                 'system_prompt': current_prompt.system_prompt,
                 'user_prompt_template': current_prompt.user_prompt_template,
+                'strategy_directives': current_prompt.strategy_directives,
             },
             'performance_stats': stats,
             'recent_headlines': headlines,
@@ -2803,7 +2834,9 @@ def generate_prompt_evolution_candidate():
                     'content': (
                         'You are an expert prompt engineer for an autonomous trading workflow. '
                         'Given the current prompt and performance context, produce improved prompts. '
-                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, reasoning.'
+                        'The system_prompt is the structural template (JSON format, placeholders). '
+                        'The strategy_directives contain trading rules and personality that feedback evolves. '
+                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, reasoning.'
                     ),
                 },
                 {
@@ -2824,6 +2857,7 @@ def generate_prompt_evolution_candidate():
 
         system_prompt = (parsed.get('system_prompt') or '').strip()
         user_prompt_template = (parsed.get('user_prompt_template') or '').strip()
+        strategy_directives = (parsed.get('strategy_directives') or '').strip()
         reasoning = (parsed.get('reasoning') or '').strip()
 
         if not system_prompt or not user_prompt_template:
@@ -2832,6 +2866,7 @@ def generate_prompt_evolution_candidate():
         return jsonify({
             'system_prompt': system_prompt,
             'user_prompt_template': user_prompt_template,
+            'strategy_directives': strategy_directives,
             'reasoning': reasoning,
         })
     except Exception as e:
@@ -2846,6 +2881,7 @@ def apply_prompt_evolution_candidate():
         agent_type = data.get('agent_type')
         system_prompt = (data.get('system_prompt') or '').strip()
         user_prompt_template = (data.get('user_prompt_template') or '').strip()
+        strategy_directives = (data.get('strategy_directives') or '').strip()
         description = (data.get('description') or '').strip()
 
         if not agent_type:
@@ -2855,16 +2891,21 @@ def apply_prompt_evolution_candidate():
 
         config_hash = get_current_config_hash()
 
+        # Feedback agent aliases: deactivate both feedback_analyzer and FeedbackAgent together
+        _FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
+        types_to_deactivate = list(_FEEDBACK_ALIASES) if agent_type in _FEEDBACK_ALIASES else [agent_type]
+
         with engine.begin() as conn:
-            conn.execute(text("""
-                UPDATE prompt_versions
-                SET is_active = FALSE
-                WHERE agent_type = :agent_type
-                  AND config_hash = :config_hash
-            """), {
-                'agent_type': agent_type,
-                'config_hash': config_hash,
-            })
+            for t in types_to_deactivate:
+                conn.execute(text("""
+                    UPDATE prompt_versions
+                    SET is_active = FALSE
+                    WHERE agent_type = :agent_type
+                      AND config_hash = :config_hash
+                """), {
+                    'agent_type': t,
+                    'config_hash': config_hash,
+                })
 
             version_row = conn.execute(text("""
                 SELECT COALESCE(MAX(version), -1) AS max_version
@@ -2884,6 +2925,7 @@ def apply_prompt_evolution_candidate():
                     version,
                     system_prompt,
                     user_prompt_template,
+                    strategy_directives,
                     description,
                     created_by,
                     is_active,
@@ -2893,6 +2935,7 @@ def apply_prompt_evolution_candidate():
                     :version,
                     :system_prompt,
                     :user_prompt_template,
+                    :strategy_directives,
                     :description,
                     :created_by,
                     TRUE,
@@ -2903,6 +2946,7 @@ def apply_prompt_evolution_candidate():
                 'version': new_version,
                 'system_prompt': system_prompt,
                 'user_prompt_template': user_prompt_template,
+                'strategy_directives': strategy_directives,
                 'description': description,
                 'created_by': 'prompt_lab',
                 'config_hash': config_hash,

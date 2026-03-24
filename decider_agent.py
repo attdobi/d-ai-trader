@@ -982,6 +982,11 @@ def extract_companies_from_summaries(summary_text):
         prompt_data = get_active_prompt("CompanyExtractionAgent")
         system_prompt = prompt_data["system_prompt"]
         user_prompt_template = prompt_data["user_prompt_template"]
+        strategy = prompt_data.get("strategy_directives", "")
+        if strategy and "{strategy_directives}" in system_prompt:
+            system_prompt = system_prompt.replace("{strategy_directives}", strategy)
+        elif strategy and "{strategy_directives}" not in system_prompt:
+            system_prompt = system_prompt + "\n\n" + strategy
         print(f"🧬 Using CompanyExtractionAgent prompt v{prompt_data.get('version', 'unknown')}")
     except Exception as e:
         print(f"⚠️  Falling back to default company extraction prompt: {e}")
@@ -1979,6 +1984,15 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
         system_prompt = prompt_data["system_prompt"]
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
+
+        # Inject strategy directives into structural template
+        strategy = prompt_data.get("strategy_directives", "")
+        if strategy and "{strategy_directives}" in system_prompt:
+            system_prompt = system_prompt.replace("{strategy_directives}", strategy)
+        elif strategy and "{strategy_directives}" not in system_prompt:
+            # Legacy prompt without placeholder — append strategy
+            system_prompt = system_prompt + "\n\n" + strategy
+
         print(f"🔧 Using DeciderAgent prompt v{prompt_version} (UNIFIED)")
         
         # CRITICAL: Ensure ALL prompts end with proper JSON format requirements

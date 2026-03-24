@@ -1,43 +1,19 @@
 """
 Prompt management utilities for using versioned prompts
 """
-import os
 
 from sqlalchemy import text
 from config import engine
-from prompts.decider_gpt_pro_prompt import (
-    GPT_PRO_SYSTEM_PROMPT,
-    GPT_PRO_USER_PROMPT_TEMPLATE,
-)
-from prompts.decider_standard_prompt import (
-    STANDARD_SYSTEM_PROMPT,
-    STANDARD_USER_PROMPT_TEMPLATE,
-)
-
-def _decider_prompts_for_profile():
-    profile = os.getenv("DAI_PROMPT_PROFILE", "standard").strip().lower()
-    if profile == "gpt-pro":
-        return GPT_PRO_SYSTEM_PROMPT.strip(), GPT_PRO_USER_PROMPT_TEMPLATE.strip()
-    return STANDARD_SYSTEM_PROMPT.strip(), STANDARD_USER_PROMPT_TEMPLATE.strip()
-
-
-def _apply_decider_overrides(agent_type, prompt_payload):
-    if agent_type != "DeciderAgent" or not prompt_payload:
-        return prompt_payload
-    system_prompt, user_prompt = _decider_prompts_for_profile()
-    prompt_payload["system_prompt"] = system_prompt
-    prompt_payload["user_prompt_template"] = user_prompt
-    return prompt_payload
 
 def _build_prompt_payload(agent_type, row):
     if not row:
         return None
-    payload = {
+    return {
         "system_prompt": row.system_prompt,
         "user_prompt_template": row.user_prompt_template,
+        "strategy_directives": getattr(row, 'strategy_directives', None) or "",
         "version": row.version
     }
-    return _apply_decider_overrides(agent_type, payload)
 
 def initialize_config_prompts(config_hash):
     """Initialize v0 baseline prompts for a new config"""
@@ -57,7 +33,7 @@ def initialize_config_prompts(config_hash):
         
         # Get global v0 baseline prompts
         baseline_result = conn.execute(text("""
-            SELECT agent_type, system_prompt, user_prompt_template
+            SELECT agent_type, system_prompt, user_prompt_template, strategy_directives
             FROM prompt_versions
             WHERE version = 0 AND (config_hash = 'global' OR config_hash IS NULL)
             ORDER BY agent_type
@@ -72,12 +48,13 @@ def initialize_config_prompts(config_hash):
             for prompt in baseline_prompts:
                 write_conn.execute(text("""
                     INSERT INTO prompt_versions
-                    (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
-                    VALUES (:agent_type, 0, :system_prompt, :user_prompt_template, :description, 'auto_init', TRUE, :config_hash)
+                    (agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, created_by, is_active, config_hash)
+                    VALUES (:agent_type, 0, :system_prompt, :user_prompt_template, :strategy_directives, :description, 'auto_init', TRUE, :config_hash)
                 """), {
                     "agent_type": prompt.agent_type,
                     "system_prompt": prompt.system_prompt,
                     "user_prompt_template": prompt.user_prompt_template,
+                    "strategy_directives": prompt.strategy_directives,
                     "description": f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
                     "config_hash": config_hash
                 })
@@ -93,7 +70,7 @@ def get_active_prompt(agent_type):
     with engine.connect() as conn:
         # First try to get config-specific prompt
         result = conn.execute(text("""
-            SELECT system_prompt, user_prompt_template, version
+            SELECT system_prompt, user_prompt_template, strategy_directives, version
             FROM prompt_versions
             WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
             ORDER BY version DESC
@@ -112,7 +89,7 @@ def get_active_prompt(agent_type):
             if initialized:
                 # Try again to get the config-specific prompt
                 result = conn.execute(text("""
-                    SELECT system_prompt, user_prompt_template, version
+                    SELECT system_prompt, user_prompt_template, strategy_directives, version
                     FROM prompt_versions
                     WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
                     ORDER BY version DESC
@@ -126,7 +103,7 @@ def get_active_prompt(agent_type):
             
             # Final fallback to global v0 baseline
             result = conn.execute(text("""
-                SELECT system_prompt, user_prompt_template, version
+                SELECT system_prompt, user_prompt_template, strategy_directives, version
                 FROM prompt_versions
                 WHERE agent_type = :agent_type AND version = 0 AND (config_hash = 'global' OR config_hash IS NULL)
                 LIMIT 1
@@ -149,7 +126,7 @@ def get_active_prompt_emergency_patch(agent_type):
 
     def _fetch_prompt(conn):
         result = conn.execute(text("""
-            SELECT system_prompt, user_prompt_template, version
+            SELECT system_prompt, user_prompt_template, strategy_directives, version
             FROM prompt_versions
             WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
             ORDER BY version DESC LIMIT 1
@@ -158,6 +135,7 @@ def get_active_prompt_emergency_patch(agent_type):
             return {
                 "system_prompt": result.system_prompt,
                 "user_prompt_template": result.user_prompt_template,
+                "strategy_directives": getattr(result, "strategy_directives", None) or "",
                 "version": result.version
             }
         return None
@@ -166,7 +144,7 @@ def get_active_prompt_emergency_patch(agent_type):
         with engine.connect() as conn:
             prompt = _fetch_prompt(conn)
             if prompt:
-                return _apply_decider_overrides(agent_type, prompt)
+                return prompt
     except Exception as e:
         print(f"⚠️ prompt_versions lookup error: {e}")
 
@@ -175,7 +153,7 @@ def get_active_prompt_emergency_patch(agent_type):
             with engine.connect() as conn:
                 prompt = _fetch_prompt(conn)
                 if prompt:
-                    return _apply_decider_overrides(agent_type, prompt)
+                    return prompt
     except Exception as init_err:
         print(f"⚠️ Prompt initialization warning for {agent_type}: {init_err}")
 
@@ -184,6 +162,7 @@ def get_active_prompt_emergency_patch(agent_type):
         agent: {
             "system_prompt": payload["system_prompt"],
             "user_prompt_template": payload["user_prompt_template"],
+            "strategy_directives": payload.get("strategy_directives", "") or "",
             "version": 0,
         }
         for agent, payload in DEFAULT_PROMPTS.items()
@@ -191,9 +170,17 @@ def get_active_prompt_emergency_patch(agent_type):
 
     print(f"ℹ️ Using baseline prompt for {agent_type} (no active version found for config {config_hash})")
     prompt = baselines.get(agent_type, baselines["FeedbackAgent"])
-    return _apply_decider_overrides(agent_type, prompt)
+    return prompt
 
-def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system"):
+_FEEDBACK_ALIASES = {"feedback_analyzer", "FeedbackAgent"}
+
+def _feedback_agent_types(agent_type):
+    """Return all alias names that should be deactivated together for feedback agents."""
+    if agent_type in _FEEDBACK_ALIASES:
+        return list(_FEEDBACK_ALIASES)
+    return [agent_type]
+
+def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system", strategy_directives=None):
     """Create a new prompt version for the current config, reusing version numbers when possible"""
     from config import get_current_config_hash
     config_hash = get_current_config_hash()
@@ -222,12 +209,14 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             target_version = result.next_version
             print(f"📈 Creating new version v{target_version} for {agent_type}")
         
-        # Deactivate current prompts for this config
-        conn.execute(text("""
-            UPDATE prompt_versions
-            SET is_active = FALSE
-            WHERE agent_type = :agent_type AND config_hash = :config_hash
-        """), {"agent_type": agent_type, "config_hash": config_hash})
+        # Deactivate current prompts for this config (including aliases like feedback_analyzer/FeedbackAgent)
+        types_to_deactivate = _feedback_agent_types(agent_type)
+        for t in types_to_deactivate:
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
+            """), {"agent_type": t, "config_hash": config_hash})
         
         # Check if target version already exists - if so, update it; if not, insert it
         existing_version = conn.execute(text("""
@@ -241,6 +230,7 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
                 UPDATE prompt_versions
                 SET system_prompt = :system_prompt,
                     user_prompt_template = :user_prompt_template,
+                    strategy_directives = :strategy_directives,
                     description = :description,
                     created_by = :created_by,
                     is_active = TRUE,
@@ -249,6 +239,7 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             """), {
                 "system_prompt": system_prompt,
                 "user_prompt_template": user_prompt_template,
+                "strategy_directives": strategy_directives,
                 "description": description,
                 "created_by": created_by,
                 "id": existing_version.id
@@ -260,14 +251,15 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             # Insert new version
             result = conn.execute(text("""
                 INSERT INTO prompt_versions
-                (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
-                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :description, :created_by, TRUE, :config_hash)
+                (agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, created_by, is_active, config_hash)
+                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :strategy_directives, :description, :created_by, TRUE, :config_hash)
                 RETURNING id, version
             """), {
                 "agent_type": agent_type,
                 "version": target_version,
                 "system_prompt": system_prompt,
                 "user_prompt_template": user_prompt_template,
+                "strategy_directives": strategy_directives,
                 "description": description,
                 "created_by": created_by,
                 "config_hash": config_hash

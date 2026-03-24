@@ -60,6 +60,10 @@
           <h4>User Prompt Template Diff</h4>
           <div id="userDiff" class="pe-diff-view" role="region" aria-label="User prompt template diff"></div>
         </section>
+        <section class="pe-diff-block">
+          <h4>Strategy Directives Diff</h4>
+          <div id="strategyDiff" class="pe-diff-view" role="region" aria-label="Strategy directives diff"></div>
+        </section>
       </div>
     </div>
   </section>
@@ -96,6 +100,10 @@
         <div class="pe-field">
           <label for="generatedSystemPrompt">System Prompt</label>
           <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+        </div>
+        <div class="pe-field" style="grid-column: 1 / -1;">
+          <label for="generatedStrategyDirectives">Strategy Directives <span style="font-weight:normal;color:#888;">(evolves with feedback)</span></label>
+          <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Trading personality, sell thresholds, risk rules — this is what feedback evolves"></textarea>
         </div>
         <div class="pe-field">
           <label for="generatedUserPrompt">User Prompt Template</label>

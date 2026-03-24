@@ -112,6 +112,7 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
         user_prompt = (payload.get("user_prompt_template") or payload.get("user_prompt") or "").strip()
         system_prompt = (payload.get("system_prompt") or "").strip()
         description = (payload.get("description") or "v0 baseline prompt").strip()
+        strategy_directives = (payload.get("strategy_directives") or "").strip()
 
         if not user_prompt or not system_prompt:
             print(f"⚠️  Skipping malformed prompt payload for {agent_type}")
@@ -120,6 +121,7 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
         rows[agent_type] = {
             "user_prompt_template": user_prompt,
             "system_prompt": system_prompt,
+            "strategy_directives": strategy_directives,
             "description": description,
         }
 
@@ -133,7 +135,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
         existing = conn.execute(
             text(
                 """
-                SELECT id, system_prompt, user_prompt_template, description, is_active
+                SELECT id, system_prompt, user_prompt_template, strategy_directives, description, is_active
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND version = 0
@@ -153,6 +155,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                         version,
                         system_prompt,
                         user_prompt_template,
+                        strategy_directives,
                         description,
                         created_by,
                         is_active,
@@ -162,6 +165,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                         0,
                         :system_prompt,
                         :user_prompt_template,
+                        :strategy_directives,
                         :description,
                         'init_database',
                         TRUE,
@@ -173,6 +177,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                     "agent_type": agent_type,
                     "system_prompt": payload["system_prompt"],
                     "user_prompt_template": payload["user_prompt_template"],
+                    "strategy_directives": payload["strategy_directives"],
                     "description": payload["description"],
                     "config_hash": config_hash,
                 },
@@ -184,6 +189,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
         needs_update = (
             (existing.system_prompt or "") != payload["system_prompt"]
             or (existing.user_prompt_template or "") != payload["user_prompt_template"]
+            or (existing.strategy_directives or "") != payload["strategy_directives"]
             or (existing.description or "") != payload["description"]
             or not bool(existing.is_active)
         )
@@ -195,6 +201,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                     UPDATE prompt_versions
                     SET system_prompt = :system_prompt,
                         user_prompt_template = :user_prompt_template,
+                        strategy_directives = :strategy_directives,
                         description = :description,
                         created_by = 'init_database',
                         is_active = TRUE,
@@ -206,6 +213,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                     "id": existing.id,
                     "system_prompt": payload["system_prompt"],
                     "user_prompt_template": payload["user_prompt_template"],
+                    "strategy_directives": payload["strategy_directives"],
                     "description": payload["description"],
                 },
             )
@@ -675,6 +683,13 @@ def initialize_database() -> None:
             "prompt_versions",
             "created_at",
             "ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        )
+        ensure_column(
+            conn,
+            stats,
+            "prompt_versions",
+            "strategy_directives",
+            "ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS strategy_directives TEXT",
         )
 
         # Backfill legacy prompt_versions rows where config_hash was null.

@@ -27,7 +27,7 @@
   <div class="metric-card hero-card">
     <h3>
       {% if use_schwab_positions %}
-        Funds Available{% if not is_margin_account %} (Settled){% endif %}
+        Funds Available for Trading
       {% else %}
         Cash Balance
       {% endif %}
@@ -112,6 +112,18 @@
   <h2 class="section-title">📈 5-Day Price Trends</h2>
   <div class="sparkline-row" id="sparklineRow">
     <p style="color: var(--muted); font-size: 13px;">Loading sparklines...</p>
+  </div>
+</div>
+
+<div class="chart-controls">
+  <div class="chart-range-buttons">
+    <button class="chart-range-btn" data-range="7">1W</button>
+    <button class="chart-range-btn" data-range="30">1M</button>
+    <button class="chart-range-btn" data-range="90">3M</button>
+    <button class="chart-range-btn" data-range="180">6M</button>
+    <button class="chart-range-btn" data-range="ytd">YTD</button>
+    <button class="chart-range-btn active" data-range="all">ALL</button>
+    <button class="chart-range-btn chart-reset-btn" onclick="resetAllChartZoom()">🔍 Reset Zoom</button>
   </div>
 </div>
 
@@ -235,5 +247,7 @@
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0"></script>
 <script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

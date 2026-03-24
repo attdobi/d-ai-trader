@@ -150,6 +150,7 @@ async function loadDiff(agentType, firstVersion, secondVersion) {
   const diffMeta = document.getElementById('diffMeta');
   const systemDiff = document.getElementById('systemDiff');
   const userDiff = document.getElementById('userDiff');
+  const strategyDiff = document.getElementById('strategyDiff');
 
   const [versionA, versionB] = [Number(firstVersion), Number(secondVersion)].sort((a, b) => a - b);
 
@@ -157,16 +158,23 @@ async function loadDiff(agentType, firstVersion, secondVersion) {
   diffMeta.textContent = `Loading diff for ${AGENT_LABELS[agentType]} v${versionA} → v${versionB}...`;
   systemDiff.innerHTML = '';
   userDiff.innerHTML = '';
+  if (strategyDiff) strategyDiff.innerHTML = '';
 
   try {
     const data = await apiJSON(`/api/prompt-evolution/diff/${encodeURIComponent(agentType)}/${versionA}/${versionB}`);
     diffMeta.textContent = `Comparing ${AGENT_LABELS[agentType]} versions v${data.version_a} → v${data.version_b}`;
     renderDiff(data.system_prompt_diff, systemDiff);
     renderDiff(data.user_prompt_diff, userDiff);
+    if (strategyDiff) {
+      renderDiff(data.strategy_directives_diff || [], strategyDiff);
+    }
   } catch (error) {
     diffMeta.textContent = `Failed to load diff: ${error.message}`;
     renderDiff([], systemDiff);
     renderDiff([], userDiff);
+    if (strategyDiff) {
+      renderDiff([], strategyDiff);
+    }
   }
 }
 
@@ -239,6 +247,13 @@ function renderTimeline(agentType, entries) {
 
     button.appendChild(top);
     button.appendChild(description);
+
+    if (entry.strategy_directives_preview) {
+      const strategyPreview = document.createElement('p');
+      strategyPreview.className = 'pe-description';
+      strategyPreview.textContent = `Strategy: ${entry.strategy_directives_preview}`;
+      button.appendChild(strategyPreview);
+    }
 
     if (entry.is_active) {
       const active = document.createElement('span');
@@ -313,6 +328,7 @@ function setupPromptLab() {
   const systemPromptEl = document.getElementById('generatedSystemPrompt');
   const userPromptEl = document.getElementById('generatedUserPrompt');
   const descriptionEl = document.getElementById('promptDescription');
+  const strategyDirectivesEl = document.getElementById('generatedStrategyDirectives');
 
   if (!agentSelect || !generateBtn || !applyBtn) return;
 
@@ -334,6 +350,9 @@ function setupPromptLab() {
       reasoningEl.textContent = data.reasoning || 'No reasoning returned by API.';
       systemPromptEl.value = data.system_prompt || '';
       userPromptEl.value = data.user_prompt_template || '';
+      if (strategyDirectivesEl) {
+        strategyDirectivesEl.value = data.strategy_directives || '';
+      }
       descriptionEl.value = `Refined ${AGENT_LABELS[agentType]} prompt (${new Date().toLocaleString()})`;
 
       setHidden(resultsEl, false);
@@ -351,6 +370,7 @@ function setupPromptLab() {
     const agentType = agentSelect.value;
     const systemPrompt = systemPromptEl.value.trim();
     const userPromptTemplate = userPromptEl.value.trim();
+    const strategyDirectives = strategyDirectivesEl ? strategyDirectivesEl.value.trim() : '';
     const description = descriptionEl.value.trim();
 
     clearPromptLabAlerts();
@@ -375,6 +395,7 @@ function setupPromptLab() {
         agent_type: agentType,
         system_prompt: systemPrompt,
         user_prompt_template: userPromptTemplate,
+        strategy_directives: strategyDirectives,
         description
       };
       const data = await apiJSON('/api/prompt-evolution/apply', {
