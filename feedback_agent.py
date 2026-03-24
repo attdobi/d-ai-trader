@@ -27,6 +27,13 @@ FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
 prompt_manager = PromptManager(client=openai, session=session)
 
 
+def _canonical_agent_type(agent_type):
+    """Normalize legacy agent names to canonical prompt_versions keys."""
+    if agent_type == "feedback_analyzer":
+        return "FeedbackAgent"
+    return agent_type
+
+
 def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label: str, base_max_tokens: int, enable_reasoning: bool = True) -> dict:
     """Assemble OpenAI parameters with reasoning defaults for feedback flows."""
     model_name = GPT_MODEL
@@ -136,7 +143,7 @@ class TradeOutcomeTracker:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS ai_agent_feedback_responses (
                     id SERIAL PRIMARY KEY,
-                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer', 'FeedbackAgent')),
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user_prompt TEXT NOT NULL,
                     system_prompt TEXT NOT NULL,
@@ -152,7 +159,7 @@ class TradeOutcomeTracker:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS ai_agent_prompts (
                     id SERIAL PRIMARY KEY,
-                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer')),
+                    agent_type TEXT NOT NULL CHECK (agent_type IN ('summarizer', 'decider', 'feedback_analyzer', 'FeedbackAgent')),
                     prompt_version INTEGER NOT NULL,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     user_prompt TEXT NOT NULL,
@@ -628,6 +635,8 @@ class TradeOutcomeTracker:
                     config_hash
                 )
                 print(f"✅ Updated SummarizerAgent strategy_directives for config {config_hash}")
+                # Update summarizer memory with feedback lessons
+                self._update_agent_memory("SummarizerAgent", snippet, config_hash)
 
             if decider_feedback:
                 snippet = self._extract_feedback_snippet(decider_feedback)
@@ -639,6 +648,8 @@ class TradeOutcomeTracker:
                     config_hash
                 )
                 print(f"✅ Updated DeciderAgent strategy_directives for config {config_hash}")
+                # Update decider memory with feedback lessons
+                self._update_agent_memory("DeciderAgent", snippet, config_hash)
                 
         except Exception as e:
             print(f"❌ Error generating prompts for config {config_hash}: {e}")
@@ -688,6 +699,103 @@ class TradeOutcomeTracker:
             print(f"❌ Error updating strategy_directives for {agent_type}: {e}")
             import traceback
             traceback.print_exc()
+
+    def _update_agent_memory(self, agent_type, new_lessons, config_hash):
+        """Append new lessons to an agent's memory, compressing if over limit."""
+        MAX_MEMORY_CHARS = 4000
+
+        try:
+            import os
+            original_hash = os.environ.get('CURRENT_CONFIG_HASH')
+            os.environ['CURRENT_CONFIG_HASH'] = config_hash
+
+            try:
+                from prompt_manager import get_active_prompt
+                prompt_data = get_active_prompt(agent_type)
+                current_memory = prompt_data.get("memory", "")
+
+                # Append new lessons
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y-%m-%d")
+                updated_memory = f"{current_memory}\n\n## {timestamp}\n{new_lessons}".strip()
+
+                # If over limit, compress
+                if len(updated_memory) > MAX_MEMORY_CHARS:
+                    updated_memory = self._compress_memory(updated_memory, MAX_MEMORY_CHARS)
+
+                # Save updated memory
+                self._update_memory_field(agent_type, updated_memory, config_hash)
+                print(f"🧠 Updated {agent_type} memory for config {config_hash[:8]}")
+            finally:
+                if original_hash is not None:
+                    os.environ['CURRENT_CONFIG_HASH'] = original_hash
+                elif 'CURRENT_CONFIG_HASH' in os.environ:
+                    del os.environ['CURRENT_CONFIG_HASH']
+        except Exception as e:
+            print(f"⚠️ Failed to update {agent_type} memory: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _compress_memory(self, memory_text, max_chars):
+        """Keep header + most recent entries that fit within limit."""
+        lines = memory_text.split("\n")
+
+        # Find sections (## headers)
+        sections = []
+        current_section = []
+        for line in lines:
+            if line.startswith("## ") and current_section:
+                sections.append("\n".join(current_section))
+                current_section = [line]
+            else:
+                current_section.append(line)
+        if current_section:
+            sections.append("\n".join(current_section))
+
+        if len(sections) <= 1:
+            return memory_text[:max_chars]
+
+        # Keep header (first section) and most recent sections
+        header = sections[0]
+        remaining = sections[1:]
+
+        # Take most recent sections that fit
+        kept = []
+        budget = max_chars - len(header) - 100  # Reserve space for compression note
+        archived_count = 0
+
+        for section in reversed(remaining):
+            if budget - len(section) > 0:
+                kept.insert(0, section)
+                budget -= len(section) + 2  # +2 for newlines
+            else:
+                archived_count += 1
+
+        result = header
+        if archived_count > 0:
+            result += f"\n\n*(Earlier lessons compressed — {archived_count} entries archived)*"
+        for section in kept:
+            result += "\n\n" + section
+
+        return result.strip()
+
+    def _update_memory_field(self, agent_type, memory_text, config_hash):
+        """Update only the memory column for the active prompt version."""
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    UPDATE prompt_versions
+                    SET memory = :memory
+                    WHERE agent_type = :agent_type
+                      AND config_hash = :config_hash
+                      AND is_active = TRUE
+                """), {
+                    "memory": memory_text,
+                    "agent_type": agent_type,
+                    "config_hash": config_hash,
+                })
+        except Exception as e:
+            print(f"⚠️ Failed to update memory field for {agent_type}: {e}")
 
     def _create_new_prompt_version_for_config(self, agent_type, user_prompt, system_prompt, description, config_hash):
         """Create a new prompt version for a specific config hash"""
@@ -791,7 +899,18 @@ Return ONLY valid JSON in this EXACT format:
 
         FEEDBACK_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent providing system-wide performance analysis. You are a trading performance analyst providing feedback to improve AI trading agents. Your analysis should be data-driven, specific, and actionable.'''
 
-        system_prompt = f'''{FEEDBACK_SYSTEM_BASE}
+        # Inject feedback agent soul if available
+        feedback_soul = ""
+        try:
+            from prompt_manager import get_active_prompt
+            feedback_prompt_data = get_active_prompt("FeedbackAgent")
+            feedback_soul = feedback_prompt_data.get("soul", "")
+        except Exception:
+            pass
+        
+        feedback_soul_section = f"\n\n## AGENT IDENTITY\n{feedback_soul}" if feedback_soul else ""
+
+        system_prompt = f'''{FEEDBACK_SYSTEM_BASE}{feedback_soul_section}
 
 CRITICAL INSTRUCTIONS:
 1. Create COMPREHENSIVE feedback that preserves important historical lessons
@@ -885,7 +1004,8 @@ CRITICAL INSTRUCTIONS:
     
     def generate_ai_feedback_response(self, agent_type, context_data=None, performance_metrics=None, is_manual_request=False):
         """Generate AI feedback response for a specific agent and store it"""
-        
+        agent_type = _canonical_agent_type(agent_type)
+
         # Try to get active prompt from database first
         active_prompt = self.get_active_prompt(agent_type)
         
@@ -939,7 +1059,7 @@ Focus on actionable improvements that can be incorporated into the decider's tra
                 system_prompt = """You are an expert trading strategist providing feedback to improve AI trading decisions. 
 Your analysis should be data-driven, specific, and actionable. Focus on patterns that can help the decider agent make better decisions."""
                 
-            elif agent_type == "feedback_analyzer":
+            elif agent_type == "FeedbackAgent":
                 # FIXED TEMPLATE COMPONENTS (never change)
                 FEEDBACK_BASE_INSTRUCTIONS = '''You are a trading performance analyst. Review the current trading system performance and provide comprehensive feedback for system improvement.
 
@@ -1104,6 +1224,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def get_active_prompt(self, agent_type):
         """Get the currently active prompt for an agent type"""
+        agent_type = _canonical_agent_type(agent_type)
+
         # Import here to avoid circular imports
         from config import should_use_specific_prompt_version, get_prompt_version_config
         
@@ -1167,7 +1289,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         agent_type_mapping = {
             'summarizer': 'SummarizerAgent',
             'decider': 'DeciderAgent',
-            'feedback_analyzer': 'FeedbackAgent'
+            'feedback_analyzer': 'FeedbackAgent',
+            'FeedbackAgent': 'FeedbackAgent'
         }
         
         mapped_agent_type = agent_type_mapping.get(agent_type, agent_type)
@@ -1195,6 +1318,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
     
     def get_prompt_history(self, agent_type, limit=10):
         """Get prompt history for an agent type and current config"""
+        agent_type = _canonical_agent_type(agent_type)
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
         

@@ -57,6 +57,51 @@ The launcher auto-creates a virtualenv and installs dependencies on first run.
 
 ---
 
+## 🧠 Agent Soul & Memory
+
+Each trading agent has a persistent **Soul** (identity/philosophy) and **Memory** (learned lessons).
+
+### File Structure
+
+```
+agents/
+├── decider/
+│   ├── SOUL.md      # Trading philosophy, risk rules, decision style
+│   └── MEMORY.md    # Lessons learned from trading experience
+├── summarizer/
+│   ├── SOUL.md      # Extraction philosophy, signal priorities
+│   └── MEMORY.md    # Source quality notes, extraction patterns
+└── feedback/
+    └── SOUL.md      # Review philosophy, feedback style
+```
+
+### How It Works
+
+- **Soul** defines *who the agent is* — personality, philosophy, decision-making style. Loaded from `agents/<name>/SOUL.md` as defaults, stored in DB, editable in Prompt Lab.
+- **Memory** captures *what the agent has learned* — patterns, mistakes, lessons. Auto-updated by the feedback agent after each analysis cycle.
+- Both are injected into the system prompt at runtime:
+  - `## AGENT IDENTITY` — soul content
+  - `## STRATEGY DIRECTIVES` — evolving strategy
+  - `## LESSONS FROM EXPERIENCE` — memory content
+
+### Editing
+
+- **Prompt Lab UI**: Edit soul and memory directly in the dashboard
+- **File override**: Set `DAI_SOUL_FILE_OVERRIDE=1` to load from `agents/` files instead of DB
+- **Database**: Soul and memory are stored in the `prompt_versions` table (`soul` and `memory` columns)
+
+### Memory Management
+
+- Memory auto-grows as the feedback agent adds lessons after each cycle
+- Compressed when exceeding ~4000 chars (~1000 tokens): oldest entries archived, most recent kept
+- Append-only with automatic compression — no data loss, just summarization
+
+### Backwards Compatibility
+
+Empty soul/memory fields are fully backwards compatible — agents behave exactly as before until content is added.
+
+---
+
 ## Architecture
 
 ```

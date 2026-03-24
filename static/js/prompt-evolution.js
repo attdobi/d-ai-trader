@@ -255,6 +255,20 @@ function renderTimeline(agentType, entries) {
       button.appendChild(strategyPreview);
     }
 
+    if (entry.soul_preview) {
+      const soulPreview = document.createElement('p');
+      soulPreview.className = 'pe-description';
+      soulPreview.textContent = `Soul: ${entry.soul_preview}`;
+      button.appendChild(soulPreview);
+    }
+
+    if (entry.memory_preview) {
+      const memoryPreview = document.createElement('p');
+      memoryPreview.className = 'pe-description';
+      memoryPreview.textContent = `Memory: ${entry.memory_preview}`;
+      button.appendChild(memoryPreview);
+    }
+
     if (entry.is_active) {
       const active = document.createElement('span');
       active.className = 'pe-active';
@@ -329,13 +343,56 @@ function setupPromptLab() {
   const userPromptEl = document.getElementById('generatedUserPrompt');
   const descriptionEl = document.getElementById('promptDescription');
   const strategyDirectivesEl = document.getElementById('generatedStrategyDirectives');
+  const soulEl = document.getElementById('generatedSoul');
+  const memoryEl = document.getElementById('generatedMemory');
+
+  const loadActiveBtn = document.getElementById('loadActiveBtn');
 
   if (!agentSelect || !generateBtn || !applyBtn) return;
 
+  // Load active version into editing area
+  if (loadActiveBtn) {
+    loadActiveBtn.addEventListener('click', async () => {
+      const agentType = agentSelect.value;
+      clearPromptLabAlerts();
+      setPromptLabMessage('Loading active version...');
+      const originalLabel = loadActiveBtn.textContent;
+      loadActiveBtn.disabled = true;
+      loadActiveBtn.textContent = 'Loading...';
+
+      try {
+        const data = await apiJSON(`/api/prompts/${encodeURIComponent(agentType)}/active`);
+        if (!data || data.error) throw new Error(data?.error || 'No active prompt found');
+
+        reasoningEl.textContent = `Loaded active v${data.version ?? '?'} for ${AGENT_LABELS[agentType]}. Edit any field and apply as a new version.`;
+        systemPromptEl.value = data.system_prompt || '';
+        userPromptEl.value = data.user_prompt_template || '';
+        if (strategyDirectivesEl) strategyDirectivesEl.value = data.strategy_directives || '';
+        if (soulEl) soulEl.value = data.soul || '';
+        if (memoryEl) memoryEl.value = data.memory || '';
+        descriptionEl.value = '';
+
+        setHidden(resultsEl, false);
+        setPromptLabMessage(`Active v${data.version ?? '?'} loaded. Edit and apply to create a new version.`);
+      } catch (error) {
+        showPromptLabError(`Failed to load active version: ${error.message}`);
+        setPromptLabMessage('');
+      } finally {
+        loadActiveBtn.disabled = false;
+        loadActiveBtn.textContent = originalLabel;
+      }
+    });
+  }
+
   generateBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
+    const generateSoul = true;
+    const generateMemory = true;
     clearPromptLabAlerts();
-    setPromptLabMessage('Generating prompt candidate...');
+    const genParts = ['prompt'];
+    if (generateSoul) genParts.push('soul');
+    if (generateMemory) genParts.push('memory');
+    setPromptLabMessage(`Generating ${genParts.join(' + ')}...`);
 
     const originalLabel = generateBtn.textContent;
     generateBtn.disabled = true;
@@ -344,7 +401,7 @@ function setupPromptLab() {
     try {
       const data = await apiJSON('/api/prompt-evolution/generate', {
         method: 'POST',
-        body: JSON.stringify({ agent_type: agentType })
+        body: JSON.stringify({ agent_type: agentType, generate_soul: generateSoul, generate_memory: generateMemory })
       });
 
       reasoningEl.textContent = data.reasoning || 'No reasoning returned by API.';
@@ -352,6 +409,12 @@ function setupPromptLab() {
       userPromptEl.value = data.user_prompt_template || '';
       if (strategyDirectivesEl) {
         strategyDirectivesEl.value = data.strategy_directives || '';
+      }
+      if (soulEl) {
+        soulEl.value = data.soul || '';
+      }
+      if (memoryEl) {
+        memoryEl.value = data.memory || '';
       }
       descriptionEl.value = `Refined ${AGENT_LABELS[agentType]} prompt (${new Date().toLocaleString()})`;
 
@@ -371,6 +434,8 @@ function setupPromptLab() {
     const systemPrompt = systemPromptEl.value.trim();
     const userPromptTemplate = userPromptEl.value.trim();
     const strategyDirectives = strategyDirectivesEl ? strategyDirectivesEl.value.trim() : '';
+    const soul = soulEl ? soulEl.value.trim() : '';
+    const memory = memoryEl ? memoryEl.value.trim() : '';
     const description = descriptionEl.value.trim();
 
     clearPromptLabAlerts();
@@ -396,6 +461,8 @@ function setupPromptLab() {
         system_prompt: systemPrompt,
         user_prompt_template: userPromptTemplate,
         strategy_directives: strategyDirectives,
+        soul: soul,
+        memory: memory,
         description
       };
       const data = await apiJSON('/api/prompt-evolution/apply', {
@@ -454,6 +521,16 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPerformanceContext();
   loadPromptHistory();
   setupPromptLab();
+
+  // Auto-load active version on page load and when agent changes
+  const loadActiveBtn = document.getElementById('loadActiveBtn');
+  if (loadActiveBtn) {
+    setTimeout(() => loadActiveBtn.click(), 500);
+    const agentSelect = document.getElementById('promptLabAgentType');
+    if (agentSelect) {
+      agentSelect.addEventListener('change', () => loadActiveBtn.click());
+    }
+  }
 
   // Auto-refresh performance context every 5 minutes
   setInterval(loadPerformanceContext, 5 * 60 * 1000);

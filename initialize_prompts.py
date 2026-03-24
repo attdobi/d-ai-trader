@@ -3,6 +3,17 @@
 Script to initialize default prompts in the database
 """
 
+from pathlib import Path
+
+
+def _load_agent_file(agent_name, filename, default=""):
+    """Load a .md file from agents/<agent_name>/<filename>"""
+    path = Path(__file__).parent / "agents" / agent_name / filename
+    if path.exists():
+        return path.read_text().strip()
+    return default
+
+
 DEFAULT_PROMPTS = {
     "SummarizerAgent": {
         "user_prompt_template": (
@@ -54,6 +65,8 @@ r"""GUIDELINES
 - Stop after the JSON object; no markdown or prose outside it."""
         ),
         "description": "SummarizerAgent — aggressive, image-first narrative (~200 words) with ticker-centric headlines and a final Watchlist, same JSON shape",
+        "soul": _load_agent_file("summarizer", "SOUL.md"),
+        "memory": _load_agent_file("summarizer", "MEMORY.md"),
     },
 
     "DeciderAgent": {
@@ -188,7 +201,9 @@ REMINDERS
   • Prefer SELLING +3–5% winners to free capital, then rotating into only the top contrarian setups.
   • Explicitly mention crowd behavior you’re fading in each reason.
 - Do NOT output anything except the JSON object described above.""",
-        "description": "DeciderAgent — profit-harvesting first, rotation second; enforces contrarian crowd-fade behavior and compact JSON output."
+        "description": "DeciderAgent — profit-harvesting first, rotation second; enforces contrarian crowd-fade behavior and compact JSON output.",
+        "soul": _load_agent_file("decider", "SOUL.md"),
+        "memory": _load_agent_file("decider", "MEMORY.md"),
     },
     "CompanyExtractionAgent": {
         "user_prompt_template": (
@@ -210,8 +225,10 @@ No explanation, no markdown, just JSON."""
         ),
         "strategy_directives": "",
         "description": "Extracts companies (rolled up to parent) and ticker symbols from summarizer output",
+        "soul": "",
+        "memory": "",
     },
-    "feedback_analyzer": {
+    "FeedbackAgent": {
         "user_prompt_template": (
 r"""You are the end-of-day Feedback Agent in a four-stage trading system.
 
@@ -259,11 +276,13 @@ DeciderFeedbackSnippet:   "≤220-char actionable rule for Decider"
         ),
         "strategy_directives": "Keep total length ~250–300 words; avoid fluff or narrative.\nDo not offer legal/tax advice; stay operational.",
         "description": "feedback_analyzer — concise, rule-driven EOD reviewer (~300 words) producing two deterministic snippet lines.",
+        "soul": _load_agent_file("feedback", "SOUL.md"),
+        "memory": "",
     },
 }
 
-# Provide alias matching dashboard expectations
-DEFAULT_PROMPTS["FeedbackAgent"] = DEFAULT_PROMPTS["feedback_analyzer"]
+# Legacy alias — keep for any code that still references the old name
+DEFAULT_PROMPTS["feedback_analyzer"] = DEFAULT_PROMPTS["FeedbackAgent"]
 
 
 def initialize_default_prompts():
@@ -277,7 +296,8 @@ def initialize_default_prompts():
     
     # Save default prompts for each agent type
     for agent_type, prompt_data in default_prompts.items():
-        if agent_type == "FeedbackAgent":
+        # Legacy alias points at the same payload; seed canonical key only.
+        if agent_type == "feedback_analyzer":
             continue
         try:
             # Use correct field names based on the prompt data structure
