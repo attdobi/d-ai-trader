@@ -255,6 +255,20 @@ function renderTimeline(agentType, entries) {
       button.appendChild(strategyPreview);
     }
 
+    if (entry.soul_preview) {
+      const soulPreview = document.createElement('p');
+      soulPreview.className = 'pe-description';
+      soulPreview.textContent = `Soul: ${entry.soul_preview}`;
+      button.appendChild(soulPreview);
+    }
+
+    if (entry.memory_preview) {
+      const memoryPreview = document.createElement('p');
+      memoryPreview.className = 'pe-description';
+      memoryPreview.textContent = `Memory: ${entry.memory_preview}`;
+      button.appendChild(memoryPreview);
+    }
+
     if (entry.is_active) {
       const active = document.createElement('span');
       active.className = 'pe-active';
@@ -329,6 +343,8 @@ function setupPromptLab() {
   const userPromptEl = document.getElementById('generatedUserPrompt');
   const descriptionEl = document.getElementById('promptDescription');
   const strategyDirectivesEl = document.getElementById('generatedStrategyDirectives');
+  const soulEl = document.getElementById('generatedSoul');
+  const memoryEl = document.getElementById('generatedMemory');
 
   if (!agentSelect || !generateBtn || !applyBtn) return;
 
@@ -353,6 +369,12 @@ function setupPromptLab() {
       if (strategyDirectivesEl) {
         strategyDirectivesEl.value = data.strategy_directives || '';
       }
+      if (soulEl) {
+        soulEl.value = data.soul || '';
+      }
+      if (memoryEl) {
+        memoryEl.value = data.memory || '';
+      }
       descriptionEl.value = `Refined ${AGENT_LABELS[agentType]} prompt (${new Date().toLocaleString()})`;
 
       setHidden(resultsEl, false);
@@ -371,6 +393,8 @@ function setupPromptLab() {
     const systemPrompt = systemPromptEl.value.trim();
     const userPromptTemplate = userPromptEl.value.trim();
     const strategyDirectives = strategyDirectivesEl ? strategyDirectivesEl.value.trim() : '';
+    const soul = soulEl ? soulEl.value.trim() : '';
+    const memory = memoryEl ? memoryEl.value.trim() : '';
     const description = descriptionEl.value.trim();
 
     clearPromptLabAlerts();
@@ -396,6 +420,8 @@ function setupPromptLab() {
         system_prompt: systemPrompt,
         user_prompt_template: userPromptTemplate,
         strategy_directives: strategyDirectives,
+        soul: soul,
+        memory: memory,
         description
       };
       const data = await apiJSON('/api/prompt-evolution/apply', {

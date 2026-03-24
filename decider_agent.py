@@ -1985,6 +1985,11 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
 
+        # Inject soul (agent identity)
+        soul = prompt_data.get("soul", "")
+        if soul:
+            system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{soul}"
+
         # Inject strategy directives into structural template
         strategy = prompt_data.get("strategy_directives", "")
         if strategy and "{strategy_directives}" in system_prompt:
@@ -1992,6 +1997,11 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
         elif strategy and "{strategy_directives}" not in system_prompt:
             # Legacy prompt without placeholder — append strategy
             system_prompt = system_prompt + "\n\n" + strategy
+
+        # Inject memory (lessons from experience)
+        memory = prompt_data.get("memory", "")
+        if memory:
+            system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{memory}"
 
         print(f"🔧 Using DeciderAgent prompt v{prompt_version} (UNIFIED)")
         

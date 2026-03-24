@@ -119,6 +119,8 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
     system_prompt = prompt_payload.get("system_prompt")
     user_prompt = prompt_payload.get("user_prompt_template") or prompt_payload.get("user_prompt")
     strategy_directives = prompt_payload.get("strategy_directives", "")
+    soul = prompt_payload.get("soul", "")
+    memory = prompt_payload.get("memory", "")
     description = prompt_payload.get("description")
 
     if not system_prompt or not user_prompt:
@@ -142,6 +144,10 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
         }
         if ":strategy_directives" in insert_sql:
             values["strategy_directives"] = strategy_directives
+        if ":soul" in insert_sql:
+            values["soul"] = soul
+        if ":memory" in insert_sql:
+            values["memory"] = memory
         conn.execute(text(insert_sql), values)
 
     # Base table
@@ -162,9 +168,9 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
 
     _insert_row("prompt_versions", """
         INSERT INTO prompt_versions
-            (agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, created_by, is_active, config_hash)
+            (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
         VALUES
-            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :description, 'prompt_reset', TRUE, :config_hash)
+            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :soul, :memory, :description, 'prompt_reset', TRUE, :config_hash)
     """)
 
     def _table_exists(table_name):
@@ -1719,6 +1725,8 @@ def get_prompts(agent_type):
                     "user_prompt": current_prompt["user_prompt_template"],
                     "system_prompt": current_prompt["system_prompt"],
                     "strategy_directives": current_prompt.get("strategy_directives", ""),
+                    "soul": current_prompt.get("soul", ""),
+                    "memory": current_prompt.get("memory", ""),
                     "description": f"Current active prompt v{current_prompt['version']} for config {config_hash[:8]}",
                     "is_active": True,
                     "created_by": "emergency_patch"
@@ -1754,7 +1762,9 @@ def get_active_prompt(agent_type):
                 "strategy_directives": prompt.get("strategy_directives", ""),
                 "prompt_version": prompt["version"],
                 "version": prompt["version"],
-                "description": f"Active prompt v{prompt['version']}"
+                "description": f"Active prompt v{prompt['version']}",
+                "soul": prompt.get("soul", ""),
+                "memory": prompt.get("memory", ""),
             }
             return jsonify(formatted_prompt)
         else:
@@ -1773,6 +1783,8 @@ def save_prompt(agent_type):
         user_prompt = data.get('user_prompt')
         system_prompt = data.get('system_prompt')
         strategy_directives = data.get('strategy_directives', '')
+        soul = data.get('soul', '')
+        memory = data.get('memory', '')
         description = data.get('description', '')
         created_by = data.get('created_by', 'system')
         
@@ -1786,12 +1798,19 @@ def save_prompt(agent_type):
             'description': description,
             'created_by': created_by,
             'strategy_directives': strategy_directives,
+            'soul': soul,
+            'memory': memory,
         }
         try:
             version = feedback_tracker.save_prompt_version(**save_kwargs)
         except TypeError:
-            save_kwargs.pop('strategy_directives', None)
-            version = feedback_tracker.save_prompt_version(**save_kwargs)
+            save_kwargs.pop('soul', None)
+            save_kwargs.pop('memory', None)
+            try:
+                version = feedback_tracker.save_prompt_version(**save_kwargs)
+            except TypeError:
+                save_kwargs.pop('strategy_directives', None)
+                version = feedback_tracker.save_prompt_version(**save_kwargs)
         
         return jsonify({
             'success': True,
@@ -2680,7 +2699,7 @@ def get_prompt_evolution_history():
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, is_active, created_at
+                SELECT agent_type, version, system_prompt, user_prompt_template, strategy_directives, description, is_active, created_at, soul, memory
                 FROM prompt_versions
                 WHERE config_hash = :config_hash
                 ORDER BY agent_type ASC, version DESC
@@ -2696,6 +2715,8 @@ def get_prompt_evolution_history():
                 'system_prompt_preview': (row.system_prompt or '')[:200],
                 'user_prompt_template_preview': (row.user_prompt_template or '')[:200],
                 'strategy_directives_preview': (row.strategy_directives or '')[:200],
+                'soul_preview': (row.soul or '')[:200],
+                'memory_preview': (row.memory or '')[:200],
             })
 
         return jsonify(history)
@@ -2709,7 +2730,7 @@ def get_prompt_evolution_diff(agent_type, version_a, version_b):
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT version, system_prompt, user_prompt_template, strategy_directives
+                SELECT version, system_prompt, user_prompt_template, strategy_directives, soul, memory
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND config_hash = :config_hash
@@ -2752,10 +2773,28 @@ def get_prompt_evolution_diff(agent_type, version_a, version_b):
             lineterm=''
         ))
 
+        soul_diff = list(difflib.unified_diff(
+            (row_a.soul or '').splitlines(),
+            (row_b.soul or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_soul',
+            tofile=f'{agent_type}_v{version_b}_soul',
+            lineterm=''
+        ))
+
+        memory_diff = list(difflib.unified_diff(
+            (row_a.memory or '').splitlines(),
+            (row_b.memory or '').splitlines(),
+            fromfile=f'{agent_type}_v{version_a}_memory',
+            tofile=f'{agent_type}_v{version_b}_memory',
+            lineterm=''
+        ))
+
         return jsonify({
             'system_prompt_diff': system_prompt_diff,
             'user_prompt_diff': user_prompt_diff,
             'strategy_directives_diff': strategy_directives_diff,
+            'soul_diff': soul_diff,
+            'memory_diff': memory_diff,
             'version_a': version_a,
             'version_b': version_b,
         })
@@ -2785,7 +2824,7 @@ def generate_prompt_evolution_candidate():
 
         with engine.connect() as conn:
             current_prompt = conn.execute(text("""
-                SELECT version, system_prompt, user_prompt_template, strategy_directives, description
+                SELECT version, system_prompt, user_prompt_template, strategy_directives, description, soul, memory
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND config_hash = :config_hash
@@ -2812,6 +2851,8 @@ def generate_prompt_evolution_candidate():
                 'system_prompt': current_prompt.system_prompt,
                 'user_prompt_template': current_prompt.user_prompt_template,
                 'strategy_directives': current_prompt.strategy_directives,
+                'soul': current_prompt.soul or '',
+                'memory': current_prompt.memory or '',
             },
             'performance_stats': stats,
             'recent_headlines': headlines,
@@ -2836,7 +2877,8 @@ def generate_prompt_evolution_candidate():
                         'Given the current prompt and performance context, produce improved prompts. '
                         'The system_prompt is the structural template (JSON format, placeholders). '
                         'The strategy_directives contain trading rules and personality that feedback evolves. '
-                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, reasoning.'
+                        'Soul defines persistent agent identity, and memory captures lessons learned over time. '
+                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.'
                     ),
                 },
                 {
@@ -2859,6 +2901,8 @@ def generate_prompt_evolution_candidate():
         user_prompt_template = (parsed.get('user_prompt_template') or '').strip()
         strategy_directives = (parsed.get('strategy_directives') or '').strip()
         reasoning = (parsed.get('reasoning') or '').strip()
+        soul_out = (current_prompt.soul or '').strip()
+        memory_out = (current_prompt.memory or '').strip()
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
@@ -2868,6 +2912,8 @@ def generate_prompt_evolution_candidate():
             'user_prompt_template': user_prompt_template,
             'strategy_directives': strategy_directives,
             'reasoning': reasoning,
+            'soul': soul_out,
+            'memory': memory_out,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2883,6 +2929,8 @@ def apply_prompt_evolution_candidate():
         user_prompt_template = (data.get('user_prompt_template') or '').strip()
         strategy_directives = (data.get('strategy_directives') or '').strip()
         description = (data.get('description') or '').strip()
+        soul = (data.get('soul') or '').strip()
+        memory = (data.get('memory') or '').strip()
 
         if not agent_type:
             return jsonify({'error': 'agent_type is required'}), 400
@@ -2929,7 +2977,9 @@ def apply_prompt_evolution_candidate():
                     description,
                     created_by,
                     is_active,
-                    config_hash
+                    config_hash,
+                    soul,
+                    memory
                 ) VALUES (
                     :agent_type,
                     :version,
@@ -2939,7 +2989,9 @@ def apply_prompt_evolution_candidate():
                     :description,
                     :created_by,
                     TRUE,
-                    :config_hash
+                    :config_hash,
+                    :soul,
+                    :memory
                 )
             """), {
                 'agent_type': agent_type,
@@ -2950,6 +3002,8 @@ def apply_prompt_evolution_candidate():
                 'description': description,
                 'created_by': 'prompt_lab',
                 'config_hash': config_hash,
+                'soul': soul,
+                'memory': memory,
             })
 
         return jsonify({'success': True, 'version': new_version})

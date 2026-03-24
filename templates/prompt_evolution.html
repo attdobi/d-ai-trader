@@ -105,6 +105,14 @@
           <label for="generatedStrategyDirectives">Strategy Directives <span style="font-weight:normal;color:#888;">(evolves with feedback)</span></label>
           <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Trading personality, sell thresholds, risk rules — this is what feedback evolves"></textarea>
         </div>
+        <div class="pe-field" style="grid-column: 1 / -1;">
+          <label for="generatedSoul">Agent Soul <span style="font-weight:normal;color:#888;">(persistent identity — who this agent is)</span></label>
+          <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent personality, philosophy, decision style — loaded from agents/<name>/SOUL.md by default"></textarea>
+        </div>
+        <div class="pe-field" style="grid-column: 1 / -1;">
+          <label for="generatedMemory">Agent Memory <span style="font-weight:normal;color:#888;">(auto-updated by feedback agent)</span></label>
+          <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Lessons learned, patterns, mistakes — automatically updated after each analysis cycle"></textarea>
+        </div>
         <div class="pe-field">
           <label for="generatedUserPrompt">User Prompt Template</label>
           <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>

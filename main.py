@@ -298,12 +298,22 @@ def get_openai_summary(agent_name, html_content, image_paths):
         user_prompt_template = prompt_data["user_prompt_template"]
         prompt_version = prompt_data["version"]
 
+        # Inject soul (agent identity)
+        soul = prompt_data.get("soul", "")
+        if soul:
+            system_prompt_template = f"{system_prompt_template}\n\n## AGENT IDENTITY\n{soul}"
+
         # Inject strategy directives
         strategy = prompt_data.get("strategy_directives", "")
         if strategy and "{strategy_directives}" in system_prompt_template:
             system_prompt_template = system_prompt_template.replace("{strategy_directives}", strategy)
         elif strategy and "{strategy_directives}" not in system_prompt_template:
             system_prompt_template = system_prompt_template + "\n\n" + strategy
+
+        # Inject memory (lessons from experience)
+        memory = prompt_data.get("memory", "")
+        if memory:
+            system_prompt_template = f"{system_prompt_template}\n\n## LESSONS FROM EXPERIENCE\n{memory}"
 
         print(f"🔧 Using SummarizerAgent prompt v{prompt_version} (UNIFIED)")
     except Exception as e:

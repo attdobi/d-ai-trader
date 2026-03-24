@@ -113,6 +113,8 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
         system_prompt = (payload.get("system_prompt") or "").strip()
         description = (payload.get("description") or "v0 baseline prompt").strip()
         strategy_directives = (payload.get("strategy_directives") or "").strip()
+        soul = (payload.get("soul") or "").strip()
+        memory = (payload.get("memory") or "").strip()
 
         if not user_prompt or not system_prompt:
             print(f"⚠️  Skipping malformed prompt payload for {agent_type}")
@@ -123,6 +125,8 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
             "system_prompt": system_prompt,
             "strategy_directives": strategy_directives,
             "description": description,
+            "soul": soul,
+            "memory": memory,
         }
 
     return rows
@@ -135,7 +139,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
         existing = conn.execute(
             text(
                 """
-                SELECT id, system_prompt, user_prompt_template, strategy_directives, description, is_active
+                SELECT id, system_prompt, user_prompt_template, strategy_directives, description, is_active, soul, memory
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND version = 0
@@ -159,7 +163,9 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                         description,
                         created_by,
                         is_active,
-                        config_hash
+                        config_hash,
+                        soul,
+                        memory
                     ) VALUES (
                         :agent_type,
                         0,
@@ -169,7 +175,9 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                         :description,
                         'init_database',
                         TRUE,
-                        :config_hash
+                        :config_hash,
+                        :soul,
+                        :memory
                     )
                     """
                 ),
@@ -180,6 +188,8 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                     "strategy_directives": payload["strategy_directives"],
                     "description": payload["description"],
                     "config_hash": config_hash,
+                    "soul": payload.get("soul", ""),
+                    "memory": payload.get("memory", ""),
                 },
             )
             stats.seeded_prompts += 1
@@ -194,28 +204,40 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
             or not bool(existing.is_active)
         )
 
-        if needs_update:
+        # Seed soul/memory into existing rows only if DB is empty and payload has content
+        seed_soul = not (existing.soul or "").strip() and payload.get("soul", "").strip()
+        seed_memory = not (existing.memory or "").strip() and payload.get("memory", "").strip()
+
+        if needs_update or seed_soul or seed_memory:
+            update_fields = {
+                "id": existing.id,
+                "system_prompt": payload["system_prompt"],
+                "user_prompt_template": payload["user_prompt_template"],
+                "strategy_directives": payload["strategy_directives"],
+                "description": payload["description"],
+            }
+
+            # Build dynamic SET clause
+            set_parts = [
+                "system_prompt = :system_prompt",
+                "user_prompt_template = :user_prompt_template",
+                "strategy_directives = :strategy_directives",
+                "description = :description",
+                "created_by = 'init_database'",
+                "is_active = TRUE",
+                "created_at = CURRENT_TIMESTAMP",
+            ]
+
+            if seed_soul:
+                set_parts.append("soul = :soul")
+                update_fields["soul"] = payload["soul"]
+            if seed_memory:
+                set_parts.append("memory = :memory")
+                update_fields["memory"] = payload["memory"]
+
             conn.execute(
-                text(
-                    """
-                    UPDATE prompt_versions
-                    SET system_prompt = :system_prompt,
-                        user_prompt_template = :user_prompt_template,
-                        strategy_directives = :strategy_directives,
-                        description = :description,
-                        created_by = 'init_database',
-                        is_active = TRUE,
-                        created_at = CURRENT_TIMESTAMP
-                    WHERE id = :id
-                    """
-                ),
-                {
-                    "id": existing.id,
-                    "system_prompt": payload["system_prompt"],
-                    "user_prompt_template": payload["user_prompt_template"],
-                    "strategy_directives": payload["strategy_directives"],
-                    "description": payload["description"],
-                },
+                text(f"UPDATE prompt_versions SET {', '.join(set_parts)} WHERE id = :id"),
+                update_fields,
             )
             stats.updated_prompts += 1
             print(f"   🔄 Updated v0 prompt: {agent_type} ({config_hash})")
@@ -690,6 +712,20 @@ def initialize_database() -> None:
             "prompt_versions",
             "strategy_directives",
             "ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS strategy_directives TEXT",
+        )
+        ensure_column(
+            conn,
+            stats,
+            "prompt_versions",
+            "soul",
+            "ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS soul TEXT DEFAULT ''",
+        )
+        ensure_column(
+            conn,
+            stats,
+            "prompt_versions",
+            "memory",
+            "ALTER TABLE prompt_versions ADD COLUMN IF NOT EXISTS memory TEXT DEFAULT ''",
         )
 
         # Backfill legacy prompt_versions rows where config_hash was null.
