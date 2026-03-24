@@ -2374,20 +2374,20 @@ OUTPUT (STRICT)
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
 
-    # Drop HOLD decisions for tickers we don't own (e.g., "PORTFOLIO", "CASH")
-    if current_ticker_set:
-        filtered_decisions = []
-        for decision in ai_response:
-            if not isinstance(decision, dict):
-                filtered_decisions.append(decision)
-                continue
-            action = (decision.get("action") or "").lower()
-            ticker = (decision.get("ticker") or "").upper()
-            if action == "hold" and ticker and ticker not in current_ticker_set:
-                print(f"⚠️  Dropping hallucinated HOLD for unknown ticker '{ticker}'")
-                continue
+    # Drop HOLD decisions for tickers we don't own (e.g., "PORTFOLIO", "CASH", or hallucinated symbols)
+    # NOTE: This filter ALWAYS runs, including when portfolio is empty (no holdings).
+    filtered_decisions = []
+    for decision in ai_response:
+        if not isinstance(decision, dict):
             filtered_decisions.append(decision)
-        ai_response = filtered_decisions
+            continue
+        action = (decision.get("action") or "").lower()
+        ticker = (decision.get("ticker") or "").upper()
+        if action == "hold" and ticker and ticker not in current_ticker_set:
+            print(f"⚠️  Dropping hallucinated HOLD for unowned ticker '{ticker}' (holdings: {current_tickers or 'NONE'})")
+            continue
+        filtered_decisions.append(decision)
+    ai_response = filtered_decisions
 
     # Guarantee a decision exists for every current holding
     existing_decisions = {}

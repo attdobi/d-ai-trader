@@ -2928,7 +2928,14 @@ def generate_prompt_evolution_candidate():
                         'The system_prompt is the structural template (JSON format, placeholders). '
                         'The strategy_directives contain trading rules and personality that feedback evolves. '
                         'Soul defines persistent agent identity, and memory captures lessons learned over time. '
-                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.'
+                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.\n\n'
+                        'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
+                        '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
+                        'HOLD and SELL are ONLY valid for tickers the agent currently owns. '
+                        'If the portfolio is cash-only, the only valid actions are BUY or providing a cash_reason.\n'
+                        '2. The "CRITICAL CONSTRAINT" in system_prompt about grounding decisions in the actual portfolio state.\n'
+                        '3. All anti-hallucination language — the agent must never invent positions it does not hold.\n'
+                        'You may rephrase these rules for clarity, but the semantic meaning and enforcement MUST survive in the output.'
                     ),
                 },
                 {
@@ -2965,6 +2972,27 @@ def generate_prompt_evolution_candidate():
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
+
+        # Validate that critical anti-hallucination guardrails survived evolution
+        combined_text = (system_prompt + ' ' + (strategy_directives or '')).lower()
+        hallucination_guards = [
+            ('holdings', 'source of truth', 'ground truth', 'actual portfolio'),
+            ('hold', 'sell', 'only valid for tickers', 'currently own', 'you own'),
+            ('hallucin', 'invent', 'never output hold', 'never hold'),
+        ]
+        guards_present = 0
+        for guard_group in hallucination_guards:
+            if any(phrase in combined_text for phrase in guard_group):
+                guards_present += 1
+
+        if guards_present < 2:
+            return jsonify({
+                'error': (
+                    'Generated prompt is missing critical anti-hallucination guardrails. '
+                    'The evolved prompt must preserve rules that prevent HOLD/SELL for unowned tickers. '
+                    'Please retry generation.'
+                )
+            }), 502
 
         return jsonify({
             'system_prompt': system_prompt,
