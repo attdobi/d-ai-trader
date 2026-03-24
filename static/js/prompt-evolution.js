@@ -386,8 +386,8 @@ function setupPromptLab() {
 
   generateBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
-    const generateSoul = document.getElementById('generateSoulCheck')?.checked || false;
-    const generateMemory = document.getElementById('generateMemoryCheck')?.checked || false;
+    const generateSoul = true;
+    const generateMemory = true;
     clearPromptLabAlerts();
     const genParts = ['prompt'];
     if (generateSoul) genParts.push('soul');
