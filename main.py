@@ -46,7 +46,7 @@ from bs4 import BeautifulSoup
 # Ordered: Most reliable first (helps driver warm-up), complex sites later
 URLS = [
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # ✅ Most reliable, simple
-    ("Agent_Benzinga", "https://www.benzinga.com"),                   # ⭐ Day trading catalysts - very reliable
+    ("Agent_MarketBeat", "https://www.marketbeat.com/market-news/"),   # ⭐ Day trading catalysts, pre-market movers
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),            # ✅ Reliable, good content
     ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
     ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news
