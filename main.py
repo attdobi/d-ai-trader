@@ -218,6 +218,28 @@ def reset_undetected_chromedriver_cache():
     except Exception as exc:
         print(f"⚠️  Unable to reset undetected_chromedriver cache: {exc}")
 
+
+def reset_cft_chromedriver_cache():
+    """Remove cached Chrome-for-Testing chromedriver and re-download.
+
+    Handles the case where a cached binary gets killed by Gatekeeper (exit code -9)
+    after a Chrome update or OS security change.
+    """
+    global CHROMEDRIVER_BINARY
+    cft_cache = Path.home() / ".cache" / "d-ai-trader" / "chromedriver"
+    try:
+        if cft_cache.exists():
+            shutil.rmtree(cft_cache)
+            print(f"🧹 Cleared CFT chromedriver cache at {cft_cache}")
+    except Exception as exc:
+        print(f"⚠️  Unable to clear CFT chromedriver cache: {exc}")
+    # Re-download fresh driver
+    if platform.system().lower() == "darwin":
+        fresh = _download_cft_chromedriver()
+        if fresh:
+            CHROMEDRIVER_BINARY = fresh
+            print(f"✅ Re-downloaded chromedriver to {fresh}")
+
 # Function to create fresh Chrome options (never reuse)
 def create_chrome_options():
     """Create fresh ChromeOptions - never reuse the same object"""
@@ -782,6 +804,13 @@ def _process_agent_sequence(agent_sequence, worker_id):
                         ):
                             reset_undetected_chromedriver_cache()
                             # Re-detect Chrome version after cache reset
+                            globals()["UC_VERSION_MAIN"] = None
+                            chrome_major_version()
+                        # Chromedriver killed by Gatekeeper or code-signing (exit -9 / -6)
+                        if "unexpectedly exited" in error_text or "Status code was: -" in error_text:
+                            print(f"[Worker {worker_id}] 🔄 Chromedriver killed on launch — nuking caches and re-downloading")
+                            reset_cft_chromedriver_cache()
+                            reset_undetected_chromedriver_cache()
                             globals()["UC_VERSION_MAIN"] = None
                             chrome_major_version()
                         current_driver = None
