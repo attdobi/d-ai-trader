@@ -51,6 +51,9 @@ Thumbs.db
 usr/
 home/
 
+# Knowledge bases (800-900 generated files — never commit)
+Knowledge_Bases/
+
 # Backup files from cleanup attempts
 *.bak.*
 *.new

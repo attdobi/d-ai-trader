@@ -98,19 +98,26 @@ def _harden_chromedriver(path):
     except Exception as exc:
         print(f"⚠️  Unable to chmod chromedriver: {exc}")
     try:
-        subprocess.run(["xattr", "-cr", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["xattr", "-cr", path],
+            check=False, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            print(f"⚠️  xattr -cr failed (rc={result.returncode}): {result.stderr.strip()}")
     except FileNotFoundError:
         # xattr not available (non-macOS)
         pass
     except Exception as exc:
         print(f"⚠️  Failed to clear chromedriver xattrs: {exc}")
     try:
-        subprocess.run(
-            ["codesign", "--force", "--deep", "--sign", "-", path],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        # NOTE: no --deep — it's deprecated for single-file binaries and can
+        # produce an invalid signature that AMFI rejects, causing SIGKILL on exec.
+        result = subprocess.run(
+            ["codesign", "--force", "--sign", "-", path],
+            check=False, capture_output=True, text=True,
         )
+        if result.returncode != 0:
+            print(f"⚠️  codesign failed (rc={result.returncode}): {result.stderr.strip()}")
     except FileNotFoundError:
         # codesign not available (non-macOS)
         pass
