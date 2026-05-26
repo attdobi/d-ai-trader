@@ -14,12 +14,16 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                           • gpt-4o          - BEST for trading (reliable, fast)
                           • gpt-4o-mini     - Good for testing (cheap)
                           • gpt-4-turbo     - "GPT-4.1" equivalent (older)
-                        
-                        EXPERIMENTAL (GPT-5 reasoning models):
-                          • gpt-5 / gpt-5-mini - ⚠️  May hit token limits
-                            (Uses tokens for "thinking" - needs 8000+ tokens)
-                            NOT recommended for production yet
-                        
+
+                        GPT-5 reasoning models:
+                          • gpt-5.5 / gpt-5.4 / gpt-5.2 / gpt-5.1 / gpt-5
+                          • Append a reasoning-effort suffix to set the
+                            effort for summarizer/decider/feedback agents:
+                              -m gpt-5.5-low
+                              -m gpt-5.5-med
+                              -m gpt-5.5-high
+                              -m gpt-5.5-xhigh
+
                         Note: o1/o3 models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
