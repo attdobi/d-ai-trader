@@ -185,6 +185,7 @@ openai.api_key = api_key
 GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
 _VALID_GPT_MODELS = [
+    "gpt-5.5",
     "gpt-5.4",
     "gpt-5.2",
     "gpt-5.1",
@@ -202,8 +203,38 @@ _MODEL_ALIASES = {
     "gpt5.1": "gpt-5.1",
     "gpt5.2": "gpt-5.2",
     "gpt5.4": "gpt-5.4",
+    "gpt5.5": "gpt-5.5",
     "gpt-4-turbo": "gpt-4-turbo",
 }
+
+# Reasoning-effort suffix accepted on -m flag, e.g. "gpt-5.5-high".
+# Maps user-facing token -> internal reasoning level name.
+_REASONING_SUFFIX_ALIASES = {
+    "low": "low",
+    "med": "medium",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+}
+
+# Global reasoning override set via the -m suffix (or DAI_REASONING_LEVEL env).
+# Applies only to summarizer/decider/feedback agents; momentum and other
+# profiles keep their own defaults.
+GLOBAL_REASONING_LEVEL = None
+
+
+def _extract_reasoning_suffix(model_name):
+    """Split a trailing reasoning-effort suffix off a model name.
+
+    Returns (clean_model, level_or_none). E.g. "gpt-5.5-high" -> ("gpt-5.5", "high").
+    """
+    if not model_name or "-" not in model_name:
+        return model_name, None
+    base, _, tail = model_name.rpartition("-")
+    level = _REASONING_SUFFIX_ALIASES.get(tail.lower())
+    if level and base:
+        return base, level
+    return model_name, None
 
 
 def _normalize_model_name(model_name):
@@ -223,9 +254,21 @@ def _announce_model(model_name: str):
 
 
 def set_gpt_model(model_name):
-    """Update the global GPT model"""
-    global GPT_MODEL
-    raw_input, normalized = _normalize_model_name(model_name)
+    """Update the global GPT model.
+
+    Accepts an optional trailing reasoning-effort suffix (e.g. "gpt-5.5-high").
+    The suffix is stripped and stored as the global reasoning override applied
+    to summarizer/decider/feedback agents.
+    """
+    global GPT_MODEL, GLOBAL_REASONING_LEVEL
+    clean_name, suffix_level = _extract_reasoning_suffix((model_name or "").strip())
+    if suffix_level:
+        GLOBAL_REASONING_LEVEL = suffix_level
+        print(
+            f"🧠 Reasoning effort '{suffix_level}' extracted from model arg "
+            f"— applies to summarizer/decider/feedback."
+        )
+    raw_input, normalized = _normalize_model_name(clean_name)
     if normalized != raw_input.lower() and raw_input:
         print(f"ℹ️  Model alias '{raw_input}' resolved to '{normalized}'")
 
@@ -292,8 +335,10 @@ def get_gpt_model():
 # Reasoning level configuration (per-agent)
 REASONING_LEVEL_TOKEN_LIMITS = {
     "light": 4000,
+    "low": 4000,
     "medium": 6000,
     "high": 12000,
+    "xhigh": 20000,
 }
 DEFAULT_REASONING_LEVELS = {
     "summarizer": "medium",  # user asked for light-to-medium; default to medium
@@ -326,18 +371,37 @@ def _resolve_reasoning_profile(agent_name: str) -> str:
 
 
 def get_agent_reasoning_level(agent_name: str) -> str:
-    """Return sanitized reasoning level for an agent (light|medium|high)."""
+    """Return sanitized reasoning level for an agent (light|low|medium|high|xhigh).
+
+    Precedence (highest first) for summarizer/decider/feedback:
+      1. DAI_REASONING_LEVEL env (or -m model suffix → GLOBAL_REASONING_LEVEL) — the CLI/runtime override
+      2. Per-agent env (DAI_SUMMARIZER_REASONING_LEVEL etc.) — baseline from .env
+      3. DEFAULT_REASONING_LEVELS
+    Other profiles (momentum, default) skip step 1.
+    """
     profile = _resolve_reasoning_profile(agent_name)
+
+    # Step 1: global override (CLI suffix or explicit env) for the three big agents.
+    if profile in {"summarizer", "decider", "feedback"}:
+        global_raw = env_first("DAI_REASONING_LEVEL", "").strip().lower()
+        global_raw = _REASONING_SUFFIX_ALIASES.get(global_raw, global_raw)
+        if global_raw in REASONING_LEVEL_TOKEN_LIMITS:
+            return global_raw
+        if GLOBAL_REASONING_LEVEL:
+            return GLOBAL_REASONING_LEVEL
+
+    # Step 2: per-agent env override.
     env_key = AGENT_REASONING_ENV_KEYS.get(profile)
-    level = ""
     if env_key:
         raw = env_first(env_key, "").strip().lower()
         if raw:
+            raw = _REASONING_SUFFIX_ALIASES.get(raw, raw)  # accept "med" -> "medium"
             if raw in REASONING_LEVEL_TOKEN_LIMITS:
-                level = raw
-            else:
-                print(f"⚠️  Unknown reasoning level '{raw}' for {profile}; falling back to default.")
-    return level or DEFAULT_REASONING_LEVELS.get(profile, DEFAULT_REASONING_LEVELS["default"])
+                return raw
+            print(f"⚠️  Unknown reasoning level '{raw}' for {profile}; falling back to default.")
+
+    # Step 3: built-in default.
+    return DEFAULT_REASONING_LEVELS.get(profile, DEFAULT_REASONING_LEVELS["default"])
 
 
 def get_reasoning_token_cap(agent_name: str, model_name: str, default_cap: int) -> int:
@@ -363,8 +427,10 @@ def get_reasoning_params(agent_name: str, model_name: str) -> dict:
     # Map internal levels to OpenAI-supported reasoning_effort values
     level_map = {
         "light": "low",      # Closest to "light" is "low" effort
+        "low": "low",
         "medium": "medium",
         "high": "high",
+        "xhigh": "xhigh",
     }
     reasoning_effort = level_map.get(level, level)
     valid_levels = {"none", "minimal", "low", "medium", "high", "xhigh"}
