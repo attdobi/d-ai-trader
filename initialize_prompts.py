@@ -7,10 +7,28 @@ from pathlib import Path
 
 
 def _load_agent_file(agent_name, filename, default=""):
-    """Load a .md file from agents/<agent_name>/<filename>"""
-    path = Path(__file__).parent / "agents" / agent_name / filename
-    if path.exists():
-        return path.read_text().strip()
+    """Load a .md file from agents/<agent_name>/<filename>.
+
+    Resolution order (first that exists wins):
+      1. agents/<agent_name>/<filename>             — live mirror, gitignored,
+         intended for runtime-evolved content (Obsidian-friendly).
+      2. agents/<agent_name>/<stem>.default.<ext>   — committed seed/template.
+
+    The split lets the canonical evolving copy live in Postgres (source of
+    truth) and be optionally mirrored to disk for the upcoming Obsidian
+    graph view, while the committed default keeps fresh checkouts bootable.
+    """
+    base = Path(__file__).parent / "agents" / agent_name
+    live = base / filename
+    if live.exists():
+        return live.read_text().strip()
+    if "." in filename:
+        stem, ext = filename.rsplit(".", 1)
+        fallback = base / f"{stem}.default.{ext}"
+    else:
+        fallback = base / f"{filename}.default"
+    if fallback.exists():
+        return fallback.read_text().strip()
     return default
 
 
