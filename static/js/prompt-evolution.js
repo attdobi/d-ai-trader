@@ -347,8 +347,70 @@ function setupPromptLab() {
   const memoryEl = document.getElementById('generatedMemory');
 
   const loadActiveBtn = document.getElementById('loadActiveBtn');
+  const refreshFeedbackBtn = document.getElementById('refreshFeedbackBtn');
+  const feedbackRefreshStatusEl = document.getElementById('feedbackRefreshStatus');
 
   if (!agentSelect || !generateBtn || !applyBtn) return;
+
+  // Refresh feedback on demand — runs the FeedbackAgent with the latest
+  // trade outcomes. Does NOT mutate existing prompts (skip_auto_prompts=True
+  // on the server). The next "Generate Improved Prompt" call will pick up
+  // the freshly stored feedback row.
+  if (refreshFeedbackBtn) {
+    refreshFeedbackBtn.addEventListener('click', async () => {
+      clearPromptLabAlerts();
+      const originalLabel = refreshFeedbackBtn.textContent;
+      refreshFeedbackBtn.disabled = true;
+      refreshFeedbackBtn.textContent = 'Refreshing…';
+      if (feedbackRefreshStatusEl) {
+        feedbackRefreshStatusEl.textContent = 'Running FeedbackAgent against the latest trade outcomes…';
+      }
+
+      try {
+        const data = await apiJSON('/api/prompt-evolution/refresh-feedback', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+
+        if (data?.error) throw new Error(data.error);
+
+        const ts = new Date().toLocaleString();
+        if (data?.feedback_id) {
+          const trades = data.total_trades ?? 0;
+          const decisions = data.decisions_analyzed ?? 0;
+          const sourceLabel = data.feedback_source || 'trade_outcomes';
+          const detail = trades
+            ? `${trades} trades analyzed`
+            : `${decisions} decisions analyzed (no completed trades)`;
+          const successRate = (typeof data.success_rate === 'number')
+            ? ` · success ${(data.success_rate * 100).toFixed(1)}%`
+            : '';
+          const summary = `Feedback v#${data.feedback_id} written at ${ts} — source: ${sourceLabel} · ${detail}${successRate}`;
+          if (feedbackRefreshStatusEl) {
+            feedbackRefreshStatusEl.textContent = summary;
+            feedbackRefreshStatusEl.style.color = '#2e7d32';
+          }
+          showPromptLabSuccess('Feedback refreshed. Click "Generate Improved Prompt" to evolve a candidate from this fresh feedback.');
+        } else {
+          const msg = data?.message || 'FeedbackAgent ran but produced no new record.';
+          if (feedbackRefreshStatusEl) {
+            feedbackRefreshStatusEl.textContent = `${ts} — ${msg}`;
+            feedbackRefreshStatusEl.style.color = '#b26a00';
+          }
+          setPromptLabMessage(msg);
+        }
+      } catch (error) {
+        if (feedbackRefreshStatusEl) {
+          feedbackRefreshStatusEl.textContent = `Refresh failed: ${error.message}`;
+          feedbackRefreshStatusEl.style.color = '#c62828';
+        }
+        showPromptLabError(`Failed to refresh feedback: ${error.message}`);
+      } finally {
+        refreshFeedbackBtn.disabled = false;
+        refreshFeedbackBtn.textContent = originalLabel;
+      }
+    });
+  }
 
   // Load active version into editing area
   if (loadActiveBtn) {
@@ -517,15 +579,356 @@ function renderDiff(lines, container) {
   });
 }
 
+// =============================================================================
+// Batch Prompt Lab — one-click "refresh feedback + generate for all 3 agents",
+// per-agent tabs with GitHub-style diffs, approve/reject per agent.
+// =============================================================================
+
+function countDiffStats(diffLines) {
+  let added = 0;
+  let removed = 0;
+  if (!Array.isArray(diffLines)) return { added, removed };
+  for (const line of diffLines) {
+    if (typeof line !== 'string') continue;
+    if (line.startsWith('+') && !line.startsWith('+++')) added++;
+    else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+  }
+  return { added, removed };
+}
+
+function buildDiffSection(label, diffLines, openByDefault) {
+  const wrap = document.createElement('details');
+  wrap.className = 'pe-diff-section';
+  if (openByDefault) wrap.open = true;
+
+  const summary = document.createElement('summary');
+  const { added, removed } = countDiffStats(diffLines);
+  const totalChanged = added + removed;
+  summary.innerHTML = `${label} <span style="color:#888; font-weight:normal; font-size:0.9em;">— ${
+    totalChanged
+      ? `<span style="color:#2e7d32;">+${added}</span> / <span style="color:#c62828;">-${removed}</span>`
+      : '<span style="color:#888;">no changes</span>'
+  }</span>`;
+  wrap.appendChild(summary);
+
+  const view = document.createElement('div');
+  view.className = 'pe-diff-view';
+  if (!totalChanged) {
+    const empty = document.createElement('div');
+    empty.className = 'pe-diff-empty';
+    empty.textContent = 'No changes from active version.';
+    view.appendChild(empty);
+  } else {
+    renderDiff(diffLines, view);
+  }
+  wrap.appendChild(view);
+  return wrap;
+}
+
+function setupBatchPromptLab() {
+  const btn = document.getElementById('batchGenerateBtn');
+  const statusEl = document.getElementById('batchStatus');
+  const errorEl = document.getElementById('batchError');
+  const successEl = document.getElementById('batchSuccess');
+  const fbBanner = document.getElementById('batchFeedbackSummary');
+  const fbBannerText = document.getElementById('batchFeedbackSummaryText');
+  const resultsEl = document.getElementById('batchResults');
+  const tabsEl = document.getElementById('batchTabs');
+  const panelsEl = document.getElementById('batchPanels');
+  const hintEl = document.getElementById('batchGenerateHint');
+
+  if (!btn || !tabsEl || !panelsEl) return;
+
+  const clearBatchAlerts = () => {
+    if (errorEl) { errorEl.textContent = ''; setHidden(errorEl, true); }
+    if (successEl) { successEl.textContent = ''; setHidden(successEl, true); }
+  };
+  const showBatchError = (msg) => {
+    if (!errorEl) return;
+    errorEl.textContent = msg;
+    setHidden(errorEl, false);
+  };
+  const showBatchSuccess = (msg) => {
+    if (!successEl) return;
+    successEl.textContent = msg;
+    setHidden(successEl, false);
+  };
+
+  function activateTab(agentType) {
+    tabsEl.querySelectorAll('.pe-tab-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.agent === agentType);
+    });
+    panelsEl.querySelectorAll('.pe-tab-panel').forEach((p) => {
+      p.classList.toggle('active', p.dataset.agent === agentType);
+    });
+  }
+
+  function renderTabsAndPanels(candidates, errors) {
+    tabsEl.innerHTML = '';
+    panelsEl.innerHTML = '';
+
+    // Failed-generation tabs first (so they're visible)
+    const errorByAgent = {};
+    (errors || []).forEach((e) => { errorByAgent[e.agent_type] = e.error; });
+
+    const order = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent'];
+    order.forEach((agentType) => {
+      const candidate = candidates.find((c) => c.agent_type === agentType);
+      const errMsg = errorByAgent[agentType];
+
+      // Tab button
+      const tabBtn = document.createElement('button');
+      tabBtn.type = 'button';
+      tabBtn.className = 'pe-tab-btn';
+      tabBtn.dataset.agent = agentType;
+      tabBtn.setAttribute('role', 'tab');
+
+      const label = AGENT_LABELS[agentType] || agentType;
+      if (candidate) {
+        // Total diff stats across all 5 fields
+        let added = 0;
+        let removed = 0;
+        Object.values(candidate.diffs || {}).forEach((lines) => {
+          const s = countDiffStats(lines);
+          added += s.added;
+          removed += s.removed;
+        });
+        tabBtn.innerHTML = `${label} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
+      } else {
+        tabBtn.classList.add('failed');
+        tabBtn.innerHTML = `${label} <span class="pe-diff-badge" style="color:#c62828;">⚠ failed</span>`;
+      }
+      tabBtn.addEventListener('click', () => activateTab(agentType));
+      tabsEl.appendChild(tabBtn);
+
+      // Tab panel
+      const panel = document.createElement('div');
+      panel.className = 'pe-tab-panel';
+      panel.dataset.agent = agentType;
+      panel.setAttribute('role', 'tabpanel');
+
+      if (errMsg) {
+        const errBox = document.createElement('div');
+        errBox.className = 'pe-error';
+        errBox.style.marginTop = '12px';
+        errBox.textContent = `Generation failed for ${label}: ${errMsg}`;
+        panel.appendChild(errBox);
+        panelsEl.appendChild(panel);
+        return;
+      }
+
+      // Reasoning
+      const reasoningWrap = document.createElement('div');
+      reasoningWrap.className = 'pe-field';
+      reasoningWrap.innerHTML = `<label>Reasoning <span style="color:#888; font-weight:normal;">— v${candidate.current_version} → v${candidate.current_version + 1}</span></label>`;
+      const reasoningBox = document.createElement('div');
+      reasoningBox.className = 'pe-reasoning';
+      reasoningBox.textContent = candidate.reasoning || 'No reasoning returned by API.';
+      reasoningWrap.appendChild(reasoningBox);
+      panel.appendChild(reasoningWrap);
+
+      // Five diff sections (Strategy Directives + Memory open by default — that's where evolution mostly lives)
+      const diffMap = [
+        { key: 'system_prompt_diff', label: 'System Prompt', open: false },
+        { key: 'user_prompt_diff', label: 'User Prompt Template', open: false },
+        { key: 'strategy_directives_diff', label: 'Strategy Directives', open: true },
+        { key: 'soul_diff', label: 'Soul (mission + per-agent identity)', open: false },
+        { key: 'memory_diff', label: 'Memory (Obsidian-style log)', open: true },
+      ];
+      diffMap.forEach(({ key, label: lbl, open }) => {
+        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open);
+        panel.appendChild(section);
+      });
+
+      // Decision bar — editable description + approve/reject
+      const decisionBar = document.createElement('div');
+      decisionBar.className = 'pe-decision-bar';
+
+      const descLabel = document.createElement('label');
+      descLabel.textContent = 'Description:';
+      descLabel.style.fontWeight = '600';
+      decisionBar.appendChild(descLabel);
+
+      const descInput = document.createElement('input');
+      descInput.type = 'text';
+      descInput.className = 'pe-input';
+      descInput.style.flex = '1';
+      descInput.style.minWidth = '300px';
+      descInput.value = candidate.description || '';
+      decisionBar.appendChild(descInput);
+
+      const approveBtn = document.createElement('button');
+      approveBtn.type = 'button';
+      approveBtn.className = 'pe-btn approve';
+      approveBtn.textContent = '✅ Approve & Activate';
+      decisionBar.appendChild(approveBtn);
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.type = 'button';
+      rejectBtn.className = 'pe-btn reject';
+      rejectBtn.textContent = '❌ Reject';
+      decisionBar.appendChild(rejectBtn);
+
+      const statusSpan = document.createElement('span');
+      statusSpan.style.marginLeft = '8px';
+      statusSpan.style.fontSize = '0.9em';
+      decisionBar.appendChild(statusSpan);
+
+      approveBtn.addEventListener('click', async () => {
+        const description = (descInput.value || '').trim() || candidate.description;
+        if (!description) {
+          statusSpan.style.color = '#c62828';
+          statusSpan.textContent = 'Description required.';
+          return;
+        }
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        const origLabel = approveBtn.textContent;
+        approveBtn.textContent = 'Applying…';
+        statusSpan.style.color = '#888';
+        statusSpan.textContent = '';
+
+        try {
+          const payload = {
+            agent_type: candidate.agent_type,
+            system_prompt: candidate.system_prompt,
+            user_prompt_template: candidate.user_prompt_template,
+            strategy_directives: candidate.strategy_directives,
+            soul: candidate.soul,
+            memory: candidate.memory,
+            description,
+          };
+          const data = await apiJSON('/api/prompt-evolution/apply', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          if (!data?.success) throw new Error('API did not confirm success.');
+
+          tabBtn.classList.add('approved');
+          statusSpan.style.color = '#2e7d32';
+          statusSpan.textContent = `✓ Activated as v${data.version}`;
+          approveBtn.textContent = `Active v${data.version}`;
+          rejectBtn.disabled = true;
+          descInput.disabled = true;
+          showBatchSuccess(`${AGENT_LABELS[candidate.agent_type]} v${data.version} activated.`);
+          await loadPromptHistory();
+        } catch (err) {
+          statusSpan.style.color = '#c62828';
+          statusSpan.textContent = `Failed: ${err.message}`;
+          approveBtn.disabled = false;
+          rejectBtn.disabled = false;
+          approveBtn.textContent = origLabel;
+        }
+      });
+
+      rejectBtn.addEventListener('click', () => {
+        tabBtn.classList.add('rejected');
+        statusSpan.style.color = '#999';
+        statusSpan.textContent = '✗ Rejected (candidate discarded client-side).';
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
+        descInput.disabled = true;
+      });
+
+      panel.appendChild(decisionBar);
+      panelsEl.appendChild(panel);
+    });
+
+    // Activate first successful candidate's tab (or first tab if all failed)
+    const firstSuccessful = candidates[0]?.agent_type || order[0];
+    activateTab(firstSuccessful);
+  }
+
+  function renderFeedbackBanner(summary) {
+    if (!fbBanner || !fbBannerText) return;
+    const ts = new Date(summary.generated_at || Date.now()).toLocaleString();
+    const bits = [];
+    if (summary.feedback_id) bits.push(`#${summary.feedback_id}`);
+    bits.push(`source: ${summary.feedback_source || 'trade_outcomes'}`);
+    if (summary.total_trades) bits.push(`${summary.total_trades} trades`);
+    if (summary.decisions_analyzed) bits.push(`${summary.decisions_analyzed} decisions`);
+    if (typeof summary.success_rate === 'number') {
+      bits.push(`success ${(summary.success_rate * 100).toFixed(1)}%`);
+    }
+    if (typeof summary.avg_profit === 'number') {
+      bits.push(`avg ${summary.avg_profit.toFixed(2)}%`);
+    }
+    bits.push(ts);
+    fbBannerText.textContent = bits.join(' · ');
+    setHidden(fbBanner, false);
+  }
+
+  btn.addEventListener('click', async () => {
+    clearBatchAlerts();
+    setHidden(resultsEl, true);
+    btn.disabled = true;
+    const origLabel = btn.textContent;
+    btn.textContent = 'Running…';
+    if (statusEl) {
+      statusEl.textContent = 'Refreshing feedback and generating candidates for all three agents…';
+      statusEl.style.color = '#888';
+    }
+    if (hintEl) hintEl.textContent = 'Step 1/2: refreshing feedback…';
+
+    try {
+      const data = await apiJSON('/api/prompt-evolution/refresh-and-generate-all', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (data?.error) throw new Error(data.error);
+
+      if (data.feedback_summary) renderFeedbackBanner(data.feedback_summary);
+
+      const candidates = data.candidates || [];
+      const errors = data.errors || [];
+      renderTabsAndPanels(candidates, errors);
+      setHidden(resultsEl, false);
+
+      const successCount = candidates.length;
+      const failCount = errors.length;
+      const ts = new Date().toLocaleString();
+      if (statusEl) {
+        statusEl.style.color = failCount ? '#b26a00' : '#2e7d32';
+        statusEl.textContent = `Generated ${successCount}/3 candidates at ${ts}${
+          failCount ? ` (${failCount} failed — see tab)` : ''
+        }. Review each tab and approve or reject.`;
+      }
+      if (hintEl) hintEl.textContent = '';
+    } catch (err) {
+      showBatchError(`Batch generation failed: ${err.message}`);
+      if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.style.color = '#c62828';
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = origLabel;
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadPerformanceContext();
   loadPromptHistory();
   setupPromptLab();
+  setupBatchPromptLab();
 
-  // Auto-load active version on page load and when agent changes
+  // Auto-load active version into the Advanced section when it's opened and
+  // when the agent dropdown changes. We don't auto-fire on page load anymore —
+  // the Advanced section is collapsed by default.
   const loadActiveBtn = document.getElementById('loadActiveBtn');
+  const advancedSection = document.getElementById('promptLabAdvanced');
   if (loadActiveBtn) {
-    setTimeout(() => loadActiveBtn.click(), 500);
+    let loadedOnce = false;
+    const loadIfFirstOpen = () => {
+      if (!loadedOnce && advancedSection?.open) {
+        loadedOnce = true;
+        loadActiveBtn.click();
+      }
+    };
+    if (advancedSection) {
+      advancedSection.addEventListener('toggle', loadIfFirstOpen);
+    }
     const agentSelect = document.getElementById('promptLabAgentType');
     if (agentSelect) {
       agentSelect.addEventListener('change', () => loadActiveBtn.click());

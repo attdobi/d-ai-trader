@@ -248,14 +248,20 @@ class TradeOutcomeTracker:
             pass
         return {"recent_volatility": 0, "volume_trend": "unknown"}
     
-    def analyze_recent_outcomes(self, days_back=FEEDBACK_LOOKBACK_DAYS):
+    def analyze_recent_outcomes(self, days_back=FEEDBACK_LOOKBACK_DAYS, skip_auto_prompts=False):
         """Analyze recent trade outcomes and generate feedback"""
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
-        return self.analyze_recent_outcomes_for_config(config_hash, days_back)
-    
-    def analyze_recent_outcomes_for_config(self, config_hash, days_back=FEEDBACK_LOOKBACK_DAYS):
-        """Analyze recent trade outcomes and generate feedback for a specific config"""
+        return self.analyze_recent_outcomes_for_config(config_hash, days_back, skip_auto_prompts=skip_auto_prompts)
+
+    def analyze_recent_outcomes_for_config(self, config_hash, days_back=FEEDBACK_LOOKBACK_DAYS, skip_auto_prompts=False):
+        """Analyze recent trade outcomes and generate feedback for a specific config.
+
+        When `skip_auto_prompts` is True, the feedback record is still written
+        to `agent_feedback`, but the AUTO-mode heuristic that mutates
+        strategy_directives/memory is bypassed. Use this when the caller plans
+        to evolve prompts manually (e.g. from the Prompt Lab UI).
+        """
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         with engine.connect() as conn:
@@ -300,10 +306,12 @@ class TradeOutcomeTracker:
                     )
                     
                     # Auto-generate improved prompts from this feedback
-                    if feedback_id:
+                    if feedback_id and not skip_auto_prompts:
                         print(f"🚀 Auto-generating improved prompts from decision pattern feedback...")
                         self._auto_generate_prompts_from_feedback_for_config(synthetic_feedback, feedback_id, config_hash)
-                    
+                    elif feedback_id and skip_auto_prompts:
+                        print(f"⏭️  skip_auto_prompts=True — leaving prompts untouched (caller will evolve manually)")
+
                     return {
                         'feedback_generated': True,
                         'feedback_source': 'decision_patterns',
@@ -330,9 +338,11 @@ class TradeOutcomeTracker:
                     )
                     
                     # Generate v1 prompts from v0 baseline
-                    if feedback_id:
+                    if feedback_id and not skip_auto_prompts:
                         print(f"🚀 Evolving prompts from v0 → v1 for AUTO mode config {config_hash}")
                         self._auto_generate_prompts_from_feedback_for_config(minimal_feedback, feedback_id, config_hash)
+                    elif feedback_id and skip_auto_prompts:
+                        print(f"⏭️  skip_auto_prompts=True — leaving v0 baseline untouched")
                     
                     return {
                         'feedback_generated': True,
@@ -361,14 +371,18 @@ class TradeOutcomeTracker:
                                                     avg_profit, analysis, feedback, config_hash)
         
         # Automatically create new prompts based on feedback for this config
-        self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
-        
+        if not skip_auto_prompts:
+            self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
+        else:
+            print(f"⏭️  skip_auto_prompts=True — feedback stored, prompts left for manual evolution")
+
         return {
             "feedback_id": feedback_id,
             "success_rate": success_rate,
             "avg_profit": avg_profit,
             "total_trades": total_trades,
-            "feedback": feedback
+            "feedback": feedback,
+            "feedback_source": "trade_outcomes",
         }
 
     def _get_historical_feedback_summary_for_config(self, agent_type, config_hash, max_feedbacks=10):

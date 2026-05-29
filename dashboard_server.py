@@ -2813,197 +2813,496 @@ def get_prompt_evolution_performance_context():
         return jsonify({'error': str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# Prompt-Evolution helpers (factored out so single-agent and batch endpoints
+# share one code path).
+# ---------------------------------------------------------------------------
+
+_PROMPT_LAB_AGENTS = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent']
+_PROMPT_LAB_LABELS = {
+    'SummarizerAgent': 'Summarizer',
+    'DeciderAgent': 'Decider',
+    'FeedbackAgent': 'Feedback',
+}
+_PROMPT_LAB_AGENT_DIRS = {
+    'SummarizerAgent': 'summarizer',
+    'DeciderAgent': 'decider',
+    'FeedbackAgent': 'feedback',
+}
+_MISSION_HEADER_LOWER = 'mission (shared across all agents'
+
+
+def _read_disk_soul(agent_type):
+    """Return the contents of the live SOUL.md, or fall back to the committed
+    SOUL.default.md seed. Empty string if neither exists.
+    """
+    dir_name = _PROMPT_LAB_AGENT_DIRS.get(agent_type)
+    if not dir_name:
+        return ''
+    base = os.path.join(os.path.dirname(__file__), 'agents', dir_name)
+    for fname in ('SOUL.md', 'SOUL.default.md'):
+        path = os.path.join(base, fname)
+        try:
+            with open(path, 'r', encoding='utf-8') as fh:
+                return fh.read()
+        except (FileNotFoundError, OSError):
+            continue
+    return ''
+
+
+def _ensure_mission_in_soul(agent_type, db_soul):
+    """Bootstrap the shared Mission/Shared-Principles block from disk SOUL.md
+    when the in-DB soul predates the Mission update.
+
+    Idempotent: if Mission is already present in `db_soul`, returns unchanged.
+    If the disk SOUL.md lacks the marker too, returns `db_soul` unchanged
+    (we'd rather pass through than corrupt).
+    """
+    soul = db_soul or ''
+    if _MISSION_HEADER_LOWER in soul.lower():
+        return soul
+
+    disk_soul = _read_disk_soul(agent_type)
+    if not disk_soul or _MISSION_HEADER_LOWER not in disk_soul.lower():
+        return soul
+
+    if not soul.strip():
+        # DB soul empty → disk soul already contains both shared block and
+        # per-agent text; return wholesale.
+        return disk_soul
+
+    # Extract the shared block (from "## Mission" up to the "---" separator)
+    # and prepend it to the existing DB soul.
+    mission_idx = disk_soul.lower().find('## mission')
+    if mission_idx < 0:
+        return soul
+    separator_idx = disk_soul.find('\n---\n', mission_idx)
+    if separator_idx < 0:
+        shared_block = disk_soul.rstrip() + '\n'
+    else:
+        shared_block = disk_soul[mission_idx:separator_idx + 5]  # include '\n---\n'
+
+    return shared_block + '\n' + soul
+
+
+def _compute_unified_diffs(agent_type, before, after,
+                           version_label_a='current', version_label_b='candidate'):
+    """Return the same 5-key dict shape as the /api/prompt-evolution/diff route.
+
+    `before` and `after` are dicts with keys: system_prompt,
+    user_prompt_template, strategy_directives, soul, memory.
+    """
+    def _diff(field, label):
+        return list(difflib.unified_diff(
+            (before.get(field) or '').splitlines(),
+            (after.get(field) or '').splitlines(),
+            fromfile=f'{agent_type}_{version_label_a}_{label}',
+            tofile=f'{agent_type}_{version_label_b}_{label}',
+            lineterm=''
+        ))
+
+    return {
+        'system_prompt_diff': _diff('system_prompt', 'system_prompt'),
+        'user_prompt_diff': _diff('user_prompt_template', 'user_prompt_template'),
+        'strategy_directives_diff': _diff('strategy_directives', 'strategy_directives'),
+        'soul_diff': _diff('soul', 'soul'),
+        'memory_diff': _diff('memory', 'memory'),
+    }
+
+
+def _auto_generate_version_description(agent_type, current_version, feedback_summary):
+    """Build a non-empty description so /apply never fails on the empty-string path."""
+    label = _PROMPT_LAB_LABELS.get(agent_type, agent_type)
+    next_ver = (current_version or 0) + 1
+    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+    parts = [f"v{next_ver} {label} (auto)"]
+    fb = feedback_summary or {}
+    if fb.get('feedback_id'):
+        parts.append(f"feedback#{fb['feedback_id']}")
+    if isinstance(fb.get('success_rate'), (int, float)):
+        parts.append(f"success {fb['success_rate'] * 100:.1f}%")
+    if isinstance(fb.get('total_trades'), int) and fb.get('total_trades'):
+        parts.append(f"{fb['total_trades']} trades")
+    parts.append(ts)
+    return ' · '.join(parts)
+
+
+def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None):
+    """Generate one prompt candidate via the LLM and compute the diff vs active.
+
+    Returns a dict with: agent_type, current_version, system_prompt,
+    user_prompt_template, strategy_directives, soul, memory, reasoning,
+    description, diffs (5-key dict), diff_stats {added, removed}.
+
+    Raises ValueError with a descriptive message on hard-fail conditions
+    (no active prompt, malformed LLM output, missing anti-hallucination guards,
+    Mission section stripped from soul).
+    """
+    with engine.connect() as conn:
+        current_prompt = conn.execute(text("""
+            SELECT version, system_prompt, user_prompt_template, strategy_directives, description, soul, memory
+            FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND config_hash = :config_hash
+              AND is_active = TRUE
+            ORDER BY version DESC
+            LIMIT 1
+        """), {
+            'agent_type': agent_type,
+            'config_hash': config_hash,
+        }).fetchone()
+
+    if not current_prompt:
+        raise ValueError(f'No active prompt found for {agent_type}')
+
+    context_payload = _load_prompt_evolution_context()
+    stats = context_payload.get('stats', {})
+    headlines = context_payload.get('headlines', [])
+
+    with engine.connect() as conn:
+        version_history = conn.execute(text("""
+            SELECT version, description, created_at
+            FROM prompt_versions
+            WHERE agent_type = :agent_type AND config_hash = :config_hash
+            ORDER BY version DESC LIMIT 10
+        """), {"agent_type": agent_type, "config_hash": config_hash}).fetchall()
+
+        feedback_rows = conn.execute(text("""
+            SELECT summarizer_feedback, decider_feedback, analysis_timestamp, success_rate, avg_profit_percentage
+            FROM agent_feedback
+            WHERE config_hash = :config_hash
+            ORDER BY analysis_timestamp DESC LIMIT 5
+        """), {"config_hash": config_hash}).fetchall()
+
+    prompt_history = [{
+        'version': r.version,
+        'description': r.description,
+        'created_at': _safe_isoformat(r.created_at),
+    } for r in version_history]
+
+    recent_feedback = [{
+        'timestamp': _safe_isoformat(r.analysis_timestamp),
+        'success_rate': float(r.success_rate or 0),
+        'avg_profit': float(r.avg_profit_percentage or 0),
+        'summarizer_feedback': (r.summarizer_feedback or '')[:500],
+        'decider_feedback': (r.decider_feedback or '')[:500],
+    } for r in feedback_rows]
+
+    # Batch flow always evolves all four fields, including soul + memory.
+    soul_memory_instruction = (
+        "\n\nIMPORTANT: Also produce 'soul' and 'memory' fields. "
+        "Evolve memory by appending dated entries (ISO date headers) using the "
+        "Obsidian-friendly convention: short entries, [[wiki-links]], hashtags."
+    )
+
+    # Bootstrap: if the in-DB soul predates the Mission update, prepend the
+    # shared block from agents/<name>/SOUL.md so the LLM sees (and is required
+    # to preserve) the Mission + Shared Principles.
+    bootstrapped_soul = _ensure_mission_in_soul(agent_type, current_prompt.soul or '')
+
+    prompt_payload = {
+        'agent_type': agent_type,
+        'current_prompt': {
+            'version': current_prompt.version,
+            'description': current_prompt.description,
+            'system_prompt': current_prompt.system_prompt,
+            'user_prompt_template': current_prompt.user_prompt_template,
+            'strategy_directives': current_prompt.strategy_directives,
+            'soul': bootstrapped_soul,
+            'memory': current_prompt.memory or '',
+        },
+        'prompt_evolution_history': prompt_history,
+        'recent_feedback': recent_feedback,
+        'performance_stats': stats,
+        'recent_headlines': headlines,
+        'goal': (
+            'Improve prompt quality based on current performance and feedback history. '
+            'Preserve placeholders/tokens and actionable structure while tightening clarity.'
+            + soul_memory_instruction
+        ),
+    }
+
+    from openai import OpenAI
+    client = OpenAI()
+    model = get_gpt_model()
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                'role': 'system',
+                'content': (
+                    'You are an expert prompt engineer for an autonomous trading workflow. '
+                    'Given the current prompt and performance context, produce improved prompts. '
+                    'The system_prompt is the structural template (JSON format, placeholders). '
+                    'The strategy_directives contain trading rules and personality that feedback evolves. '
+                    'Soul defines persistent agent identity, and memory captures lessons learned over time. '
+                    'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.\n\n'
+                    'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
+                    '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
+                    'HOLD and SELL are ONLY valid for tickers the agent currently owns. '
+                    'If the portfolio is cash-only, the only valid actions are BUY or providing a cash_reason.\n'
+                    '2. The "CRITICAL CONSTRAINT" in system_prompt about grounding decisions in the actual portfolio state.\n'
+                    '3. All anti-hallucination language — the agent must never invent positions it does not hold.\n'
+                    '4. The "## Mission (shared across all agents — preserve verbatim)" section and the '
+                    '"## Shared Principles (preserve verbatim)" section of the soul MUST appear unchanged in your output. '
+                    'You may add new per-agent material below them; you may NOT edit the words inside those two sections. '
+                    'These sections are the system-wide charter and are reviewed by humans separately.\n'
+                    'You may rephrase rules 1-3 for clarity, but the semantic meaning and enforcement MUST survive in the output.'
+                ),
+            },
+            {
+                'role': 'user',
+                'content': (
+                    'Generate an improved prompt package from this input:\n\n'
+                    f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+                ),
+            },
+        ],
+    )
+
+    content = ''
+    if response and getattr(response, 'choices', None):
+        content = response.choices[0].message.content
+
+    parsed = _parse_generated_prompt_payload(content)
+
+    def _to_str(val):
+        if val is None:
+            return ''
+        if isinstance(val, list):
+            return '\n'.join(str(v) for v in val).strip()
+        return str(val).strip()
+
+    system_prompt = _to_str(parsed.get('system_prompt'))
+    user_prompt_template = _to_str(parsed.get('user_prompt_template'))
+    strategy_directives = _to_str(parsed.get('strategy_directives'))
+    reasoning = _to_str(parsed.get('reasoning'))
+    soul_out = _to_str(parsed.get('soul')) or _to_str(current_prompt.soul)
+    memory_out = _to_str(parsed.get('memory')) or _to_str(current_prompt.memory)
+
+    if not system_prompt or not user_prompt_template:
+        raise ValueError('Generated payload missing required prompt fields (system_prompt / user_prompt_template).')
+
+    # Anti-hallucination guardrails (unchanged from prior /generate behavior).
+    combined_text = (system_prompt + ' ' + (strategy_directives or '')).lower()
+    hallucination_guards = [
+        ('holdings', 'source of truth', 'ground truth', 'actual portfolio'),
+        ('hold', 'sell', 'only valid for tickers', 'currently own', 'you own'),
+        ('hallucin', 'invent', 'never output hold', 'never hold'),
+    ]
+    guards_present = sum(
+        1 for grp in hallucination_guards if any(p in combined_text for p in grp)
+    )
+    if guards_present < 2:
+        raise ValueError(
+            'Generated prompt is missing critical anti-hallucination guardrails. '
+            'The evolved prompt must preserve rules that prevent HOLD/SELL for unowned tickers.'
+        )
+
+    # Mission preservation check — the prepended shared section must survive.
+    # We test for two distinctive phrases that appear only in our Mission/Shared block.
+    soul_lower = (soul_out or '').lower()
+    mission_phrases = ['mission (shared across all agents', 'shared principles (preserve verbatim']
+    if not all(phrase in soul_lower for phrase in mission_phrases):
+        raise ValueError(
+            'Generated soul is missing the verbatim Mission / Shared Principles sections. '
+            'These must survive every regeneration.'
+        )
+
+    description = _auto_generate_version_description(
+        agent_type, current_prompt.version, feedback_summary
+    )
+
+    candidate = {
+        'agent_type': agent_type,
+        'agent_label': _PROMPT_LAB_LABELS.get(agent_type, agent_type),
+        'current_version': current_prompt.version,
+        'system_prompt': system_prompt,
+        'user_prompt_template': user_prompt_template,
+        'strategy_directives': strategy_directives,
+        'soul': soul_out,
+        'memory': memory_out,
+        'reasoning': reasoning,
+        'description': description,
+    }
+
+    before = {
+        'system_prompt': current_prompt.system_prompt,
+        'user_prompt_template': current_prompt.user_prompt_template,
+        'strategy_directives': current_prompt.strategy_directives,
+        'soul': current_prompt.soul or '',
+        'memory': current_prompt.memory or '',
+    }
+    diffs = _compute_unified_diffs(agent_type, before, candidate,
+                                    version_label_a=f'v{current_prompt.version}',
+                                    version_label_b='candidate')
+    added = sum(1 for d in diffs.values() for line in d if line.startswith('+') and not line.startswith('+++'))
+    removed = sum(1 for d in diffs.values() for line in d if line.startswith('-') and not line.startswith('---'))
+    candidate['diffs'] = diffs
+    candidate['diff_stats'] = {'added': added, 'removed': removed}
+    return candidate
+
+
+@app.route('/api/prompt-evolution/refresh-feedback', methods=['POST'])
+def refresh_feedback_for_prompt_lab():
+    """Run the FeedbackAgent on-demand with the latest trade outcomes for the
+    current config, and write a fresh record to `agent_feedback` — without
+    triggering the AUTO-mode prompt mutation side effect. After this returns,
+    /api/prompt-evolution/generate will see the fresh feedback row.
+    """
+    try:
+        from config import get_current_config_hash
+        config_hash = get_current_config_hash()
+
+        tracker = TradeOutcomeTracker()
+        result = tracker.analyze_recent_outcomes(skip_auto_prompts=True) or {}
+
+        # Normalize the response — analyze_recent_outcomes can return
+        # different shapes depending on which branch ran (outcomes vs
+        # decision_patterns vs auto_mode_evolution vs no-op decision_analysis).
+        feedback_id = result.get('feedback_id')
+        feedback_source = result.get('feedback_source', 'trade_outcomes')
+        feedback_payload = result.get('feedback') or result.get('feedback_content') or {}
+
+        payload = {
+            'success': bool(feedback_id),
+            'config_hash': config_hash,
+            'feedback_id': feedback_id,
+            'feedback_source': feedback_source,
+            'total_trades': result.get('total_trades', 0),
+            'decisions_analyzed': result.get('decisions_analyzed', 0),
+            'success_rate': result.get('success_rate'),
+            'avg_profit': result.get('avg_profit'),
+            'summarizer_feedback': feedback_payload.get('summarizer_feedback', ''),
+            'decider_feedback': feedback_payload.get('decider_feedback', ''),
+            'key_insights': feedback_payload.get('key_insights', []),
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+        }
+        if not feedback_id:
+            payload['message'] = (
+                'FeedbackAgent ran but produced no new record — likely no recent '
+                'trades or decisions for this config_hash. Generate will use the '
+                'most recent existing feedback if any.'
+            )
+        return jsonify(payload)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/prompt-evolution/generate', methods=['POST'])
 def generate_prompt_evolution_candidate():
+    """Single-agent generate (used by the legacy Advanced section of the
+    Prompt Lab). Calls the same helper as the batch endpoint so behavior
+    and guardrails stay in lockstep."""
     try:
         data = request.get_json(silent=True) or {}
         agent_type = data.get('agent_type')
-
         if not agent_type:
             return jsonify({'error': 'agent_type is required'}), 400
 
         config_hash = get_current_config_hash()
 
+        # Pass the most recent feedback row so the auto-description matches batch flow.
         with engine.connect() as conn:
-            current_prompt = conn.execute(text("""
-                SELECT version, system_prompt, user_prompt_template, strategy_directives, description, soul, memory
-                FROM prompt_versions
-                WHERE agent_type = :agent_type
-                  AND config_hash = :config_hash
-                  AND is_active = TRUE
-                ORDER BY version DESC
-                LIMIT 1
-            """), {
-                'agent_type': agent_type,
-                'config_hash': config_hash,
-            }).fetchone()
-
-        if not current_prompt:
-            return jsonify({'error': f'No active prompt found for {agent_type}'}), 404
-
-        context_payload = _load_prompt_evolution_context()
-        stats = context_payload.get('stats', {})
-        headlines = context_payload.get('headlines', [])
-
-        # Pull prompt version history for this agent
-        with engine.connect() as conn:
-            version_history = conn.execute(text("""
-                SELECT version, description, created_at
-                FROM prompt_versions
-                WHERE agent_type = :agent_type AND config_hash = :config_hash
-                ORDER BY version DESC LIMIT 10
-            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchall()
-
-            # Pull recent feedback for context
-            feedback_rows = conn.execute(text("""
-                SELECT summarizer_feedback, decider_feedback, analysis_timestamp, success_rate, avg_profit_percentage
-                FROM agent_feedback
+            latest_fb = conn.execute(text("""
+                SELECT id, success_rate FROM agent_feedback
                 WHERE config_hash = :config_hash
-                ORDER BY analysis_timestamp DESC LIMIT 5
-            """), {"config_hash": config_hash}).fetchall()
+                ORDER BY analysis_timestamp DESC LIMIT 1
+            """), {'config_hash': config_hash}).fetchone()
+        feedback_summary = None
+        if latest_fb:
+            feedback_summary = {
+                'feedback_id': latest_fb.id,
+                'success_rate': float(latest_fb.success_rate or 0.0),
+            }
 
-        prompt_history = [{
-            'version': r.version,
-            'description': r.description,
-            'created_at': _safe_isoformat(r.created_at),
-        } for r in version_history]
+        try:
+            candidate = _generate_candidate_for_agent(agent_type, config_hash, feedback_summary)
+        except ValueError as ve:
+            return jsonify({'error': str(ve)}), 502
 
-        recent_feedback = [{
-            'timestamp': _safe_isoformat(r.analysis_timestamp),
-            'success_rate': float(r.success_rate or 0),
-            'avg_profit': float(r.avg_profit_percentage or 0),
-            'summarizer_feedback': (r.summarizer_feedback or '')[:500],
-            'decider_feedback': (r.decider_feedback or '')[:500],
-        } for r in feedback_rows]
-
-        generate_soul = data.get('generate_soul', False)
-        generate_memory = data.get('generate_memory', False)
-
-        soul_memory_instruction = ""
-        if generate_soul or generate_memory:
-            parts = []
-            if generate_soul:
-                parts.append("'soul' — a persistent identity for this agent based on its evolution history and trading performance. Include core philosophy, decision style, and personality traits that emerge from the data.")
-            if generate_memory:
-                parts.append("'memory' — distilled lessons learned from actual trading outcomes, feedback cycles, and prompt evolution history. Include specific patterns, mistakes to avoid, and calibration notes.")
-            soul_memory_instruction = f"\n\nIMPORTANT: Also generate the following fields:\n" + "\n".join(f"- {p}" for p in parts)
-        else:
-            soul_memory_instruction = "\n\nDo NOT generate soul or memory fields — return them as empty strings. Only improve system_prompt, user_prompt_template, and strategy_directives."
-
-        prompt_payload = {
-            'agent_type': agent_type,
-            'current_prompt': {
-                'version': current_prompt.version,
-                'description': current_prompt.description,
-                'system_prompt': current_prompt.system_prompt,
-                'user_prompt_template': current_prompt.user_prompt_template,
-                'strategy_directives': current_prompt.strategy_directives,
-                'soul': current_prompt.soul or '',
-                'memory': current_prompt.memory or '',
-            },
-            'prompt_evolution_history': prompt_history,
-            'recent_feedback': recent_feedback,
-            'performance_stats': stats,
-            'recent_headlines': headlines,
-            'goal': (
-                'Improve prompt quality based on current performance and feedback history. '
-                'Preserve placeholders/tokens and actionable structure while tightening clarity.'
-                + soul_memory_instruction
-            ),
-        }
-
-        from openai import OpenAI
-
-        client = OpenAI()
-        model = get_gpt_model()
-
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    'role': 'system',
-                    'content': (
-                        'You are an expert prompt engineer for an autonomous trading workflow. '
-                        'Given the current prompt and performance context, produce improved prompts. '
-                        'The system_prompt is the structural template (JSON format, placeholders). '
-                        'The strategy_directives contain trading rules and personality that feedback evolves. '
-                        'Soul defines persistent agent identity, and memory captures lessons learned over time. '
-                        'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.\n\n'
-                        'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
-                        '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
-                        'HOLD and SELL are ONLY valid for tickers the agent currently owns. '
-                        'If the portfolio is cash-only, the only valid actions are BUY or providing a cash_reason.\n'
-                        '2. The "CRITICAL CONSTRAINT" in system_prompt about grounding decisions in the actual portfolio state.\n'
-                        '3. All anti-hallucination language — the agent must never invent positions it does not hold.\n'
-                        'You may rephrase these rules for clarity, but the semantic meaning and enforcement MUST survive in the output.'
-                    ),
-                },
-                {
-                    'role': 'user',
-                    'content': (
-                        'Generate an improved prompt package from this input:\n\n'
-                        f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
-                    ),
-                },
-            ],
-        )
-
-        content = ''
-        if response and getattr(response, 'choices', None):
-            content = response.choices[0].message.content
-
-        parsed = _parse_generated_prompt_payload(content)
-
-        def _to_str(val):
-            """Safely convert any value to a stripped string."""
-            if val is None:
-                return ''
-            if isinstance(val, list):
-                return '\n'.join(str(v) for v in val).strip()
-            return str(val).strip()
-
-        system_prompt = _to_str(parsed.get('system_prompt'))
-        user_prompt_template = _to_str(parsed.get('user_prompt_template'))
-        strategy_directives = _to_str(parsed.get('strategy_directives'))
-        reasoning = _to_str(parsed.get('reasoning'))
-        # Use AI-generated soul/memory if requested, otherwise keep existing
-        soul_out = _to_str(parsed.get('soul')) if generate_soul else _to_str(current_prompt.soul)
-        memory_out = _to_str(parsed.get('memory')) if generate_memory else _to_str(current_prompt.memory)
-
-        if not system_prompt or not user_prompt_template:
-            return jsonify({'error': 'Generated payload missing required prompt fields'}), 502
-
-        # Validate that critical anti-hallucination guardrails survived evolution
-        combined_text = (system_prompt + ' ' + (strategy_directives or '')).lower()
-        hallucination_guards = [
-            ('holdings', 'source of truth', 'ground truth', 'actual portfolio'),
-            ('hold', 'sell', 'only valid for tickers', 'currently own', 'you own'),
-            ('hallucin', 'invent', 'never output hold', 'never hold'),
-        ]
-        guards_present = 0
-        for guard_group in hallucination_guards:
-            if any(phrase in combined_text for phrase in guard_group):
-                guards_present += 1
-
-        if guards_present < 2:
-            return jsonify({
-                'error': (
-                    'Generated prompt is missing critical anti-hallucination guardrails. '
-                    'The evolved prompt must preserve rules that prevent HOLD/SELL for unowned tickers. '
-                    'Please retry generation.'
-                )
-            }), 502
-
+        # Legacy single-agent shape — same keys the existing JS reads.
         return jsonify({
-            'system_prompt': system_prompt,
-            'user_prompt_template': user_prompt_template,
-            'strategy_directives': strategy_directives,
-            'reasoning': reasoning,
-            'soul': soul_out,
-            'memory': memory_out,
+            'system_prompt': candidate['system_prompt'],
+            'user_prompt_template': candidate['user_prompt_template'],
+            'strategy_directives': candidate['strategy_directives'],
+            'reasoning': candidate['reasoning'],
+            'soul': candidate['soul'],
+            'memory': candidate['memory'],
+            'description': candidate['description'],
+            'current_version': candidate['current_version'],
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/refresh-and-generate-all', methods=['POST'])
+def refresh_feedback_and_generate_all():
+    """One-click: run FeedbackAgent → generate evolved prompt for all three
+    agents concurrently → return candidates + pre-computed diffs.
+
+    The user reviews each candidate in a tabbed diff view and approves or
+    rejects per agent. Approve hits the existing /apply endpoint.
+    """
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from feedback_agent import TradeOutcomeTracker
+
+        config_hash = get_current_config_hash()
+
+        # Step 1: refresh feedback (don't trigger the AUTO-mode side-effect).
+        tracker = TradeOutcomeTracker()
+        feedback_result = tracker.analyze_recent_outcomes(skip_auto_prompts=True) or {}
+        feedback_payload = feedback_result.get('feedback') or feedback_result.get('feedback_content') or {}
+
+        feedback_summary = {
+            'feedback_id': feedback_result.get('feedback_id'),
+            'feedback_source': feedback_result.get('feedback_source', 'trade_outcomes'),
+            'total_trades': feedback_result.get('total_trades', 0),
+            'decisions_analyzed': feedback_result.get('decisions_analyzed', 0),
+            'success_rate': feedback_result.get('success_rate'),
+            'avg_profit': feedback_result.get('avg_profit'),
+            'summarizer_feedback': feedback_payload.get('summarizer_feedback', ''),
+            'decider_feedback': feedback_payload.get('decider_feedback', ''),
+            'key_insights': feedback_payload.get('key_insights', []),
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+        }
+
+        # Step 2: fan out — three concurrent LLM calls.
+        candidates = []
+        errors = []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            future_to_agent = {
+                pool.submit(_generate_candidate_for_agent, agent, config_hash, feedback_summary): agent
+                for agent in _PROMPT_LAB_AGENTS
+            }
+            for future in as_completed(future_to_agent):
+                agent = future_to_agent[future]
+                try:
+                    candidates.append(future.result())
+                except Exception as exc:
+                    errors.append({'agent_type': agent, 'error': str(exc)})
+
+        # Stable ordering for the UI (Summarizer, Decider, Feedback).
+        agent_order = {a: i for i, a in enumerate(_PROMPT_LAB_AGENTS)}
+        candidates.sort(key=lambda c: agent_order.get(c.get('agent_type'), 99))
+
+        return jsonify({
+            'config_hash': config_hash,
+            'feedback_summary': feedback_summary,
+            'candidates': candidates,
+            'errors': errors,
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 
 
 @app.route('/api/prompt-evolution/apply', methods=['POST'])

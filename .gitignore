@@ -54,6 +54,14 @@ home/
 # Knowledge bases (800-900 generated files — never commit)
 Knowledge_Bases/
 
+# Agent SOUL / MEMORY — DB is canonical; on-disk files are live mirrors
+# that may contain trade-specific lessons. Defaults end in .default.md and
+# ARE committed; live mirrors (SOUL.md / MEMORY.md) are gitignored.
+agents/*/SOUL.md
+agents/*/MEMORY.md
+!agents/*/SOUL.default.md
+!agents/*/MEMORY.default.md
+
 # Backup files from cleanup attempts
 *.bak.*
 *.new
