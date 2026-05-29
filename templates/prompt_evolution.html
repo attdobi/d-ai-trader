@@ -70,67 +70,178 @@
 
   <section class="pe-card" id="promptLabCard">
     <h2>Prompt Lab</h2>
-    <p class="pe-subtitle">Generate and apply improved prompt versions for each agent.</p>
+    <p class="pe-subtitle">Refresh feedback → regenerate all three agents → review diffs → approve or reject per agent.</p>
 
-    <div class="pe-form-grid">
-      <div class="pe-field">
-        <label for="promptLabAgentType">Agent Type</label>
-        <select id="promptLabAgentType" class="pe-select">
-          <option value="SummarizerAgent">Summarizer</option>
-          <option value="DeciderAgent">Decider</option>
-          <option value="FeedbackAgent">Feedback</option>
-        </select>
-      </div>
-      <div class="pe-field" style="justify-content: flex-end; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-        <button id="loadActiveBtn" class="pe-btn secondary" type="button">📋 Load Active Version</button>
-        <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
-      </div>
+    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 6px;">
+      <button id="batchGenerateBtn" class="pe-btn" type="button" style="font-size: 1.05em; padding: 10px 18px;">🚀 Refresh Feedback &amp; Generate All</button>
+      <span id="batchGenerateHint" style="color: #888; font-size: 0.9em;">Runs FeedbackAgent, then evolves all three prompts in parallel (~10-30s).</span>
     </div>
 
-    <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
-    <div id="promptLabError" class="pe-error pe-hidden"></div>
-    <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
+    <div id="batchStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">No batch run yet this session.</div>
+    <div id="batchError" class="pe-error pe-hidden"></div>
+    <div id="batchSuccess" class="pe-success pe-hidden"></div>
 
-    <div id="promptLabResults" class="pe-hidden">
-      <div class="pe-field">
-        <label>Reasoning</label>
-        <div id="generatedReasoning" class="pe-reasoning"></div>
-      </div>
+    <div id="batchFeedbackSummary" class="pe-hidden" style="margin: 12px 0; padding: 10px 14px; background: #f4f7fb; border-left: 3px solid #4a86e8; border-radius: 4px; font-size: 0.92em;">
+      <strong>Feedback Refresh:</strong> <span id="batchFeedbackSummaryText"></span>
+    </div>
+
+    <div id="batchResults" class="pe-hidden">
+      <!-- Tab strip -->
+      <div id="batchTabs" role="tablist" style="display: flex; gap: 4px; border-bottom: 2px solid #ddd; margin-top: 16px;"></div>
+
+      <!-- Tab panels (one per agent, populated by JS) -->
+      <div id="batchPanels"></div>
+    </div>
+
+    <!-- ===================== ADVANCED (legacy single-agent flow) ===================== -->
+    <details id="promptLabAdvanced" style="margin-top: 28px; border-top: 1px solid #e5e5e5; padding-top: 14px;">
+      <summary style="cursor: pointer; font-weight: 600; color: #555;">⚙️ Advanced — single-agent workflow</summary>
+
+      <p class="pe-subtitle" style="margin-top: 10px;">Manually drive one agent at a time. Useful for targeted tweaks or when the batch flow fails for one agent.</p>
 
       <div class="pe-form-grid">
         <div class="pe-field">
-          <label for="generatedSystemPrompt">System Prompt</label>
-          <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+          <label for="promptLabAgentType">Agent Type</label>
+          <select id="promptLabAgentType" class="pe-select">
+            <option value="SummarizerAgent">Summarizer</option>
+            <option value="DeciderAgent">Decider</option>
+            <option value="FeedbackAgent">Feedback</option>
+          </select>
         </div>
-        <div class="pe-field" style="grid-column: 1 / -1;">
-          <label for="generatedStrategyDirectives">Strategy Directives <span style="font-weight:normal;color:#888;">(evolves with feedback)</span></label>
-          <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Trading personality, sell thresholds, risk rules — this is what feedback evolves"></textarea>
+        <div class="pe-field" style="justify-content: flex-end; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <button id="loadActiveBtn" class="pe-btn secondary" type="button">📋 Load Active Version</button>
+          <button id="refreshFeedbackBtn" class="pe-btn secondary" type="button" title="Run the FeedbackAgent against the latest trade outcomes so the next 'Generate' uses fresh feedback. Does NOT touch existing prompts.">🔄 Refresh Feedback</button>
+          <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
         </div>
-        <div class="pe-field" style="grid-column: 1 / -1;">
-          <label for="generatedSoul">Agent Soul <span style="font-weight:normal;color:#888;">(persistent identity — who this agent is)</span></label>
-          <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent personality, philosophy, decision style — loaded from agents/<name>/SOUL.md by default"></textarea>
-        </div>
-        <div class="pe-field" style="grid-column: 1 / -1;">
-          <label for="generatedMemory">Agent Memory <span style="font-weight:normal;color:#888;">(auto-updated by feedback agent)</span></label>
-          <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Lessons learned, patterns, mistakes — automatically updated after each analysis cycle"></textarea>
-        </div>
+      </div>
+
+      <div id="feedbackRefreshStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">Feedback not refreshed this session — Generate will use the most recent stored feedback.</div>
+      <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
+      <div id="promptLabError" class="pe-error pe-hidden"></div>
+      <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
+
+      <div id="promptLabResults" class="pe-hidden">
         <div class="pe-field">
-          <label for="generatedUserPrompt">User Prompt Template</label>
-          <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
+          <label>Reasoning</label>
+          <div id="generatedReasoning" class="pe-reasoning"></div>
+        </div>
+
+        <div class="pe-form-grid">
+          <div class="pe-field">
+            <label for="generatedSystemPrompt">System Prompt</label>
+            <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+          </div>
+          <div class="pe-field" style="grid-column: 1 / -1;">
+            <label for="generatedStrategyDirectives">Strategy Directives <span style="font-weight:normal;color:#888;">(evolves with feedback)</span></label>
+            <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Trading personality, sell thresholds, risk rules — this is what feedback evolves"></textarea>
+          </div>
+          <div class="pe-field" style="grid-column: 1 / -1;">
+            <label for="generatedSoul">Agent Soul <span style="font-weight:normal;color:#888;">(persistent identity — who this agent is)</span></label>
+            <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent personality, philosophy, decision style — loaded from agents/<name>/SOUL.md by default"></textarea>
+          </div>
+          <div class="pe-field" style="grid-column: 1 / -1;">
+            <label for="generatedMemory">Agent Memory <span style="font-weight:normal;color:#888;">(auto-updated by feedback agent)</span></label>
+            <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Lessons learned, patterns, mistakes — automatically updated after each analysis cycle"></textarea>
+          </div>
+          <div class="pe-field">
+            <label for="generatedUserPrompt">User Prompt Template</label>
+            <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <div class="pe-field">
+          <label for="promptDescription">Description</label>
+          <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
+        </div>
+
+        <div style="margin-top: 14px;">
+          <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
         </div>
       </div>
-
-      <div class="pe-field">
-        <label for="promptDescription">Description</label>
-        <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
-      </div>
-
-      <div style="margin-top: 14px;">
-        <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
-      </div>
-    </div>
+    </details>
   </section>
 </div>
+
+<style>
+/* Batch flow — tabs and per-agent panels */
+.pe-tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 1em;
+  font-weight: 500;
+  color: #666;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pe-tab-btn:hover { color: #222; background: #f7f9fc; }
+.pe-tab-btn.active {
+  color: #1a73e8;
+  border-bottom-color: #1a73e8;
+  font-weight: 600;
+}
+.pe-tab-btn .pe-diff-badge {
+  font-size: 0.8em;
+  color: #888;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pe-tab-btn .pe-diff-badge .add { color: #2e7d32; }
+.pe-tab-btn .pe-diff-badge .rem { color: #c62828; }
+.pe-tab-btn.failed { color: #c62828; }
+.pe-tab-btn.approved { color: #2e7d32; }
+.pe-tab-btn.rejected { color: #999; text-decoration: line-through; }
+.pe-tab-panel { display: none; padding: 18px 4px; }
+.pe-tab-panel.active { display: block; }
+.pe-diff-section {
+  margin: 12px 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.pe-diff-section > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  font-weight: 600;
+  font-size: 0.95em;
+  user-select: none;
+}
+.pe-diff-section > summary:hover { background: #eef2f8; }
+.pe-diff-section .pe-diff-view {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: #fafbfc;
+  padding: 10px 14px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.pe-diff-empty {
+  padding: 14px;
+  color: #888;
+  font-style: italic;
+  text-align: center;
+}
+.pe-decision-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: #f7f9fc;
+  border-radius: 6px;
+}
+.pe-btn.approve { background: #2e7d32; color: #fff; }
+.pe-btn.approve:hover { background: #256528; }
+.pe-btn.reject { background: #c62828; color: #fff; }
+.pe-btn.reject:hover { background: #a31f1f; }
+</style>
 {% endblock %}
 
 {% block scripts %}
