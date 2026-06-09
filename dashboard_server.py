@@ -39,6 +39,7 @@ import json
 import pandas as pd
 import threading
 import time
+import uuid
 import yfinance as yf
 from datetime import datetime, timedelta
 from feedback_agent import TradeOutcomeTracker
@@ -3239,25 +3240,43 @@ def generate_prompt_evolution_candidate():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/prompt-evolution/refresh-and-generate-all', methods=['POST'])
-def refresh_feedback_and_generate_all():
-    """One-click: run FeedbackAgent → generate evolved prompt for all three
-    agents concurrently → return candidates + pre-computed diffs.
+# In-memory batch-job registry. Survives across HTTP requests (browser
+# navigation / tab switches / reloads) but not across server restarts —
+# which is fine: the client clears stale localStorage if status lookup 404s.
+_BATCH_JOBS = {}
+_BATCH_JOBS_LOCK = threading.Lock()
+_BATCH_JOB_TTL_SEC = 30 * 60  # 30 min
 
-    The user reviews each candidate in a tabbed diff view and approves or
-    rejects per agent. Approve hits the existing /apply endpoint.
-    """
+
+def _reap_stale_batch_jobs():
+    """Drop jobs older than TTL. Called opportunistically on each access."""
+    cutoff = time.time() - _BATCH_JOB_TTL_SEC
+    with _BATCH_JOBS_LOCK:
+        stale = [k for k, v in _BATCH_JOBS.items() if v.get('updated_at', 0) < cutoff]
+        for k in stale:
+            _BATCH_JOBS.pop(k, None)
+
+
+def _run_batch_generation(job_id, config_hash):
+    """Background worker. Updates _BATCH_JOBS in place."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from feedback_agent import TradeOutcomeTracker
+
+    def _set(state):
+        state['updated_at'] = time.time()
+        with _BATCH_JOBS_LOCK:
+            _BATCH_JOBS[job_id] = state
+
     try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from feedback_agent import TradeOutcomeTracker
-
-        config_hash = get_current_config_hash()
-
-        # Step 1: refresh feedback (don't trigger the AUTO-mode side-effect).
+        # Step 1: feedback refresh.
+        _set({
+            'status': 'running', 'phase': 'feedback',
+            'config_hash': config_hash, 'started_at': time.time(),
+            'message': 'Running FeedbackAgent against the latest trade outcomes…',
+        })
         tracker = TradeOutcomeTracker()
         feedback_result = tracker.analyze_recent_outcomes(skip_auto_prompts=True) or {}
         feedback_payload = feedback_result.get('feedback') or feedback_result.get('feedback_content') or {}
-
         feedback_summary = {
             'feedback_id': feedback_result.get('feedback_id'),
             'feedback_source': feedback_result.get('feedback_source', 'trade_outcomes'),
@@ -3271,9 +3290,19 @@ def refresh_feedback_and_generate_all():
             'generated_at': datetime.utcnow().isoformat() + 'Z',
         }
 
-        # Step 2: fan out — three concurrent LLM calls.
+        # Step 2: parallel LLM calls.
+        _set({
+            'status': 'running', 'phase': 'generate',
+            'config_hash': config_hash,
+            'message': 'Evolving prompts for all three agents in parallel…',
+            'feedback_summary': feedback_summary,
+            'completed_agents': [],
+            'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
+        })
+
         candidates = []
         errors = []
+        completed = []
         with ThreadPoolExecutor(max_workers=3) as pool:
             future_to_agent = {
                 pool.submit(_generate_candidate_for_agent, agent, config_hash, feedback_summary): agent
@@ -3285,22 +3314,84 @@ def refresh_feedback_and_generate_all():
                     candidates.append(future.result())
                 except Exception as exc:
                     errors.append({'agent_type': agent, 'error': str(exc)})
+                completed.append(agent)
+                # Live progress update — UI can show "2/3 done".
+                with _BATCH_JOBS_LOCK:
+                    if job_id in _BATCH_JOBS:
+                        _BATCH_JOBS[job_id]['completed_agents'] = list(completed)
+                        _BATCH_JOBS[job_id]['updated_at'] = time.time()
 
-        # Stable ordering for the UI (Summarizer, Decider, Feedback).
         agent_order = {a: i for i, a in enumerate(_PROMPT_LAB_AGENTS)}
         candidates.sort(key=lambda c: agent_order.get(c.get('agent_type'), 99))
 
-        return jsonify({
+        _set({
+            'status': 'done',
             'config_hash': config_hash,
             'feedback_summary': feedback_summary,
             'candidates': candidates,
             'errors': errors,
-            'generated_at': datetime.utcnow().isoformat() + 'Z',
+            'completed_agents': completed,
+            'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
+            'finished_at': datetime.utcnow().isoformat() + 'Z',
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
+        _set({
+            'status': 'failed',
+            'config_hash': config_hash,
+            'error': str(e),
+            'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
+            'finished_at': datetime.utcnow().isoformat() + 'Z',
+        })
+
+
+@app.route('/api/prompt-evolution/refresh-and-generate-all', methods=['POST'])
+def refresh_feedback_and_generate_all():
+    """Kick off the batch flow in a background thread; return a job_id
+    immediately. The client persists job_id in localStorage and polls
+    /batch-status/<job_id>, so progress survives tab switches and reloads.
+    """
+    try:
+        _reap_stale_batch_jobs()
+        config_hash = get_current_config_hash()
+        job_id = uuid.uuid4().hex
+
+        with _BATCH_JOBS_LOCK:
+            _BATCH_JOBS[job_id] = {
+                'status': 'running', 'phase': 'starting',
+                'config_hash': config_hash,
+                'started_at': time.time(),
+                'updated_at': time.time(),
+                'message': 'Queued…',
+            }
+
+        thread = threading.Thread(
+            target=_run_batch_generation,
+            args=(job_id, config_hash),
+            daemon=True,
+            name=f'batch-gen-{job_id[:8]}',
+        )
+        thread.start()
+
+        return jsonify({'job_id': job_id, 'status': 'running'})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/batch-status/<job_id>', methods=['GET'])
+def get_batch_generation_status(job_id):
+    """Return the current state of a batch job. 404 if unknown (server
+    restart or TTL expiry) — the client should clear localStorage."""
+    _reap_stale_batch_jobs()
+    with _BATCH_JOBS_LOCK:
+        job = _BATCH_JOBS.get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found', 'job_id': job_id}), 404
+    # Don't leak internal timestamps as raw floats — keep them but they're harmless.
+    return jsonify({'job_id': job_id, **job})
 
 
 
