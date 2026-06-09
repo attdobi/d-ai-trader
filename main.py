@@ -45,7 +45,7 @@ from bs4 import BeautifulSoup
 # Configuration - Optimized for day trading (6 sources max for cost efficiency)
 # Ordered: Most reliable first (helps driver warm-up), complex sites later
 URLS = [
-    ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # ✅ Most reliable, simple
+    ("Agent_Yahoo_Finance", "https://finance.yahoo.com/topic/stock-market-news/"),  # ✅ News-focused topic page (homepage 500s as of 2026-06)
     ("Agent_StockAnalysis_Gainers", "https://stockanalysis.com/markets/gainers/"),  # ⭐ Day trading movers — replaces MarketBeat (404'd 2026-06)
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),            # ✅ Reliable, good content
     ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
