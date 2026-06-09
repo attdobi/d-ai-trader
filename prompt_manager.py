@@ -6,6 +6,14 @@ from sqlalchemy import text
 from config import engine
 
 
+_AGENT_DIR_MAP = {
+    "DeciderAgent": "decider",
+    "SummarizerAgent": "summarizer",
+    "FeedbackAgent": "feedback",
+    "feedback_analyzer": "feedback",
+}
+
+
 def _build_prompt_payload(agent_type, row):
     if not row:
         return None
@@ -18,20 +26,28 @@ def _build_prompt_payload(agent_type, row):
         "memory": getattr(row, 'memory', None) or "",
         "version": row.version
     }
-    # File override: load soul/memory from agents/ files if env var set
-    if os.environ.get("DAI_SOUL_FILE_OVERRIDE") == "1":
+    agent_dir = _AGENT_DIR_MAP.get(agent_type)
+
+    # Emergency hard-override: force disk values to win even over populated DB.
+    # Toggle with DAI_SOUL_FILE_OVERRIDE=1.
+    if agent_dir and os.environ.get("DAI_SOUL_FILE_OVERRIDE") == "1":
         from initialize_prompts import _load_agent_file
-        # Map agent_type to directory name
-        agent_dir_map = {
-            "DeciderAgent": "decider",
-            "SummarizerAgent": "summarizer",
-            "FeedbackAgent": "feedback",
-            "feedback_analyzer": "feedback",
-        }
-        agent_dir = agent_dir_map.get(agent_type)
-        if agent_dir:
-            payload["soul"] = _load_agent_file(agent_dir, "SOUL.md") or payload["soul"]
-            payload["memory"] = _load_agent_file(agent_dir, "MEMORY.md") or payload["memory"]
+        payload["soul"] = _load_agent_file(agent_dir, "SOUL.md") or payload["soul"]
+        payload["memory"] = _load_agent_file(agent_dir, "MEMORY.md") or payload["memory"]
+
+    # Empty-DB fallback: when a row's soul/memory column is empty, load the
+    # committed default from agents/<dir>/SOUL.default.md (resolved by
+    # _load_agent_file's SOUL.md → SOUL.default.md fallback chain). Ensures
+    # the Prompt Lab Advanced tab and the Generate flow always start from
+    # the system charter rather than an empty box. DB-stored values still
+    # win when present, so evolved prompts are never clobbered.
+    if agent_dir and (not payload["soul"] or not payload["memory"]):
+        from initialize_prompts import _load_agent_file
+        if not payload["soul"]:
+            payload["soul"] = _load_agent_file(agent_dir, "SOUL.md", "")
+        if not payload["memory"]:
+            payload["memory"] = _load_agent_file(agent_dir, "MEMORY.md", "")
+
     return payload
 
 def initialize_config_prompts(config_hash):
