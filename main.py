@@ -46,13 +46,19 @@ from bs4 import BeautifulSoup
 # Ordered: Most reliable first (helps driver warm-up), complex sites later
 URLS = [
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com"),             # ✅ Most reliable, simple
-    ("Agent_MarketBeat", "https://www.marketbeat.com/market-news/"),   # ⭐ Day trading catalysts, pre-market movers
+    ("Agent_StockAnalysis_Gainers", "https://stockanalysis.com/markets/gainers/"),  # ⭐ Day trading movers — replaces MarketBeat (404'd 2026-06)
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),            # ✅ Reliable, good content
     ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
     ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news
     ("Agent_CNBC", "https://www.cnbc.com")                            # ⭐ Great content but can crash driver initially
     # Order matters: Simple sites first warm up driver, complex sites later
-    # BLOCKED: Reuters, TheStreet, Investing.com (Cloudflare), MarketWatch, Finviz
+    # BLOCKED / DEAD:
+    #   Reuters, TheStreet, Investing.com, TipRanks (Cloudflare challenge)
+    #   Investors.com (HTTP 403)
+    #   MarketWatch (paywall, HTTP 401)
+    #   Finviz (anti-bot)
+    #   Benzinga (HTTP 500, swapped 2025)
+    #   MarketBeat — /market-news/ → HTTP 404 (swapped to StockAnalysis 2026-06)
 ]
 
 SUMMARY_MAX_WORKERS = max(1, int(os.getenv("SUMMARY_MAX_WORKERS", "2")))
