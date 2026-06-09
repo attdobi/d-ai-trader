@@ -132,6 +132,41 @@ else:
     print("⚠️  Chromedriver installation path not detected; undetected_chromedriver will attempt its own download.")
 
 
+# ---------------------------------------------------------------------------
+# undetected_chromedriver patcher — re-harden after uc rewrites the binary.
+#
+# uc patches chromedriver in place to remove the "cdc_" automation-detection
+# string. That rewrite invalidates the adhoc codesign we just applied, so on
+# macOS 13+ AMFI SIGKILLs the patched binary at launch (exit -9). The hook
+# below runs after uc's patcher and re-applies _harden_chromedriver so the
+# patched binary is launchable.
+# ---------------------------------------------------------------------------
+try:
+    import undetected_chromedriver.patcher as _uc_patcher  # noqa: E402
+    if not getattr(_uc_patcher.Patcher, "_dai_post_patch_hook_installed", False):
+        _uc_original_patch_exe = _uc_patcher.Patcher.patch_exe
+
+        def _dai_patch_exe_with_resign(self, *args, **kwargs):
+            result = _uc_original_patch_exe(self, *args, **kwargs)
+            try:
+                target = getattr(self, "executable_path", None)
+                if target and os.path.exists(target):
+                    _harden_chromedriver(target)
+                    print(f"🔏 Re-signed uc-patched chromedriver: {target}")
+            except Exception as exc:
+                print(f"⚠️  Post-patch re-sign failed: {exc}")
+            return result
+
+        _uc_patcher.Patcher.patch_exe = _dai_patch_exe_with_resign
+        _uc_patcher.Patcher._dai_post_patch_hook_installed = True
+        print("🪝 undetected_chromedriver patch_exe hook installed (re-sign after patch)")
+except ImportError:
+    # undetected_chromedriver not installed; nothing to hook.
+    pass
+except Exception as _hook_exc:
+    print(f"⚠️  Could not install uc patcher hook: {_hook_exc}")
+
+
 def _download_cft_chromedriver():
     """Download ChromeDriver from Chrome-for-Testing as a fallback (helps avoid Gatekeeper issues)."""
     detected_version = chromedriver_autoinstaller.get_chrome_version()

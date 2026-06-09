@@ -858,53 +858,192 @@ function setupBatchPromptLab() {
     setHidden(fbBanner, false);
   }
 
+  // ----- Persistence + polling (so a tab switch or reload doesn't lose state) -----
+  const LS_JOB_KEY = 'pe.batchJobId';
+  const LS_RESULT_KEY = 'pe.lastBatchResult';
+  const POLL_INTERVAL_MS = 2000;
+  const origBtnLabel = btn.textContent;
+  let pollTimer = null;
+  let activeJobId = null;
+
+  const setRunningUI = (message) => {
+    btn.disabled = true;
+    btn.textContent = '⏳ Running…';
+    if (statusEl) {
+      statusEl.style.color = '#888';
+      statusEl.textContent = message || 'Working…';
+    }
+    if (hintEl) hintEl.textContent = '';
+  };
+  const setIdleUI = () => {
+    btn.disabled = false;
+    btn.textContent = origBtnLabel;
+  };
+
+  const phaseMessage = (job) => {
+    if (job.phase === 'feedback') {
+      return job.message || 'Step 1/2 — Running FeedbackAgent…';
+    }
+    if (job.phase === 'generate') {
+      const done = (job.completed_agents || []).length;
+      return `Step 2/2 — Evolving prompts (${done}/3 complete)…`;
+    }
+    return job.message || 'Working…';
+  };
+
+  function renderFinishedJob(job) {
+    if (job.feedback_summary) renderFeedbackBanner(job.feedback_summary);
+    const candidates = job.candidates || [];
+    const errors = job.errors || [];
+    renderTabsAndPanels(candidates, errors);
+    setHidden(resultsEl, false);
+
+    const successCount = candidates.length;
+    const failCount = errors.length;
+    const ts = new Date(job.finished_at || Date.now()).toLocaleString();
+    if (statusEl) {
+      statusEl.style.color = failCount ? '#b26a00' : '#2e7d32';
+      statusEl.textContent = `Generated ${successCount}/3 candidates at ${ts}${
+        failCount ? ` (${failCount} failed — see tab)` : ''
+      }. Review each tab and approve or reject.`;
+    }
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function pollOnce(jobId) {
+    try {
+      const res = await fetch(`/api/prompt-evolution/batch-status/${encodeURIComponent(jobId)}`);
+      if (res.status === 404) {
+        // Job is gone (server restart or TTL). Clear and surface a soft message.
+        localStorage.removeItem(LS_JOB_KEY);
+        activeJobId = null;
+        stopPolling();
+        setIdleUI();
+        if (statusEl) {
+          statusEl.style.color = '#b26a00';
+          statusEl.textContent = 'Previous batch job is no longer available (server restart or expired). Click again to rerun.';
+        }
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const job = await res.json();
+
+      if (job.status === 'running') {
+        setRunningUI(phaseMessage(job));
+        if (job.feedback_summary) renderFeedbackBanner(job.feedback_summary);
+        pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS);
+        return;
+      }
+      if (job.status === 'done') {
+        stopPolling();
+        activeJobId = null;
+        localStorage.removeItem(LS_JOB_KEY);
+        try {
+          localStorage.setItem(LS_RESULT_KEY, JSON.stringify({
+            feedback_summary: job.feedback_summary,
+            candidates: job.candidates,
+            errors: job.errors,
+            finished_at: job.finished_at,
+            stored_at: Date.now(),
+          }));
+        } catch (_) { /* localStorage quota — fine to drop */ }
+        renderFinishedJob(job);
+        setIdleUI();
+        return;
+      }
+      if (job.status === 'failed') {
+        stopPolling();
+        activeJobId = null;
+        localStorage.removeItem(LS_JOB_KEY);
+        showBatchError(`Batch generation failed: ${job.error || 'unknown error'}`);
+        if (statusEl) {
+          statusEl.style.color = '#c62828';
+          statusEl.textContent = '';
+        }
+        setIdleUI();
+        return;
+      }
+      // Unknown status — back off and try again.
+      pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS);
+    } catch (err) {
+      // Transient network error — keep polling.
+      console.warn('batch-status poll error:', err);
+      pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS * 2);
+    }
+  }
+
+  function startPolling(jobId) {
+    activeJobId = jobId;
+    localStorage.setItem(LS_JOB_KEY, jobId);
+    stopPolling();
+    pollOnce(jobId);
+  }
+
+  // Resume any active job from a prior page load.
+  function resumeFromLocalStorage() {
+    const existingJobId = localStorage.getItem(LS_JOB_KEY);
+    if (existingJobId) {
+      setRunningUI('Reconnecting to in-flight batch job…');
+      startPolling(existingJobId);
+      return;
+    }
+    // No active job — but if we have a recent result, restore it so a hard
+    // refresh after completion doesn't blank the page.
+    try {
+      const raw = localStorage.getItem(LS_RESULT_KEY);
+      if (!raw) return;
+      const cached = JSON.parse(raw);
+      // Only restore if it's < 1 hour old; users probably don't want to see
+      // candidates from a previous trading session.
+      if (Date.now() - (cached.stored_at || 0) > 60 * 60 * 1000) {
+        localStorage.removeItem(LS_RESULT_KEY);
+        return;
+      }
+      renderFinishedJob({
+        feedback_summary: cached.feedback_summary,
+        candidates: cached.candidates || [],
+        errors: cached.errors || [],
+        finished_at: cached.finished_at,
+      });
+      if (statusEl) {
+        statusEl.style.color = '#888';
+        statusEl.textContent += ' (restored from previous session)';
+      }
+    } catch (_) {
+      localStorage.removeItem(LS_RESULT_KEY);
+    }
+  }
+
   btn.addEventListener('click', async () => {
     clearBatchAlerts();
     setHidden(resultsEl, true);
-    btn.disabled = true;
-    const origLabel = btn.textContent;
-    btn.textContent = 'Running…';
-    if (statusEl) {
-      statusEl.textContent = 'Refreshing feedback and generating candidates for all three agents…';
-      statusEl.style.color = '#888';
-    }
-    if (hintEl) hintEl.textContent = 'Step 1/2: refreshing feedback…';
-
+    setRunningUI('Queuing batch job…');
     try {
       const data = await apiJSON('/api/prompt-evolution/refresh-and-generate-all', {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      if (data?.error) throw new Error(data.error);
-
-      if (data.feedback_summary) renderFeedbackBanner(data.feedback_summary);
-
-      const candidates = data.candidates || [];
-      const errors = data.errors || [];
-      renderTabsAndPanels(candidates, errors);
-      setHidden(resultsEl, false);
-
-      const successCount = candidates.length;
-      const failCount = errors.length;
-      const ts = new Date().toLocaleString();
-      if (statusEl) {
-        statusEl.style.color = failCount ? '#b26a00' : '#2e7d32';
-        statusEl.textContent = `Generated ${successCount}/3 candidates at ${ts}${
-          failCount ? ` (${failCount} failed — see tab)` : ''
-        }. Review each tab and approve or reject.`;
-      }
-      if (hintEl) hintEl.textContent = '';
+      if (data?.error || !data?.job_id) throw new Error(data?.error || 'No job_id returned.');
+      startPolling(data.job_id);
     } catch (err) {
-      showBatchError(`Batch generation failed: ${err.message}`);
+      showBatchError(`Failed to start batch: ${err.message}`);
+      setIdleUI();
       if (statusEl) {
-        statusEl.textContent = '';
         statusEl.style.color = '#c62828';
+        statusEl.textContent = '';
       }
-    } finally {
-      btn.disabled = false;
-      btn.textContent = origLabel;
     }
   });
+
+  resumeFromLocalStorage();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
