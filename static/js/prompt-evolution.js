@@ -11,6 +11,19 @@ const selectedVersions = {
   FeedbackAgent: []
 };
 
+// Notify any other open dashboard page (e.g. the Feedback tab) that a new
+// prompt version was activated, so it can refresh its version display
+// instantly instead of waiting for its poll interval.
+function broadcastPromptApplied(agentType, version) {
+  try {
+    const channel = new BroadcastChannel('dai-prompts');
+    channel.postMessage({ type: 'prompt-applied', agent: agentType, version });
+    channel.close();
+  } catch (_) {
+    // BroadcastChannel unsupported — other pages fall back to polling.
+  }
+}
+
 function setHidden(element, hidden) {
   if (!element) return;
   element.classList.toggle('pe-hidden', hidden);
@@ -538,6 +551,7 @@ function setupPromptLab() {
 
       showPromptLabSuccess(`Applied successfully as version v${data.version}.`);
       setPromptLabMessage('Prompt version applied. Timeline refreshed.');
+      broadcastPromptApplied(agentType, data.version);
       await loadPromptHistory();
     } catch (error) {
       showPromptLabError(`Failed to apply new version: ${error.message}`);
@@ -811,6 +825,7 @@ function setupBatchPromptLab() {
           rejectBtn.disabled = true;
           descInput.disabled = true;
           showBatchSuccess(`${AGENT_LABELS[candidate.agent_type]} v${data.version} activated.`);
+          broadcastPromptApplied(candidate.agent_type, data.version);
           await loadPromptHistory();
         } catch (err) {
           statusSpan.style.color = '#c62828';

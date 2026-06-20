@@ -214,12 +214,35 @@
 .pe-diff-section .pe-diff-view {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;
-  background: #fafbfc;
+  background: #ffffff;
   padding: 10px 14px;
   white-space: pre;
   overflow-x: auto;
   max-height: 420px;
   overflow-y: auto;
+}
+/* GitHub light-theme diff colors. High specificity so they override the
+   dark-theme .pe-diff-line rules in app.css (which are unreadable on the
+   light batch-flow background). */
+.pe-diff-section .pe-diff-view .pe-diff-line {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 4px;
+  color: #1f2328;
+}
+.pe-diff-section .pe-diff-view .pe-diff-line.add {
+  background: #e6ffec;
+  color: #0a5128;
+}
+.pe-diff-section .pe-diff-view .pe-diff-line.remove {
+  background: #ffebe9;
+  color: #82071e;
+}
+.pe-diff-section .pe-diff-view .pe-diff-line.hunk {
+  background: #ddf4ff;
+  color: #0550ae;
+  font-weight: 600;
 }
 .pe-diff-empty {
   padding: 14px;

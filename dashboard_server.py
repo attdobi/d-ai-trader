@@ -261,11 +261,6 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
         """)
 
 
-class _SafeFormatDict(dict):
-    """Dictionary that leaves unknown keys in braces when formatting."""
-    def __missing__(self, key):
-        return f"{{{key}}}"
-
 def _normalize_feedback_value(value):
     """Convert stored feedback (JSON/text/None) into a clean display string."""
     if value is None:
@@ -286,14 +281,21 @@ def _normalize_feedback_value(value):
     return str(value)
 
 def _render_prompt_text(template, replacements):
-    """Render a prompt template with defensive formatting."""
+    """Render a prompt template by substituting only known {placeholder} tokens.
+
+    Uses literal string replacement instead of str.format_map: these templates
+    routinely contain JSON examples and other literal braces (e.g.
+    {"action": "BUY", "size": 100}) that format_map tries to parse as format
+    fields, raising 'ValueError: Invalid format specifier' and aborting the
+    whole render. Plain replace touches only the placeholders we know about and
+    leaves every other brace untouched, so it can't throw.
+    """
     if not template:
         return None
-    try:
-        return template.format_map(_SafeFormatDict(replacements))
-    except Exception as exc:
-        print(f"Prompt render error: {exc}")
-        return template
+    rendered = template
+    for key, value in (replacements or {}).items():
+        rendered = rendered.replace("{" + str(key) + "}", str(value))
+    return rendered
 
 def _collect_prompt_payload(tracker, agent_candidates, key, replacements=None):
     """Build a structured payload for the active prompt of a given agent."""

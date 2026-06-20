@@ -290,7 +290,36 @@ function refreshFeedbackData() {
   loadLatestFeedback();
   loadFeedbackHistory();
   loadTradeOutcomes();
+  // Keep the active-prompt version card in sync with approvals made in the
+  // Prompt Lab. Previously this only ran once on page load, so the Feedback
+  // page showed a stale version until a hard reload.
+  loadPromptDetails();
 }
+
+// Instant cross-page sync: the Prompt Lab broadcasts on the 'dai-prompts'
+// channel whenever a new version is approved/activated. Refresh immediately
+// so the Feedback page never lags behind the Prompt Lab.
+try {
+  const promptSyncChannel = new BroadcastChannel('dai-prompts');
+  promptSyncChannel.onmessage = (event) => {
+    if (event?.data?.type === 'prompt-applied') {
+      loadPromptDetails();
+    }
+  };
+} catch (_) {
+  // BroadcastChannel unsupported — the 10s poll above still keeps us in sync.
+}
+
+// Back/forward navigation restores pages from the bfcache without re-running
+// DOMContentLoaded, which would otherwise show stale prompt versions. Force a
+// refresh when the page is shown from cache.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) {
+    loadPromptDetails();
+    refreshFeedbackData();
+  }
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   loadPromptDetails();
   refreshFeedbackData();
