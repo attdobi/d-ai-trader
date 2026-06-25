@@ -2389,6 +2389,14 @@ OUTPUT (STRICT)
         " and (b) confirms that every ≥+3% winner was harvested or explicitly names any retained winner with its % gain and fresh catalyst justification."
         " Keep the object compact: {\"decisions\":[...], \"cash_reason\":\"...\"}."
     )
+    prompt += (
+        "\n\nJUSTIFICATION DETAIL (for human + RLHF review — overrides any shorter length cap):"
+        " Make every \"reason\" (and the \"cash_reason\") a specific, self-contained justification of roughly 220-450 characters that a reviewer could audit without other context. Each MUST cover, with concrete numbers:"
+        " (1) CATALYST — what changed and why it is fresh, not a stale/extended headline;"
+        " (2) CONFIRMATION — the signals you actually checked: position vs VWAP / opening range, 10-minute trend, relative strength vs SPY and the sector/peer ETF, and volume;"
+        " (3) THESIS & RISK — the entry/exit logic, the level that would invalidate it, and the intended hold horizon;"
+        " (4) WHY NOW — why act this cycle versus waiting. Be concrete and decision-grade; do not pad with generic phrasing."
+    )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
@@ -2552,6 +2560,24 @@ OUTPUT (STRICT)
             print(f"💬 Cash hold rationale (no buys with ${settled_cash_value:,.2f} settled): {cash_hold_reason}")
         else:
             print(f"⚠️  No buys chosen despite ${settled_cash_value:,.2f} settled; AI did not supply a cash_reason.")
+
+    # Persist the cash-hold rationale as a recorded decision so the "why we held"
+    # justification is captured (it was only printed, then lost). This makes
+    # no-trade cycles reviewable on the dashboard and by the feedback/RLHF loop,
+    # and stops a deliberate, justified hold from being logged as "AI failed".
+    has_actionable = any(
+        isinstance(d, dict) and (d.get("action") or "").lower() in ("buy", "sell")
+        for d in ai_response
+    )
+    if cash_hold_reason and not has_actionable:
+        ai_response.append({
+            "action": "hold",
+            "ticker": "CASH",
+            "amount_usd": 0,
+            "shares": 0,
+            "reason": cash_hold_reason,
+            "execution_status": "cash_hold",
+        })
 
     # If market is closed, modify decisions to show they're deferred
     if not market_open:

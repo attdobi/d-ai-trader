@@ -429,7 +429,10 @@ class DAITraderOrchestrator:
                     logger.warning("⚠️  All decisions were rejected; nothing to execute.")
                 decider.record_portfolio_snapshot()
             else:
-                logger.warning("⚠️  No decisions to process - AI returned empty or failed")
+                # Empty here means no buys/sells AND no cash rationale was provided.
+                # A deliberate cash-hold is now recorded as a decision upstream, so
+                # this branch is genuinely "nothing to act on", not necessarily a failure.
+                logger.info("ℹ️  No actionable decisions this cycle (no trades and no cash rationale).")
             
             # Mark summaries as processed
             summary_ids = [s['id'] for s in summaries]

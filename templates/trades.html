@@ -67,8 +67,8 @@
           {% set action = decision.get('action', 'N/A').lower() %}
           {% if action == 'buy' %}📈{% elif action == 'sell' %}📉{% elif action == 'hold' %}⏸{% elif 'market' in action or 'closed' in action %}⛔{% endif %}
           {{ decision.get('action', 'N/A') }}
-          {% if exec_status and action in ['buy', 'sell'] %}
-            <span class="exec-badge exec-{{ exec_status|lower }}">{{ exec_status }}</span>
+          {% if exec_status and (action in ['buy', 'sell'] or exec_status|lower == 'cash_hold') %}
+            <span class="exec-badge exec-{{ exec_status|lower }}">{{ 'cash hold' if exec_status|lower == 'cash_hold' else exec_status }}</span>
           {% endif %}
         </td>
         {% set es_lower = exec_status|lower %}
@@ -140,6 +140,7 @@
 .exec-filled { background: #e6ffec; color: #0a5128; }
 .exec-rejected, .exec-error, .exec-failed { background: #ffebe9; color: #b42318; }
 .exec-working, .exec-not_filled { background: #fff4e5; color: #8a5300; }
+.exec-cash_hold { background: #eef1f4; color: #475569; }
 .est-tag { color: #9aa3ad; font-style: italic; font-size: 0.85em; }
 .amt-none { color: #b42318; font-size: 0.9em; }
 </style>
