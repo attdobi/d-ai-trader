@@ -1432,24 +1432,40 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             print("No recent decisions to analyze")
             return None
             
+        # Execution statuses that mean the order never actually traded. Counting
+        # these as decisions (or worse, as "successful" buys) corrupts the
+        # learning signal — a canceled/rejected order is not a trade.
+        NON_EXECUTED_STATUSES = {
+            'rejected', 'canceled', 'cancelled', 'working', 'error', 'failed', 'not_filled'
+        }
+
         # Parse and analyze decision patterns
         parsed_decisions = []
+        excluded_non_executed = 0
         for decision in decisions:
             try:
                 decision_data = decision['data']
                 if isinstance(decision_data, list) and len(decision_data) > 0:
                     decision_item = decision_data[0]  # Take first decision in list
+                    action = decision_item.get('action', 'unknown')
+                    exec_status = str(decision_item.get('execution_status', 'normal')).lower()
+                    # Drop buy/sell orders that never filled — they are not trades.
+                    if action in ('buy', 'sell') and exec_status in NON_EXECUTED_STATUSES:
+                        excluded_non_executed += 1
+                        continue
                     parsed_decisions.append({
                         'timestamp': decision['timestamp'],
-                        'action': decision_item.get('action', 'unknown'),
+                        'action': action,
                         'ticker': decision_item.get('ticker', 'unknown'),
                         'amount_usd': decision_item.get('amount_usd', 0),
                         'reason': decision_item.get('reason', ''),
-                        'execution_status': decision_item.get('execution_status', 'normal')
+                        'execution_status': exec_status
                     })
             except Exception as e:
                 print(f"Error parsing decision: {e}")
                 continue
+        if excluded_non_executed:
+            print(f"ℹ️  Excluded {excluded_non_executed} non-executed (rejected/canceled) order(s) from feedback analysis.")
         
         if not parsed_decisions:
             print("No parseable decisions to analyze")
