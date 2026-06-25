@@ -145,7 +145,13 @@ async function loadLatestFeedback() {
         document.getElementById('avgProfit').textContent = `${(p30.avg_profit * 100).toFixed(2)}%`;
         document.getElementById('tradeCount').textContent = p30.total_trades;
       }
-      if (data.period_analysis) updatePerformanceChart(data.period_analysis);
+      // Drive the chart from the user's selected range. When it's the default
+      // set, reuse the data we just fetched; otherwise fetch the chosen windows.
+      if (selectedTrendPeriods === DEFAULT_TREND_PERIODS && data.period_analysis) {
+        updatePerformanceChart(data.period_analysis);
+      } else {
+        refreshPerformanceChart(selectedTrendPeriods);
+      }
     } else {
       el.innerHTML = '<p>No recent feedback analysis available</p>';
     }
@@ -153,9 +159,10 @@ async function loadLatestFeedback() {
     el.innerHTML = `<p style="color:red;">Error loading feedback: ${e.message}</p>`;
   }
 }
+const DEFAULT_TREND_PERIODS = '7,14,30,60,90';
+let selectedTrendPeriods = DEFAULT_TREND_PERIODS;
+
 function updatePerformanceChart(periodData) {
-  const ctx = document.getElementById('performanceChart').getContext('2d');
-  if (feedbackPerformanceChart) feedbackPerformanceChart.destroy();
   // Render whatever windows the backend returned, sorted ascending by days.
   const periods = Object.keys(periodData || {})
     .map(k => ({ key: k, days: parseInt(k, 10) }))
@@ -164,6 +171,20 @@ function updatePerformanceChart(periodData) {
   const labels = periods.map(p => p.days >= 365 ? `${Math.round(p.days / 365)}y` : `${p.days}d`);
   const successRates = periods.map(p => (periodData[p.key]?.success_rate || 0) * 100);
   const avgProfits = periods.map(p => (periodData[p.key]?.avg_profit || 0) * 100);
+
+  // Update in place when the chart already exists and the x-axis still matches.
+  // Destroying + recreating every 10s caused the visible flicker.
+  if (feedbackPerformanceChart
+      && feedbackPerformanceChart.data.labels.length === labels.length
+      && feedbackPerformanceChart.data.labels.every((l, i) => l === labels[i])) {
+    feedbackPerformanceChart.data.datasets[0].data = successRates;
+    feedbackPerformanceChart.data.datasets[1].data = avgProfits;
+    feedbackPerformanceChart.update('none'); // no animation, no re-create
+    return;
+  }
+
+  const ctx = document.getElementById('performanceChart').getContext('2d');
+  if (feedbackPerformanceChart) feedbackPerformanceChart.destroy();
   feedbackPerformanceChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -175,13 +196,14 @@ function updatePerformanceChart(periodData) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: false,
       scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } },
       plugins: { title: { display: true, text: 'Performance Trends (nested lookback windows)' } }
     }
   });
 }
 
-// Re-fetch the chart for a chosen set of lookback windows (range buttons).
+// Re-fetch the chart for a chosen set of lookback windows (range buttons + poll).
 async function refreshPerformanceChart(periodsCsv) {
   try {
     const data = await fetchJSON(`/api/feedback?periods=${encodeURIComponent(periodsCsv)}`);
@@ -198,7 +220,8 @@ function setupTrendRangeButtons() {
     btn.addEventListener('click', () => {
       wrap.querySelectorAll('.trend-range-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      refreshPerformanceChart(btn.dataset.periods);
+      selectedTrendPeriods = btn.dataset.periods;
+      refreshPerformanceChart(selectedTrendPeriods);
     });
   });
 }
