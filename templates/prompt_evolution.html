@@ -264,6 +264,56 @@
 .pe-btn.approve:hover { background: #256528; }
 .pe-btn.reject { background: #c62828; color: #fff; }
 .pe-btn.reject:hover { background: #a31f1f; }
+
+/* Behavioral-impact summary + justification chips (Phase 1) */
+.pe-impact-summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 6px 0 14px; font-size: 0.9em;
+}
+.pe-impact-pill {
+  font-weight: 600; font-size: 0.78em; letter-spacing: 0.4px;
+  padding: 3px 9px; border-radius: 10px;
+}
+.pe-impact-pill.substantive { background: #e6ffec; color: #0a5128; }
+.pe-impact-pill.cosmetic { background: #fff4e5; color: #8a5300; }
+.pe-impact-counts { color: #444; font-family: ui-monospace, Menlo, monospace; }
+.pe-impact-hint { color: #999; }
+.pe-tab-impact { font-size: 0.8em; margin-right: 5px; vertical-align: middle; }
+.pe-tab-impact.substantive { color: #2e7d32; }
+.pe-tab-impact.cosmetic { color: #d08300; }
+.pe-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 4px; }
+.pe-change-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #d0d7de; background: #fff; border-radius: 14px;
+  padding: 3px 10px 3px 6px; font-size: 0.82em; cursor: pointer;
+  color: #24292f; transition: background 0.12s ease;
+}
+.pe-change-chip:hover { background: #f3f6fa; }
+.pe-change-chip.major { border-color: #f3b8b8; }
+.pe-change-chip.minor { opacity: 0.85; }
+.pe-chip-kind {
+  font-weight: 700; font-size: 0.72em; letter-spacing: 0.3px;
+  padding: 1px 6px; border-radius: 8px;
+}
+.pe-chip-kind.major, .pe-change-chip.major .pe-chip-kind { background: #ffe3e3; color: #b42318; }
+.pe-chip-kind.minor, .pe-change-chip.minor .pe-chip-kind { background: #eef1f4; color: #6b7280; }
+.pe-change-popup {
+  z-index: 1000; width: 340px; max-width: 90vw;
+  background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.18); font-size: 0.9em;
+}
+.pe-change-popup-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid #eee;
+}
+.pe-change-popup-tag { color: #888; font-size: 0.85em; }
+.pe-change-popup-close {
+  margin-left: auto; border: none; background: none; cursor: pointer;
+  font-size: 1.2em; line-height: 1; color: #888;
+}
+.pe-change-popup-body { padding: 10px 12px; color: #24292f; }
+.pe-change-popup-body p { margin: 0 0 8px; line-height: 1.45; }
+.pe-change-popup-what { font-weight: 600; }
 </style>
 {% endblock %}
 

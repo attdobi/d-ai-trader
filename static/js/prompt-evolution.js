@@ -610,7 +610,7 @@ function countDiffStats(diffLines) {
   return { added, removed };
 }
 
-function buildDiffSection(label, diffLines, openByDefault) {
+function buildDiffSection(label, diffLines, openByDefault, sectionChanges) {
   const wrap = document.createElement('details');
   wrap.className = 'pe-diff-section';
   if (openByDefault) wrap.open = true;
@@ -625,6 +625,27 @@ function buildDiffSection(label, diffLines, openByDefault) {
   }</span>`;
   wrap.appendChild(summary);
 
+  // Justification chips — one per change the generator attributed to this
+  // section. Clicking a chip opens a popup with the why + expected effect.
+  if (Array.isArray(sectionChanges) && sectionChanges.length) {
+    const chipRow = document.createElement('div');
+    chipRow.className = 'pe-chip-row';
+    sectionChanges.forEach((change) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `pe-change-chip ${change.kind === 'major' ? 'major' : 'minor'}`;
+      const what = change.what || '(no description)';
+      chip.innerHTML = `<span class="pe-chip-kind">${change.kind === 'major' ? 'MAJOR' : 'minor'}</span>${escapeHtml(truncate(what, 70))}`;
+      chip.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showChangePopup(change, chip);
+      });
+      chipRow.appendChild(chip);
+    });
+    wrap.appendChild(chipRow);
+  }
+
   const view = document.createElement('div');
   view.className = 'pe-diff-view';
   if (!totalChanged) {
@@ -637,6 +658,60 @@ function buildDiffSection(label, diffLines, openByDefault) {
   }
   wrap.appendChild(view);
   return wrap;
+}
+
+function truncate(str, n) {
+  if (typeof str !== 'string') return '';
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
+}
+
+function escapeHtml(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+let _changePopupEl = null;
+function closeChangePopup() {
+  if (_changePopupEl) {
+    _changePopupEl.remove();
+    _changePopupEl = null;
+    document.removeEventListener('click', _onDocClickForPopup, true);
+  }
+}
+function _onDocClickForPopup(e) {
+  if (_changePopupEl && !_changePopupEl.contains(e.target)) closeChangePopup();
+}
+function showChangePopup(change, anchorEl) {
+  closeChangePopup();
+  const pop = document.createElement('div');
+  pop.className = 'pe-change-popup';
+  const kindLabel = change.kind === 'major' ? 'MAJOR' : 'minor';
+  const behavioral = change.behavioral ? 'behavioral' : 'cosmetic';
+  pop.innerHTML = `
+    <div class="pe-change-popup-head">
+      <span class="pe-chip-kind ${change.kind === 'major' ? 'major' : 'minor'}">${kindLabel}</span>
+      <span class="pe-change-popup-tag">${behavioral}</span>
+      <button type="button" class="pe-change-popup-close" aria-label="Close">×</button>
+    </div>
+    <div class="pe-change-popup-body">
+      <p class="pe-change-popup-what">${escapeHtml(change.what || '(no description)')}</p>
+      ${change.why ? `<p><strong>Why:</strong> ${escapeHtml(change.why)}</p>` : ''}
+      ${change.expected_effect ? `<p><strong>Expected effect:</strong> ${escapeHtml(change.expected_effect)}</p>` : ''}
+    </div>`;
+  document.body.appendChild(pop);
+
+  // Position under the chip
+  const r = anchorEl.getBoundingClientRect();
+  pop.style.position = 'absolute';
+  pop.style.top = `${window.scrollY + r.bottom + 6}px`;
+  pop.style.left = `${window.scrollX + Math.min(r.left, window.innerWidth - 360)}px`;
+
+  pop.querySelector('.pe-change-popup-close').addEventListener('click', closeChangePopup);
+  _changePopupEl = pop;
+  // Defer attaching the outside-click handler so this very click doesn't close it
+  setTimeout(() => document.addEventListener('click', _onDocClickForPopup, true), 0);
 }
 
 function setupBatchPromptLab() {
@@ -707,7 +782,11 @@ function setupBatchPromptLab() {
           added += s.added;
           removed += s.removed;
         });
-        tabBtn.innerHTML = `${label} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
+        const cs = candidate.change_summary || {};
+        const impactDot = cs.is_substantive
+          ? '<span class="pe-tab-impact substantive" title="substantive: has behaviorally-major changes">●</span>'
+          : '<span class="pe-tab-impact cosmetic" title="cosmetic only: reword/no behavior change">●</span>';
+        tabBtn.innerHTML = `${impactDot}${label} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
       } else {
         tabBtn.classList.add('failed');
         tabBtn.innerHTML = `${label} <span class="pe-diff-badge" style="color:#c62828;">⚠ failed</span>`;
@@ -731,6 +810,17 @@ function setupBatchPromptLab() {
         return;
       }
 
+      // Behavioral-impact summary — the headline for "is this change worth it?"
+      const cs = candidate.change_summary || {};
+      const summaryWrap = document.createElement('div');
+      summaryWrap.className = 'pe-impact-summary';
+      const substantive = cs.is_substantive;
+      summaryWrap.innerHTML = `
+        <span class="pe-impact-pill ${substantive ? 'substantive' : 'cosmetic'}">${substantive ? 'SUBSTANTIVE' : 'COSMETIC ONLY'}</span>
+        <span class="pe-impact-counts">${cs.major || 0} major · ${cs.minor || 0} minor · ${cs.behavioral || 0} behavioral</span>
+        <span class="pe-impact-hint">— click a chip below to see why each change was made</span>`;
+      panel.appendChild(summaryWrap);
+
       // Reasoning
       const reasoningWrap = document.createElement('div');
       reasoningWrap.className = 'pe-field';
@@ -741,16 +831,23 @@ function setupBatchPromptLab() {
       reasoningWrap.appendChild(reasoningBox);
       panel.appendChild(reasoningWrap);
 
+      // Group the generator's changes by section so each diff block shows its chips.
+      const changesBySection = {};
+      (candidate.changes || []).forEach((ch) => {
+        const sec = ch.section || 'strategy_directives';
+        (changesBySection[sec] = changesBySection[sec] || []).push(ch);
+      });
+
       // Five diff sections (Strategy Directives + Memory open by default — that's where evolution mostly lives)
       const diffMap = [
-        { key: 'system_prompt_diff', label: 'System Prompt', open: false },
-        { key: 'user_prompt_diff', label: 'User Prompt Template', open: false },
-        { key: 'strategy_directives_diff', label: 'Strategy Directives', open: true },
-        { key: 'soul_diff', label: 'Soul (mission + per-agent identity)', open: false },
-        { key: 'memory_diff', label: 'Memory (Obsidian-style log)', open: true },
+        { key: 'system_prompt_diff', section: 'system_prompt', label: 'System Prompt', open: false },
+        { key: 'user_prompt_diff', section: 'user_prompt_template', label: 'User Prompt Template', open: false },
+        { key: 'strategy_directives_diff', section: 'strategy_directives', label: 'Strategy Directives', open: true },
+        { key: 'soul_diff', section: 'soul', label: 'Soul (mission + per-agent identity)', open: false },
+        { key: 'memory_diff', section: 'memory', label: 'Memory (Obsidian-style log)', open: true },
       ];
-      diffMap.forEach(({ key, label: lbl, open }) => {
-        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open);
+      diffMap.forEach(({ key, section: sec, label: lbl, open }) => {
+        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open, changesBySection[sec] || []);
         panel.appendChild(section);
       });
 

@@ -2927,6 +2927,62 @@ def _compute_unified_diffs(agent_type, before, after,
     }
 
 
+_VALID_CHANGE_SECTIONS = {
+    'system_prompt', 'user_prompt_template', 'strategy_directives', 'soul', 'memory',
+}
+
+
+def _normalize_changes(raw_changes):
+    """Sanitize the LLM's `changes` array into a predictable shape.
+
+    Defensive: the model may omit fields, use odd section names, or return a
+    non-list. Always returns a list of dicts with every key present, plus a
+    derived `change_summary` is computed by the caller.
+    """
+    if not isinstance(raw_changes, list):
+        return []
+    cleaned = []
+    for item in raw_changes:
+        if not isinstance(item, dict):
+            continue
+        section = str(item.get('section', '') or '').strip().lower()
+        if section not in _VALID_CHANGE_SECTIONS:
+            section = 'strategy_directives'  # safest default bucket
+        kind = str(item.get('kind', '') or '').strip().lower()
+        if kind not in ('major', 'minor'):
+            kind = 'minor'
+        behavioral = bool(item.get('behavioral', False))
+        # A change can't be major without being behavioral, and vice-versa we
+        # don't force — but normalize the obvious contradiction.
+        if kind == 'major':
+            behavioral = True
+        cleaned.append({
+            'section': section,
+            'kind': kind,
+            'behavioral': behavioral,
+            'what': str(item.get('what', '') or '').strip(),
+            'why': str(item.get('why', '') or '').strip(),
+            'expected_effect': str(item.get('expected_effect', '') or '').strip(),
+        })
+    return cleaned
+
+
+def _summarize_changes(changes):
+    """Roll up a normalized changes list into counts + an overall verdict."""
+    major = sum(1 for c in changes if c['kind'] == 'major')
+    minor = sum(1 for c in changes if c['kind'] == 'minor')
+    behavioral = sum(1 for c in changes if c['behavioral'])
+    return {
+        'major': major,
+        'minor': minor,
+        'behavioral': behavioral,
+        'total': len(changes),
+        # "substantive" = at least one behaviorally-major edit. This is what the
+        # critic will use to auto-reject cosmetic-only candidates in Phase 3.
+        'is_substantive': major > 0,
+    }
+
+
 def _auto_generate_version_description(agent_type, current_version, feedback_summary):
     """Build a non-empty description so /apply never fails on the empty-string path."""
     label = _PROMPT_LAB_LABELS.get(agent_type, agent_type)
@@ -3054,7 +3110,22 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'The system_prompt is the structural template (JSON format, placeholders). '
                     'The strategy_directives contain trading rules and personality that feedback evolves. '
                     'Soul defines persistent agent identity, and memory captures lessons learned over time. '
-                    'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, soul, memory, reasoning.\n\n'
+                    'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, '
+                    'soul, memory, reasoning, changes.\n\n'
+                    'THE "changes" KEY — this is how a downstream critic and a human decide whether to ship your '
+                    'edit, so be rigorous. It is an array of objects, one per distinct edit you made:\n'
+                    '  { "section": one of "system_prompt"|"user_prompt_template"|"strategy_directives"|"soul"|"memory",\n'
+                    '    "kind": "major" | "minor",\n'
+                    '    "behavioral": true | false,\n'
+                    '    "what": one sentence on what changed,\n'
+                    '    "why": one sentence grounding it in the feedback/performance data,\n'
+                    '    "expected_effect": one sentence on how it should change trading behavior or win rate }\n'
+                    'CLASSIFY BY BEHAVIORAL IMPACT, NOT TEXT SIZE. A one-word threshold change (e.g. "<=5%" to '
+                    '"<=3%") or a loosened/tightened gate is MAJOR and behavioral=true even though the diff is tiny. '
+                    'Rewording, reordering, or restating an existing rule with no change in what the agent will DO '
+                    'is MINOR and behavioral=false, even if you rewrote a whole paragraph. If you only reworded '
+                    'things, say so honestly with minor/false entries — do not inflate. The goal is to improve '
+                    'win rate by learning from past wins and losses, not to churn text.\n\n'
                     'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
                     '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
                     'HOLD and SELL are ONLY valid for tickers the agent currently owns. '
@@ -3097,6 +3168,8 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
     reasoning = _to_str(parsed.get('reasoning'))
     soul_out = _to_str(parsed.get('soul')) or _to_str(current_prompt.soul)
     memory_out = _to_str(parsed.get('memory')) or _to_str(current_prompt.memory)
+    changes = _normalize_changes(parsed.get('changes'))
+    change_summary = _summarize_changes(changes)
 
     if not system_prompt or not user_prompt_template:
         raise ValueError('Generated payload missing required prompt fields (system_prompt / user_prompt_template).')
@@ -3142,6 +3215,8 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         'memory': memory_out,
         'reasoning': reasoning,
         'description': description,
+        'changes': changes,
+        'change_summary': change_summary,
     }
 
     before = {
@@ -3251,6 +3326,8 @@ def generate_prompt_evolution_candidate():
             'memory': candidate['memory'],
             'description': candidate['description'],
             'current_version': candidate['current_version'],
+            'changes': candidate['changes'],
+            'change_summary': candidate['change_summary'],
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
