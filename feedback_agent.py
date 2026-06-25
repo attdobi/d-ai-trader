@@ -23,6 +23,44 @@ SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant
 SIGNIFICANT_LOSS_THRESHOLD = -0.10   # 10% loss considered significant
 FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
 
+# A trade only counts as "break even" when the realized P&L is a few dollars
+# either way. Most positions here are small, so the previous "within ±2%"
+# rule mislabeled real -$6 to -$16 losses as break-even and starved the
+# feedback agent of loss signal. Dollar delta is the honest test of whether
+# money actually changed hands.
+BREAK_EVEN_DOLLAR_MAX = 3.0  # |net P&L $| <= this → break_even
+
+
+def categorize_outcome(gain_loss_amount, gain_loss_percentage):
+    """Classify a closed trade into an outcome bucket.
+
+    Single source of truth shared by record_sell_outcome (live) and the
+    backfill migration. `gain_loss_percentage` is a FRACTION (e.g. -0.0158
+    for -1.58%), matching what's stored in trade_outcomes.gain_loss_percentage.
+
+    Rules:
+      - |net $| <= BREAK_EVEN_DOLLAR_MAX  → break_even (dollar delta, not %)
+      - else bucket by signed percentage against the significance thresholds.
+    """
+    try:
+        amount = float(gain_loss_amount)
+    except (TypeError, ValueError):
+        amount = 0.0
+    try:
+        pct = float(gain_loss_percentage)
+    except (TypeError, ValueError):
+        pct = 0.0
+
+    if abs(amount) <= BREAK_EVEN_DOLLAR_MAX:
+        return 'break_even'
+    if pct >= SIGNIFICANT_PROFIT_THRESHOLD:
+        return 'significant_profit'
+    if pct > 0:
+        return 'moderate_profit'
+    if pct <= SIGNIFICANT_LOSS_THRESHOLD:
+        return 'significant_loss'
+    return 'moderate_loss'
+
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
 
@@ -190,17 +228,8 @@ class TradeOutcomeTracker:
         else:
             hold_duration = 0
         
-        # Categorize outcome
-        if gain_loss_percentage >= SIGNIFICANT_PROFIT_THRESHOLD:
-            outcome_category = 'significant_profit'
-        elif gain_loss_percentage > 0:
-            outcome_category = 'moderate_profit'
-        elif gain_loss_percentage >= -0.02:  # Within 2% is break even
-            outcome_category = 'break_even'
-        elif gain_loss_percentage >= SIGNIFICANT_LOSS_THRESHOLD:
-            outcome_category = 'moderate_loss'
-        else:
-            outcome_category = 'significant_loss'
+        # Categorize outcome (break_even is a dollar-delta test, not a % band).
+        outcome_category = categorize_outcome(gain_loss_amount, gain_loss_percentage)
         
         # Get market context (simplified)
         market_context = self._get_market_context(ticker)

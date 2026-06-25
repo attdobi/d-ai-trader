@@ -1601,7 +1601,12 @@ def get_trade_outcomes():
                     'sell_price': float(row.sell_price),
                     'shares': float(row.shares),
                     'net_gain_dollars': float(row.gain_loss_amount),
-                    'gain_loss_pct': float(row.gain_loss_percentage),
+                    # trade_outcomes.gain_loss_percentage is stored as a FRACTION
+                    # (e.g. -0.0158). The frontend (schwab.js, feedback.js) renders
+                    # gain_loss_pct as an already-percent value, so convert here.
+                    # Previously the raw fraction leaked through and -1.58% showed
+                    # as "-0.02%".
+                    'gain_loss_pct': float(row.gain_loss_percentage) * 100.0,
                     'category': row.outcome_category,
                     'hold_days': row.hold_duration_days
                 })
@@ -2623,7 +2628,9 @@ def _load_prompt_evolution_context():
     trade_rows = []
     for row in outcome_rows:
         try:
-            gain_pct = float(row.gain_loss_percentage if row.gain_loss_percentage is not None else 0.0)
+            # Stored as a fraction; convert to percent for display consistency
+            # (the Prompt Lab stats panel renders these with toFixed(2)+'%').
+            gain_pct = float(row.gain_loss_percentage if row.gain_loss_percentage is not None else 0.0) * 100.0
         except (TypeError, ValueError):
             gain_pct = 0.0
         trade_rows.append({
@@ -2638,12 +2645,19 @@ def _load_prompt_evolution_context():
     best_trade = max(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
     worst_trade = min(trade_rows, key=lambda trade: trade['gain_loss_percentage']) if trade_rows else None
 
+    def _trade_card(trade):
+        # The frontend formatTrade() reads {ticker, gain}; expose that shape.
+        # gain_loss_percentage is already in percent units here.
+        if not trade:
+            return None
+        return {'ticker': trade['ticker'], 'gain': trade['gain_loss_percentage']}
+
     stats = {
         'win_rate': round((win_count / total_trades) * 100, 2) if total_trades else 0.0,
         'avg_profit_pct': round(avg_profit_pct, 2),
         'total_trades': total_trades,
-        'best_trade': best_trade,
-        'worst_trade': worst_trade,
+        'best_trade': _trade_card(best_trade),
+        'worst_trade': _trade_card(worst_trade),
     }
 
     headlines = []
