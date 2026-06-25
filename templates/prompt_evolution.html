@@ -314,6 +314,25 @@
 .pe-change-popup-body { padding: 10px 12px; color: #24292f; }
 .pe-change-popup-body p { margin: 0 0 8px; line-height: 1.45; }
 .pe-change-popup-what { font-weight: 600; }
+
+/* Critic verdict banner + human override (Phase 3) */
+.pe-critic-banner {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 14px 0 4px; padding: 9px 13px; border-radius: 6px; font-size: 0.9em;
+}
+.pe-critic-banner.approve { background: #e6ffec; border-left: 3px solid #2e7d32; }
+.pe-critic-banner.reject { background: #fff4e5; border-left: 3px solid #d08300; }
+.pe-critic-verdict { font-weight: 700; font-size: 0.82em; letter-spacing: 0.4px; }
+.pe-critic-banner.approve .pe-critic-verdict { color: #0a5128; }
+.pe-critic-banner.reject .pe-critic-verdict { color: #8a5300; }
+.pe-critic-meta { color: #444; }
+.pe-override {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin: 4px 0 0; font-size: 0.88em; color: #8a5300; cursor: pointer;
+}
+.pe-tab-btn .pe-critic-mark { font-size: 0.85em; margin-left: 4px; }
+.pe-tab-btn .pe-critic-mark.approve { color: #2e7d32; }
+.pe-tab-btn .pe-critic-mark.reject { color: #d08300; }
 </style>
 {% endblock %}
 

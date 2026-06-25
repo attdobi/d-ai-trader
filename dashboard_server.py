@@ -2983,6 +2983,137 @@ def _summarize_changes(changes):
     }
 
 
+def _critique_candidate(candidate, feedback_summary=None):
+    """Critic agent: decide whether a candidate change is worth shipping.
+
+    The objective is improving realized win rate by learning from past wins and
+    losses — NOT prose quality. Returns {verdict: 'approve'|'reject', reason,
+    confidence (0-1), auto (bool)}.
+
+    Cosmetic-only candidates (no behaviorally-major change) are auto-rejected
+    without an LLM call. Substantive candidates get a skeptical LLM review.
+    """
+    summary = candidate.get('change_summary') or {}
+    changes = candidate.get('changes') or []
+
+    if not summary.get('is_substantive'):
+        return {
+            'verdict': 'reject',
+            'reason': 'Cosmetic only — no behaviorally-major change. Rewording/restating existing rules does not move win rate, and churning prompt versions adds noise.',
+            'confidence': 0.9,
+            'auto': True,
+        }
+
+    perf = feedback_summary or {}
+    critic_payload = {
+        'agent_type': candidate.get('agent_type'),
+        'change_summary': summary,
+        'changes': changes,
+        'reasoning': candidate.get('reasoning', ''),
+        'recent_performance': {
+            'success_rate': perf.get('success_rate'),
+            'avg_profit': perf.get('avg_profit'),
+            'total_trades': perf.get('total_trades'),
+            'decisions_analyzed': perf.get('decisions_analyzed'),
+        },
+    }
+
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        model = get_gpt_model()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are a skeptical critic in a reinforcement-learning loop for an autonomous '
+                        'trading system. The ONLY objective is to improve realized win rate / expectancy by '
+                        'learning from past wins and losses. You are reviewing a proposed prompt change before '
+                        'it reaches a human and possibly production.\n\n'
+                        'APPROVE only if the change is (a) behaviorally meaningful, (b) grounded in the actual '
+                        'recent performance/feedback data, and (c) plausibly improves win rate or loss '
+                        'containment. REJECT if it is churn, ungrounded speculation, weakens risk discipline '
+                        'without evidence, over-fits to a tiny sample, or just reorganizes text. When in doubt, '
+                        'REJECT — a missed improvement is cheaper than shipping noise into the policy.\n\n'
+                        'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one or two '
+                        'sentences, "confidence": number 0-1}.'
+                    ),
+                },
+                {
+                    'role': 'user',
+                    'content': (
+                        'Review this candidate prompt change:\n\n'
+                        f"{json.dumps(critic_payload, ensure_ascii=False, indent=2)}"
+                    ),
+                },
+            ],
+        )
+        content = ''
+        if response and getattr(response, 'choices', None):
+            content = response.choices[0].message.content
+        parsed = _parse_generated_prompt_payload(content) or {}
+        verdict = str(parsed.get('verdict', '') or '').strip().lower()
+        if verdict not in ('approve', 'reject'):
+            verdict = 'reject'  # fail closed
+        try:
+            confidence = float(parsed.get('confidence'))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+        return {
+            'verdict': verdict,
+            'reason': str(parsed.get('reason', '') or '').strip() or 'No reason returned.',
+            'confidence': confidence,
+            'auto': False,
+        }
+    except Exception as exc:
+        # On critic failure, don't block the human — surface as a soft reject
+        # with low confidence so the human still sees and decides.
+        return {
+            'verdict': 'reject',
+            'reason': f'Critic unavailable ({exc}); defer to human review.',
+            'confidence': 0.0,
+            'auto': False,
+        }
+
+
+def _record_candidate_review(candidate, config_hash):
+    """Insert a prompt_change_reviews row at critic time. Returns the row id
+    (or None on failure — recording must never block the user flow)."""
+    critic = candidate.get('critic') or {}
+    summary = candidate.get('change_summary') or {}
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text("""
+                INSERT INTO prompt_change_reviews (
+                    config_hash, agent_type, from_version,
+                    change_summary, changes, is_substantive,
+                    critic_verdict, critic_reason, critic_confidence, critic_at
+                ) VALUES (
+                    :config_hash, :agent_type, :from_version,
+                    :change_summary, :changes, :is_substantive,
+                    :critic_verdict, :critic_reason, :critic_confidence, :critic_at
+                ) RETURNING id
+            """), {
+                'config_hash': config_hash,
+                'agent_type': candidate.get('agent_type'),
+                'from_version': candidate.get('current_version'),
+                'change_summary': json.dumps(summary),
+                'changes': json.dumps(candidate.get('changes') or []),
+                'is_substantive': bool(summary.get('is_substantive')),
+                'critic_verdict': critic.get('verdict'),
+                'critic_reason': critic.get('reason'),
+                'critic_confidence': critic.get('confidence'),
+                'critic_at': datetime.utcnow(),
+            }).fetchone()
+            return row.id if row else None
+    except Exception as exc:
+        print(f"⚠️  Failed to record candidate review: {exc}")
+        return None
+
+
 def _auto_generate_version_description(agent_type, current_version, feedback_summary):
     """Build a non-empty description so /apply never fails on the empty-string path."""
     label = _PROMPT_LAB_LABELS.get(agent_type, agent_type)
@@ -3417,6 +3548,26 @@ def _run_batch_generation(job_id, config_hash):
         agent_order = {a: i for i, a in enumerate(_PROMPT_LAB_AGENTS)}
         candidates.sort(key=lambda c: agent_order.get(c.get('agent_type'), 99))
 
+        # Critic pass — score each candidate and record a review row. Runs after
+        # generation so the UI can surface the critic's verdict and auto-collapse
+        # cosmetic-only candidates. Cheap (cosmetic ones skip the LLM).
+        _set({
+            'status': 'running', 'phase': 'critique',
+            'config_hash': config_hash,
+            'message': 'Critic reviewing candidates…',
+            'feedback_summary': feedback_summary,
+            'completed_agents': completed,
+            'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
+        })
+        for cand in candidates:
+            try:
+                verdict = _critique_candidate(cand, feedback_summary)
+            except Exception as exc:
+                verdict = {'verdict': 'reject', 'reason': f'Critic error: {exc}',
+                           'confidence': 0.0, 'auto': False}
+            cand['critic'] = verdict
+            cand['review_id'] = _record_candidate_review(cand, config_hash)
+
         _set({
             'status': 'done',
             'config_hash': config_hash,
@@ -3576,6 +3727,67 @@ def apply_prompt_evolution_candidate():
             })
 
         return jsonify({'success': True, 'version': new_version})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/record-decision', methods=['POST'])
+def record_prompt_review_decision():
+    """Record the human's approve/reject on a candidate's review row.
+
+    This is the label that scores the critic (agreement now; market outcome
+    later). Called after Approve & Activate (verdict=approve, to_version set)
+    and on Reject (verdict=reject). Never blocks the UI on failure.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        review_id = data.get('review_id')
+        verdict = str(data.get('verdict', '') or '').strip().lower()
+        to_version = data.get('to_version')
+        if not review_id:
+            return jsonify({'error': 'review_id is required'}), 400
+        if verdict not in ('approve', 'reject'):
+            return jsonify({'error': "verdict must be 'approve' or 'reject'"}), 400
+
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE prompt_change_reviews
+                SET human_verdict = :verdict,
+                    human_at = :now,
+                    to_version = COALESCE(:to_version, to_version)
+                WHERE id = :id
+            """), {
+                'verdict': verdict,
+                'now': datetime.utcnow(),
+                'to_version': to_version,
+                'id': review_id,
+            })
+        return jsonify({'success': True, 'review_id': review_id, 'verdict': verdict})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prompt-evolution/critic-scorecard')
+def get_critic_scorecard():
+    """Critic↔human agreement over recorded reviews — the critic's learning
+    signal. (Critic↔market agreement is added in Phase 4 once outcomes land.)"""
+    try:
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT critic_verdict, human_verdict
+                FROM prompt_change_reviews
+                WHERE config_hash = :h
+                  AND critic_verdict IS NOT NULL
+                  AND human_verdict IS NOT NULL
+            """), {'h': config_hash}).fetchall()
+        total = len(rows)
+        agree = sum(1 for r in rows if r.critic_verdict == r.human_verdict)
+        return jsonify({
+            'reviews_with_both_verdicts': total,
+            'agreements': agree,
+            'agreement_rate': round(agree / total, 3) if total else None,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

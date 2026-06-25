@@ -24,6 +24,19 @@ function broadcastPromptApplied(agentType, version) {
   }
 }
 
+// Record the human's approve/reject on a candidate review row. Fire-and-forget:
+// this is training data for the critic, but must never block the UI.
+function recordReviewDecision(reviewId, verdict, toVersion) {
+  if (!reviewId) return;
+  try {
+    fetch('/api/prompt-evolution/record-decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ review_id: reviewId, verdict, to_version: toVersion }),
+    }).catch(() => {});
+  } catch (_) { /* ignore */ }
+}
+
 function setHidden(element, hidden) {
   if (!element) return;
   element.classList.toggle('pe-hidden', hidden);
@@ -786,7 +799,11 @@ function setupBatchPromptLab() {
         const impactDot = cs.is_substantive
           ? '<span class="pe-tab-impact substantive" title="substantive: has behaviorally-major changes">●</span>'
           : '<span class="pe-tab-impact cosmetic" title="cosmetic only: reword/no behavior change">●</span>';
-        tabBtn.innerHTML = `${impactDot}${label} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
+        const cv = (candidate.critic || {}).verdict;
+        const criticMark = cv === 'approve'
+          ? '<span class="pe-critic-mark approve" title="critic approved">✓</span>'
+          : (cv === 'reject' ? '<span class="pe-critic-mark reject" title="critic rejected">⊘</span>' : '');
+        tabBtn.innerHTML = `${impactDot}${label}${criticMark} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
       } else {
         tabBtn.classList.add('failed');
         tabBtn.innerHTML = `${label} <span class="pe-diff-badge" style="color:#c62828;">⚠ failed</span>`;
@@ -851,6 +868,31 @@ function setupBatchPromptLab() {
         panel.appendChild(section);
       });
 
+      // Critic verdict banner — the critic reviews before the human. The human
+      // gate is on the critic's APPROVALS; rejects require an explicit override.
+      const critic = candidate.critic || {};
+      const criticRejected = critic.verdict === 'reject';
+      const criticBanner = document.createElement('div');
+      criticBanner.className = `pe-critic-banner ${criticRejected ? 'reject' : 'approve'}`;
+      const confPct = typeof critic.confidence === 'number' ? ` · ${Math.round(critic.confidence * 100)}% conf` : '';
+      const autoTag = critic.auto ? ' · auto' : '';
+      criticBanner.innerHTML = `
+        <span class="pe-critic-verdict">${criticRejected ? 'CRITIC: REJECT' : 'CRITIC: APPROVE'}</span>
+        <span class="pe-critic-meta">${escapeHtml(critic.reason || 'No critic verdict.')}${confPct}${autoTag}</span>`;
+      panel.appendChild(criticBanner);
+
+      let overrideOn = !criticRejected; // critic-approved → human can act immediately
+      if (criticRejected) {
+        const overrideWrap = document.createElement('label');
+        overrideWrap.className = 'pe-override';
+        overrideWrap.innerHTML = `<input type="checkbox" /> I disagree with the critic — let me approve anyway`;
+        panel.appendChild(overrideWrap);
+        overrideWrap.querySelector('input').addEventListener('change', (e) => {
+          overrideOn = e.target.checked;
+          approveBtn.disabled = !overrideOn;
+        });
+      }
+
       // Decision bar — editable description + approve/reject
       const decisionBar = document.createElement('div');
       decisionBar.className = 'pe-decision-bar';
@@ -872,6 +914,7 @@ function setupBatchPromptLab() {
       approveBtn.type = 'button';
       approveBtn.className = 'pe-btn approve';
       approveBtn.textContent = '✅ Approve & Activate';
+      approveBtn.disabled = criticRejected; // gated until override when critic rejected
       decisionBar.appendChild(approveBtn);
 
       const rejectBtn = document.createElement('button');
@@ -923,6 +966,8 @@ function setupBatchPromptLab() {
           descInput.disabled = true;
           showBatchSuccess(`${AGENT_LABELS[candidate.agent_type]} v${data.version} activated.`);
           broadcastPromptApplied(candidate.agent_type, data.version);
+          // Record the human label (scores the critic; market outcome later).
+          recordReviewDecision(candidate.review_id, 'approve', data.version);
           await loadPromptHistory();
         } catch (err) {
           statusSpan.style.color = '#c62828';
@@ -936,10 +981,11 @@ function setupBatchPromptLab() {
       rejectBtn.addEventListener('click', () => {
         tabBtn.classList.add('rejected');
         statusSpan.style.color = '#999';
-        statusSpan.textContent = '✗ Rejected (candidate discarded client-side).';
+        statusSpan.textContent = '✗ Rejected.';
         approveBtn.disabled = true;
         rejectBtn.disabled = true;
         descInput.disabled = true;
+        recordReviewDecision(candidate.review_id, 'reject', null);
       });
 
       panel.appendChild(decisionBar);

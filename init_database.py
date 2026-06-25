@@ -635,6 +635,39 @@ def initialize_database() -> None:
             "ALTER TABLE agent_instruction_updates ADD COLUMN IF NOT EXISTS config_hash VARCHAR(50)",
         )
 
+        # Prompt-change review ledger — the training data for the critic agent.
+        # One row per generated candidate: the critic's verdict, the human's
+        # verdict, and (backfilled later) the realized market outcome of the
+        # version if it was activated. Lets us compute critic↔human agreement
+        # now and critic↔market agreement once trades close.
+        ensure_table(
+            conn,
+            stats,
+            "prompt_change_reviews",
+            """
+            CREATE TABLE IF NOT EXISTS prompt_change_reviews (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                config_hash VARCHAR(50),
+                agent_type TEXT NOT NULL,
+                from_version INTEGER,
+                to_version INTEGER,
+                change_summary JSONB,
+                changes JSONB,
+                is_substantive BOOLEAN,
+                critic_verdict TEXT,
+                critic_reason TEXT,
+                critic_confidence FLOAT,
+                critic_at TIMESTAMP,
+                human_verdict TEXT,
+                human_at TIMESTAMP,
+                realized_winrate_delta FLOAT,
+                realized_pnl FLOAT,
+                outcome_measured_at TIMESTAMP
+            )
+            """,
+        )
+
         ensure_table(
             conn,
             stats,
