@@ -593,12 +593,30 @@ class DAITraderOrchestrator:
             import traceback
             logger.error(traceback.format_exc())
     
+    def run_outcome_backfill(self):
+        """Attribute realized P&L to activated prompt versions (Phase-4 critic
+        scorecard). Measures whether shipped prompt changes actually improved
+        win rate, so the critic can eventually be scored against the market.
+        Isolated in its own try/except — must never break the feedback job."""
+        try:
+            from backfill_version_outcomes import main as backfill_outcomes
+            logger.info("Running prompt-version outcome backfill")
+            backfill_outcomes(dry_run=False)
+            logger.info("✅ Outcome backfill completed")
+        except Exception as e:
+            logger.error(f"⚠️  Outcome backfill failed (non-fatal): {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
     def scheduled_feedback_job(self):
-        """Scheduled job for feedback agent"""
+        """Scheduled job for feedback agent + prompt-version outcome backfill"""
         try:
             if self.is_feedback_time():
                 logger.info("Running scheduled feedback job")
                 self.run_feedback_agent()
+                # Right after feedback: measure outcomes of any versions whose
+                # windows have matured since last week (feeds the critic scorecard).
+                self.run_outcome_backfill()
                 logger.info("✅ Scheduled feedback job completed successfully")
             else:
                 logger.info("Skipping feedback job - outside of scheduled time")
