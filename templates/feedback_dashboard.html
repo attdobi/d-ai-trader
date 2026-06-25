@@ -188,7 +188,9 @@
     <button type="button" class="trend-range-btn active" data-periods="7,14,30,60,90">90d</button>
     <button type="button" class="trend-range-btn" data-periods="30,90,180,365">1y</button>
   </div>
-  <canvas id="performanceChart"></canvas>
+  <div class="chart-canvas-box">
+    <canvas id="performanceChart"></canvas>
+  </div>
 </div>
 <style>
 .trend-range-btn {
@@ -197,6 +199,10 @@
 }
 .trend-range-btn:hover { background: rgba(33,150,243,0.12); }
 .trend-range-btn.active { background: #2196F3; border-color: #2196F3; color: #fff; }
+/* Bound the canvas so Chart.js (maintainAspectRatio:false) can't grow it
+   without limit — this is what caused the runaway vertical stretch. */
+.chart-canvas-box { position: relative; height: 320px; width: 100%; }
+.chart-canvas-box canvas { max-height: 320px; }
 </style>
 {% endblock %}
 
