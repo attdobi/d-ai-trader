@@ -1227,10 +1227,16 @@ def trade_decisions():
                             'ticker': decision.get('ticker', 'N/A'),
                             'action': decision.get('action', 'N/A'),
                             'amount_usd': decision.get('amount_usd', 0),
-                            'shares': decision.get('shares'),  # ← ADDED
-                            'total_value': decision.get('total_value'),  # ← ADDED
+                            'shares': decision.get('shares'),           # pre-trade estimate
+                            'total_value': decision.get('total_value'), # pre-trade estimate
                             'reason': decision.get('reason', 'N/A'),
-                            'execution_status': decision.get('execution_status')  # For market closed flag
+                            'execution_status': decision.get('execution_status'),
+                            # Real post-execution fill — must be passed through or the
+                            # Trades tab can only ever show the estimate.
+                            'executed_shares': decision.get('executed_shares'),
+                            'executed_price': decision.get('executed_price'),
+                            'executed_amount': decision.get('executed_amount'),
+                            'order_id': decision.get('order_id'),
                         }
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
