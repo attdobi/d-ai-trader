@@ -654,35 +654,44 @@ class SchwabAPIClient:
 
             if response.status_code in [200, 201]:
                 order_id = response.headers.get('Location', '').split('/')[-1]
-                logger.info(f"Order placed successfully. Order ID: {order_id}")
-                status_info = self._post_submit_order_check(acc_hash, order_id)
-                if status_info and status_info["status"] in {"REJECTED", "CANCELED"}:
-                    logger.error("Schwab order %s %s: %s", order_id, status_info["status"], status_info.get("reason"))
-                    return {
-                        "status": status_info["status"].lower(),
-                        "order_id": order_id,
-                        "symbol": symbol,
-                        "quantity": quantity,
-                        "instruction": instruction,
-                        "order_type": order_type,
-                        "price": price,
-                        "timestamp": datetime.now().isoformat(),
-                        "reason": status_info.get("reason"),
-                        "success": False,
-                    }
+                logger.info(f"Order submitted. Order ID: {order_id} — confirming fill…")
+                status_info = self._post_submit_order_check(acc_hash, order_id) or {}
+                sstatus = (status_info.get("status") or "").upper()
+                filled_qty = status_info.get("filled_qty") or 0
+                avg_price = status_info.get("avg_price")
+                filled_amount = status_info.get("filled_amount")
 
-                return {
-                    "status": "success",
+                base = {
                     "order_id": order_id,
                     "symbol": symbol,
-                    "quantity": quantity,
+                    "quantity": quantity,            # requested
                     "instruction": instruction,
                     "order_type": order_type,
-                    "price": price,
                     "timestamp": datetime.now().isoformat(),
                     "order_status": status_info,
-                    "success": True,
                 }
+
+                # Hard rejection / cancel / expiry — NOT executed.
+                if sstatus in {"REJECTED", "CANCELED", "EXPIRED"}:
+                    logger.error("Schwab order %s %s: %s", order_id, sstatus, status_info.get("reason"))
+                    return {**base, "status": sstatus.lower(), "price": price,
+                            "reason": status_info.get("reason") or f"Order {sstatus.lower()} by broker",
+                            "success": False}
+
+                # Confirmed fill (full or partial) — record the ACTUAL fill.
+                if sstatus == "FILLED" or (filled_qty and filled_qty > 0):
+                    return {**base, "status": "success", "success": True,
+                            "price": avg_price if avg_price else price,
+                            "filled_quantity": filled_qty or quantity,
+                            "executed_amount": filled_amount}
+
+                # Accepted but not filled within the wait window (WORKING/QUEUED/unknown).
+                # Treat as NOT executed so holdings aren't updated for a phantom fill.
+                logger.warning("Schwab order %s accepted but not filled (status=%s) within wait window",
+                               order_id, sstatus or "unknown")
+                return {**base, "status": "working", "price": price,
+                        "reason": f"Order accepted but not filled (status={sstatus or 'unknown'}) within confirmation window",
+                        "success": False}
             else:
                 logger.error(f"Failed to place order: {response.status_code} - {response.text}")
                 return {
@@ -758,40 +767,82 @@ class SchwabAPIClient:
             logger.error(f"Failed to build Schwab order: {exc}")
             return None
 
-    def _post_submit_order_check(self, account_hash: str, order_id: str) -> Optional[Dict[str, Any]]:
+    # Terminal Schwab order states — polling stops once one is reached.
+    _TERMINAL_ORDER_STATES = {"FILLED", "REJECTED", "CANCELED", "EXPIRED", "REPLACED"}
+
+    @staticmethod
+    def _extract_fills(order: Dict[str, Any]):
+        """Sum the executed legs of a Schwab order into the ACTUAL fill.
+
+        Returns (filled_qty, avg_price, filled_amount). All zero/None when the
+        order has not executed against the account.
         """
-        Poll Schwab for the submitted order's status and surface any rejection reason.
+        filled_qty = 0.0
+        filled_val = 0.0
+        for act in order.get("orderActivityCollection") or []:
+            for ex in act.get("executionLegs") or []:
+                q = ex.get("quantity") or 0
+                p = ex.get("price") or 0
+                filled_qty += q
+                filled_val += q * p
+        # Fall back to the order's own filledQuantity if no execution legs yet.
+        if not filled_qty:
+            filled_qty = order.get("filledQuantity") or 0
+        avg_price = (filled_val / filled_qty) if (filled_qty and filled_val) else None
+        filled_amount = filled_val if filled_val else None
+        return filled_qty, avg_price, filled_amount
+
+    def _post_submit_order_check(self, account_hash: str, order_id: str,
+                                 max_wait: float = 9.0) -> Optional[Dict[str, Any]]:
+        """Poll Schwab until the order reaches a TERMINAL state (or times out).
+
+        A single 1-second poll used to miss async rejections — an order that
+        was still WORKING at t+1s would be reported as executed even though
+        Schwab rejected it a moment later (exactly what happened with the OTC
+        BAYRY orders). Now we poll until FILLED/REJECTED/CANCELED/EXPIRED, and
+        return the real fill quantities/price so callers never confuse an
+        accepted-but-unfilled order with an executed one.
         """
         if not self.client or not order_id:
             return None
 
-        try:
-            time.sleep(1.0)
-            response = self.client.get_order(account_hash, order_id)
-            if response.status_code != 200:
-                logger.debug("Unable to retrieve Schwab order %s status (status=%s)", order_id, response.status_code)
-                return None
+        attempts = max(1, int(max_wait / 1.5))
+        last = None
+        for _ in range(attempts):
+            try:
+                time.sleep(1.5)
+                response = self.client.get_order(account_hash, order_id)
+                if response.status_code != 200:
+                    logger.debug("Unable to retrieve Schwab order %s status (status=%s)", order_id, response.status_code)
+                    continue
 
-            data = response.json() or {}
-            status = (data.get("status") or "").upper()
-            cancel_time = data.get("cancelTime") or data.get("orderCancelTime")
-            cancel_reason = None
-            if "orderLegCollection" in data:
+                data = response.json() or {}
+                status = (data.get("status") or "").upper()
+                cancel_time = data.get("cancelTime") or data.get("orderCancelTime")
+                cancel_reason = None
                 for leg in data.get("orderLegCollection") or []:
                     cancel_reason = cancel_reason or leg.get("cancelReason")
                     if cancel_reason:
                         break
-            cancel_reason = cancel_reason or data.get("cancelationReason") or data.get("cancelledReason")
+                cancel_reason = cancel_reason or data.get("cancelationReason") or data.get("cancelledReason")
+                filled_qty, avg_price, filled_amount = self._extract_fills(data)
 
-            return {
-                "status": status,
-                "reason": cancel_reason,
-                "cancel_time": cancel_time,
-                "raw": data,
-            }
-        except Exception as exc:
-            logger.debug("Exception while fetching Schwab order status: %s", exc)
-            return None
+                last = {
+                    "status": status,
+                    "reason": cancel_reason,
+                    "cancel_time": cancel_time,
+                    "filled_qty": filled_qty,
+                    "avg_price": avg_price,
+                    "filled_amount": filled_amount,
+                    "raw": data,
+                }
+                if status in self._TERMINAL_ORDER_STATES:
+                    return last
+            except Exception as exc:
+                logger.debug("Exception while fetching Schwab order status: %s", exc)
+                continue
+        # Non-terminal at timeout (e.g. still WORKING) — return what we last saw.
+        return last
     
     def get_order_status(self, order_id: str, account_hash: Optional[str] = None) -> Optional[Dict]:
         """

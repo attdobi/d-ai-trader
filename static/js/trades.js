@@ -91,6 +91,13 @@ document.addEventListener('DOMContentLoaded', () => {
       let isToday = false;
       try { isToday = new Date(tsText).toLocaleDateString() === today; } catch {}
       if (!isToday) return;
+      // Don't count decisions that did NOT execute (rejected / working / error /
+      // market-closed) as trades. Rows with no exec status (pre-tracking) still
+      // count, so historical totals are unaffected.
+      const exec = (row.dataset.exec || '');
+      const failed = ['rejected', 'working', 'error', 'failed', 'not_filled', 'market', 'closed']
+        .some(s => exec.includes(s));
+      if (failed) return;
       const action = (row.dataset.action || '').toLowerCase();
       if (action.includes('buy')) buyCount++;
       if (action.includes('sell')) sellCount++;
@@ -100,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const netEl = document.getElementById('todayNet');
     if (buysEl) buysEl.textContent = buyCount;
     if (sellsEl) sellsEl.textContent = sellCount;
-    if (netEl) netEl.textContent = `${buyCount + sellCount} trades`;
+    if (netEl) netEl.textContent = `${buyCount + sellCount} executed`;
   }
 
   // Add "Today" chip if not present

@@ -1252,13 +1252,33 @@ def execute_real_world_trade(decision):
             return False
 
         if result.get('success'):
-            print(f"✅ REAL TRADE EXECUTED: {action.upper()} {ticker} for ${amount_usd}")
+            # Record the ACTUAL fill on the decision (not the pre-trade estimate),
+            # so the dashboard shows what really executed.
+            filled_qty = result.get('filled_quantity')
+            fill_price = result.get('price')
+            fill_amount = result.get('executed_amount')
+            if fill_amount is None and filled_qty and fill_price:
+                fill_amount = round(float(filled_qty) * float(fill_price), 2)
+            decision['execution_status'] = 'filled'
+            decision['order_id'] = result.get('order_id')
+            if filled_qty:
+                decision['executed_shares'] = filled_qty
+            if fill_price:
+                decision['executed_price'] = fill_price
+            if fill_amount is not None:
+                decision['executed_amount'] = fill_amount
+            amt_str = f"${fill_amount:.2f}" if fill_amount is not None else f"${amount_usd}"
+            print(f"✅ REAL TRADE FILLED: {action.upper()} {ticker} — {filled_qty or '?'} sh @ "
+                  f"${fill_price if fill_price else '?'} = {amt_str}")
             print(f"   Order ID: {result.get('order_id', 'N/A')}")
             return True
         else:
-            print(f"❌ REAL TRADE FAILED: {action.upper()} {ticker}")
-            error_detail = result.get('error') or result.get('reason') or 'Unknown error'
-            print(f"   Error: {error_detail}")
+            status = (result.get('status') or 'failed')
+            decision['execution_status'] = status  # rejected / working / error
+            decision['order_id'] = result.get('order_id')
+            decision['execution_error'] = result.get('error') or result.get('reason') or 'Unknown error'
+            print(f"❌ REAL TRADE NOT EXECUTED ({status.upper()}): {action.upper()} {ticker}")
+            print(f"   Reason: {decision['execution_error']}")
             order_status = result.get('order_status')
             if isinstance(order_status, dict):
                 print(f"   Schwab Status: {order_status.get('status')} Reason: {order_status.get('reason')}")
@@ -1536,7 +1556,59 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
 
     _sync_live_positions("final")
 
+    # Persist actual execution outcomes back onto the stored decision row so the
+    # dashboard shows what really filled (order_id, executed shares/price/amount,
+    # or a rejected/working status) instead of the pre-trade estimate.
+    _persist_execution_outcomes(decisions, run_id, config_hash)
+
     return skipped_decisions
+
+
+def _persist_execution_outcomes(decisions, run_id, config_hash):
+    """Merge per-decision execution outcomes into the stored trade_decisions row.
+
+    Matches by (ticker, action) so it works even when only a subset of the run's
+    decisions flowed through here. Additive and best-effort — never raises into
+    the trading path.
+    """
+    if not run_id or not decisions:
+        return
+    outcomes = {}
+    for d in decisions:
+        if not isinstance(d, dict) or not d.get('execution_status'):
+            continue
+        key = (str(d.get('ticker', '')).upper(), str(d.get('action', '')).lower())
+        outcomes[key] = {
+            k: d.get(k) for k in (
+                'execution_status', 'order_id', 'executed_shares',
+                'executed_price', 'executed_amount', 'execution_error',
+            ) if d.get(k) is not None
+        }
+    if not outcomes:
+        return
+    try:
+        with engine.begin() as conn:
+            row = conn.execute(text("""
+                SELECT id, data FROM trade_decisions
+                WHERE run_id = :r AND config_hash = :h
+                ORDER BY id DESC LIMIT 1
+            """), {"r": run_id, "h": config_hash}).fetchone()
+            if not row:
+                return
+            stored = row.data if isinstance(row.data, list) else json.loads(row.data)
+            changed = False
+            for sd in stored:
+                if not isinstance(sd, dict):
+                    continue
+                key = (str(sd.get('ticker', '')).upper(), str(sd.get('action', '')).lower())
+                if key in outcomes:
+                    sd.update(outcomes[key])
+                    changed = True
+            if changed:
+                conn.execute(text("UPDATE trade_decisions SET data = :d WHERE id = :id"),
+                             {"d": json.dumps(stored), "id": row.id})
+    except Exception as exc:
+        print(f"⚠️  Could not persist execution outcomes: {exc}")
 
 def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
     """Process all sell decisions and return updated cash balance"""
@@ -1780,11 +1852,26 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             decision["amount_usd"] = actual_spent
             decision["amount_usd_executed"] = actual_spent
 
-            # Execute real-world trade if enabled
+            # Execute real-world trade if enabled. In live mode, if the order
+            # did NOT actually fill (rejected / still working / error), DO NOT
+            # write a local holding — that was recording phantom positions the
+            # account never held. The Schwab sync remains authoritative.
             if live_execution_enabled:
                 real_trade_success = execute_real_world_trade(decision)
                 if not real_trade_success:
-                    print(f"⚠️  Real buy execution failed for {ticker}, recording in simulation only")
+                    status = decision.get('execution_status', 'failed')
+                    print(f"⛔ {ticker}: real order did not fill (status={status}) — "
+                          f"skipping holdings update; no phantom position recorded.")
+                    skipped_decisions.append({
+                        "action": "buy",
+                        "ticker": ticker,
+                        "amount_usd": actual_spent,
+                        "reason": f"Real order {status} — not executed (Original: {reason})",
+                        "execution_status": status,
+                        "order_id": decision.get('order_id'),
+                        "execution_error": decision.get('execution_error'),
+                    })
+                    continue
 
             # Execute the buy in simulation (always)
             try:
