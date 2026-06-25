@@ -3769,24 +3769,41 @@ def record_prompt_review_decision():
 
 @app.route('/api/prompt-evolution/critic-scorecard')
 def get_critic_scorecard():
-    """Critic↔human agreement over recorded reviews — the critic's learning
-    signal. (Critic↔market agreement is added in Phase 4 once outcomes land.)"""
+    """How good is the critic? Two signals:
+      - critic↔human agreement (available now, the bootstrap signal)
+      - critic↔market agreement (populates as activated versions mature; this is
+        the ground truth that eventually lets us retire the human)."""
     try:
+        from prompt_outcome_attribution import critic_vs_market
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT critic_verdict, human_verdict
+                SELECT critic_verdict, human_verdict, realized_winrate_delta
                 FROM prompt_change_reviews
-                WHERE config_hash = :h
-                  AND critic_verdict IS NOT NULL
-                  AND human_verdict IS NOT NULL
+                WHERE config_hash = :h AND critic_verdict IS NOT NULL
             """), {'h': config_hash}).fetchall()
-        total = len(rows)
-        agree = sum(1 for r in rows if r.critic_verdict == r.human_verdict)
+
+        both = [r for r in rows if r.human_verdict]
+        human_agree = sum(1 for r in both if r.critic_verdict == r.human_verdict)
+
+        market_rows = [r for r in rows if r.realized_winrate_delta is not None]
+        market_judged = [critic_vs_market(r.critic_verdict, float(r.realized_winrate_delta))
+                         for r in market_rows]
+        market_judged = [m for m in market_judged if m is not None]
+        market_right = sum(1 for m in market_judged if m)
+
         return jsonify({
-            'reviews_with_both_verdicts': total,
-            'agreements': agree,
-            'agreement_rate': round(agree / total, 3) if total else None,
+            'critic_vs_human': {
+                'reviews': len(both),
+                'agreements': human_agree,
+                'agreement_rate': round(human_agree / len(both), 3) if both else None,
+            },
+            'critic_vs_market': {
+                'measured_versions': len(market_judged),
+                'critic_right': market_right,
+                'accuracy': round(market_right / len(market_judged), 3) if market_judged else None,
+                'note': 'Populates as activated versions accumulate closed trades.',
+            },
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
