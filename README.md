@@ -1,8 +1,60 @@
 # 🤖 D-AI-Trader
 
-Autonomous stock trading system powered by **GPT-5.4**. Scrapes financial news via headless Chrome, runs it through AI summarization and decision-making, and executes trades through the Schwab API — or in simulation mode with no broker required.
+An autonomous trading system built as a reinforcement-learning loop in which **the market is the reward signal**. Frozen LLM agents read financial news, decide trades, and execute them through the Schwab API (or in simulation); a feedback agent then scores the realized P&L and rewrites the agents' prompts. The policy that improves over time is **natural-language text — agent identity, strategy, and memory — not network weights.**
 
-Default cadence is **3 hours** (180 min), targeting 1–3 day hold periods suited to **cash accounts** (T+1 settlement). Margin accounts ($25k+) can run faster cadences.
+We call this **RLMF — Reinforcement Learning from Market Feedback** ([detailed below](#how-it-learns-rlmf)). It's the actual point of the project; the trading is the environment it learns in, not a get-rich scheme. Treat it as a research harness for prompt-space policy iteration.
+
+Loop: `news → summarize → decide → execute → score → rewrite the prompt`. Default cadence is 3 hours, suited to 1–3 day holds on cash accounts (T+1 settlement). Runs fully in simulation with no broker required.
+
+---
+
+## How It Learns: RLMF
+
+The system is a reinforcement-learning loop with two deliberate substitutions from the textbook setup:
+
+- The **reward** is realized trade P&L — *the market itself*. No human rater (as in RLHF) and no learned reward model. The environment hands back ground truth.
+- The **policy** is a block of prompt text — each agent's `SOUL` (identity), `STRATEGY DIRECTIVES` (evolving rules), and `MEMORY` (lessons) — injected into the system prompt at runtime. The LLM weights stay frozen. Learning happens in *text space*.
+
+An **episode** is one trading cycle. A **policy update** is the feedback agent reading recent outcomes, attributing them to the reasons the Decider gave, and rewriting the prompt. Updates are human-readable diffs, gated by an approve/reject step in the Prompt Lab.
+
+```
+        policy = prompt (soul + strategy directives + memory)
+                              │
+                              ▼
+   Decider acts ──→ trade executes ──→ market resolves P&L ──→ Feedback agent
+        ▲                                  (the reward)         scores outcomes,
+        │                                                       rewrites the policy
+        └──────────────── new prompt version ◀────────────────────────┘
+```
+
+### Compared to PPO
+
+Same control loop, different machinery at every joint:
+
+| | PPO | RLMF (this system) |
+|---|---|---|
+| **Policy** | Network weights θ | Prompt text (soul + directives + memory) |
+| **Reward** | Environment scalar | Realized market P&L — no human, no learned reward model |
+| **Update rule** | Gradient ascent on a clipped surrogate objective | An LLM rewrites the prompt from an outcome post-mortem |
+| **Update space** | Continuous (weight deltas) | Discrete (natural language) |
+| **Credit assignment** | Advantage / GAE over timesteps | Feedback agent ties P&L back to the stated trade rationale |
+| **Stability mechanism** | Trust region / clip ratio | Versioned prompts + human approve/reject gate |
+| **Sample regime** | Many on-policy rollouts | Few episodes; semantic generalization across them |
+| **Interpretability** | Opaque weight deltas | Every update is a readable prompt diff |
+
+PPO's clip exists to stop one update from moving the policy too far. The Prompt Lab's **approve/reject gate is the same idea** — a human-sized trust region on a textual policy step.
+
+The trade-off is honest: a gradient learner needs thousands of noisy episodes to extract signal from financial returns, but assigns credit rigorously. RLMF can generalize from a handful — *"stop buying gap-ups into earnings"* is one sentence, not ten thousand gradient steps — but its credit assignment is coarse and only as good as the feedback agent's reasoning. **Garbage reward in, garbage policy out**: if outcomes are mislabeled, the loop learns nothing (see the dollar-delta fix in the changelog).
+
+### Where it lives in the code
+
+| Concept | Implementation |
+|---|---|
+| Policy | `prompt_versions` table (`soul` / `strategy_directives` / `memory`), injected at runtime as `## AGENT IDENTITY`, `## STRATEGY DIRECTIVES`, `## LESSONS FROM EXPERIENCE` |
+| Reward | `trade_outcomes.gain_loss_percentage` + `outcome_category` |
+| Policy update | `feedback_agent.py` — weekly outcome analysis → prompt rewrite |
+| Trust-region gate | Prompt Lab approve/reject (`/prompt-evolution`) |
+| Episode | One trading cycle (Summarizer → Decider → execution → outcome) |
 
 ---
 
@@ -106,7 +158,7 @@ Empty soul/memory fields are fully backwards compatible — agents behave exactl
 
 ```
 Summarizer  →  Momentum Recap  →  Decider  →  Execution  →  Feedback
-(6 sources)    (scorable view)    (GPT-5.4)   (sim/Schwab)  (post-close)
+(6 sources)    (scorable view)    (LLM)       (sim/Schwab)  (weekly RLMF)
 ```
 
 ### Pipeline Detail
@@ -147,7 +199,8 @@ Summarizer  →  Momentum Recap  →  Decider  →  Execution  →  Feedback
                               ▼
                    ┌─────────────────────┐
                    │  Feedback Agent     │
-                   │  (daily post-close) │
+                   │  (weekly → rewrites │
+                   │   the prompt/policy)│
                    └─────────────────────┘
 ```
 
@@ -247,27 +300,28 @@ DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
 
 ## Trading Strategy
 
-### Philosophy
+The strategy is not a claim about returns — it's the **initial policy** the RLMF loop starts from and then mutates. Everything below is the default `SOUL` + `STRATEGY DIRECTIVES`, and all of it is subject to being rewritten by the feedback agent as outcomes accumulate. Read it as starting conditions, not promises.
 
-- **Selective entries**: 2–3 high-conviction trades per day at 3-hour cadence
-- **Quick profits**: Target 5–10% gains, exit fast
-- **Momentum-based**: Ride trends, cut before reversals
-- **Capital rotation**: Sell winners, redeploy into new opportunities
+### Starting policy
 
-### Profit Targets & Stop Losses
+- Short-swing horizon: 1–5 day holds, catalyst-driven entries
+- Capital rotation: exit on thesis-break, redeploy into fresher setups
+- Cash is a position: hold it when no setup clears the bar
+
+### Default exit thresholds
 
 | Condition | Action |
 |---|---|
-| +5–8% | SELL — lock in profit |
-| +8–15% | SELL — great trade |
-| +15%+ | SELL NOW — exceptional |
-| −3% to −5% | SELL — stop loss, protect capital |
+| ≥ +5% | Take profit |
+| −3% to −5% | Stop loss |
 
-### Position Sizing
+These live in the strategy directives and drift over time as the loop learns; the dashboard always reflects the active version, not this table.
+
+### Position sizing (default)
 
 - Per trade: $1,500–$4,000
 - Max concurrent positions: 5
-- Cash buffer always maintained
+- Cash buffer maintained at all times
 
 ### Account Types
 
@@ -283,10 +337,10 @@ DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
 | 6:30 AM | Market open — first cycle runs |
 | 6:30 AM → 1:00 PM | Intraday cycles every `--cadence` minutes |
 | 1:00 PM | Market close |
-| 1:30 PM | Feedback agent runs daily analysis |
+| Thursday 5:30 PM | Feedback agent runs the weekly policy update (RLMF) |
 | After hours | Decisions recorded as "⛔ MARKET CLOSED", no execution |
 
-The scheduler auto-runs a catch-up cycle if started after 6:30 AM PT.
+The scheduler auto-runs a catch-up cycle if started after 6:30 AM PT. The feedback/prompt-evolution step is weekly by design — it needs a batch of closed trades to compute a meaningful reward signal — but can also be triggered on demand from the Prompt Lab.
 
 ---
 
@@ -294,14 +348,14 @@ The scheduler auto-runs a catch-up cycle if started after 6:30 AM PT.
 
 | Source | Focus |
 |---|---|
-| Yahoo Finance | Stock news, earnings |
-| Benzinga ⭐ | Day trading catalysts, movers |
+| Yahoo Finance (stock-market-news) | Stock news, earnings |
+| StockAnalysis (gainers) | Intraday movers, day-trade catalysts |
 | Fox Business | Market sentiment |
 | AP Business | Clean, factual |
 | BBC Business | International markets |
 | CNBC | Breaking news, market movers |
 
-All work with headless Chrome — no bot detection issues.
+Sources rot. Sites add paywalls, Cloudflare challenges, or just start returning 404/500 — when one does, the summarizer wastes a cycle on an error page, so the list in `main.py` (`URLS`) gets pruned and replaced periodically. The retired roster (Benzinga, MarketBeat, Reuters, TheStreet, Investing.com, MarketWatch, Finviz, TipRanks) is documented inline there.
 
 ---
 
@@ -490,6 +544,14 @@ Day trading is risky. You can lose money. This is experimental software for educ
 ---
 
 ## Changelog
+
+### June 2026
+- **Reward-integrity fixes (the RLMF loop was learning from bad labels).** `break_even` was any trade within ±2%, so real −$6 to −$137 losses on small positions were labeled break-even and never reached the feedback agent as losses — categorization is now a dollar-delta test (`|net P&L| ≤ $3`). Backfilled 89/291 historical rows; the outcome distribution went from mostly-break_even to a truthful 128 loss / 121 win split.
+- Fixed per-trade gain/loss % rendering ~100× too small (a stored fraction was displayed as a percent) across the Schwab Live, Feedback, and Prompt Lab tabs.
+- Prompt Lab: one-click "refresh feedback + regenerate all agents" with per-agent diff tabs and approve/reject; background job + polling so progress survives navigation; instant Feedback↔Prompt Lab version sync.
+- Added GPT-5.5 support and an `-m <model>-<effort>` reasoning suffix (e.g. `gpt-5.5-high`).
+- Agent SOUL/MEMORY framework: committed `.default.md` seeds, gitignored live mirrors, Obsidian-ready memory format.
+- macOS resilience: re-sign chromedriver after `undetected_chromedriver` patches it (Gatekeeper SIGKILL), Postgres.app permission-dialog workaround.
 
 ### March 2026
 - Upgraded default model to GPT-5.4
