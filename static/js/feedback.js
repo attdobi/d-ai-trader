@@ -156,13 +156,18 @@ async function loadLatestFeedback() {
 function updatePerformanceChart(periodData) {
   const ctx = document.getElementById('performanceChart').getContext('2d');
   if (feedbackPerformanceChart) feedbackPerformanceChart.destroy();
-  const periods = ['7d','14d','30d'];
-  const successRates = periods.map(p => (periodData[p]?.success_rate || 0) * 100);
-  const avgProfits = periods.map(p => (periodData[p]?.avg_profit || 0) * 100);
+  // Render whatever windows the backend returned, sorted ascending by days.
+  const periods = Object.keys(periodData || {})
+    .map(k => ({ key: k, days: parseInt(k, 10) }))
+    .filter(p => !Number.isNaN(p.days))
+    .sort((a, b) => a.days - b.days);
+  const labels = periods.map(p => p.days >= 365 ? `${Math.round(p.days / 365)}y` : `${p.days}d`);
+  const successRates = periods.map(p => (periodData[p.key]?.success_rate || 0) * 100);
+  const avgProfits = periods.map(p => (periodData[p.key]?.avg_profit || 0) * 100);
   feedbackPerformanceChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: ['7 Days','14 Days','30 Days'],
+      labels,
       datasets: [
         { label: 'Success Rate (%)', data: successRates, borderColor: '#4CAF50', backgroundColor: 'rgba(76,175,80,0.1)', yAxisID: 'y' },
         { label: 'Average Profit (%)', data: avgProfits, borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.1)', yAxisID: 'y1' }
@@ -171,8 +176,30 @@ function updatePerformanceChart(periodData) {
     options: {
       responsive: true, maintainAspectRatio: false,
       scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } },
-      plugins: { title: { display: true, text: 'Performance Trends' } }
+      plugins: { title: { display: true, text: 'Performance Trends (nested lookback windows)' } }
     }
+  });
+}
+
+// Re-fetch the chart for a chosen set of lookback windows (range buttons).
+async function refreshPerformanceChart(periodsCsv) {
+  try {
+    const data = await fetchJSON(`/api/feedback?periods=${encodeURIComponent(periodsCsv)}`);
+    if (data?.period_analysis) updatePerformanceChart(data.period_analysis);
+  } catch (e) {
+    console.error('Error loading performance chart:', e);
+  }
+}
+
+function setupTrendRangeButtons() {
+  const wrap = document.getElementById('trendRangeButtons');
+  if (!wrap) return;
+  wrap.querySelectorAll('.trend-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      wrap.querySelectorAll('.trend-range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      refreshPerformanceChart(btn.dataset.periods);
+    });
   });
 }
 async function loadFeedbackHistory() {
@@ -324,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPromptDetails();
   refreshFeedbackData();
   setInterval(refreshFeedbackData, 10000);
+  setupTrendRangeButtons();
   const resetBtn = document.getElementById('resetPromptsBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', resetPromptsToBaseline);

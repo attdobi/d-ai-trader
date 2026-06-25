@@ -183,8 +183,21 @@
 </div>
 
 <div class="chart-container">
+  <div id="trendRangeButtons" style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:8px;">
+    <button type="button" class="trend-range-btn" data-periods="7,14,30">30d</button>
+    <button type="button" class="trend-range-btn active" data-periods="7,14,30,60,90">90d</button>
+    <button type="button" class="trend-range-btn" data-periods="30,90,180,365">1y</button>
+  </div>
   <canvas id="performanceChart"></canvas>
 </div>
+<style>
+.trend-range-btn {
+  background: transparent; border: 1px solid #3a4a63; color: #9bb0cc;
+  border-radius: 6px; padding: 3px 12px; font-size: 0.85em; cursor: pointer;
+}
+.trend-range-btn:hover { background: rgba(33,150,243,0.12); }
+.trend-range-btn.active { background: #2196F3; border-color: #2196F3; color: #fff; }
+</style>
 {% endblock %}
 
 {% block scripts %}

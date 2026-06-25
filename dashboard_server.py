@@ -1555,10 +1555,19 @@ def get_feedback_data():
         except Exception:
             latest_feedback = None
         
-        # Get trade outcomes for different periods
-        periods = [7, 14, 30]
+        # Get trade outcomes for different lookback windows. Default now extends
+        # to 90 days; the client can request any set via ?periods=7,30,90,180,365.
+        periods_param = request.args.get('periods')
+        periods = [7, 14, 30, 60, 90]
+        if periods_param:
+            parsed = sorted({
+                int(p) for p in periods_param.split(',')
+                if p.strip().isdigit() and 1 <= int(p) <= 1095
+            })
+            if parsed:
+                periods = parsed[:12]  # cap to keep the chart readable
         period_data = {}
-        
+
         for days in periods:
             # Compute metrics without AI call to avoid API failures impacting the dashboard
             metrics = tracker.compute_recent_outcomes_metrics(days_back=days)
