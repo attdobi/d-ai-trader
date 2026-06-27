@@ -1179,6 +1179,14 @@ def _compute_symbol_momentum(symbol):
 
 
 def build_momentum_recap(entities):
+    """Build the per-ticker momentum recap fed into the Decider's prompt.
+
+    NOTE: "momentum" is NOT an LLM agent — this is plain Python over the Yahoo
+    Finance API (yfinance). It makes no model calls, consumes no tokens, and has
+    no reasoning level or cost. It produces the structured numbers (price ladder,
+    relative volume, range position, RS-vs-SPY); the Decider does the reasoning
+    over them. (Hence there is no "momentum" reasoning profile in config.py.)
+    """
     symbols_in_order = []
     company_names = {}
     for entry in entities:

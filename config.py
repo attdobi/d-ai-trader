@@ -377,12 +377,15 @@ REASONING_LEVEL_TOKEN_LIMITS = {
     "high": 12000,
     "xhigh": 20000,
 }
+# Reasoning levels are per LLM agent. Note there is intentionally NO "momentum"
+# profile: the momentum recap is pure Python over the Yahoo Finance API
+# (decider_agent._compute_symbol_momentum) — it makes no LLM calls, so it has no
+# reasoning level or token cost. The only LLM agents are the four below.
 DEFAULT_REASONING_LEVELS = {
     "summarizer": "medium",  # user asked for light-to-medium; default to medium
     "decider": "high",
     "feedback": "high",
     "company": "low",        # ticker/entity extraction — simple, low is plenty
-    "momentum": "light",
     "default": "medium",
 }
 AGENT_REASONING_ENV_KEYS = {
@@ -390,7 +393,6 @@ AGENT_REASONING_ENV_KEYS = {
     "decider": "DAI_DECIDER_REASONING_LEVEL",
     "feedback": "DAI_FEEDBACK_REASONING_LEVEL",
     "company": "DAI_COMPANY_REASONING_LEVEL",
-    "momentum": "DAI_MOMENTUM_REASONING_LEVEL",
 }
 
 
@@ -404,12 +406,8 @@ def _resolve_reasoning_profile(agent_name: str) -> str:
         return "decider"
     if "feedback" in name:
         return "feedback"
-    # Company/ticker extraction gets its own knob (DAI_COMPANY_REASONING_LEVEL)
-    # — checked before "momentum" so the two no longer share a profile.
     if "companyextraction" in name or "company_extraction" in name or "extraction" in name:
         return "company"
-    if "momentum" in name:
-        return "momentum"
     return "default"
 
 
