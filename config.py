@@ -381,6 +381,7 @@ DEFAULT_REASONING_LEVELS = {
     "summarizer": "medium",  # user asked for light-to-medium; default to medium
     "decider": "high",
     "feedback": "high",
+    "company": "low",        # ticker/entity extraction — simple, low is plenty
     "momentum": "light",
     "default": "medium",
 }
@@ -388,6 +389,7 @@ AGENT_REASONING_ENV_KEYS = {
     "summarizer": "DAI_SUMMARIZER_REASONING_LEVEL",
     "decider": "DAI_DECIDER_REASONING_LEVEL",
     "feedback": "DAI_FEEDBACK_REASONING_LEVEL",
+    "company": "DAI_COMPANY_REASONING_LEVEL",
     "momentum": "DAI_MOMENTUM_REASONING_LEVEL",
 }
 
@@ -402,7 +404,11 @@ def _resolve_reasoning_profile(agent_name: str) -> str:
         return "decider"
     if "feedback" in name:
         return "feedback"
-    if "companyextraction" in name or "company_extraction" in name or "momentum" in name:
+    # Company/ticker extraction gets its own knob (DAI_COMPANY_REASONING_LEVEL)
+    # — checked before "momentum" so the two no longer share a profile.
+    if "companyextraction" in name or "company_extraction" in name or "extraction" in name:
+        return "company"
+    if "momentum" in name:
         return "momentum"
     return "default"
 
