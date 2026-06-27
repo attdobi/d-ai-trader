@@ -2126,6 +2126,10 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
         run_id = run_id or run_context.run_id
         config_hash = run_context.config_hash or config_hash
         print(f"📋 RunContext: run_id={run_context.run_id}, config_hash={run_context.config_hash}")
+    # Tag this cycle's API calls (Decider + CompanyExtraction) with the run_id so
+    # their cost can be attributed to the resulting decision on the Trades tab.
+    if run_id:
+        prompt_manager.run_id = run_id
     market_open = is_market_open()
     print(f"⏰ Market status at decision time: {'OPEN' if market_open else 'CLOSED'}")
     # Limit summaries to the targeted run_id when provided

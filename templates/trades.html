@@ -120,7 +120,12 @@
             {{ reason }}
           {% endif %}
         </td>
-        <td>{{ trade.timestamp }}</td>
+        <td>
+          {{ trade.timestamp }}
+          {% if trade.decision_cost is not none and trade.decision_cost > 0 %}
+            <span class="decision-cost" title="API cost of this decision (Decider + extraction calls){% if trade.decision_tokens %} · {{ '{:,}'.format(trade.decision_tokens) }} tokens{% endif %}">${{ '%.4f'|format(trade.decision_cost) }}</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     {% endfor %}
@@ -146,6 +151,7 @@
 .exec-cash_hold { background: #eef1f4; color: #475569; }
 .est-tag { color: #9aa3ad; font-style: italic; font-size: 0.85em; }
 .amt-none { color: #b42318; font-size: 0.9em; }
+.decision-cost { display:block; margin-top:3px; color:#7a8a9a; font-size:0.8em; font-family: ui-monospace, Menlo, monospace; }
 </style>
 {% endblock %}
 

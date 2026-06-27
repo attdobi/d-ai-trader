@@ -153,11 +153,11 @@
   <table id="costTable" style="width:100%; margin-top:12px; border-collapse:collapse; font-size:0.92em;">
     <thead><tr style="text-align:left; color:#8aa;">
       <th style="padding:6px 8px;">Agent</th><th>Calls</th><th>Prompt tok</th>
-      <th>Reasoning tok</th><th>Cost ({{ '' }}window)</th>
+      <th>Output tok</th><th>(of which reasoning)</th><th>Cost ({{ '' }}window)</th>
     </tr></thead>
     <tbody id="costTableBody"></tbody>
     <tfoot><tr style="border-top:1px solid rgba(120,140,170,0.25); font-weight:600;">
-      <td style="padding:6px 8px;">Total</td><td id="costTotCalls">—</td><td></td><td></td><td id="costTotal">—</td>
+      <td style="padding:6px 8px;">Total</td><td id="costTotCalls">—</td><td></td><td></td><td></td><td id="costTotal">—</td>
     </tr></tfoot>
   </table>
 </div>
@@ -184,7 +184,8 @@
       (d.per_agent || []).forEach(function(a) {
         const tr = document.createElement('tr');
         tr.innerHTML = '<td style="padding:6px 8px;">' + a.agent + '</td><td>' + a.calls +
-          '</td><td>' + fmtTok(a.prompt_tokens) + '</td><td>' + fmtTok(a.reasoning_tokens) +
+          '</td><td>' + fmtTok(a.prompt_tokens) + '</td><td>' + fmtTok(a.completion_tokens) +
+          '</td><td style="color:#8aa;">' + fmtTok(a.reasoning_tokens) +
           '</td><td>' + fmtUsd(a.cost) + '</td>';
         body.appendChild(tr);
       });

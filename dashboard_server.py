@@ -1260,7 +1260,25 @@ def trade_decisions():
                 trade_dict['data'] = cleaned_data
             
             trades.append(trade_dict)
-        
+
+        # Attach the API cost of each decision (Decider + CompanyExtraction calls
+        # for that run) so the Trades tab shows the $ that produced the trades.
+        run_ids = [t.get('run_id') for t in trades if t.get('run_id')]
+        if run_ids:
+            cost_rows = conn.execute(text("""
+                SELECT run_id, COALESCE(SUM(cost_usd), 0) AS cost,
+                       COALESCE(SUM(total_tokens), 0) AS tokens
+                FROM api_usage
+                WHERE run_id = ANY(:rids)
+                  AND agent_type IN ('DeciderAgent', 'CompanyExtractionAgent')
+                GROUP BY run_id
+            """), {"rids": run_ids}).fetchall()
+            cost_by_run = {r.run_id: {'cost': float(r.cost or 0), 'tokens': int(r.tokens or 0)} for r in cost_rows}
+            for t in trades:
+                info = cost_by_run.get(t.get('run_id'))
+                t['decision_cost'] = info['cost'] if info else None
+                t['decision_tokens'] = info['tokens'] if info else None
+
         return render_template("trades.html", active_tab="trades", trades=trades)
 
 @app.route("/summaries")
@@ -1311,6 +1329,7 @@ def summaries():
 
                 summaries.append({
                     "agent": row.agent,
+                    "run_id": getattr(row, 'run_id', None),
                     "timestamp": formatted_timestamp,
                     "headlines": summary_data.get("headlines", []),
                     "insights": summary_data.get("insights", "")
@@ -1319,6 +1338,26 @@ def summaries():
                 print(f"Failed to parse summary row {row.id}: {e}")
                 print(f"Raw data: {row.data[:200]}...")
                 continue
+
+        # Per-summary cost: the cycle's SummarizerAgent spend shares one run_id
+        # across all that cycle's source summaries, so show the per-summary
+        # average (cycle summarizer cost ÷ summaries in that cycle).
+        run_ids = [s['run_id'] for s in summaries if s.get('run_id')]
+        if run_ids:
+            cost_rows = conn.execute(text("""
+                SELECT run_id, COALESCE(SUM(cost_usd), 0) AS cost
+                FROM api_usage
+                WHERE run_id = ANY(:rids) AND agent_type = 'SummarizerAgent'
+                GROUP BY run_id
+            """), {"rids": run_ids}).fetchall()
+            cost_by_run = {r.run_id: float(r.cost or 0) for r in cost_rows}
+            counts = {}
+            for s in summaries:
+                counts[s.get('run_id')] = counts.get(s.get('run_id'), 0) + 1
+            for s in summaries:
+                rid = s.get('run_id')
+                total = cost_by_run.get(rid)
+                s['summary_cost'] = (total / counts[rid]) if (total and counts.get(rid)) else None
 
         return render_template("summaries.html", summaries=summaries)
 

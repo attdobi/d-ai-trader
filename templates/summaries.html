@@ -23,6 +23,9 @@
       <div class="source-info">
         <span class="source-name">{{ summary.agent }}</span>
         <span class="source-timestamp">{{ summary.timestamp }}</span>
+        {% if summary.summary_cost is not none and summary.summary_cost > 0 %}
+        <span class="summary-cost" title="Avg API cost per summary this cycle (summarizer spend ÷ summaries)" style="margin-left:8px; color:#7a8a9a; font-family: ui-monospace, Menlo, monospace; font-size:0.82em;">${{ '%.4f'|format(summary.summary_cost) }}</span>
+        {% endif %}
       </div>
       <span class="freshness-dot {% if summary.timestamp %}freshness-recent{% else %}freshness-stale{% endif %}" title="Data freshness"></span>
     </div>
