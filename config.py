@@ -345,6 +345,9 @@ AGENT_MODEL_OVERRIDES = {
     "summarizer": _load_agent_model_override("DAI_MODEL_SUMMARIZER", "summarizer"),
     "decider": _load_agent_model_override("DAI_MODEL_DECIDER", "decider"),
     "feedback": _load_agent_model_override("DAI_MODEL_FEEDBACK", "feedback"),
+    # Company/ticker extraction is a simple text task — let it run on a cheaper
+    # model (e.g. gpt-5.4-mini) via DAI_MODEL_COMPANY without touching the decider.
+    "company": _load_agent_model_override("DAI_MODEL_COMPANY", "company"),
 }
 
 
@@ -357,6 +360,8 @@ def get_agent_model(agent_name):
         return AGENT_MODEL_OVERRIDES.get("decider") or GPT_MODEL
     if "feedback" in name:
         return AGENT_MODEL_OVERRIDES.get("feedback") or GPT_MODEL
+    if "company" in name or "extraction" in name:
+        return AGENT_MODEL_OVERRIDES.get("company") or GPT_MODEL
     return GPT_MODEL
 
 
