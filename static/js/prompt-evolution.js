@@ -106,12 +106,26 @@ async function loadPerformanceContext() {
     const data = await apiJSON('/api/prompt-evolution/performance-context');
     const stats = data?.stats || {};
 
+    // 7-day API spend + projected monthly burn rate.
+    let spend7 = null;
+    let monthly = null;
+    try {
+      const cost = await apiJSON('/api/cost-usage?days=7');
+      if (typeof cost?.total_cost === 'number') {
+        spend7 = cost.total_cost;
+        monthly = (spend7 / 7) * 30.4;  // avg daily × ~month length
+      }
+    } catch (_) { /* cost optional */ }
+    const fmtUsd = (v) => (typeof v === 'number') ? ('$' + v.toFixed(2)) : '—';
+
     const statCards = [
       { label: 'Win Rate', value: formatPercent(stats.win_rate, 1) },
       { label: 'Avg Profit', value: formatPercent(stats.avg_profit_pct, 2, true) },
       { label: 'Total Trades', value: String(stats.total_trades ?? 0) },
       { label: 'Best Trade', value: formatTrade(stats.best_trade) },
-      { label: 'Worst Trade', value: formatTrade(stats.worst_trade) }
+      { label: 'Worst Trade', value: formatTrade(stats.worst_trade) },
+      { label: 'API Spend (7d)', value: fmtUsd(spend7) },
+      { label: 'Est. Monthly Burn', value: (typeof monthly === 'number') ? (fmtUsd(monthly) + '/mo') : '—' }
     ];
 
     statsEl.innerHTML = '';
