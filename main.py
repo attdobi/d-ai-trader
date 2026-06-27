@@ -763,11 +763,15 @@ def summarize_page(agent_name, url, web_driver):
     if screenshot_saved_2:
         saved_screenshots.append(screenshot_path_2)
 
+    call_usage = None
     try:
         summary_data = get_openai_summary(agent_name, html, saved_screenshots)
         if isinstance(summary_data, list):
             summary_data = summary_data[0] if summary_data else {}
         print(f"🧾 {agent_name} summary response: {summary_data}")
+        # Exact per-source cost: the usage of the call that just produced THIS
+        # summary (thread-local, so parallel workers don't cross-contaminate).
+        call_usage = prompt_manager.last_usage()
     except Exception as e:
         summary_data = {"error": f"Summary failed: {e}"}
         print(f"❌ {agent_name} summary error: {e}")
@@ -777,7 +781,10 @@ def summarize_page(agent_name, url, web_driver):
         "timestamp": current_capture_timestamp(),
         "summary": summary_data,
         "screenshot_paths": saved_screenshots,
-        "run_id": RUN_TIMESTAMP
+        "run_id": RUN_TIMESTAMP,
+        "cost_usd": (call_usage or {}).get("cost_usd"),
+        "tokens": (call_usage or {}).get("total_tokens"),
+        "model": (call_usage or {}).get("model"),
     }
 
     return summary

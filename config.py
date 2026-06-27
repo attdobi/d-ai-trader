@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import time
+import threading
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -800,6 +801,15 @@ class PromptManager:
         self.client = client
         self.session = session
         self.run_id = run_id
+        # Per-thread snapshot of the most recent call's usage, so a caller can
+        # stamp the exact cost onto what that call produced. Thread-local because
+        # the summarizer runs calls across parallel worker threads on one shared
+        # PromptManager — a plain attribute would clobber across workers.
+        self._tls = threading.local()
+
+    def last_usage(self):
+        """Return this thread's most-recent call usage dict, or None."""
+        return getattr(self._tls, "last_usage", None)
 
     def _record_api_usage(self, agent_name, model_name, response):
         """Persist token usage + computed cost for the dashboard. Best-effort —
@@ -817,6 +827,15 @@ class PromptManager:
                 reasoning_tokens = int(getattr(details, "reasoning_tokens", 0) or 0)
             # completion_tokens already includes reasoning tokens → use it for output cost.
             cost = compute_api_cost(model_name, prompt_tokens, completion_tokens)
+            # Stash for the caller to stamp onto the produced artifact (per-thread).
+            self._tls.last_usage = {
+                "model": model_name,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "total_tokens": total_tokens,
+                "cost_usd": cost,
+            }
             with engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS api_usage (

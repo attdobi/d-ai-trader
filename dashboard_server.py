@@ -1334,12 +1334,15 @@ def summaries():
                 else:
                     formatted_timestamp = "Unknown"
 
+                # Exact per-source cost stamped at write time (newer summaries).
+                stamped_cost = outer.get("cost_usd")
                 summaries.append({
                     "agent": row.agent,
                     "run_id": getattr(row, 'run_id', None),
                     "timestamp": formatted_timestamp,
                     "headlines": summary_data.get("headlines", []),
-                    "insights": summary_data.get("insights", "")
+                    "insights": summary_data.get("insights", ""),
+                    "summary_cost": float(stamped_cost) if stamped_cost else None,
                 })
             except Exception as e:
                 print(f"Failed to parse summary row {row.id}: {e}")
@@ -1375,7 +1378,11 @@ def summaries():
             acc["calls"] += int(r.calls)
         cycles = [v for v in cycle.values() if v["t"] and v["calls"]]
 
+        # Only older summaries (no stamped per-source cost) need the cycle-average
+        # fallback; newer ones already carry their exact cost.
         for s in summaries:
+            if s.get("summary_cost") is not None:
+                continue
             st = _parse_rid(s.get("run_id"))
             best, best_d = None, None
             if st:
