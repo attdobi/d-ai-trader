@@ -1265,15 +1265,22 @@ def trade_decisions():
         # for that run) so the Trades tab shows the $ that produced the trades.
         run_ids = [t.get('run_id') for t in trades if t.get('run_id')]
         if run_ids:
+            from config import compute_api_cost
             cost_rows = conn.execute(text("""
-                SELECT run_id, COALESCE(SUM(cost_usd), 0) AS cost,
+                SELECT run_id, model,
+                       COALESCE(SUM(prompt_tokens), 0) AS p,
+                       COALESCE(SUM(completion_tokens), 0) AS c,
                        COALESCE(SUM(total_tokens), 0) AS tokens
                 FROM api_usage
                 WHERE run_id = ANY(:rids)
                   AND agent_type IN ('DeciderAgent', 'CompanyExtractionAgent')
-                GROUP BY run_id
+                GROUP BY run_id, model
             """), {"rids": run_ids}).fetchall()
-            cost_by_run = {r.run_id: {'cost': float(r.cost or 0), 'tokens': int(r.tokens or 0)} for r in cost_rows}
+            cost_by_run = {}
+            for r in cost_rows:
+                acc = cost_by_run.setdefault(r.run_id, {'cost': 0.0, 'tokens': 0})
+                acc['cost'] += compute_api_cost(r.model, int(r.p), int(r.c))
+                acc['tokens'] += int(r.tokens)
             for t in trades:
                 info = cost_by_run.get(t.get('run_id'))
                 t['decision_cost'] = info['cost'] if info else None
@@ -1344,13 +1351,18 @@ def summaries():
         # average (cycle summarizer cost ÷ summaries in that cycle).
         run_ids = [s['run_id'] for s in summaries if s.get('run_id')]
         if run_ids:
+            from config import compute_api_cost
             cost_rows = conn.execute(text("""
-                SELECT run_id, COALESCE(SUM(cost_usd), 0) AS cost
+                SELECT run_id, model,
+                       COALESCE(SUM(prompt_tokens), 0) AS p,
+                       COALESCE(SUM(completion_tokens), 0) AS c
                 FROM api_usage
                 WHERE run_id = ANY(:rids) AND agent_type = 'SummarizerAgent'
-                GROUP BY run_id
+                GROUP BY run_id, model
             """), {"rids": run_ids}).fetchall()
-            cost_by_run = {r.run_id: float(r.cost or 0) for r in cost_rows}
+            cost_by_run = {}
+            for r in cost_rows:
+                cost_by_run[r.run_id] = cost_by_run.get(r.run_id, 0.0) + compute_api_cost(r.model, int(r.p), int(r.c))
             counts = {}
             for s in summaries:
                 counts[s.get('run_id')] = counts.get(s.get('run_id'), 0) + 1
@@ -1603,67 +1615,59 @@ def get_cost_usage():
         except (TypeError, ValueError):
             days = 14
 
-        from config import load_model_pricing
+        from config import load_model_pricing, compute_api_cost
         pricing = load_model_pricing()
         priced_models = [m for m, r in pricing.items()
                          if isinstance(r, dict) and (r.get('input') or r.get('output'))]
 
         with engine.connect() as conn:
-            # Per-agent totals over the window
-            per_agent = conn.execute(text("""
-                SELECT agent_type,
+            # Group by (agent, model) so cost can be computed from CURRENT rates
+            # at display time — editing model_pricing.json reprices all history.
+            rows = conn.execute(text("""
+                SELECT agent_type, model, ts::date AS day,
                        COUNT(*) AS calls,
                        COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                        COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-                       COALESCE(SUM(cost_usd), 0) AS cost
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens
                 FROM api_usage
                 WHERE config_hash = :h AND ts >= CURRENT_DATE - :days
-                GROUP BY agent_type ORDER BY cost DESC
+                GROUP BY agent_type, model, ts::date
             """), {"h": config_hash, "days": days}).fetchall()
 
-            today = conn.execute(text("""
-                SELECT COALESCE(SUM(cost_usd), 0) AS cost,
-                       COALESCE(SUM(total_tokens), 0) AS tokens,
-                       COUNT(*) AS calls
-                FROM api_usage
-                WHERE config_hash = :h AND ts::date = CURRENT_DATE
-            """), {"h": config_hash}).fetchone()
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        per_agent = {}
+        daily_map = {}
+        today_cost = today_tokens = today_calls = 0.0
+        for r in rows:
+            cost = compute_api_cost(r.model, int(r.prompt_tokens), int(r.completion_tokens))
+            a = per_agent.setdefault(r.agent_type, {
+                'agent': r.agent_type, 'calls': 0, 'prompt_tokens': 0,
+                'completion_tokens': 0, 'reasoning_tokens': 0, 'cost': 0.0})
+            a['calls'] += int(r.calls)
+            a['prompt_tokens'] += int(r.prompt_tokens)
+            a['completion_tokens'] += int(r.completion_tokens)
+            a['reasoning_tokens'] += int(r.reasoning_tokens)
+            a['cost'] += cost
+            dkey = (r.day.isoformat() if r.day else None, r.agent_type)
+            dd = daily_map.setdefault(dkey, {'day': dkey[0], 'agent': r.agent_type, 'cost': 0.0, 'tokens': 0})
+            dd['cost'] += cost
+            dd['tokens'] += int(r.total_tokens)
+            if r.day and r.day.isoformat() == today_str:
+                today_cost += cost
+                today_tokens += int(r.total_tokens)
+                today_calls += int(r.calls)
 
-            # Daily series: one row per (day, agent)
-            daily = conn.execute(text("""
-                SELECT ts::date AS day, agent_type,
-                       COALESCE(SUM(cost_usd), 0) AS cost,
-                       COALESCE(SUM(total_tokens), 0) AS tokens
-                FROM api_usage
-                WHERE config_hash = :h AND ts >= CURRENT_DATE - :days
-                GROUP BY ts::date, agent_type ORDER BY day
-            """), {"h": config_hash, "days": days}).fetchall()
-
+        per_agent_list = sorted(per_agent.values(), key=lambda x: x['cost'], reverse=True)
         return jsonify({
             'pricing_configured': bool(priced_models),
             'priced_models': priced_models,
             'window_days': days,
-            'today': {
-                'cost': float(today.cost or 0),
-                'tokens': int(today.tokens or 0),
-                'calls': int(today.calls or 0),
-            },
-            'per_agent': [{
-                'agent': r.agent_type,
-                'calls': int(r.calls),
-                'prompt_tokens': int(r.prompt_tokens),
-                'completion_tokens': int(r.completion_tokens),
-                'reasoning_tokens': int(r.reasoning_tokens),
-                'cost': float(r.cost or 0),
-            } for r in per_agent],
-            'total_cost': float(sum(r.cost or 0 for r in per_agent)),
-            'daily': [{
-                'day': r.day.isoformat() if r.day else None,
-                'agent': r.agent_type,
-                'cost': float(r.cost or 0),
-                'tokens': int(r.tokens or 0),
-            } for r in daily],
+            'today': {'cost': today_cost, 'tokens': int(today_tokens), 'calls': int(today_calls)},
+            'per_agent': per_agent_list,
+            'total_cost': sum(a['cost'] for a in per_agent_list),
+            'daily': sorted(daily_map.values(), key=lambda x: x['day'] or ''),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
