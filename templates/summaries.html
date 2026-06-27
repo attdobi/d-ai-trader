@@ -23,10 +23,10 @@
       <div class="source-info">
         <span class="source-name">{{ summary.agent }}</span>
         <span class="source-timestamp">{{ summary.timestamp }}</span>
-        {% if summary.summary_cost is not none and summary.summary_cost > 0 %}
-        <span class="summary-cost" title="Avg API cost per summary this cycle (summarizer spend ÷ summaries)" style="margin-left:8px; color:#7a8a9a; font-family: ui-monospace, Menlo, monospace; font-size:0.82em;">${{ '%.4f'|format(summary.summary_cost) }}</span>
-        {% endif %}
       </div>
+      {% if summary.summary_cost is not none and summary.summary_cost > 0 %}
+      <span class="summary-cost-badge" title="API cost of this summary call">Cost: ${{ '%.4f'|format(summary.summary_cost) }}</span>
+      {% endif %}
       <span class="freshness-dot {% if summary.timestamp %}freshness-recent{% else %}freshness-stale{% endif %}" title="Data freshness"></span>
     </div>
 
@@ -56,6 +56,20 @@
   <p>📊 No summaries available yet. Run the summarizer agents to generate market summaries.</p>
 </div>
 {% endif %}
+
+<style>
+.summary-cost-badge {
+  align-self: flex-start;
+  margin-left: 8px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(120,140,170,0.14);
+  color: #9bb0cc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+</style>
 {% endblock %}
 
 {% block scripts %}

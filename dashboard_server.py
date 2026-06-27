@@ -1346,30 +1346,44 @@ def summaries():
                 print(f"Raw data: {row.data[:200]}...")
                 continue
 
-        # Per-summary cost: the cycle's SummarizerAgent spend shares one run_id
-        # across all that cycle's source summaries, so show the per-summary
-        # average (cycle summarizer cost ÷ summaries in that cycle).
-        run_ids = [s['run_id'] for s in summaries if s.get('run_id')]
-        if run_ids:
-            from config import compute_api_cost
-            cost_rows = conn.execute(text("""
-                SELECT run_id, model,
-                       COALESCE(SUM(prompt_tokens), 0) AS p,
-                       COALESCE(SUM(completion_tokens), 0) AS c
-                FROM api_usage
-                WHERE run_id = ANY(:rids) AND agent_type = 'SummarizerAgent'
-                GROUP BY run_id, model
-            """), {"rids": run_ids}).fetchall()
-            cost_by_run = {}
-            for r in cost_rows:
-                cost_by_run[r.run_id] = cost_by_run.get(r.run_id, 0.0) + compute_api_cost(r.model, int(r.p), int(r.c))
-            counts = {}
-            for s in summaries:
-                counts[s.get('run_id')] = counts.get(s.get('run_id'), 0) + 1
-            for s in summaries:
-                rid = s.get('run_id')
-                total = cost_by_run.get(rid)
-                s['summary_cost'] = (total / counts[rid]) if (total and counts.get(rid)) else None
+        # Per-summary cost: one summarizer call == one source summary. Summaries
+        # and api_usage record run_ids that can drift by ~1s, so match each
+        # summary to the NEAREST summarizer cycle by timestamp and use that
+        # cycle's per-call cost (cycle summarizer spend ÷ calls in the cycle).
+        from config import compute_api_cost
+        from datetime import datetime as _dt
+
+        def _parse_rid(rid):
+            try:
+                return _dt.strptime(str(rid), "%Y%m%dT%H%M%S")
+            except (ValueError, TypeError):
+                return None
+
+        usage_rows = conn.execute(text("""
+            SELECT run_id, model,
+                   COALESCE(SUM(prompt_tokens), 0) AS p,
+                   COALESCE(SUM(completion_tokens), 0) AS c,
+                   COUNT(*) AS calls
+            FROM api_usage
+            WHERE agent_type = 'SummarizerAgent' AND ts >= CURRENT_DATE - 7
+            GROUP BY run_id, model
+        """)).fetchall()
+        cycle = {}  # run_id -> {"cost", "calls", "t"}
+        for r in usage_rows:
+            acc = cycle.setdefault(r.run_id, {"cost": 0.0, "calls": 0, "t": _parse_rid(r.run_id)})
+            acc["cost"] += compute_api_cost(r.model, int(r.p), int(r.c))
+            acc["calls"] += int(r.calls)
+        cycles = [v for v in cycle.values() if v["t"] and v["calls"]]
+
+        for s in summaries:
+            st = _parse_rid(s.get("run_id"))
+            best, best_d = None, None
+            if st:
+                for v in cycles:
+                    d = abs((v["t"] - st).total_seconds())
+                    if best_d is None or d < best_d:
+                        best, best_d = v, d
+            s["summary_cost"] = (best["cost"] / best["calls"]) if (best and best_d is not None and best_d <= 180) else None
 
         return render_template("summaries.html", summaries=summaries)
 
@@ -1658,6 +1672,12 @@ def get_cost_usage():
                 today_cost += cost
                 today_tokens += int(r.total_tokens)
                 today_calls += int(r.calls)
+
+        # Always show the full LLM-agent roster, even with zero calls this window
+        # (e.g. FeedbackAgent runs weekly, so it's often idle for days).
+        for ag in ('SummarizerAgent', 'CompanyExtractionAgent', 'DeciderAgent', 'FeedbackAgent'):
+            per_agent.setdefault(ag, {'agent': ag, 'calls': 0, 'prompt_tokens': 0,
+                                      'completion_tokens': 0, 'reasoning_tokens': 0, 'cost': 0.0})
 
         per_agent_list = sorted(per_agent.values(), key=lambda x: x['cost'], reverse=True)
         return jsonify({
