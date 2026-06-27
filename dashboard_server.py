@@ -1549,6 +1549,87 @@ def api_profit_loss():
         
         return jsonify([dict(row._mapping) for row in result])
 
+@app.route('/api/cost-usage')
+def get_cost_usage():
+    """API cost + token usage per day and per agent for the dashboard.
+
+    Returns today's spend, a per-agent breakdown, and an N-day daily series.
+    Costs come from model_pricing.json (0 until you fill in your rates) but
+    token counts are always exact. ?days=N controls the window (default 14).
+    """
+    try:
+        config_hash = get_current_config_hash()
+        try:
+            days = max(1, min(90, int(request.args.get('days', 14))))
+        except (TypeError, ValueError):
+            days = 14
+
+        from config import load_model_pricing
+        pricing = load_model_pricing()
+        priced_models = [m for m, r in pricing.items()
+                         if isinstance(r, dict) and (r.get('input') or r.get('output'))]
+
+        with engine.connect() as conn:
+            # Per-agent totals over the window
+            per_agent = conn.execute(text("""
+                SELECT agent_type,
+                       COUNT(*) AS calls,
+                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                       COALESCE(SUM(cost_usd), 0) AS cost
+                FROM api_usage
+                WHERE config_hash = :h AND ts >= CURRENT_DATE - :days
+                GROUP BY agent_type ORDER BY cost DESC
+            """), {"h": config_hash, "days": days}).fetchall()
+
+            today = conn.execute(text("""
+                SELECT COALESCE(SUM(cost_usd), 0) AS cost,
+                       COALESCE(SUM(total_tokens), 0) AS tokens,
+                       COUNT(*) AS calls
+                FROM api_usage
+                WHERE config_hash = :h AND ts::date = CURRENT_DATE
+            """), {"h": config_hash}).fetchone()
+
+            # Daily series: one row per (day, agent)
+            daily = conn.execute(text("""
+                SELECT ts::date AS day, agent_type,
+                       COALESCE(SUM(cost_usd), 0) AS cost,
+                       COALESCE(SUM(total_tokens), 0) AS tokens
+                FROM api_usage
+                WHERE config_hash = :h AND ts >= CURRENT_DATE - :days
+                GROUP BY ts::date, agent_type ORDER BY day
+            """), {"h": config_hash, "days": days}).fetchall()
+
+        return jsonify({
+            'pricing_configured': bool(priced_models),
+            'priced_models': priced_models,
+            'window_days': days,
+            'today': {
+                'cost': float(today.cost or 0),
+                'tokens': int(today.tokens or 0),
+                'calls': int(today.calls or 0),
+            },
+            'per_agent': [{
+                'agent': r.agent_type,
+                'calls': int(r.calls),
+                'prompt_tokens': int(r.prompt_tokens),
+                'completion_tokens': int(r.completion_tokens),
+                'reasoning_tokens': int(r.reasoning_tokens),
+                'cost': float(r.cost or 0),
+            } for r in per_agent],
+            'total_cost': float(sum(r.cost or 0 for r in per_agent)),
+            'daily': [{
+                'day': r.day.isoformat() if r.day else None,
+                'agent': r.agent_type,
+                'cost': float(r.cost or 0),
+                'tokens': int(r.tokens or 0),
+            } for r in daily],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/feedback')
 def get_feedback_data():
     """Get feedback analysis data"""

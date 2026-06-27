@@ -1,0 +1,12 @@
+{
+  "_comment": "USD per 1,000,000 tokens. Fill in YOUR OpenAI rates from https://openai.com/api/pricing/ . 'input' = prompt tokens, 'output' = completion + reasoning tokens (reasoning bills at the output rate). Token counts are captured exactly; only these rates are user-supplied, so cost re-prices instantly when you edit this file. No restart needed — it's re-read per request.",
+  "gpt-5.5": {"input": 0, "output": 0},
+  "gpt-5.4": {"input": 0, "output": 0},
+  "gpt-5.4-mini": {"input": 0, "output": 0},
+  "gpt-5.2": {"input": 0, "output": 0},
+  "gpt-5": {"input": 0, "output": 0},
+  "gpt-5-mini": {"input": 0, "output": 0},
+  "gpt-4o": {"input": 0, "output": 0},
+  "gpt-4o-mini": {"input": 0, "output": 0},
+  "gpt-4.1": {"input": 0, "output": 0}
+}

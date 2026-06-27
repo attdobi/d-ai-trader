@@ -668,6 +668,28 @@ def initialize_database() -> None:
             """,
         )
 
+        # API cost / token-usage telemetry (one row per OpenAI call).
+        ensure_table(
+            conn,
+            stats,
+            "api_usage",
+            """
+            CREATE TABLE IF NOT EXISTS api_usage (
+                id SERIAL PRIMARY KEY,
+                ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                config_hash TEXT,
+                run_id TEXT,
+                agent_type TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                total_tokens INTEGER,
+                cost_usd DOUBLE PRECISION
+            )
+            """,
+        )
+
         ensure_table(
             conn,
             stats,

@@ -142,6 +142,62 @@
   </div>
 </div>
 
+<div class="cost-section" id="costSection" style="margin-top:18px; padding:16px 18px; border:1px solid rgba(120,140,170,0.25); border-radius:12px;">
+  <div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;">
+    <h2 style="margin:0;">💰 API Cost</h2>
+    <span id="costToday" style="font-size:1.3em; font-weight:600;">—</span>
+    <span style="color:#8aa; font-size:0.85em;">today</span>
+    <span id="costWindow" style="color:#8aa; font-size:0.85em; margin-left:auto;"></span>
+  </div>
+  <div id="costPricingWarn" style="display:none; margin-top:8px; color:#d08a3a; font-size:0.88em;"></div>
+  <table id="costTable" style="width:100%; margin-top:12px; border-collapse:collapse; font-size:0.92em;">
+    <thead><tr style="text-align:left; color:#8aa;">
+      <th style="padding:6px 8px;">Agent</th><th>Calls</th><th>Prompt tok</th>
+      <th>Reasoning tok</th><th>Cost ({{ '' }}window)</th>
+    </tr></thead>
+    <tbody id="costTableBody"></tbody>
+    <tfoot><tr style="border-top:1px solid rgba(120,140,170,0.25); font-weight:600;">
+      <td style="padding:6px 8px;">Total</td><td id="costTotCalls">—</td><td></td><td></td><td id="costTotal">—</td>
+    </tr></tfoot>
+  </table>
+</div>
+
+<script>
+(function() {
+  function fmtUsd(v) { return v ? ('$' + v.toFixed(v < 1 ? 4 : 2)) : '$0.00'; }
+  function fmtTok(v) { return (v || 0).toLocaleString(); }
+  async function loadCost() {
+    try {
+      const res = await fetch('/api/cost-usage?days=14');
+      const d = await res.json();
+      if (d.error) return;
+      document.getElementById('costToday').textContent = fmtUsd(d.today.cost) +
+        ' · ' + fmtTok(d.today.tokens) + ' tok · ' + d.today.calls + ' calls';
+      document.getElementById('costWindow').textContent = 'last ' + d.window_days + ' days';
+      const warn = document.getElementById('costPricingWarn');
+      if (!d.pricing_configured) {
+        warn.style.display = 'block';
+        warn.textContent = '⚠ Token counts are exact, but $ shows 0 until you set rates in model_pricing.json.';
+      } else { warn.style.display = 'none'; }
+      const body = document.getElementById('costTableBody');
+      body.innerHTML = '';
+      (d.per_agent || []).forEach(function(a) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td style="padding:6px 8px;">' + a.agent + '</td><td>' + a.calls +
+          '</td><td>' + fmtTok(a.prompt_tokens) + '</td><td>' + fmtTok(a.reasoning_tokens) +
+          '</td><td>' + fmtUsd(a.cost) + '</td>';
+        body.appendChild(tr);
+      });
+      document.getElementById('costTotal').textContent = fmtUsd(d.total_cost);
+      document.getElementById('costTotCalls').textContent =
+        (d.per_agent || []).reduce(function(s, a) { return s + a.calls; }, 0);
+    } catch (e) { /* ignore */ }
+  }
+  loadCost();
+  setInterval(loadCost, 30000);
+})();
+</script>
+
 <details class="system-controls-panel">
   <summary class="system-controls-toggle">⚙️ System Controls &amp; Configuration</summary>
   <div class="system-controls-content">

@@ -187,6 +187,7 @@ _last_announced_model = None
 _VALID_GPT_MODELS = [
     "gpt-5.5",
     "gpt-5.4",
+    "gpt-5.4-mini",
     "gpt-5.2",
     "gpt-5.1",
     "gpt-5",
@@ -203,9 +204,40 @@ _MODEL_ALIASES = {
     "gpt5.1": "gpt-5.1",
     "gpt5.2": "gpt-5.2",
     "gpt5.4": "gpt-5.4",
+    "gpt5.4-mini": "gpt-5.4-mini",
     "gpt5.5": "gpt-5.5",
     "gpt-4-turbo": "gpt-4-turbo",
 }
+
+# --- API cost tracking -----------------------------------------------------
+_PRICING_PATH = PROJECT_ROOT / "model_pricing.json"
+
+
+def load_model_pricing():
+    """Load per-model $/1M-token rates from model_pricing.json.
+
+    Re-read on each call so price edits take effect without a restart. Returns
+    {model: {"input": float, "output": float}}.
+    """
+    try:
+        if _PRICING_PATH.exists():
+            with open(_PRICING_PATH) as fh:
+                data = json.load(fh)
+            return {k: v for k, v in data.items() if isinstance(v, dict)}
+    except Exception as exc:
+        print(f"⚠️  Could not load model_pricing.json: {exc}")
+    return {}
+
+
+def compute_api_cost(model_name, prompt_tokens, output_tokens):
+    """USD cost for one call. output_tokens already includes reasoning tokens
+    (reasoning bills at the output rate). Returns 0.0 if the model is unpriced."""
+    pricing = load_model_pricing()
+    _, normalized = _normalize_model_name(model_name or "")
+    rates = pricing.get(normalized) or pricing.get(model_name or "") or {}
+    in_rate = float(rates.get("input", 0) or 0)
+    out_rate = float(rates.get("output", 0) or 0)
+    return (prompt_tokens / 1_000_000.0) * in_rate + (output_tokens / 1_000_000.0) * out_rate
 
 # Reasoning-effort suffix accepted on -m flag, e.g. "gpt-5.5-high".
 # Maps user-facing token -> internal reasoning level name.
@@ -760,6 +792,51 @@ class PromptManager:
         self.session = session
         self.run_id = run_id
 
+    def _record_api_usage(self, agent_name, model_name, response):
+        """Persist token usage + computed cost for the dashboard. Best-effort —
+        wrapped so telemetry can never break a real API call."""
+        try:
+            usage = getattr(response, "usage", None)
+            if not usage:
+                return
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+            reasoning_tokens = 0
+            details = getattr(usage, "completion_tokens_details", None)
+            if details is not None:
+                reasoning_tokens = int(getattr(details, "reasoning_tokens", 0) or 0)
+            # completion_tokens already includes reasoning tokens → use it for output cost.
+            cost = compute_api_cost(model_name, prompt_tokens, completion_tokens)
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS api_usage (
+                        id SERIAL PRIMARY KEY,
+                        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        config_hash TEXT,
+                        run_id TEXT,
+                        agent_type TEXT,
+                        model TEXT,
+                        prompt_tokens INTEGER,
+                        completion_tokens INTEGER,
+                        reasoning_tokens INTEGER,
+                        total_tokens INTEGER,
+                        cost_usd DOUBLE PRECISION
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO api_usage (config_hash, run_id, agent_type, model,
+                        prompt_tokens, completion_tokens, reasoning_tokens, total_tokens, cost_usd)
+                    VALUES (:h, :r, :a, :m, :p, :c, :rt, :t, :cost)
+                """), {
+                    "h": get_current_config_hash(), "r": self.run_id,
+                    "a": agent_name or "unknown", "m": model_name,
+                    "p": prompt_tokens, "c": completion_tokens,
+                    "rt": reasoning_tokens, "t": total_tokens, "cost": cost,
+                })
+        except Exception:
+            pass  # telemetry must never break a trading-path API call
+
     def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None):
         base_system_prompt = system_prompt or ""
         retries = 0
@@ -887,6 +964,9 @@ class PromptManager:
                 response = self.client.chat.completions.create(**api_params)
                 elapsed = time.time() - start_time
                 print(f"[PromptManager] ✅ {agent_name or 'UnknownAgent'} response received in {elapsed:.1f}s", flush=True)
+                # Cost tracking — record every real API call (including retries,
+                # which cost money). Best-effort: never break a call over telemetry.
+                self._record_api_usage(agent_name, model_name, response)
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
