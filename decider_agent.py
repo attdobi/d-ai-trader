@@ -1076,12 +1076,13 @@ def _compute_symbol_momentum(symbol):
 
     history_daily = pd.DataFrame()
     try:
-        history_daily = stock.history(period="1y", interval="1d", auto_adjust=False)
+        # 2y so the year-ago reference always exists (1y often falls a day short).
+        history_daily = stock.history(period="2y", interval="1d", auto_adjust=False)
     except Exception as e:
-        print(f"⚠️  Failed to fetch 1y daily history for {ticker}: {e}")
+        print(f"⚠️  Failed to fetch daily history for {ticker}: {e}")
 
     if history_daily is None or history_daily.empty:
-        print(f"⚠️  No 1y daily history available for {ticker}")
+        print(f"⚠️  No daily history available for {ticker}")
         return None
 
     intraday = pd.DataFrame()
@@ -1091,49 +1092,89 @@ def _compute_symbol_momentum(symbol):
         print(f"⚠️  Failed to fetch intraday history for {ticker}: {e}")
 
     latest_row = history_daily.iloc[-1]
-    current_price = float(latest_row.get('Close'))
-    previous_close = float(history_daily['Close'].iloc[-2]) if len(history_daily) > 1 else None
+    # The in-progress daily candle returns Close=NaN during market hours, so we
+    # work off the valid (settled) closes and prefer the live intraday price.
+    valid_closes = history_daily['Close'].dropna()
+    latest_close_settled = not pd.isna(latest_row.get('Close'))
+
+    # Real-time price: intraday last (preferred) → last settled daily close.
+    intraday_price = None
+    if intraday is not None and not intraday.empty:
+        intraday_valid = intraday['Close'].dropna()
+        if not intraday_valid.empty:
+            intraday_price = float(intraday_valid.iloc[-1])
+    current_price = intraday_price
+    if current_price is None and not valid_closes.empty:
+        current_price = float(valid_closes.iloc[-1])
+    if current_price is None:
+        print(f"⚠️  No usable price for {ticker}")
+        return None
+
+    # Previous completed session close (for the 1-day % move).
+    if latest_close_settled:
+        previous_close = float(valid_closes.iloc[-2]) if len(valid_closes) > 1 else None
+    else:
+        previous_close = float(valid_closes.iloc[-1]) if len(valid_closes) >= 1 else None
     daily_pct = _pct_change(current_price, previous_close)
 
+    # Daily-reference timeframes (week / month / year) off settled closes.
+    valid_daily = history_daily.dropna(subset=['Close'])
     latest_date = history_daily.index[-1]
-    yoy_reference_date = latest_date - pd.DateOffset(years=1)
-    yoy_price = _select_reference_price(history_daily, yoy_reference_date)
-    yoy_pct = _pct_change(current_price, yoy_price)
+    week_pct = _pct_change(current_price, _select_reference_price(valid_daily, latest_date - pd.Timedelta(days=7)))
+    mom_pct = _pct_change(current_price, _select_reference_price(valid_daily, latest_date - pd.DateOffset(months=1)))
+    yoy_pct = _pct_change(current_price, _select_reference_price(valid_daily, latest_date - pd.DateOffset(years=1)))
 
-    mom_reference_date = latest_date - pd.DateOffset(months=1)
-    mom_price = _select_reference_price(history_daily, mom_reference_date)
-    mom_pct = _pct_change(current_price, mom_price)
+    # Intraday timeframes: 10-minute and 1-hour impulse.
+    ten_min_pct = hour_pct = None
+    if intraday is not None and not intraday.empty and intraday_price is not None:
+        for minutes, target in ((10, 'ten'), (60, 'hour')):
+            cutoff = intraday.index[-1] - pd.Timedelta(minutes=minutes)
+            past = intraday.loc[intraday.index <= cutoff, 'Close'].dropna()
+            if not past.empty:
+                pct = _pct_change(intraday_price, float(past.iloc[-1]))
+                if target == 'ten':
+                    ten_min_pct = pct
+                else:
+                    hour_pct = pct
 
-    ten_min_pct = None
-    if intraday is not None and not intraday.empty:
-        latest_intraday_price = float(intraday['Close'].iloc[-1])
-        ten_min_cutoff = intraday.index[-1] - pd.Timedelta(minutes=10)
-        past_window = intraday.loc[intraday.index <= ten_min_cutoff]
-        if not past_window.empty:
-            price_10_min = float(past_window['Close'].iloc[-1])
-            ten_min_pct = _pct_change(latest_intraday_price, price_10_min)
-        current_price = latest_intraday_price  # Prefer real-time price when available
+    day_high = float(latest_row.get('High')) if not pd.isna(latest_row.get('High')) else None
+    day_low = float(latest_row.get('Low')) if not pd.isna(latest_row.get('Low')) else None
+    volume = float(latest_row.get('Volume')) if not pd.isna(latest_row.get('Volume')) else None
 
-    day_high = float(latest_row.get('High')) if latest_row.get('High') is not None else None
-    day_low = float(latest_row.get('Low')) if latest_row.get('Low') is not None else None
-    volume = float(latest_row.get('Volume')) if latest_row.get('Volume') is not None else None
+    # Relative volume vs the trailing 20-session average (participation).
+    rel_volume = None
+    vol_series = history_daily['Volume'].dropna()
+    if volume and len(vol_series) > 1:
+        avg_vol = float(vol_series.iloc[-21:-1].mean()) if len(vol_series) > 20 else float(vol_series.iloc[:-1].mean())
+        if avg_vol and avg_vol > 0:
+            rel_volume = volume / avg_vol
 
-    last_year = history_daily.tail(252)
+    last_year = valid_daily.tail(252)
     high_52 = float(last_year['High'].max()) if not last_year.empty else None
     low_52 = float(last_year['Low'].min()) if not last_year.empty else None
+
+    def _range_pos(price, lo, hi):
+        if lo is None or hi is None or hi <= lo:
+            return None
+        return max(0.0, min(100.0, (price - lo) / (hi - lo) * 100.0))
 
     return {
         "symbol": ticker,
         "price": current_price,
-        "daily_pct": daily_pct,
-        "yoy_pct": yoy_pct,
-        "mom_pct": mom_pct,
         "ten_min_pct": ten_min_pct,
+        "hour_pct": hour_pct,
+        "daily_pct": daily_pct,
+        "week_pct": week_pct,
+        "mom_pct": mom_pct,
+        "yoy_pct": yoy_pct,
         "volume": volume,
+        "rel_volume": rel_volume,
         "day_high": day_high,
         "day_low": day_low,
+        "day_pos": _range_pos(current_price, day_low, day_high),
         "high_52": high_52,
         "low_52": low_52,
+        "pos_52w": _range_pos(current_price, low_52, high_52),
     }
 
 
@@ -1163,26 +1204,36 @@ def build_momentum_recap(entities):
         name = snapshot.get('company') or snapshot['symbol']
         symbol = snapshot['symbol']
         price = snapshot.get('price')
-        daily_pct = _format_percent(snapshot.get('daily_pct'))
-        mom_pct = _format_percent(snapshot.get('mom_pct'))
-        yoy_pct = _format_percent(snapshot.get('yoy_pct'))
-        ten_pct = _format_percent(snapshot.get('ten_min_pct'))
-        volume = _format_number(snapshot.get('volume'))
-        day_range = (
-            f"{snapshot['day_low']:.2f}-{snapshot['day_high']:.2f}"
-            if snapshot.get('day_low') is not None and snapshot.get('day_high') is not None
-            else "N/A"
-        )
-        range_52w = (
-            f"{snapshot['low_52']:.2f}-{snapshot['high_52']:.2f}"
-            if snapshot.get('low_52') is not None and snapshot.get('high_52') is not None
-            else "N/A"
-        )
         price_text = f"${price:.2f}" if price is not None else "N/A"
 
+        # Momentum ladder across timeframes — lets the Decider read the term
+        # structure (is the move accelerating or fading as you zoom out?).
+        ladder = " ".join(
+            f"{label} {_format_percent(snapshot.get(key))}"
+            for label, key in (
+                ("10m", "ten_min_pct"), ("1h", "hour_pct"), ("1d", "daily_pct"),
+                ("1w", "week_pct"), ("1mo", "mom_pct"), ("1y", "yoy_pct"),
+            )
+        )
+
+        volume = _format_number(snapshot.get('volume'))
+        rel_vol = snapshot.get('rel_volume')
+        vol_text = f"{volume}" + (f" ({rel_vol:.1f}× 20d-avg)" if rel_vol else "")
+
+        day_pos = snapshot.get('day_pos')
+        day_range = (
+            f"{day_pos:.0f}% of {snapshot['day_low']:.2f}-{snapshot['day_high']:.2f}"
+            if day_pos is not None else "N/A"
+        )
+        pos_52w = snapshot.get('pos_52w')
+        range_52w = (
+            f"{pos_52w:.0f}% of {snapshot['low_52']:.2f}-{snapshot['high_52']:.2f}"
+            if pos_52w is not None else "N/A"
+        )
+
         lines.append(
-            f"- {name} ({symbol}): Price {price_text} | Daily {daily_pct} | MoM {mom_pct} | YoY {yoy_pct} | "
-            f"10m {ten_pct} | Vol {volume} | Day {day_range} | 52w {range_52w}"
+            f"- {name} ({symbol}): {price_text} | {ladder} | "
+            f"vol {vol_text} | day-range {day_range} | 52w {range_52w}"
         )
 
     return momentum_data, "\n".join(lines)
