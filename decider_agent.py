@@ -1199,6 +1199,16 @@ def build_momentum_recap(entities):
     if not momentum_data:
         return momentum_data, "- No momentum data available"
 
+    # SPY benchmark for relative strength. Reuse it if SPY is already a
+    # candidate; otherwise fetch it once (cached on the data for the snapshot).
+    spy_snapshot = next((s for s in momentum_data if s['symbol'] == 'SPY'), None)
+    if spy_snapshot is None:
+        spy_snapshot = _compute_symbol_momentum('SPY')
+
+    # Timeframes shown as relative strength (stock return minus SPY return, in
+    # percentage points). Impulse + day leadership + trend leadership.
+    rs_timeframes = (("10m", "ten_min_pct"), ("1d", "daily_pct"), ("1mo", "mom_pct"))
+
     lines = []
     for snapshot in momentum_data:
         name = snapshot.get('company') or snapshot['symbol']
@@ -1216,6 +1226,18 @@ def build_momentum_recap(entities):
             )
         )
 
+        # Relative strength vs SPY — is it leading or lagging the tape? Positive
+        # = outperforming. Skipped for SPY's own row.
+        rs_text = ""
+        if spy_snapshot and symbol != 'SPY':
+            rs_parts = []
+            for label, key in rs_timeframes:
+                sv, bv = snapshot.get(key), spy_snapshot.get(key)
+                if sv is not None and bv is not None:
+                    rs_parts.append(f"{label} {sv - bv:+.1f}")
+            if rs_parts:
+                rs_text = " | RS/SPY " + " ".join(rs_parts)
+
         volume = _format_number(snapshot.get('volume'))
         rel_vol = snapshot.get('rel_volume')
         vol_text = f"{volume}" + (f" ({rel_vol:.1f}× 20d-avg)" if rel_vol else "")
@@ -1232,7 +1254,7 @@ def build_momentum_recap(entities):
         )
 
         lines.append(
-            f"- {name} ({symbol}): {price_text} | {ladder} | "
+            f"- {name} ({symbol}): {price_text} | {ladder}{rs_text} | "
             f"vol {vol_text} | day-range {day_range} | 52w {range_52w}"
         )
 
