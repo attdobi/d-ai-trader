@@ -2586,6 +2586,7 @@ OUTPUT (STRICT)
                     print(f"            ↳ {_c.get('why')}")
     else:
         print("📋 CONSIDERED SETUPS: none reported by the model this cycle")
+    _CONSIDERED_STASH[run_id] = considered_setups
 
     # Filter out invalid "action":"cash" entries - these are not real trade decisions
     if isinstance(ai_response, list):
@@ -2801,6 +2802,12 @@ def extract_decision_info_from_text(text_content):
         }
     return None
 
+# Per-run stash for the decider's "considered setups" audit trail. ask_decision_agent
+# fills it; store_trade_decisions drains it and persists it as a non-executable element
+# (appended only to the stored JSON, never to the validated/executed decisions list).
+_CONSIDERED_STASH = {}
+
+
 def store_trade_decisions(decisions, run_id):
     config_hash = get_current_config_hash()
     print(f"🔍 Storing decisions for {config_hash}: {decisions}")
@@ -2968,6 +2975,12 @@ def store_trade_decisions(decisions, run_id):
         total_val = vd.get('total_value', 'NO_TOTAL')
         print(f"   - {action.upper()} {ticker}: shares={shares}, amount_usd={amount}, total_value={total_val}")
 
+    # Drain the considered-setups audit trail and persist it as a non-executable meta
+    # element appended ONLY to the stored JSON (never to valid_decisions, which is what
+    # gets returned and executed). Lets the Trades tab show what the decider weighed.
+    _considered = _CONSIDERED_STASH.pop(run_id, None)
+    _data_to_store = (valid_decisions + [{"kind": "considered_audit", "considered": _considered}]) if _considered else valid_decisions
+
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS trade_decisions (
@@ -2983,7 +2996,7 @@ def store_trade_decisions(decisions, run_id):
         """), {
             "run_id": run_id,
             "timestamp": naive_pacific_timestamp,
-            "data": json.dumps(valid_decisions),
+            "data": json.dumps(_data_to_store),
             "config_hash": get_current_config_hash()
         })
         print(f"✅ Stored to trade_decisions table with enriched data")

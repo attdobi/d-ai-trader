@@ -1221,6 +1221,11 @@ def trade_decisions():
                 # IMPORTANT: Preserve ALL fields including shares, total_value for display
                 cleaned_data = []
                 for decision in trade_dict['data']:
+                    if isinstance(decision, dict) and decision.get('kind') == 'considered_audit':
+                        # Non-executable audit element — surface as the cycle's
+                        # "considered setups" panel, not as a trade row.
+                        trade_dict['considered'] = decision.get('considered') or []
+                        continue
                     if isinstance(decision, dict):
                         # Preserve all fields from database (including shares, total_value)
                         cleaned_decision = {

@@ -128,10 +128,43 @@
         </td>
       </tr>
       {% endfor %}
+      {% if trade.considered %}
+      <tr class="considered-row">
+        <td colspan="7">
+          <details class="considered-panel">
+            <summary>🔍 Considered this cycle ({{ trade.considered|length }})</summary>
+            <ul>
+              {% for c in trade.considered %}
+              <li>
+                <span class="cons-ticker">{{ c.get('ticker','?') }}</span>
+                <span class="cons-verdict cons-{{ (c.get('verdict',''))|lower }}">{{ (c.get('verdict','?'))|upper }}</span>
+                <span class="cons-signals">{{ c.get('signals','') }}</span>
+                {% if c.get('why') %}<div class="cons-why">↳ {{ c.get('why') }}</div>{% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
+        </td>
+      </tr>
+      {% endif %}
     {% endfor %}
   </tbody>
 </table>
 </div>
+
+<style>
+.considered-row td { background: rgba(120,140,170,0.06); padding: 0 12px 10px; border: none; }
+.considered-panel summary { cursor: pointer; color: #9bb0cc; font-size: 0.85em; padding: 6px 0; user-select: none; }
+.considered-panel ul { list-style: none; margin: 4px 0 8px; padding: 0; }
+.considered-panel li { padding: 5px 0; border-top: 1px solid rgba(120,140,170,0.12); font-size: 0.86em; }
+.cons-ticker { font-weight: 700; color: #cfe0f5; margin-right: 8px; font-family: ui-monospace, Menlo, monospace; }
+.cons-verdict { font-size: 0.72em; padding: 1px 7px; border-radius: 9px; margin-right: 8px; letter-spacing: .03em; }
+.cons-buy { background: rgba(60,180,120,0.18); color: #7fe0a8; }
+.cons-reject { background: rgba(220,90,90,0.16); color: #f0a0a0; }
+.cons-watch { background: rgba(200,170,80,0.16); color: #e6cf8a; }
+.cons-signals { color: #9bb0cc; }
+.cons-why { color: #8fa3bf; margin: 3px 0 0 2px; font-style: italic; }
+</style>
 
 <div class="pagination" id="tradesPagination">
   <button class="pagination-btn" id="prevPage" onclick="changePage(-1)">← Previous</button>
