@@ -793,7 +793,7 @@ class SchwabAPIClient:
         return filled_qty, avg_price, filled_amount
 
     def _post_submit_order_check(self, account_hash: str, order_id: str,
-                                 max_wait: float = 9.0) -> Optional[Dict[str, Any]]:
+                                 max_wait: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """Poll Schwab until the order reaches a TERMINAL state (or times out).
 
         A single 1-second poll used to miss async rejections — an order that
@@ -802,10 +802,18 @@ class SchwabAPIClient:
         BAYRY orders). Now we poll until FILLED/REJECTED/CANCELED/EXPIRED, and
         return the real fill quantities/price so callers never confuse an
         accepted-but-unfilled order with an executed one.
+
+        The window must outlast Schwab's status lag: a liquid market order (e.g.
+        IRDM) can fill a few seconds after the old 9s budget elapsed, which made
+        us log it "not executed" and skip the holdings update — leaving a real,
+        untracked position. The poll returns the instant a terminal state is
+        seen, so a longer cap only costs latency for genuinely stuck orders.
         """
         if not self.client or not order_id:
             return None
 
+        if max_wait is None:
+            max_wait = float(os.getenv("DAI_ORDER_CONFIRM_WAIT", "30"))
         attempts = max(1, int(max_wait / 1.5))
         last = None
         for _ in range(attempts):

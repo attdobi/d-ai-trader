@@ -24,7 +24,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 from urllib import request as urllib_request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -37,6 +37,12 @@ from sqlalchemy import text
 from config import engine, api_key, PromptManager, session, get_current_config_hash
 import chromedriver_autoinstaller
 import openai
+# PromptManager runs its own retry loop (with auth refresh + backoff); disable the
+# SDK's internal retries so our per-call timeout can't be silently multiplied 2-3x.
+try:
+    openai.max_retries = 0
+except Exception:
+    pass
 import undetected_chromedriver as uc
 from feedback_agent import TradeOutcomeTracker
 
@@ -982,18 +988,30 @@ def run_summary_agents():
     for idx, entry in enumerate(URLS):
         batches[idx % worker_count].append(entry)
     
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+    # Overall wall-clock budget for the sweep. Each source stores its summary the
+    # moment it's ready, so if a worker hangs we proceed with whatever completed
+    # rather than freezing the cycle (and, at the open, the trade) behind it.
+    sweep_deadline = float(os.getenv("DAI_SUMMARY_SWEEP_TIMEOUT", "300"))
+    executor = ThreadPoolExecutor(max_workers=worker_count)
+    try:
         futures = {
             executor.submit(_process_agent_sequence, batch, worker_id + 1): worker_id + 1
             for worker_id, batch in enumerate(batches)
             if batch
         }
-        for future in as_completed(futures):
-            worker_id = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"[Worker {worker_id}] ❌ Batch processing failed: {e}")
+        try:
+            for future in as_completed(futures, timeout=sweep_deadline):
+                worker_id = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[Worker {worker_id}] ❌ Batch processing failed: {e}")
+        except FuturesTimeoutError:
+            unfinished = [wid for fut, wid in futures.items() if not fut.done()]
+            print(f"⏱️  Summarizer sweep exceeded {sweep_deadline:.0f}s; proceeding without workers {unfinished} (their summaries are missing this cycle).")
+    finally:
+        # Don't block the cycle joining a stuck worker; per-call API timeouts bound it.
+        executor.shutdown(wait=False, cancel_futures=True)
 
 if __name__ == "__main__":
     run_summary_agents()

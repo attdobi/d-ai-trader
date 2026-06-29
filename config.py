@@ -988,6 +988,15 @@ class PromptManager:
                 
                 # Make API call with latency logging
                 start_time = time.time()
+                # Hard per-call wall-clock cap. Without this, a single hung request can
+                # stall the whole pipeline — one un-timed summarizer call once froze a
+                # worker for ~70 min and pushed the market-open trade ~2 hours late.
+                # Decider/feedback run high-reasoning models, so give them more headroom.
+                api_params.setdefault(
+                    "timeout",
+                    float(os.getenv("DAI_DECIDER_OPENAI_TIMEOUT", "180")) if decider_agent
+                    else float(os.getenv("DAI_OPENAI_TIMEOUT", "75"))
+                )
                 print(f"[PromptManager] ⏳ Awaiting {agent_name or 'UnknownAgent'} response (attempt {retries + 1}/{max_retries})", flush=True)
                 response = self.client.chat.completions.create(**api_params)
                 elapsed = time.time() - start_time

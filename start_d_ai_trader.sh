@@ -246,7 +246,13 @@ DASH_PID=$!
 python "${PROJECT_ROOT}/d_ai_trader.py" &
 AUTO_PID=$!
 
-trap 'echo; echo "🛑 Stopping..."; kill ${DASH_PID} ${AUTO_PID} 2>/dev/null || true' EXIT
+# Keep macOS awake (no idle sleep / App Nap throttling) for as long as the trader
+# runs, so the 9:30 ET market-open job and cadence timers fire on schedule instead
+# of drifting (App Nap was the likely cause of a ~15-min late open on 2026-06-29).
+caffeinate -is -w ${AUTO_PID} &
+CAFFEINATE_PID=$!
+
+trap 'echo; echo "🛑 Stopping..."; kill ${DASH_PID} ${AUTO_PID} ${CAFFEINATE_PID} 2>/dev/null || true' EXIT
 
 echo "🚀 Processes started: dashboard=${DASH_PID} automation=${AUTO_PID}"
 wait

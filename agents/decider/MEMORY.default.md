@@ -17,6 +17,8 @@ graph_status: seed
 
 ## Lessons Learned
 *High-confidence rules earned through P&L.*
+- **#gap-chase — Never buy a vertical pop.** Do not initiate a BUY in a name already up ≥10% on the day, or extended near its highs right after a gap/spike — you become exit liquidity and continuation is unlikely. **Front-run instead:** buy weakness, pullbacks, and bases BEFORE the obvious catalyst. Markets are manipulated; the obvious breakout is bait. (Paid for by [[IRDM]] 2026-06-29.)
+- **Consider 2–3 of the best setups each cycle**, ranked R1..Rk — not a single name.
 
 ## Patterns to Watch
 *Setups that historically worked, with the conditions that defined "worked."*
@@ -38,3 +40,9 @@ Template for new entries:
 - **Adjustment:** specific rule change for next time
 - **Related:** [[prior-similar-trade]] or [[shared-pattern]]
 -->
+
+## 2026-06-29 #IRDM #gap-chase #exit-liquidity
+- **Setup:** Bought IRDM ~$53–54 AFTER a +22% pre-market pop (SpaceX-IPO sympathy), extended near highs, vol 2.3×. The buy reason literally read "+22% … near hi."
+- **Outcome:** Immediately underwater — textbook top-tick. The vertical move had already happened.
+- **Root cause:** Chased strength / bought the breakout near highs = provided exit liquidity to whoever accumulated lower. Momentum-chasing, not contrarian.
+- **Adjustment:** HARD anti-chase — never BUY a name already up ≥10% on the day or extended near highs after a gap/spike. Front-run the move (buy weakness/bases/pullbacks before the obvious catalyst), don't chase it. Evaluate 2–3 best setups per cycle. **Related:** [[front-run-not-chase]]
