@@ -2472,7 +2472,7 @@ OUTPUT (STRICT)
         f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
         " you must add a top-level \"cash_reason\" that (a) states why no BUY (caps, cooldown, min-buy unmet, lack of edge, etc.)"
         " and (b) confirms that every ≥+3% winner was harvested or explicitly names any retained winner with its % gain and fresh catalyst justification."
-        " Keep the object compact: {\"decisions\":[...], \"cash_reason\":\"...\"}."
+        " Keep the object compact: {\"decisions\":[...], \"considered\":[...], \"cash_reason\":\"...\"}."
     )
     prompt += (
         "\n\nJUSTIFICATION DETAIL (for human + RLHF review — overrides any shorter length cap):"
@@ -2481,6 +2481,15 @@ OUTPUT (STRICT)
         " (2) CONFIRMATION — the signals you actually checked: position vs VWAP / opening range, 10-minute trend, relative strength vs SPY and the sector/peer ETF, and volume;"
         " (3) THESIS & RISK — the entry/exit logic, the level that would invalidate it, and the intended hold horizon;"
         " (4) WHY NOW — why act this cycle versus waiting. Be concrete and decision-grade; do not pad with generic phrasing."
+    )
+    prompt += (
+        "\n\nCONSIDERED SETUPS (transparency — REQUIRED every cycle, even when you BUY nothing):"
+        " Add a top-level \"considered\" array of the 2-3 best candidates you actually evaluated this cycle"
+        " (your R1..Rk ranked names plus any you seriously weighed and rejected). Each element MUST be"
+        " {\"ticker\":\"SYM\", \"signals\":\"day %chg, vs VWAP, 10m trend, relative strength vs SPY, volume — concrete numbers\","
+        " \"verdict\":\"buy\"|\"reject\"|\"watch\", \"why\":\"one specific, auditable sentence; for rejects name the exact disqualifier"
+        " (e.g. 'extended +14% near highs = chase / exit liquidity', 'below VWAP, 10m red', 'stale catalyst', 'min-buy unmet', 'buy cap hit')\"}."
+        " This is the audit trail for WHY you bought or stayed in cash — never leave it empty while settled funds exist."
     )
 
 
@@ -2527,6 +2536,7 @@ OUTPUT (STRICT)
     # Import the JSON schema for structured responses
     # Get AI decision regardless of market status
     cash_hold_reason = None
+    considered_setups = []
     ai_response = prompt_manager.ask_openai(
         prompt,
         system_prompt,
@@ -2538,6 +2548,8 @@ OUTPUT (STRICT)
     if isinstance(ai_response, dict):
         if isinstance(ai_response.get("cash_reason"), str) and ai_response.get("cash_reason").strip():
             cash_hold_reason = ai_response.get("cash_reason").strip()
+        if isinstance(ai_response.get("considered"), list):
+            considered_setups = ai_response.get("considered")
         # Check if it's an error response first
         if 'error' in ai_response:
             print(f"❌ AI returned error: {ai_response.get('error')}")
@@ -2561,6 +2573,19 @@ OUTPUT (STRICT)
     else:
         print(f"⚠️  Unexpected response type: {type(ai_response)}, converting to list")
         ai_response = [ai_response] if ai_response else []
+
+    # Decision audit trail — show the 2-3 setups the model actually weighed and why,
+    # so the high-reasoning model's buy / no-buy call is debuggable from the logs.
+    if considered_setups:
+        print(f"📋 CONSIDERED SETUPS ({len(considered_setups)} weighed this cycle):")
+        for _c in considered_setups:
+            if isinstance(_c, dict):
+                _v = str(_c.get("verdict") or "?").upper()
+                print(f"   • {str(_c.get('ticker','?')):<6} [{_v:^7}] {_c.get('signals','')}")
+                if _c.get("why"):
+                    print(f"            ↳ {_c.get('why')}")
+    else:
+        print("📋 CONSIDERED SETUPS: none reported by the model this cycle")
 
     # Filter out invalid "action":"cash" entries - these are not real trade decisions
     if isinstance(ai_response, list):
