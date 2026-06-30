@@ -2502,6 +2502,16 @@ OUTPUT (STRICT)
         " buyable even with VWAP absent. Being perpetually in cash is itself a failure mode — deploy"
         " when a real, non-chase setup clears the signals you actually have."
     )
+    prompt += (
+        "\n\nDEPLOY BIAS (you are a TRADER, not a cash custodian):"
+        " Your sources surface names that are already moving, so most candidates will be somewhat"
+        " green — that is normal, NOT a reason to reject them all. Block genuine post-pop chases (≥8%"
+        " day moves, vertical/parabolic spikes, climactic exhaustion-volume tops), but a name near its"
+        " day-high or 52-week high is NOT automatically a chase — strong stocks trend at highs. When"
+        " 1-2 non-extended candidates have a fresh catalyst, a positive 10m/1h trend, and adequate"
+        " (≥ ~0.8x) volume, TAKE the best of them rather than defaulting to cash. Cash is a position,"
+        " not a hiding place; sitting 100% in cash cycle after cycle while reasonable entries pass is failure."
+    )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
