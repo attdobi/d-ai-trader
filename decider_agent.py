@@ -2491,6 +2491,17 @@ OUTPUT (STRICT)
         " (e.g. 'extended +14% near highs = chase / exit liquidity', 'below VWAP, 10m red', 'stale catalyst', 'min-buy unmet', 'buy cap hit')\"}."
         " This is the audit trail for WHY you bought or stayed in cash — never leave it empty while settled funds exist."
     )
+    prompt += (
+        "\n\nDATA-AVAILABILITY RULE (do NOT penalize fields that simply were not supplied):"
+        " VWAP is frequently NOT provided in the momentum data. A missing VWAP must be treated as"
+        " UNKNOWN — never as a failure or a disqualifier. Confirm entries with the signals you DO"
+        " have: day-range / opening-range position, 10-minute AND 1-hour trend, relative strength vs"
+        " SPY, and volume. Only count VWAP against a setup when it IS provided and price is clearly"
+        " below it. Do NOT stay in cash merely because VWAP (or any single field) was not supplied:"
+        " a NON-EXTENDED setup with a fresh catalyst, a positive 10m/1h trend, and adequate volume is"
+        " buyable even with VWAP absent. Being perpetually in cash is itself a failure mode — deploy"
+        " when a real, non-chase setup clears the signals you actually have."
+    )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
