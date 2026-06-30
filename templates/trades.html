@@ -128,9 +128,16 @@
         </td>
       </tr>
       {% endfor %}
-      {% if trade.considered %}
+      {% if trade.run_id %}
       <tr class="considered-row">
         <td colspan="7">
+          <div class="cycle-feedback" data-run-id="{{ trade.run_id }}">
+            <span class="fb-label">Rate this decision (RLHF):</span>
+            <button type="button" class="fb-btn fb-up{% if trade.feedback_rating == 1 %} fb-active{% endif %}" data-rating="1" title="Good decision">👍</button>
+            <button type="button" class="fb-btn fb-down{% if trade.feedback_rating == -1 %} fb-active{% endif %}" data-rating="-1" title="Bad decision">👎</button>
+            <span class="fb-status"></span>
+          </div>
+          {% if trade.considered %}
           <details class="considered-panel">
             <summary>🔍 Considered this cycle ({{ trade.considered|length }})</summary>
             <ul>
@@ -144,6 +151,7 @@
               {% endfor %}
             </ul>
           </details>
+          {% endif %}
         </td>
       </tr>
       {% endif %}
@@ -185,11 +193,41 @@
 .est-tag { color: #9aa3ad; font-style: italic; font-size: 0.85em; }
 .amt-none { color: #b42318; font-size: 0.9em; }
 .decision-cost { display:block; margin-top:3px; color:#7a8a9a; font-size:0.8em; font-family: ui-monospace, Menlo, monospace; }
+.cycle-feedback { display:flex; align-items:center; gap:8px; padding:6px 0 2px; }
+.fb-label { color:#7a8a9a; font-size:0.82em; }
+.fb-btn { background:rgba(120,140,170,0.10); border:1px solid rgba(120,140,170,0.20); border-radius:8px; cursor:pointer; font-size:1em; line-height:1; padding:3px 8px; filter:grayscale(0.5); opacity:0.65; transition:all .12s; }
+.fb-btn:hover { opacity:1; filter:none; }
+.fb-up.fb-active { background:rgba(60,180,120,0.22); border-color:#3cb478; filter:none; opacity:1; }
+.fb-down.fb-active { background:rgba(220,90,90,0.20); border-color:#dc5a5a; filter:none; opacity:1; }
+.fb-status { color:#9bb0cc; font-size:0.78em; min-width:64px; }
 </style>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script defer src="{{ url_for('static', filename='js/trades.js') }}"></script>
+  <script>
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest('.fb-btn');
+    if(!btn) return;
+    var wrap = btn.closest('.cycle-feedback');
+    if(!wrap) return;
+    var runId = wrap.getAttribute('data-run-id');
+    var rating = parseInt(btn.getAttribute('data-rating'), 10);
+    if(btn.classList.contains('fb-active')) rating = 0;  // click active button to clear
+    var status = wrap.querySelector('.fb-status');
+    status.textContent = '…';
+    fetch('/api/decision-feedback', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({run_id: runId, rating: rating})
+    }).then(function(r){ return r.json(); }).then(function(){
+      wrap.querySelectorAll('.fb-btn').forEach(function(b){ b.classList.remove('fb-active'); });
+      if(rating === 1){ wrap.querySelector('.fb-up').classList.add('fb-active'); }
+      else if(rating === -1){ wrap.querySelector('.fb-down').classList.add('fb-active'); }
+      status.textContent = rating===1 ? '👍 saved' : (rating===-1 ? '👎 saved' : 'cleared');
+      setTimeout(function(){ status.textContent=''; }, 1800);
+    }).catch(function(){ status.textContent = 'error'; });
+  });
+  </script>
 {% endblock %}
 }

@@ -693,6 +693,24 @@ def initialize_database() -> None:
         ensure_table(
             conn,
             stats,
+            "decision_feedback",
+            """
+            CREATE TABLE IF NOT EXISTS decision_feedback (
+                config_hash   TEXT NOT NULL,
+                run_id        TEXT NOT NULL,
+                rating        SMALLINT,
+                note          TEXT,
+                decision_date DATE,
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (config_hash, run_id)
+            )
+            """,
+        )
+
+        ensure_table(
+            conn,
+            stats,
             "ai_agent_feedback_responses",
             """
             CREATE TABLE IF NOT EXISTS ai_agent_feedback_responses (

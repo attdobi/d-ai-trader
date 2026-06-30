@@ -1291,7 +1291,48 @@ def trade_decisions():
                 t['decision_cost'] = info['cost'] if info else None
                 t['decision_tokens'] = info['tokens'] if info else None
 
+        # Attach any human 👍/👎 RLHF rating for each decision cycle (run_id).
+        if run_ids:
+            fb_rows = conn.execute(text("""
+                SELECT run_id, rating FROM decision_feedback
+                WHERE config_hash = :ch AND run_id = ANY(:rids)
+            """), {"ch": config_hash, "rids": run_ids}).fetchall()
+            fb_by_run = {r.run_id: r.rating for r in fb_rows}
+            for t in trades:
+                t['feedback_rating'] = fb_by_run.get(t.get('run_id')) or 0
+
         return render_template("trades.html", active_tab="trades", trades=trades)
+
+
+@app.route("/api/decision-feedback", methods=["POST"])
+def decision_feedback():
+    """Record a human 👍/👎 on a decision cycle — an RLHF signal for a future critic.
+    PK = (config_hash, run_id); rating 1=up, -1=down, 0=cleared."""
+    data = request.get_json(force=True, silent=True) or {}
+    run_id = (data.get("run_id") or "").strip()
+    if not run_id:
+        return jsonify({"error": "run_id required"}), 400
+    try:
+        rating = int(data.get("rating"))
+    except (TypeError, ValueError):
+        rating = 0
+    if rating not in (-1, 0, 1):
+        rating = 0
+    note = (data.get("note") or "").strip() or None
+    decision_date = None
+    if len(run_id) >= 8 and run_id[:8].isdigit():
+        decision_date = f"{run_id[:4]}-{run_id[4:6]}-{run_id[6:8]}"
+    config_hash = get_current_config_hash()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO decision_feedback (config_hash, run_id, rating, note, decision_date, updated_at)
+            VALUES (:ch, :rid, :rating, :note, :dd, CURRENT_TIMESTAMP)
+            ON CONFLICT (config_hash, run_id)
+            DO UPDATE SET rating = :rating,
+                          note = COALESCE(:note, decision_feedback.note),
+                          updated_at = CURRENT_TIMESTAMP
+        """), {"ch": config_hash, "rid": run_id, "rating": rating, "note": note, "dd": decision_date})
+    return jsonify({"ok": True, "run_id": run_id, "rating": rating})
 
 @app.route("/summaries")
 def summaries():
