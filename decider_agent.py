@@ -1497,22 +1497,22 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
                 })
             sell_decisions = []
     elif live_execution_enabled:
-        if len(sell_decisions) > 2:
-            overflow = sell_decisions[2:]
-            sell_decisions = sell_decisions[:2]
+        if len(sell_decisions) > DAILY_TICKET_CAP:
+            overflow = sell_decisions[DAILY_TICKET_CAP:]
+            sell_decisions = sell_decisions[:DAILY_TICKET_CAP]
             for norm in overflow:
                 skipped_decisions.append({
                     **norm,
-                    "reason": "Live mode limit reached - max 2 sells executed",
+                    "reason": f"Live mode limit reached - max {DAILY_TICKET_CAP} sells executed",
                 })
             print(f"⏭️  Live mode capped additional {len(overflow)} sell decision(s)")
-        if len(buy_decisions) > 2:
-            overflow = buy_decisions[2:]
-            buy_decisions = buy_decisions[:2]
+        if len(buy_decisions) > DAILY_BUY_CAP:
+            overflow = buy_decisions[DAILY_BUY_CAP:]
+            buy_decisions = buy_decisions[:DAILY_BUY_CAP]
             for norm in overflow:
                 skipped_decisions.append({
                     **norm,
-                    "reason": "Live mode limit reached - max 2 buys executed",
+                    "reason": f"Live mode limit reached - max {DAILY_BUY_CAP} buys executed",
                 })
             print(f"⏭️  Live mode capped additional {len(overflow)} buy decision(s)")
 
