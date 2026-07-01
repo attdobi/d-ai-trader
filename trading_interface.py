@@ -713,6 +713,20 @@ class TradingInterface:
         total_invested = 0.0
         total_current = 0.0
 
+        # Preserve buy provenance across syncs: a position we already hold WITH a real buy
+        # reason is our OWN entry, not inherited synced inventory. Carry its original reason
+        # and purchase_timestamp forward so the decider doesn't relabel its own fresh buys
+        # "Schwab synced position" and churn them out on normal entry drawdown.
+        prior_provenance = {}
+        try:
+            with engine.connect() as _pc:
+                for _r in _pc.execute(text(
+                    "SELECT ticker, reason, purchase_timestamp FROM holdings "
+                    "WHERE config_hash = :c AND ticker != 'CASH'"), {"c": config_hash}):
+                    prior_provenance[_r.ticker] = (_r.reason, _r.purchase_timestamp)
+        except Exception:
+            prior_provenance = {}
+
         for position in positions:
             shares = float(position.get("shares") or 0.0)
             avg_price = float(position.get("average_price") or 0.0)
@@ -725,6 +739,8 @@ class TradingInterface:
             if not symbol:
                 continue
 
+            prev_reason, prev_ts = prior_provenance.get(symbol, (None, None))
+            has_real_provenance = bool(prev_reason) and prev_reason != "Schwab synced position"
             processed_holdings.append({
                 "ticker": symbol,
                 "shares": shares,
@@ -733,7 +749,10 @@ class TradingInterface:
                 "total_value": total_value,
                 "current_value": current_value,
                 "gain_loss": gain_loss,
-                "reason": "Schwab synced position",
+                # Keep our own buy thesis + entry time; only genuinely new/inherited
+                # positions (no prior real reason) get the generic "synced" label.
+                "reason": prev_reason if has_real_provenance else "Schwab synced position",
+                "purchase_ts": prev_ts if (has_real_provenance and prev_ts) else now,
             })
 
             total_invested += total_value
@@ -774,7 +793,7 @@ class TradingInterface:
                                           purchase_timestamp, current_price_timestamp, total_value, current_value,
                                           gain_loss, reason, is_active)
                     VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price,
-                            :ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                            :purchase_ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
                 """), {
                     "config_hash": config_hash,
                     "ticker": holding["ticker"],
@@ -785,6 +804,7 @@ class TradingInterface:
                     "current_value": holding["current_value"],
                     "gain_loss": holding["gain_loss"],
                     "reason": holding["reason"],
+                    "purchase_ts": holding["purchase_ts"],
                     "ts": now,
                 })
 

@@ -722,7 +722,7 @@ def fetch_holdings():
             print(f"✅ Initial portfolio snapshot recorded successfully")
 
         result = conn.execute(text("""
-            SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss, reason, is_active FROM holdings
+            SELECT ticker, shares, purchase_price, current_price, total_value, current_value, gain_loss, reason, is_active, purchase_timestamp FROM holdings
             WHERE is_active = TRUE AND config_hash = :config_hash
         """), {"config_hash": config_hash})
         return [row._mapping for row in result]
@@ -2383,11 +2383,21 @@ OUTPUT (STRICT)
         holdings_parts = []
         for h in stock_holdings:
             gain_loss_pct = (h['gain_loss'] / h['total_value'] * 100) if h['total_value'] > 0 else 0
+            # Position age (recency) so the decider distinguishes its own fresh entries
+            # from genuinely old inherited inventory and does not churn what it just bought.
+            age_str = ""
+            _pts = h.get('purchase_timestamp') if hasattr(h, 'get') else None
+            if _pts is not None:
+                try:
+                    _age_h = (datetime.utcnow() - _pts).total_seconds() / 3600.0
+                    age_str = f" (held {_age_h:.1f}h)" if _age_h < 48 else f" (held {_age_h/24:.1f}d)"
+                except Exception:
+                    age_str = ""
             holdings_parts.append(
                 f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']:.2f} "
                 f"→ Current: ${h['current_price']:.2f} "
                 f"(Gain/Loss: ${h['gain_loss']:.2f} / {gain_loss_pct:.1f}%) "
-                f"(Value: ${h['current_value']:.2f}) "
+                f"(Value: ${h['current_value']:.2f}){age_str} "
                 f"(Reason: {h['reason']})"
             )
         holdings_text = "\n".join(holdings_parts)
@@ -2548,6 +2558,20 @@ OUTPUT (STRICT)
         " in an uptrend on a down day (buying the dip) — is BUYABLE on those alone. When you have settled"
         " cash and 1-2 such setups exist, TAKE the best; do not hide in cash waiting for intraday signals"
         " that will not exist for another half hour."
+    )
+    prompt += (
+        "\n\nRECENCY & PROVENANCE (do NOT churn your own fresh entries):"
+        " A holding whose Reason is a real buy thesis (e.g. 'R1 Pullback catalyst…') is YOUR OWN recent"
+        " entry — NOT inherited 'Schwab synced position' inventory — even after a position sync. The"
+        " 'held Xh/Xd' tag in Holdings is its age. Do NOT SELL a position you opened within the last ~2"
+        " trading days on ordinary entry drawdown: a pullback you BOUGHT because it was down on the day"
+        " being still down on the day is the EXPECTED entry noise, not a thesis break — cutting it is"
+        " incoherent churn (you would buy and sell the same dip within the hour, locking a needless"
+        " loss). Respect the intended 1-5 day swing horizon. Only exit a fresh entry on a GENUINE thesis"
+        " break: a decisive support/structure break, a clear catalyst reversal, or a stop you set at"
+        " entry — never merely because it is red today or lacks a brand-new catalyst. The 'cut"
+        " synced/inherited losers' rules apply ONLY to positions actually labeled 'Schwab synced"
+        " position', never to your own recent buys."
     )
 
 
