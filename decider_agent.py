@@ -2530,6 +2530,18 @@ OUTPUT (STRICT)
         " them a valid pullback/reversal setup with technical confirmation IS the thesis even without a"
         " fresh news catalyst (that is exactly what front-running means: position before the obvious catalyst)."
     )
+    prompt += (
+        "\n\nCONFIRMATION POLICY (this OVERRIDES any stricter 'require confirmation' language above):"
+        " Intraday micro-signals — VWAP, 10-minute and 1-hour trend, and abnormal/relative volume — are"
+        " FREQUENTLY UNAVAILABLE, above all in the first ~30-45 minutes after the open (no intraday history"
+        " exists yet) and for the contrarian watchlist. Their absence ('N/A', '0.0x') is EXPECTED and must"
+        " NEVER block a BUY or force a cash-hold. Confirm with the signals that ARE reliable: multi-day and"
+        " monthly trend, relative strength vs SPY, position vs the 20-day MA and recent range, the"
+        " pullback/reversal setup itself, and catalyst. A quality non-extended setup — above all a pullback"
+        " in an uptrend on a down day (buying the dip) — is BUYABLE on those alone. When you have settled"
+        " cash and 1-2 such setups exist, TAKE the best; do not hide in cash waiting for intraday signals"
+        " that will not exist for another half hour."
+    )
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))

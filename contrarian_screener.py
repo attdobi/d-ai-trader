@@ -173,9 +173,10 @@ def format_contrarian_watchlist(candidates):
         "# CONTRARIAN WATCHLIST (front-run candidates — pulled back / oversold, NOT extended)",
         "# Screened for the reversal/pullback setups your doctrine targets. For these names a fresh",
         "# NEWS catalyst is NOT required — the SETUP is the thesis (pullback into support within an",
-        "# uptrend, or an oversold turn). Require technical confirmation: price holding/reclaiming",
-        "# support, a positive/turning 10m/1h, and stabilizing relative strength. PRIORITIZE these",
-        "# for BUY over extended gainers; anti-chase does not apply because they have not popped.",
+        "# uptrend, or an oversold turn). Confirm with what is reliable: price holding/reclaiming its",
+        "# 20-day MA or recent support, a constructive multi-day/monthly trend, and stabilizing relative",
+        "# strength. Do NOT require intraday VWAP/10m/1h — those are usually absent for pullbacks and near",
+        "# the open. PRIORITIZE these for BUY over extended gainers; anti-chase does not apply (not popped).",
     ]
     for c in candidates:
         lines.append(
