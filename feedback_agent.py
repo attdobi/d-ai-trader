@@ -747,6 +747,16 @@ class TradeOutcomeTracker:
         """Append new lessons to an agent's memory, compressing if over limit."""
         MAX_MEMORY_CHARS = 4000
 
+        # Record decider lessons in the structured long-term store (decider_memory) — the
+        # source of truth the decider now retrieves from by relevance. Best-effort.
+        if agent_type == "DeciderAgent" and new_lessons and str(new_lessons).strip():
+            try:
+                from decider_memory import add_memory
+                add_memory(config_hash, str(new_lessons).strip(), kind="lesson",
+                           source="feedback", weight=1.2)
+            except Exception as _dm_exc:
+                print(f"⚠️  decider_memory write skipped: {_dm_exc}")
+
         try:
             import os
             original_hash = os.environ.get('CURRENT_CONFIG_HASH')
