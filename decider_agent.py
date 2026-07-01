@@ -1501,6 +1501,8 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             overflow = sell_decisions[DAILY_TICKET_CAP:]
             sell_decisions = sell_decisions[:DAILY_TICKET_CAP]
             for norm in overflow:
+                norm["execution_status"] = "not_executed"
+                norm["execution_error"] = f"Not executed — exceeded the {DAILY_TICKET_CAP}-sell cap for this cycle"
                 skipped_decisions.append({
                     **norm,
                     "reason": f"Live mode limit reached - max {DAILY_TICKET_CAP} sells executed",
@@ -1510,6 +1512,8 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             overflow = buy_decisions[DAILY_BUY_CAP:]
             buy_decisions = buy_decisions[:DAILY_BUY_CAP]
             for norm in overflow:
+                norm["execution_status"] = "not_executed"
+                norm["execution_error"] = f"Not executed — exceeded the {DAILY_BUY_CAP}-buy cap for this cycle"
                 skipped_decisions.append({
                     **norm,
                     "reason": f"Live mode limit reached - max {DAILY_BUY_CAP} buys executed",
@@ -1640,7 +1644,10 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
     # Persist actual execution outcomes back onto the stored decision row so the
     # dashboard shows what really filled (order_id, executed shares/price/amount,
     # or a rejected/working status) instead of the pre-trade estimate.
-    _persist_execution_outcomes(decisions, run_id, config_hash)
+    # Pass the NORMALIZED decisions — execution status/fills and cap-skips are set on
+    # those objects (line ~1460), not on the original `decisions`, so persisting the
+    # originals silently dropped every outcome (why fills kept showing the estimate).
+    _persist_execution_outcomes([norm for _, norm in decisions_with_idx], run_id, config_hash)
 
     return skipped_decisions
 

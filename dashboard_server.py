@@ -1242,6 +1242,7 @@ def trade_decisions():
                             'executed_price': decision.get('executed_price'),
                             'executed_amount': decision.get('executed_amount'),
                             'order_id': decision.get('order_id'),
+                            'execution_error': decision.get('execution_error'),
                         }
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
