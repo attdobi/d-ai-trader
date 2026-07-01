@@ -1265,13 +1265,26 @@ def trade_decisions():
                                                  'failed', 'error', 'not_executed', 'capped', 'not_filled')
                                          or 'market' in _st or 'closed' in _st)
                             if not _filled and not _rejected:
-                                _h = hold_map.get(cleaned_decision.get('ticker'))
+                                _tk = cleaned_decision.get('ticker')
+                                _h = hold_map.get(_tk)
                                 if _act == 'buy' and _h and _h[0] > 0:
-                                    # Position exists → it filled; the broker confirmation just lagged.
+                                    # Position exists → the BUY filled; the broker confirmation lagged.
                                     cleaned_decision['executed_shares'] = _h[0]
                                     cleaned_decision['executed_price'] = _h[1]
                                     cleaned_decision['executed_amount'] = round(_h[0] * _h[1], 2)
                                     cleaned_decision['execution_status'] = 'filled'
+                                elif _act == 'sell' and _tk not in hold_map:
+                                    # Position is gone → the SELL filled. Record it (the exact fill
+                                    # price is stamped by the broker confirmation once available).
+                                    _sh = cleaned_decision.get('shares') or 0
+                                    _amt = cleaned_decision.get('amount_usd') or cleaned_decision.get('total_value') or 0
+                                    if _sh and _amt:
+                                        cleaned_decision['executed_shares'] = float(_sh)
+                                        cleaned_decision['executed_amount'] = round(float(_amt), 2)
+                                        cleaned_decision['executed_price'] = round(float(_amt) / float(_sh), 2)
+                                        cleaned_decision['execution_status'] = 'filled'
+                                    else:
+                                        continue
                                 else:
                                     continue  # not yet confirmed/rejected — do not write it as a trade
                         cleaned_data.append(cleaned_decision)

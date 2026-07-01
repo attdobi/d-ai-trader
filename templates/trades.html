@@ -128,7 +128,7 @@
         </td>
       </tr>
       {% endfor %}
-      {% if trade.run_id %}
+      {% if trade.run_id and trade.data %}
       <tr class="considered-row">
         <td colspan="7">
           <div class="cycle-feedback" data-run-id="{{ trade.run_id }}">
