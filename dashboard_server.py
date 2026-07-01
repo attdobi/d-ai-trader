@@ -1189,6 +1189,16 @@ def trade_decisions():
             ORDER BY id DESC LIMIT 20
         """), {"config_hash": config_hash}).fetchall()
         
+        # Active holdings — used to resolve a filled order whose broker confirmation
+        # glitched (the position exists, so the buy really filled), and to gate out
+        # trades that are not yet confirmed or rejected.
+        hold_map = {}
+        for hr in conn.execute(text("""
+            SELECT ticker, shares, purchase_price FROM holdings
+            WHERE config_hash = :ch AND is_active = TRUE AND ticker != 'CASH'
+        """), {"ch": config_hash}).fetchall():
+            hold_map[hr.ticker] = (float(hr.shares or 0), float(hr.purchase_price or 0))
+
         trades = []
         for row in result:
             trade_dict = dict(row._mapping)
@@ -1244,6 +1254,26 @@ def trade_decisions():
                             'order_id': decision.get('order_id'),
                             'execution_error': decision.get('execution_error'),
                         }
+                        # Only surface a BUY/SELL once it is RESOLVED — a real fill (prices
+                        # gathered) or a noted rejection. Never an estimate. Unconfirmed legs
+                        # are held back until they resolve so the tab shows only reality.
+                        _act = (cleaned_decision.get('action') or '').lower()
+                        if _act in ('buy', 'sell'):
+                            _st = (cleaned_decision.get('execution_status') or '').lower()
+                            _filled = cleaned_decision.get('executed_amount') is not None
+                            _rejected = (_st in ('rejected', 'canceled', 'cancelled', 'expired',
+                                                 'failed', 'error', 'not_executed', 'capped', 'not_filled')
+                                         or 'market' in _st or 'closed' in _st)
+                            if not _filled and not _rejected:
+                                _h = hold_map.get(cleaned_decision.get('ticker'))
+                                if _act == 'buy' and _h and _h[0] > 0:
+                                    # Position exists → it filled; the broker confirmation just lagged.
+                                    cleaned_decision['executed_shares'] = _h[0]
+                                    cleaned_decision['executed_price'] = _h[1]
+                                    cleaned_decision['executed_amount'] = round(_h[0] * _h[1], 2)
+                                    cleaned_decision['execution_status'] = 'filled'
+                                else:
+                                    continue  # not yet confirmed/rejected — do not write it as a trade
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
                         # If decision is a string, try to parse it
