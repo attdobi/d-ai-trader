@@ -693,6 +693,27 @@ def initialize_database() -> None:
         ensure_table(
             conn,
             stats,
+            "decider_memory",
+            """
+            CREATE TABLE IF NOT EXISTS decider_memory (
+                id          SERIAL PRIMARY KEY,
+                config_hash TEXT NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                kind        TEXT DEFAULT 'lesson',
+                tags        TEXT[],
+                ticker      TEXT,
+                content     TEXT NOT NULL,
+                source      TEXT DEFAULT 'feedback',
+                weight      REAL DEFAULT 1.0,
+                active      BOOLEAN DEFAULT TRUE
+            )
+            """,
+        )
+
+        ensure_table(
+            conn,
+            stats,
             "decision_feedback",
             """
             CREATE TABLE IF NOT EXISTS decision_feedback (

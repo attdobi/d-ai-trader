@@ -2499,6 +2499,23 @@ OUTPUT (STRICT)
             print("🎯 Contrarian watchlist: no non-extended candidates screened this cycle")
     except Exception as _contra_exc:
         print(f"⚠️  Contrarian screen skipped: {_contra_exc}")
+
+    # Decider memory: long-term structured lessons (retrieved by relevance) + short-term
+    # working memory (the decider's own recent activity). Both best-effort — a memory
+    # failure must never break the decision path.
+    try:
+        from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
+        _mem_cfg = get_current_config_hash()
+        _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
+        _lt = format_long_term_memory(get_relevant_memories(_mem_cfg, tickers=_mem_tks))
+        if _lt:
+            prompt += "\n\n" + _lt
+        _wm = build_working_memory(_mem_cfg)
+        if _wm:
+            prompt += "\n\n" + _wm
+        print(f"🧠 Memory injected: long-term lessons{' + recent activity' if _wm else ''}")
+    except Exception as _mem_exc:
+        print(f"⚠️  Memory injection skipped: {_mem_exc}")
     prompt += (
         "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
         f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
