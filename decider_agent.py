@@ -2467,6 +2467,21 @@ OUTPUT (STRICT)
         auto_context_sections.append("Feedback context:\n" + feedback_context.strip())
     if auto_context_sections:
         prompt += "\n\n# Auto-context (missing fields in prompt template)\n" + "\n\n".join(auto_context_sections)
+
+    # Front-run candidate source: non-extended pullback / oversold names so the anti-chase
+    # doctrine actually has something to BUY (the news/gainers feed only surfaces already-
+    # extended movers). Best-effort — a screener failure must never break the decider.
+    try:
+        from contrarian_screener import get_contrarian_candidates, format_contrarian_watchlist
+        _contra = get_contrarian_candidates()
+        _contra_block = format_contrarian_watchlist(_contra)
+        if _contra_block:
+            prompt += "\n\n" + _contra_block
+            print(f"🎯 Contrarian watchlist: {len(_contra)} non-extended front-run candidates fed to decider")
+        else:
+            print("🎯 Contrarian watchlist: no non-extended candidates screened this cycle")
+    except Exception as _contra_exc:
+        print(f"⚠️  Contrarian screen skipped: {_contra_exc}")
     prompt += (
         "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
         f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
@@ -2511,6 +2526,9 @@ OUTPUT (STRICT)
         " 1-2 non-extended candidates have a fresh catalyst, a positive 10m/1h trend, and adequate"
         " (≥ ~0.8x) volume, TAKE the best of them rather than defaulting to cash. Cash is a position,"
         " not a hiding place; sitting 100% in cash cycle after cycle while reasonable entries pass is failure."
+        " The CONTRARIAN WATCHLIST names are your PRIME front-run candidates — evaluate them FIRST; for"
+        " them a valid pullback/reversal setup with technical confirmation IS the thesis even without a"
+        " fresh news catalyst (that is exactly what front-running means: position before the obvious catalyst)."
     )
 
 
