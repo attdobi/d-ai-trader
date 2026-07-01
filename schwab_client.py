@@ -819,7 +819,8 @@ class SchwabAPIClient:
         for _ in range(attempts):
             try:
                 time.sleep(1.5)
-                response = self.client.get_order(account_hash, order_id)
+                # schwab-py signature is get_order(order_id, account_hash) — order_id FIRST.
+                response = self.client.get_order(order_id, account_hash)
                 if response.status_code != 200:
                     logger.debug("Unable to retrieve Schwab order %s status (status=%s)", order_id, response.status_code)
                     continue
@@ -869,8 +870,9 @@ class SchwabAPIClient:
                 logger.error("No account hash provided")
                 return None
             
-            response = self.client.get_order(acc_hash, order_id)
-            
+            # schwab-py signature is get_order(order_id, account_hash) — order_id FIRST.
+            response = self.client.get_order(order_id, acc_hash)
+
             if response.status_code == 200:
                 return response.json()
             else:
