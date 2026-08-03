@@ -15,14 +15,21 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                           • gpt-4o-mini     - Good for testing (cheap)
                           • gpt-4-turbo     - "GPT-4.1" equivalent (older)
 
+                        GPT-5.6 family (Aug 2026 — all vision-capable):
+                          • gpt-5.6-sol   (alias: sol)   - flagship, $5/$30 per 1M
+                          • gpt-5.6-terra (alias: terra) - mid tier, $2/$12
+                          • gpt-5.6-luna  (alias: luna)  - budget, $0.20/$1.20
+                          • bare "gpt-5.6" → Sol (matches OpenAI's alias)
+
                         GPT-5 reasoning models:
                           • gpt-5.5 / gpt-5.4 / gpt-5.2 / gpt-5.1 / gpt-5
                           • Append a reasoning-effort suffix to set the
                             effort for summarizer/decider/feedback agents:
                               -m gpt-5.5-low
                               -m gpt-5.5-med
-                              -m gpt-5.5-high
-                              -m gpt-5.5-xhigh
+                              -m gpt-5.6-sol-high
+                              -m gpt-5.6-terra-xhigh
+                              -m gpt-5.6-sol-max   (max: GPT-5.6 only)
 
                         Note: o1/o3 models NOT supported
   -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)

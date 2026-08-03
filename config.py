@@ -182,10 +182,20 @@ openai.api_key = api_key
 #     • May exhaust tokens during reasoning, leaving no output
 #     • NOT RECOMMENDED for production trading yet
 #
+# GPT-5.6 FAMILY (Aug 2026 — three price/capability tiers, all vision-capable):
+#   - gpt-5.6-sol:   flagship ($5/$30 per 1M — same price as gpt-5.5, stronger)
+#   - gpt-5.6-terra: mid tier ($2/$12) — near-Sol on reasoning benchmarks
+#   - gpt-5.6-luna:  budget tier ($0.20/$1.20) — cheaper than gpt-5.4-mini
+#   Aliases accepted: sol / terra (or tera) / luna; bare "gpt-5.6" → Sol
+#   (matches OpenAI's own alias). Reasoning suffixes work: -m terra-high.
+#
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
 GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
 _VALID_GPT_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.4",
     "gpt-5.4-mini",
@@ -208,6 +218,19 @@ _MODEL_ALIASES = {
     "gpt5.4-mini": "gpt-5.4-mini",
     "gpt5.5": "gpt-5.5",
     "gpt-4-turbo": "gpt-4-turbo",
+    # GPT-5.6 family — bare "gpt-5.6" points to Sol, matching OpenAI's alias.
+    "gpt-5.6": "gpt-5.6-sol",
+    "gpt5.6": "gpt-5.6-sol",
+    "gpt5.6-sol": "gpt-5.6-sol",
+    "gpt5.6-terra": "gpt-5.6-terra",
+    "gpt5.6-luna": "gpt-5.6-luna",
+    "sol": "gpt-5.6-sol",
+    "terra": "gpt-5.6-terra",
+    "luna": "gpt-5.6-luna",
+    # Common misspelling of Terra ("tera") — accept it everywhere.
+    "tera": "gpt-5.6-terra",
+    "gpt-5.6-tera": "gpt-5.6-terra",
+    "gpt5.6-tera": "gpt-5.6-terra",
 }
 
 # --- API cost tracking -----------------------------------------------------
@@ -248,6 +271,9 @@ _REASONING_SUFFIX_ALIASES = {
     "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
+    # "max" is new with the GPT-5.6 family; on older models it's clamped to
+    # xhigh in get_reasoning_params.
+    "max": "max",
 }
 
 # Global reasoning override set via the -m suffix (or DAI_REASONING_LEVEL env).
@@ -377,6 +403,7 @@ REASONING_LEVEL_TOKEN_LIMITS = {
     "medium": 6000,
     "high": 12000,
     "xhigh": 20000,
+    "max": 32000,   # GPT-5.6 only (clamped to xhigh on older models)
 }
 # Reasoning levels are per LLM agent. Note there is intentionally NO "momentum"
 # profile: the momentum recap is pure Python over the Yahoo Finance API
@@ -473,11 +500,16 @@ def get_reasoning_params(agent_name: str, model_name: str) -> dict:
         "medium": "medium",
         "high": "high",
         "xhigh": "xhigh",
+        "max": "max",        # GPT-5.6 family only
     }
     reasoning_effort = level_map.get(level, level)
-    valid_levels = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    valid_levels = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
     if reasoning_effort not in valid_levels:
         reasoning_effort = "medium"
+    # "max" effort only exists on the GPT-5.6 family; clamp for older models
+    # so the API doesn't reject the payload.
+    if reasoning_effort == "max" and not model_lower.startswith("gpt-5.6"):
+        reasoning_effort = "xhigh"
     return {"reasoning_effort": reasoning_effort}
 
 
