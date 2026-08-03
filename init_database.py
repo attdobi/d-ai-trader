@@ -28,6 +28,7 @@ class InitStats:
     seeded_prompts: int = 0
     updated_prompts: int = 0
     skipped_prompts: int = 0
+    deactivated_prompts: int = 0
 
 
 def table_exists(conn, table_name: str) -> bool:
@@ -164,6 +165,37 @@ def _normalized_prompt_rows() -> Dict[str, Dict[str, str]]:
     return rows
 
 
+def _any_prompt_version_exists(conn, agent_type: str, config_hash: str) -> bool:
+    return conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND config_hash = :config_hash
+            LIMIT 1
+            """
+        ),
+        {"agent_type": agent_type, "config_hash": config_hash},
+    ).fetchone() is not None
+
+
+def _any_active_prompt_exists(conn, agent_type: str, config_hash: str) -> bool:
+    return conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND config_hash = :config_hash
+              AND is_active = TRUE
+            LIMIT 1
+            """
+        ),
+        {"agent_type": agent_type, "config_hash": config_hash},
+    ).fetchone() is not None
+
+
 def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
     prompt_rows = _normalized_prompt_rows()
 
@@ -186,6 +218,15 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
         ).fetchone()
 
         if existing is None:
+            # v0 bootstraps an EMPTY config only. If any version already
+            # exists for this agent+config (e.g. feedback-evolved v1+),
+            # re-inserting v0 on every restart would pollute the table and
+            # contend for the active flag.
+            if _any_prompt_version_exists(conn, agent_type, config_hash):
+                stats.skipped_prompts += 1
+                print(f"   ↪ Skipped v0 seed (higher versions exist): {agent_type} ({config_hash})")
+                continue
+
             conn.execute(
                 text(
                     """
@@ -236,14 +277,20 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
             or (existing.user_prompt_template or "") != payload["user_prompt_template"]
             or (existing.strategy_directives or "") != payload["strategy_directives"]
             or (existing.description or "") != payload["description"]
-            or not bool(existing.is_active)
         )
 
         # Seed soul/memory into existing rows only if DB is empty and payload has content
         seed_soul = not (existing.soul or "").strip() and payload.get("soul", "").strip()
         seed_memory = not (existing.memory or "").strip() and payload.get("memory", "").strip()
 
-        if needs_update or seed_soul or seed_memory:
+        # Re-activate a dormant v0 only when NOTHING is active for this
+        # agent+config. A feedback-promoted higher version owns the active
+        # flag; restarts must never hand it back to the baseline.
+        reactivate = not bool(existing.is_active) and not _any_active_prompt_exists(
+            conn, agent_type, config_hash
+        )
+
+        if needs_update or seed_soul or seed_memory or reactivate:
             update_fields = {
                 "id": existing.id,
                 "system_prompt": payload["system_prompt"],
@@ -252,17 +299,18 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                 "description": payload["description"],
             }
 
-            # Build dynamic SET clause
+            # Build dynamic SET clause. created_at is preserved: bumping it
+            # made synced v0 rows look freshly created on every restart.
             set_parts = [
                 "system_prompt = :system_prompt",
                 "user_prompt_template = :user_prompt_template",
                 "strategy_directives = :strategy_directives",
                 "description = :description",
                 "created_by = 'init_database'",
-                "is_active = TRUE",
-                "created_at = CURRENT_TIMESTAMP",
             ]
 
+            if reactivate:
+                set_parts.append("is_active = TRUE")
             if seed_soul:
                 set_parts.append("soul = :soul")
                 update_fields["soul"] = payload["soul"]
@@ -275,10 +323,43 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                 update_fields,
             )
             stats.updated_prompts += 1
-            print(f"   🔄 Updated v0 prompt: {agent_type} ({config_hash})")
+            suffix = " (re-activated: no active version)" if reactivate else ""
+            print(f"   🔄 Updated v0 prompt: {agent_type} ({config_hash}){suffix}")
         else:
             stats.skipped_prompts += 1
             print(f"   ↪ Prompt already up-to-date: {agent_type} ({config_hash})")
+
+
+def deactivate_superseded_v0_prompts(conn, stats: InitStats) -> None:
+    """Deactivate v0 rows that are still flagged active alongside an active
+    higher version for the same agent+config.
+
+    Earlier releases re-activated the v0 baseline on every restart, leaving
+    duplicate active rows behind. The resolver (ORDER BY version DESC) masks
+    the duplicates, but they pollute the table — flip them back off.
+    """
+    deactivated = conn.execute(
+        text(
+            """
+            UPDATE prompt_versions AS v0
+            SET is_active = FALSE
+            WHERE v0.version = 0
+              AND v0.is_active = TRUE
+              AND EXISTS (
+                  SELECT 1
+                  FROM prompt_versions higher
+                  WHERE higher.agent_type = v0.agent_type
+                    AND higher.config_hash = v0.config_hash
+                    AND higher.version > 0
+                    AND higher.is_active = TRUE
+              )
+            """
+        )
+    ).rowcount or 0
+
+    if deactivated:
+        stats.deactivated_prompts += deactivated
+        print(f"   🧹 Deactivated {deactivated} superseded active v0 prompt row(s)")
 
 
 def initialize_database() -> None:
@@ -977,6 +1058,11 @@ def initialize_database() -> None:
         seed_v0_prompts(conn, stats, "global")
         seed_v0_prompts(conn, stats, current_config_hash)
 
+        # 7c) Hygiene: earlier releases re-activated v0 on every restart even
+        # when a feedback-evolved version was active. Deactivate those
+        # duplicates across ALL configs so only one version stays active.
+        deactivate_superseded_v0_prompts(conn, stats)
+
     print("\n📋 Database initialization summary")
     print("---------------------------------")
     print(f"Tables created:        {stats.created_tables}")
@@ -988,6 +1074,7 @@ def initialize_database() -> None:
     print(f"Prompts seeded:        {stats.seeded_prompts}")
     print(f"Prompts updated:       {stats.updated_prompts}")
     print(f"Prompts unchanged:     {stats.skipped_prompts}")
+    print(f"Stale v0 deactivated:  {stats.deactivated_prompts}")
     print("✅ Database initialization complete.")
 
 
