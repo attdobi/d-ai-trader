@@ -1,4 +1,4 @@
-let feedbackPerformanceChart = null;
+let feedbackTrendCharts = null; // { success: Chart, profit: Chart, labels: [] }
 const promptFallbackDescriptions = {
   summarizer: 'Latest summarizer template in use.',
   decider: 'Latest decision-making template in use.',
@@ -162,45 +162,161 @@ async function loadLatestFeedback() {
 const DEFAULT_TREND_PERIODS = '7,14,30,60,90';
 let selectedTrendPeriods = DEFAULT_TREND_PERIODS;
 
-function updatePerformanceChart(periodData) {
-  // Render whatever windows the backend returned, sorted ascending by days.
-  const periods = Object.keys(periodData || {})
-    .map(k => ({ key: k, days: parseInt(k, 10) }))
-    .filter(p => !Number.isNaN(p.days))
-    .sort((a, b) => a.days - b.days);
-  const labels = periods.map(p => p.days >= 365 ? `${Math.round(p.days / 365)}y` : `${p.days}d`);
-  const successRates = periods.map(p => (periodData[p.key]?.success_rate || 0) * 100);
-  const avgProfits = periods.map(p => (periodData[p.key]?.avg_profit || 0) * 100);
+// --- Performance trend panels (small multiples, one axis each) --------------
+// Windows are trailing and NESTED (30d includes 14d includes 7d). Plotted
+// widest-first so the x-axis reads left → right as history narrowing toward
+// now: the rightmost point is always the freshest window.
+const TREND_INK = {
+  text: '#9bb0cc', muted: '#7f8ca6', label: '#c9d6ee',
+  grid: 'rgba(255,255,255,0.05)', gridStrong: 'rgba(255,255,255,0.22)',
+  axis: 'rgba(255,255,255,0.12)', tooltipBg: '#151f35', tooltipBorder: '#3a4a63',
+};
+const TREND_SUCCESS_COLOR = '#29d697';
+const TREND_PROFIT_COLOR = '#42c9ff';
 
-  // Update in place when the chart already exists and the x-axis still matches.
-  // Destroying + recreating every 10s caused the visible flicker.
-  if (feedbackPerformanceChart
-      && feedbackPerformanceChart.data.labels.length === labels.length
-      && feedbackPerformanceChart.data.labels.every((l, i) => l === labels[i])) {
-    feedbackPerformanceChart.data.datasets[0].data = successRates;
-    feedbackPerformanceChart.data.datasets[1].data = avgProfits;
-    feedbackPerformanceChart.update('none'); // no animation, no re-create
-    return;
+function trendRgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// Direct-label only the rightmost (most recent) point of the series.
+// Reads the formatter off the chart instance ($trendFmt) — options-level
+// custom keys don't survive Chart.js v4's config resolver.
+const trendEndLabelPlugin = {
+  id: 'trendEndLabel',
+  afterDatasetsDraw(chart) {
+    const fmt = chart.$trendFmt;
+    if (!fmt) return;
+    const meta = chart.getDatasetMeta(0);
+    const pt = meta.data[meta.data.length - 1];
+    if (!pt) return;
+    const value = chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1];
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
+    ctx.fillStyle = TREND_INK.label;
+    ctx.textBaseline = 'middle';
+    const text = fmt(value);
+    // Right of the point unless that would clip at the canvas edge.
+    const fitsRight = pt.x + 9 + ctx.measureText(text).width < chart.width - 4;
+    ctx.textAlign = fitsRight ? 'left' : 'right';
+    ctx.fillText(text, fitsRight ? pt.x + 9 : pt.x - 9, pt.y);
+    ctx.restore();
   }
+};
 
-  const ctx = document.getElementById('performanceChart').getContext('2d');
-  if (feedbackPerformanceChart) feedbackPerformanceChart.destroy();
-  feedbackPerformanceChart = new Chart(ctx, {
+function buildTrendChart(canvasId, { color, labels, data, trades, fmt, guideValue, yOpts, tickOpts = {}, showXTicks }) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const chart = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        { label: 'Success Rate (%)', data: successRates, borderColor: '#4CAF50', backgroundColor: 'rgba(76,175,80,0.1)', yAxisID: 'y' },
-        { label: 'Average Profit (%)', data: avgProfits, borderColor: '#2196F3', backgroundColor: 'rgba(33,150,243,0.1)', yAxisID: 'y1' }
-      ]
+      datasets: [{
+        data,
+        borderColor: color,
+        borderWidth: 2,
+        backgroundColor: trendRgba(color, 0.07),
+        fill: true,
+        tension: 0,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: color,
+        pointBorderColor: '#121c33',
+        pointBorderWidth: 1.5,
+      }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      animation: false,
-      scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } },
-      plugins: { title: { display: true, text: 'Performance Trends (nested lookback windows)' } }
-    }
+      responsive: true, maintainAspectRatio: false, animation: false,
+      layout: { padding: { right: 56, top: 8 } },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: TREND_INK.axis },
+          ticks: { display: showXTicks, color: TREND_INK.muted, font: { size: 11 } },
+        },
+        y: {
+          ...yOpts,
+          border: { display: false },
+          // Emphasize the interpretive baseline (50% coin-flip / 0% breakeven).
+          grid: { color: c => c.tick.value === guideValue ? TREND_INK.gridStrong : TREND_INK.grid },
+          ticks: { color: TREND_INK.muted, font: { size: 11 }, maxTicksLimit: 6, callback: v => `${v}%`, ...tickOpts },
+          // Fixed axis width keeps both panels' plot areas x-aligned.
+          afterFit: axis => { axis.width = 58; },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: TREND_INK.tooltipBg, borderColor: TREND_INK.tooltipBorder,
+          borderWidth: 1, titleColor: '#dfe8f7', bodyColor: TREND_INK.text,
+          padding: 10, displayColors: false,
+          callbacks: {
+            title: items => items.length ? items[0].label : '',
+            label: item => {
+              const n = item.chart.$trendTrades?.[item.dataIndex];
+              return `${fmt(item.parsed.y)}${Number.isFinite(n) ? ` across ${n} closed trades` : ''}`;
+            },
+          },
+        },
+      },
+    },
+    plugins: [trendEndLabelPlugin],
   });
+  chart.$trendTrades = trades;
+  chart.$trendFmt = fmt;
+  chart.draw(); // re-draw so the end label (which needs $trendFmt) appears
+  return chart;
+}
+
+function updatePerformanceChart(periodData) {
+  // Widest window first → most recent (7d) lands on the right.
+  const periods = Object.keys(periodData || {})
+    .map(k => ({ key: k, days: parseInt(k, 10) }))
+    .filter(p => !Number.isNaN(p.days))
+    .sort((a, b) => b.days - a.days);
+  if (!periods.length) return;
+  const labels = periods.map(p => p.days >= 365 ? `Last ${Math.round(p.days / 365)}y` : `Last ${p.days}d`);
+  const successRates = periods.map(p => (periodData[p.key]?.success_rate || 0) * 100);
+  const avgProfits = periods.map(p => (periodData[p.key]?.avg_profit || 0) * 100);
+  const trades = periods.map(p => periodData[p.key]?.total_trades);
+
+  // Update in place when the panels exist and the x-axis still matches.
+  // Destroying + recreating every 10s caused the visible flicker.
+  if (feedbackTrendCharts
+      && feedbackTrendCharts.labels.length === labels.length
+      && feedbackTrendCharts.labels.every((l, i) => l === labels[i])) {
+    for (const [chart, data] of [[feedbackTrendCharts.success, successRates], [feedbackTrendCharts.profit, avgProfits]]) {
+      chart.data.datasets[0].data = data;
+      chart.$trendTrades = trades;
+      chart.update('none'); // no animation, no re-create
+    }
+    return;
+  }
+
+  if (feedbackTrendCharts) {
+    feedbackTrendCharts.success.destroy();
+    feedbackTrendCharts.profit.destroy();
+  }
+  feedbackTrendCharts = {
+    labels,
+    success: buildTrendChart('successRateChart', {
+      color: TREND_SUCCESS_COLOR, labels, data: successRates, trades,
+      fmt: v => `${v.toFixed(1)}%`,
+      guideValue: 50, // coin-flip baseline
+      yOpts: { suggestedMin: 40, suggestedMax: 80 },
+      tickOpts: { stepSize: 10 }, // guarantees a tick (and guide line) at 50
+
+      showXTicks: false, // shared x — labels live on the bottom panel
+    }),
+    profit: buildTrendChart('avgProfitChart', {
+      color: TREND_PROFIT_COLOR, labels, data: avgProfits, trades,
+      fmt: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`,
+      guideValue: 0, // breakeven baseline
+      yOpts: { beginAtZero: true },
+      showXTicks: true,
+    }),
+  };
 }
 
 // Re-fetch the chart for a chosen set of lookback windows (range buttons + poll).

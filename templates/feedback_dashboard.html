@@ -183,26 +183,43 @@
 </div>
 
 <div class="chart-container">
-  <div id="trendRangeButtons" style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:8px;">
-    <button type="button" class="trend-range-btn" data-periods="7,14,30">30d</button>
-    <button type="button" class="trend-range-btn active" data-periods="7,14,30,60,90">90d</button>
-    <button type="button" class="trend-range-btn" data-periods="30,90,180,365">1y</button>
+  <div class="trend-header">
+    <div>
+      <h2 style="margin:0;">Performance Trends</h2>
+      <div class="trend-subtitle">
+        Trailing windows ending today — each point covers <em>all</em> closed trades
+        from the last N days (windows nest). Read left&nbsp;→&nbsp;right as history
+        narrowing toward the most recent week.
+      </div>
+    </div>
+    <div id="trendRangeButtons">
+      <button type="button" class="trend-range-btn" data-periods="7,14,30">30d</button>
+      <button type="button" class="trend-range-btn active" data-periods="7,14,30,60,90">90d</button>
+      <button type="button" class="trend-range-btn" data-periods="30,90,180,365">1y</button>
+    </div>
   </div>
-  <div class="chart-canvas-box">
-    <canvas id="performanceChart"></canvas>
-  </div>
+  <div class="trend-panel-title"><span class="trend-swatch" style="background:#29d697;"></span>Success rate — share of closed trades that won</div>
+  <div class="chart-canvas-box trend-panel"><canvas id="successRateChart"></canvas></div>
+  <div class="trend-panel-title"><span class="trend-swatch" style="background:#42c9ff;"></span>Average profit per closed trade</div>
+  <div class="chart-canvas-box trend-panel"><canvas id="avgProfitChart"></canvas></div>
 </div>
 <style>
+.trend-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.trend-subtitle { color: #7f8ca6; font-size: 0.8em; margin: 4px 0 2px; max-width: 660px; line-height: 1.45; }
+#trendRangeButtons { display: flex; gap: 6px; }
 .trend-range-btn {
   background: transparent; border: 1px solid #3a4a63; color: #9bb0cc;
   border-radius: 6px; padding: 3px 12px; font-size: 0.85em; cursor: pointer;
 }
 .trend-range-btn:hover { background: rgba(33,150,243,0.12); }
 .trend-range-btn.active { background: #2196F3; border-color: #2196F3; color: #fff; }
-/* Bound the canvas so Chart.js (maintainAspectRatio:false) can't grow it
-   without limit — this is what caused the runaway vertical stretch. */
-.chart-canvas-box { position: relative; height: 320px; width: 100%; }
-.chart-canvas-box canvas { max-height: 320px; }
+.trend-panel-title { color: #9bb0cc; font-size: 0.85em; margin: 10px 0 2px; display: flex; align-items: center; gap: 7px; }
+.trend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+/* Bound the canvases so Chart.js (maintainAspectRatio:false) can't grow them
+   without limit — unbounded height caused the runaway vertical stretch. */
+.chart-canvas-box { position: relative; width: 100%; }
+.chart-canvas-box.trend-panel { height: 185px; }
+.chart-canvas-box.trend-panel canvas { max-height: 185px; }
 </style>
 {% endblock %}
 
