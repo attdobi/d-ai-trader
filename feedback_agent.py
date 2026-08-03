@@ -14,7 +14,7 @@ except Exception:
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import text
-from config import engine, PromptManager, session, openai, GPT_MODEL, get_model_token_params, get_model_temperature_params, get_current_config_hash, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
+from config import engine, PromptManager, session, openai, GPT_MODEL, get_agent_model, get_model_token_params, get_model_temperature_params, get_current_config_hash, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
 import yfinance as yf
 import pandas as pd
 
@@ -74,7 +74,9 @@ def _canonical_agent_type(agent_type):
 
 def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label: str, base_max_tokens: int, enable_reasoning: bool = True) -> dict:
     """Assemble OpenAI parameters with reasoning defaults for feedback flows."""
-    model_name = GPT_MODEL
+    # Honor DAI_MODEL_FEEDBACK (per-agent override); falls back to the global
+    # -m model. Previously hardcoded GPT_MODEL, which silently ignored the env.
+    model_name = get_agent_model(agent_label)
     effective_system = append_reasoning_guidance(system_prompt, agent_label, model_name)
     token_cap = get_reasoning_token_cap(agent_label, model_name, base_max_tokens)
     token_params = get_model_token_params(model_name, token_cap)
@@ -99,13 +101,19 @@ def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label
 def _execute_feedback_api(api_params: dict, agent_label: str):
     """Execute feedback API call with a one-time fallback if reasoning_effort is rejected."""
     try:
-        return prompt_manager.client.chat.completions.create(**api_params)
+        response = prompt_manager.client.chat.completions.create(**api_params)
     except Exception as exc:
         if "reasoning_effort" in api_params and "reasoning_effort" in str(exc).lower():
             print(f"⚠️ reasoning_effort rejected for {agent_label}; retrying without it.")
             api_params = {k: v for k, v in api_params.items() if k != "reasoning_effort"}
-            return prompt_manager.client.chat.completions.create(**api_params)
-        raise
+            response = prompt_manager.client.chat.completions.create(**api_params)
+        else:
+            raise
+    # Log tokens/cost to api_usage like every other agent (previously these
+    # direct client calls bypassed the recorder, so FeedbackAgent never
+    # appeared in the dashboard cost view). Best-effort inside the recorder.
+    prompt_manager._record_api_usage(agent_label, api_params.get("model"), response)
+    return response
 
 class TradeOutcomeTracker:
     """Tracks outcomes of completed trades and provides feedback"""
@@ -973,7 +981,7 @@ CRITICAL INSTRUCTIONS:
 5. Make feedback cumulative - build upon previous lessons rather than replacing them'''
         
         try:
-            token_cap = get_reasoning_token_cap("FeedbackAgent", GPT_MODEL, 4000)
+            token_cap = get_reasoning_token_cap("FeedbackAgent", get_agent_model("FeedbackAgent"), 4000)
             api_params = _build_feedback_api_params(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
@@ -1169,8 +1177,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         
         try:
             agent_label = agent_type or "FeedbackAgent"
-            effective_system_prompt = append_reasoning_guidance(system_prompt, agent_label, GPT_MODEL)
-            token_cap = get_reasoning_token_cap(agent_label, GPT_MODEL, 2000)
+            token_cap = get_reasoning_token_cap(agent_label, get_agent_model(agent_label), 2000)
             api_params = _build_feedback_api_params(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -1612,7 +1619,7 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
             
             # Get AI model parameters
             agent_label = "FeedbackAgent"
-            token_cap = get_reasoning_token_cap(agent_label, GPT_MODEL, 1000)
+            token_cap = get_reasoning_token_cap(agent_label, get_agent_model(agent_label), 1000)
             api_params = _build_feedback_api_params(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

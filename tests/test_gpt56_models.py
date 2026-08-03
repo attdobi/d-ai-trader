@@ -59,6 +59,14 @@ def test_gpt56_agent_override_accepts_alias(monkeypatch):
     assert cfg.get_agent_model("SummarizerAgent") == "gpt-5.6-luna"
 
 
+def test_gpt56_feedback_override_resolves(monkeypatch):
+    # Regression: feedback_agent used to hardcode GPT_MODEL and silently
+    # ignore DAI_MODEL_FEEDBACK; the config side must resolve the alias.
+    cfg = _cfg(monkeypatch, env={"DAI_MODEL_FEEDBACK": "sol"})
+    assert cfg.AGENT_MODEL_OVERRIDES["feedback"] == "gpt-5.6-sol"
+    assert cfg.get_agent_model("FeedbackAgent") == "gpt-5.6-sol"
+
+
 def test_gpt56_global_env_model(monkeypatch):
     cfg = _cfg(monkeypatch, env={"DAI_GPT_MODEL": "gpt-5.6-terra"})
     assert cfg.get_gpt_model() == "gpt-5.6-terra"
