@@ -1847,6 +1847,16 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
 
     with engine.begin() as conn:
+        # Two separate figures: `available_cash` is the settled-funds BUY BUDGET
+        # (gates order sizing); the CASH holdings row tracks TOTAL account cash.
+        # Overwriting the row with the budget made every post-buy portfolio
+        # snapshot dip by the unsettled amount until the next Schwab sync.
+        _cash_row = conn.execute(text("""
+            SELECT current_value FROM holdings
+            WHERE ticker = 'CASH' AND config_hash = :config_hash
+        """), {"config_hash": config_hash}).fetchone()
+        cash_row_balance = float(_cash_row.current_value) if _cash_row else float(available_cash)
+
         for decision in buy_decisions:
             ticker = decision.get("ticker")
             amount = float(decision.get("amount_usd", 0))
@@ -2053,8 +2063,11 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     })
                     print(f"Bought {shares} shares of {clean_ticker} at ${price:.2f} for ${actual_spent:.2f}")
 
-                # Update cash balance
+                # Update cash: budget for further buys, and the account CASH row
+                # decremented from its own (total-cash) value — not overwritten
+                # with the budget.
                 available_cash -= actual_spent
+                cash_row_balance = max(cash_row_balance - actual_spent, 0.0)
                 conn.execute(text("""
                     UPDATE holdings SET
                         current_price = :cash,
@@ -2062,7 +2075,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                         total_value = :cash,
                         current_price_timestamp = :timestamp
                     WHERE ticker = 'CASH' AND config_hash = :config_hash
-                """), {"cash": available_cash, "timestamp": timestamp, "config_hash": config_hash})
+                """), {"cash": cash_row_balance, "timestamp": timestamp, "config_hash": config_hash})
 
             except Exception as e:
                 print(f"❌ Error executing buy for {ticker}: {e}")

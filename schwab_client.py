@@ -1259,6 +1259,12 @@ def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
         total_value = sum(p.get("market_value", 0) for p in formatted_positions)
         if account_value == 0 and total_value:
             account_value = total_value
+        # Authoritative whole-account value: positions + ALL cash (settled AND
+        # unsettled). This is what charts/history must use — settled/available
+        # figures are trading guardrails, not the account's worth.
+        liquidation_value = _first_non_none(balances, ["liquidationValue"], 0.0)
+        if not liquidation_value:
+            liquidation_value = total_value + float(cash_balance_settled or 0.0)
 
         baseline_funds = funds_info.get("explicit", funds_available_raw) or funds_available_raw
         effective_with_ledger = compute_effective_funds(baseline_funds)
@@ -1296,6 +1302,10 @@ def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
             "settled_positions": settled_positions,
             "cash_balance": float(cash_balance_settled),
             "cash_balance_settled": float(cash_balance_settled),
+            # Despite the legacy names above, Schwab's cashBalance is TOTAL cash
+            # (settled + unsettled). Exposed under an honest alias too:
+            "total_cash": float(cash_balance_settled or 0.0),
+            "liquidation_value": float(liquidation_value or 0.0),
             "unsettled_cash": float(unsettled_cash),
             "funds_available_raw": float(funds_available_raw),
             "funds_available_explicit": funds_info.get("explicit", funds_available_raw),

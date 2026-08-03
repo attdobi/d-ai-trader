@@ -598,6 +598,14 @@ class TradingInterface:
             buying_power = effective_cash
             day_trading_power = 0.0
             account_value = portfolio.get("account_value", total_value + effective_cash)
+            # Whole-account worth (positions + ALL cash, incl. unsettled). Charts
+            # and history must use this — never the settled/available figures,
+            # which dip by the unsettled amount for a day after every sell.
+            total_cash_in_account = float(portfolio.get("total_cash") or cash_balance_settled or 0.0)
+            liquidation_value = float(
+                portfolio.get("liquidation_value")
+                or (total_value + total_cash_in_account)
+            )
 
             print(
                 f"💰 sync_schwab_positions: funds_available={effective_cash:.2f} "
@@ -626,7 +634,9 @@ class TradingInterface:
                 "funds_available_derived": derived_cash,
                 "same_day_net_activity": same_day_net,
                 "order_reserve": order_reserve,
-                "total_portfolio_value": total_value + effective_cash,
+                "total_portfolio_value": liquidation_value,
+                "liquidation_value": liquidation_value,
+                "total_cash": total_cash_in_account,
                 "settled_cash_strict": settled_cash_strict,
                 "available_trading_funds": trading_funds,
                 "account_info": {
@@ -673,7 +683,11 @@ class TradingInterface:
             }
             if persist:
                 try:
-                    self._persist_live_snapshot(formatted_positions, funds_available_display, result)
+                    # Persist TOTAL account cash — passing funds_available_display
+                    # here stamped the settled/display figure into the CASH
+                    # holdings row and portfolio_history, carving transient dips
+                    # (equal to unsettled proceeds) into every chart.
+                    self._persist_live_snapshot(formatted_positions, total_cash_in_account, result)
                 except Exception as persist_err:
                     logger.error("Failed to persist live Schwab snapshot: %s", persist_err)
             return result
@@ -765,7 +779,8 @@ class TradingInterface:
 
         cash_balance = float(cash_balance)
         total_portfolio_value = float(
-            snapshot.get("total_portfolio_value")
+            snapshot.get("liquidation_value")
+            or snapshot.get("total_portfolio_value")
             or (total_current + cash_balance)
         )
         total_profit_loss = total_current - total_invested

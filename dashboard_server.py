@@ -899,10 +899,29 @@ def record_portfolio_snapshot():
         total_portfolio_value = total_current_value + cash_balance
         
         percentage_gain = (total_profit_loss / total_invested * 100) if total_invested > 0 else 0
-        
+
+        # Guard against transient artifacts: this writer only sees the holdings
+        # table, which mid-cycle can hold a partial view (e.g. the CASH row
+        # temporarily carrying a working figure). A >25% single-step collapse
+        # within an hour is an artifact, not a market move — skip it; the next
+        # Schwab-anchored snapshot records the true value.
+        last = conn.execute(text("""
+            SELECT timestamp, total_portfolio_value FROM portfolio_history
+            WHERE config_hash = :config_hash ORDER BY timestamp DESC LIMIT 1
+        """), {"config_hash": config_hash}).fetchone()
+        if last and last.total_portfolio_value:
+            recent = (datetime.utcnow() - last.timestamp) < timedelta(hours=1)
+            if recent and total_portfolio_value < 0.75 * float(last.total_portfolio_value):
+                print(
+                    f"⚠️ Skipping portfolio snapshot: {total_portfolio_value:.2f} is a >25% "
+                    f"drop vs {float(last.total_portfolio_value):.2f} recorded "
+                    f"{last.timestamp} — transient holdings state, not a market move"
+                )
+                return
+
         # Record snapshot
         conn.execute(text("""
-            INSERT INTO portfolio_history 
+            INSERT INTO portfolio_history
             (total_portfolio_value, cash_balance, total_invested, 
              total_profit_loss, percentage_gain, holdings_snapshot, config_hash)
             VALUES (:total_portfolio_value, :cash_balance, :total_invested, 
@@ -999,7 +1018,8 @@ def dashboard():
                         or 0.0
                     )
                     raw_cash_balance = float(
-                        schwab_data.get("cash_balance_settled")
+                        schwab_data.get("total_cash")
+                        or schwab_data.get("cash_balance_settled")
                         or schwab_data.get("cash_balance")
                         or 0.0
                     )
@@ -1021,10 +1041,13 @@ def dashboard():
                             else min(available_cash_effective, settled_cash_guardrail)
                         )
                     funds_available_display = max(0.0, float(funds_available_display))
-                    # Total portfolio value = positions market value + total cash in account
-                    # raw_cash_balance already includes unsettled cash (it's the total),
-                    # so do NOT add unsettled_cash again
-                    total_portfolio_value = total_current_value + raw_cash_balance
+                    # Total portfolio value = Schwab's liquidationValue when we have
+                    # it (positions + ALL cash, settled and unsettled); fall back to
+                    # positions + total cash. Never settled/available figures here.
+                    total_portfolio_value = float(
+                        schwab_data.get("liquidation_value")
+                        or (total_current_value + raw_cash_balance)
+                    )
                     # cash_balance for the hero card: show funds available for trading
                     # (the subtitle shows the full settled/unsettled/reserve breakdown)
                     cash_balance = funds_available_display
@@ -2681,19 +2704,19 @@ def reset_portfolio():
                 total_invested += total_cost
                 total_current += market_value
 
+            # TOTAL account cash (settled + unsettled) — using the available/
+            # display figures here understated the account by any unsettled
+            # proceeds and carved dips into the history charts.
             cash_balance = float(
-                schwab_snapshot.get('funds_available_display')
-                or schwab_snapshot.get('settled_funds_available')
+                schwab_snapshot.get('total_cash')
                 or schwab_snapshot.get('cash_balance')
                 or schwab_snapshot.get('cash_balance_settled')
                 or 0
             )
-            portfolio_cash_total = float(
-                schwab_snapshot.get('funds_available_effective')
-                or schwab_snapshot.get('funds_available_for_trading')
-                or cash_balance
+            total_portfolio_value = float(
+                schwab_snapshot.get('liquidation_value')
+                or (total_current + cash_balance)
             )
-            total_portfolio_value = total_current + portfolio_cash_total
             total_profit_loss = total_current - total_invested
 
             _sync_holdings_with_database(config_hash, processed, cash_balance)
