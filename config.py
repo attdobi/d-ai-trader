@@ -375,17 +375,27 @@ AGENT_MODEL_OVERRIDES = {
     # Company/ticker extraction is a simple text task — let it run on a cheaper
     # model (e.g. gpt-5.4-mini) via DAI_MODEL_COMPANY without touching the decider.
     "company": _load_agent_model_override("DAI_MODEL_COMPANY", "company"),
+    # Prompt-lab critic (adversarial reviewer of prompt-change candidates).
+    # Defaults to the feedback agent's model when unset — the critic should be
+    # at least as capable as the agent whose proposals it judges.
+    "critic": _load_agent_model_override("DAI_MODEL_CRITIC", "critic"),
 }
 
 
 def get_agent_model(agent_name):
     """Get model override for a specific agent profile, else default GPT model."""
     name = (agent_name or "").lower()
+    if "critic" in name:
+        return (
+            AGENT_MODEL_OVERRIDES.get("critic")
+            or AGENT_MODEL_OVERRIDES.get("feedback")
+            or GPT_MODEL
+        )
     if "summarizer" in name:
         return AGENT_MODEL_OVERRIDES.get("summarizer") or GPT_MODEL
     if "decider" in name:
         return AGENT_MODEL_OVERRIDES.get("decider") or GPT_MODEL
-    if "feedback" in name:
+    if "feedback" in name or "evolution" in name:
         return AGENT_MODEL_OVERRIDES.get("feedback") or GPT_MODEL
     if "company" in name or "extraction" in name:
         return AGENT_MODEL_OVERRIDES.get("company") or GPT_MODEL
@@ -414,6 +424,7 @@ DEFAULT_REASONING_LEVELS = {
     "decider": "high",
     "feedback": "high",
     "company": "low",        # ticker/entity extraction — simple, low is plenty
+    "critic": "high",        # adversarial prompt-change reviewer — judge hard
     "default": "medium",
 }
 AGENT_REASONING_ENV_KEYS = {
@@ -421,6 +432,7 @@ AGENT_REASONING_ENV_KEYS = {
     "decider": "DAI_DECIDER_REASONING_LEVEL",
     "feedback": "DAI_FEEDBACK_REASONING_LEVEL",
     "company": "DAI_COMPANY_REASONING_LEVEL",
+    "critic": "DAI_CRITIC_REASONING_LEVEL",
 }
 
 
@@ -428,11 +440,15 @@ def _resolve_reasoning_profile(agent_name: str) -> str:
     if not agent_name:
         return "default"
     name = agent_name.lower()
+    if "critic" in name:
+        return "critic"
     if "summarizer" in name:
         return "summarizer"
     if "decider" in name:
         return "decider"
-    if "feedback" in name:
+    # Prompt-evolution generation runs under the feedback profile: it is the
+    # same improve-the-policy brain, just invoked from the Prompt Lab.
+    if "feedback" in name or "evolution" in name:
         return "feedback"
     if "companyextraction" in name or "company_extraction" in name or "extraction" in name:
         return "company"

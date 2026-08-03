@@ -742,12 +742,25 @@ def initialize_database() -> None:
                 critic_at TIMESTAMP,
                 human_verdict TEXT,
                 human_at TIMESTAMP,
+                human_agrees_critic BOOLEAN,
+                critic_auto BOOLEAN,
                 realized_winrate_delta FLOAT,
                 realized_pnl FLOAT,
                 outcome_measured_at TIMESTAMP
             )
             """,
         )
+        # Migrations for pre-existing installs: explicit RLHF concordance label
+        # (did the human ratify the critic's verdict?) and the auto flag that
+        # separates heuristic verdicts from genuine LLM judgments.
+        conn.execute(text(
+            "ALTER TABLE prompt_change_reviews "
+            "ADD COLUMN IF NOT EXISTS human_agrees_critic BOOLEAN"
+        ))
+        conn.execute(text(
+            "ALTER TABLE prompt_change_reviews "
+            "ADD COLUMN IF NOT EXISTS critic_auto BOOLEAN"
+        ))
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(

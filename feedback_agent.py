@@ -891,6 +891,53 @@ class TradeOutcomeTracker:
         """Analyze decision patterns for a specific config"""
         return self._analyze_decision_patterns(days_back, config_hash)
 
+    def _get_prompt_review_lessons(self, limit=8):
+        """Recent prompt-change reviews as compact lesson lines: the critic's
+        verdict/objection and the human's RLHF response (agree/override), plus
+        realized outcome when measured. Empty string when none exist."""
+        try:
+            config_hash = get_current_config_hash()
+            with engine.connect() as conn:
+                # Human-labeled rows first so unreviewed batches can't evict
+                # the RLHF signal; drop outage rows (confidence 0, non-auto) —
+                # they carry no judgment at all.
+                rows = conn.execute(text("""
+                    SELECT created_at::date AS review_date, agent_type, from_version,
+                           critic_verdict, COALESCE(critic_auto, FALSE) AS critic_auto,
+                           ROUND(critic_confidence::numeric, 2) AS conf,
+                           LEFT(COALESCE(critic_reason, ''), 250) AS critic_reason,
+                           human_verdict, human_agrees_critic, realized_winrate_delta
+                    FROM prompt_change_reviews
+                    WHERE config_hash = :h
+                      AND (COALESCE(critic_confidence, 0) > 0
+                           OR COALESCE(critic_auto, FALSE))
+                    ORDER BY (human_verdict IS NOT NULL) DESC, created_at DESC
+                    LIMIT :lim
+                """), {"h": config_hash, "lim": int(limit)}).fetchall()
+            lines = []
+            for r in rows:
+                human = r.human_verdict or "pending"
+                if r.human_agrees_critic is True:
+                    human += " (agreed with critic)"
+                elif r.human_agrees_critic is False:
+                    human += " (OVERRODE critic)"
+                verdict = r.critic_verdict
+                if r.critic_auto:
+                    verdict = f"auto-{verdict} (heuristic, no LLM judgment)"
+                else:
+                    verdict = f"{verdict}({r.conf})"
+                outcome = ""
+                if r.realized_winrate_delta is not None:
+                    outcome = f" realized_winrate_delta={float(r.realized_winrate_delta):+.3f}"
+                lines.append(
+                    f"- {r.review_date} {r.agent_type} v{r.from_version}: "
+                    f"critic={verdict} human={human}{outcome} — {r.critic_reason}"
+                )
+            return "\n".join(lines)
+        except Exception as exc:
+            print(f"⚠️ Could not load prompt review lessons: {exc}")
+            return ""
+
     def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis):
         """Use AI to generate feedback for improving agent performance"""
         outcomes_summary = json.dumps({
@@ -908,7 +955,12 @@ class TradeOutcomeTracker:
         
         # Get recent individual trades for detailed analysis
         recent_trades = self._get_detailed_trade_analysis()
-        
+
+        # RLHF loop-closure: what happened to past prompt-change proposals —
+        # the critic's verdicts and the human's response. Guidance that ignores
+        # these objections produces proposals that get rejected again.
+        critic_lessons = self._get_prompt_review_lessons()
+
         # FIXED TEMPLATE COMPONENTS (never change)
         FEEDBACK_BASE_INSTRUCTIONS = '''Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
 
@@ -921,12 +973,28 @@ Focus on:
 6. Specific trade examples of mistakes and successes'''
 
         # MODIFIABLE COMPONENTS (updated based on context data)
+        critic_lessons_block = ""
+        if critic_lessons:
+            critic_lessons_block = f'''
+
+PROMPT-CHANGE REVIEW HISTORY (critic verdicts + human RLHF response):
+{critic_lessons}
+
+Your guidance seeds future prompt-change proposals, which must survive a
+skeptical critic and a human reviewer. Learn from the verdicts above:
+- Ground every recommendation in SPECIFIC trades from the data (cite tickers
+  and their outcomes) — unverifiable trade-level claims get proposals rejected.
+- Prefer one or two testable changes over broad bundles whose impact cannot
+  be attributed.
+- Where the human agreed with a rejection, treat that objection as a standing
+  requirement; where the human overrode the critic, weight the human.'''
+
         performance_guidance = f'''
 Performance Data:
 {outcomes_summary}
 
 Recent Trade Details (for pattern analysis):
-{json.dumps(recent_trades, indent=2)}
+{json.dumps(recent_trades, indent=2)}{critic_lessons_block}
 
 ANALYSIS REQUIREMENTS:
 - Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic

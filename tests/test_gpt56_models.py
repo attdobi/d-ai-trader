@@ -67,6 +67,33 @@ def test_gpt56_feedback_override_resolves(monkeypatch):
     assert cfg.get_agent_model("FeedbackAgent") == "gpt-5.6-sol"
 
 
+def test_critic_defaults_to_feedback_model(monkeypatch):
+    # The prompt-lab critic should judge on (at least) the feedback agent's
+    # model when no dedicated override is set.
+    cfg = _cfg(monkeypatch, env={"DAI_MODEL_FEEDBACK": "sol", "DAI_MODEL_CRITIC": None})
+    assert cfg.get_agent_model("CriticAgent") == "gpt-5.6-sol"
+
+
+def test_critic_dedicated_override_wins(monkeypatch):
+    cfg = _cfg(monkeypatch, env={"DAI_MODEL_FEEDBACK": "sol", "DAI_MODEL_CRITIC": "terra"})
+    assert cfg.get_agent_model("CriticAgent") == "gpt-5.6-terra"
+
+
+def test_critic_reasoning_defaults_high(monkeypatch):
+    cfg = _cfg(monkeypatch)
+    assert cfg.get_agent_reasoning_level("CriticAgent") == "high"
+    assert cfg.get_reasoning_params("CriticAgent", "gpt-5.6-sol") == {"reasoning_effort": "high"}
+
+
+def test_prompt_evolution_uses_feedback_profile(monkeypatch):
+    cfg = _cfg(monkeypatch, env={
+        "DAI_MODEL_FEEDBACK": "sol",
+        "DAI_FEEDBACK_REASONING_LEVEL": "high",
+    })
+    assert cfg.get_agent_model("PromptEvolutionAgent") == "gpt-5.6-sol"
+    assert cfg.get_agent_reasoning_level("PromptEvolutionAgent") == "high"
+
+
 def test_gpt56_global_env_model(monkeypatch):
     cfg = _cfg(monkeypatch, env={"DAI_GPT_MODEL": "gpt-5.6-terra"})
     assert cfg.get_gpt_model() == "gpt-5.6-terra"

@@ -17,12 +17,20 @@ from sqlalchemy.exc import IntegrityError
 from config import (
     engine,
     get_gpt_model,
+    get_agent_model,
+    get_reasoning_params,
+    get_agent_reasoning_level,
+    PromptManager,
     get_prompt_version_config,
     get_trading_mode,
     get_current_config_hash,
     SCHWAB_ACCOUNT_HASH,
     IS_MARGIN_ACCOUNT,
 )
+
+# Telemetry-only PromptManager (no client/session needed): used to log
+# prompt-lab generation + critic calls into api_usage like every other agent.
+_prompt_lab_usage = PromptManager(client=None, session=None)
 
 import importlib
 import difflib
@@ -3262,6 +3270,100 @@ def _summarize_changes(changes):
     }
 
 
+def _fetch_trade_evidence(config_hash, days=30, cap=40):
+    """Per-trade outcome rows so generation and the critic can ground (and
+    verify) claims in actual trades instead of aggregates. Balanced sample:
+    worst half + best half, so the loop learns what WORKS as much as what
+    fails, and states its own coverage so nobody mistakes a sample for the
+    population. Returns {total_closed_trades, coverage, worst, best}."""
+    half = max(1, int(cap) // 2)
+    base_select = """
+        SELECT ticker, sell_timestamp::date AS sell_date,
+               -- gain_loss_percentage is stored as a FRACTION (-0.079 = -7.9%)
+               ROUND((gain_loss_percentage * 100)::numeric, 1) AS gain_pct,
+               ROUND(gain_loss_amount::numeric, 2) AS gain_usd,
+               hold_duration_days, outcome_category,
+               LEFT(COALESCE(original_reason, ''), 140) AS buy_reason,
+               LEFT(COALESCE(sell_reason, ''), 140) AS sell_reason
+        FROM trade_outcomes
+        WHERE config_hash = :h
+          AND sell_timestamp > NOW() - make_interval(days => :days)
+    """
+    try:
+        with engine.connect() as conn:
+            params = {"h": config_hash, "days": int(days), "lim": half}
+            total = conn.execute(text("""
+                SELECT COUNT(*) FROM trade_outcomes
+                WHERE config_hash = :h
+                  AND sell_timestamp > NOW() - make_interval(days => :days)
+            """), params).scalar() or 0
+            worst = conn.execute(
+                text(base_select + " ORDER BY gain_loss_percentage ASC LIMIT :lim"),
+                params).fetchall()
+            best = conn.execute(
+                text(base_select + " ORDER BY gain_loss_percentage DESC LIMIT :lim"),
+                params).fetchall()
+        worst_rows = [dict(r._mapping) for r in worst]
+        best_keys = {(r.ticker, str(r.sell_date), str(r.gain_pct)) for r in worst}
+        best_rows = [
+            dict(r._mapping) for r in best
+            if (r.ticker, str(r.sell_date), str(r.gain_pct)) not in best_keys
+        ]
+        omitted = max(0, int(total) - len(worst_rows) - len(best_rows))
+        return {
+            "total_closed_trades": int(total),
+            "coverage": (
+                f"{len(worst_rows)} worst + {len(best_rows)} best of {total} closed trades "
+                f"in the last {days}d; {omitted} mid-range trades omitted — do not claim "
+                "population-level facts (e.g. 'no trade did X') beyond these rows."
+            ),
+            "worst": worst_rows,
+            "best": best_rows,
+        }
+    except Exception as exc:
+        print(f"⚠️ Could not fetch trade evidence: {exc}")
+        return {"total_closed_trades": 0, "coverage": "unavailable", "worst": [], "best": []}
+
+
+def _fetch_prompt_review_history(config_hash, agent_type=None, limit=8, genuine_only=False):
+    """Recent prompt-change reviews — critic verdicts, the human's RLHF
+    verdicts, and realized outcomes when measured. This is the signal the
+    generation and feedback prompts learn from: WHY past candidates were
+    rejected, and whether the human agreed with the critic.
+
+    Human-labeled rows are kept in the window ahead of pending ones, so a run
+    of unreviewed batches can never evict the actual RLHF signal.
+    genuine_only=True additionally drops heuristic auto-verdicts and
+    outage rows (confidence 0) — required for critic self-calibration, where
+    a non-judgment must never count as a judgment."""
+    try:
+        params = {"h": config_hash, "lim": int(limit)}
+        clauses = ""
+        if agent_type:
+            clauses += " AND agent_type = :a"
+            params["a"] = agent_type
+        if genuine_only:
+            clauses += (" AND COALESCE(critic_auto, FALSE) = FALSE"
+                        " AND COALESCE(critic_confidence, 0) > 0")
+        with engine.connect() as conn:
+            rows = conn.execute(text(f"""
+                SELECT created_at::date AS review_date, agent_type,
+                       from_version, to_version, critic_verdict, critic_auto,
+                       ROUND(critic_confidence::numeric, 2) AS critic_confidence,
+                       LEFT(COALESCE(critic_reason, ''), 300) AS critic_reason,
+                       human_verdict, human_agrees_critic,
+                       realized_winrate_delta, realized_pnl
+                FROM prompt_change_reviews
+                WHERE config_hash = :h {clauses}
+                ORDER BY (human_verdict IS NOT NULL) DESC, created_at DESC
+                LIMIT :lim
+            """), params).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as exc:
+        print(f"⚠️ Could not fetch prompt review history: {exc}")
+        return []
+
+
 def _critique_candidate(candidate, feedback_summary=None):
     """Critic agent: decide whether a candidate change is worth shipping.
 
@@ -3284,6 +3386,14 @@ def _critique_candidate(candidate, feedback_summary=None):
         }
 
     perf = feedback_summary or {}
+    config_hash = get_current_config_hash()
+    # Give the critic what it needs to VERIFY claims instead of rejecting for
+    # lack of evidence: per-trade outcomes, plus its own recent verdicts with
+    # the human's RLHF response for calibration.
+    trade_evidence = _fetch_trade_evidence(config_hash)
+    # genuine_only: heuristic auto-rejects and outage rows are NOT judgments —
+    # feeding them here taught the critic to "calibrate" on its own downtime.
+    own_track_record = _fetch_prompt_review_history(config_hash, limit=10, genuine_only=True)
     critic_payload = {
         'agent_type': candidate.get('agent_type'),
         'change_summary': summary,
@@ -3295,13 +3405,20 @@ def _critique_candidate(candidate, feedback_summary=None):
             'total_trades': perf.get('total_trades'),
             'decisions_analyzed': perf.get('decisions_analyzed'),
         },
+        'trade_level_evidence': trade_evidence,
+        'your_recent_verdicts_and_human_response': own_track_record,
     }
 
     try:
         from openai import OpenAI
         client = OpenAI()
-        model = get_gpt_model()
-        response = client.chat.completions.create(
+        model = get_agent_model('CriticAgent')
+        reasoning_params = get_reasoning_params('CriticAgent', model)
+        print(
+            f"🧑‍⚖️ Prompt-lab critic: model={model} "
+            f"reasoning={get_agent_reasoning_level('CriticAgent')}"
+        )
+        api_kwargs = dict(
             model=model,
             messages=[
                 {
@@ -3316,6 +3433,18 @@ def _critique_candidate(candidate, feedback_summary=None):
                         'containment. REJECT if it is churn, ungrounded speculation, weakens risk discipline '
                         'without evidence, over-fits to a tiny sample, or just reorganizes text. When in doubt, '
                         'REJECT — a missed improvement is cheaper than shipping noise into the policy.\n\n'
+                        'VERIFY BEFORE YOU JUDGE: trade_level_evidence contains the actual per-trade outcomes '
+                        '(worst first). Check the candidate\'s claims against those rows — a claim the rows '
+                        'support is grounded even if the candidate did not cite them; a claim the rows '
+                        'contradict is disqualifying. Cite tickers from the evidence in your reason.\n\n'
+                        'CALIBRATE — CAUTIOUSLY: your_recent_verdicts_and_human_response shows your past '
+                        'genuine verdicts and the human\'s response (the human is the final RLHF authority). '
+                        'Adjust your bar ONLY on a consistent pattern: three or more same-direction human '
+                        'overrides. A single disagreement is noise — never chase it. When '
+                        'realized_winrate_delta is present it OUTRANKS human concordance: a shipped change '
+                        'that lowered win rate was a wrong approval no matter who approved it, and a rejected '
+                        'direction later proven right should soften your bar for that direction. Judge the '
+                        'evidence in front of you; never approve merely because you predict the human will.\n\n'
                         'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one or two '
                         'sentences, "confidence": number 0-1}.'
                     ),
@@ -3324,11 +3453,22 @@ def _critique_candidate(candidate, feedback_summary=None):
                     'role': 'user',
                     'content': (
                         'Review this candidate prompt change:\n\n'
-                        f"{json.dumps(critic_payload, ensure_ascii=False, indent=2)}"
+                        f"{json.dumps(critic_payload, ensure_ascii=False, indent=2, default=str)}"
                     ),
                 },
             ],
         )
+        if reasoning_params:
+            api_kwargs.update(reasoning_params)
+        try:
+            response = client.chat.completions.create(**api_kwargs)
+        except Exception as exc:
+            if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
+                api_kwargs.pop('reasoning_effort', None)
+                response = client.chat.completions.create(**api_kwargs)
+            else:
+                raise
+        _prompt_lab_usage._record_api_usage('CriticAgent', model, response)
         content = ''
         if response and getattr(response, 'choices', None):
             content = response.choices[0].message.content
@@ -3369,11 +3509,13 @@ def _record_candidate_review(candidate, config_hash):
                 INSERT INTO prompt_change_reviews (
                     config_hash, agent_type, from_version,
                     change_summary, changes, is_substantive,
-                    critic_verdict, critic_reason, critic_confidence, critic_at
+                    critic_verdict, critic_reason, critic_confidence, critic_at,
+                    critic_auto
                 ) VALUES (
                     :config_hash, :agent_type, :from_version,
                     :change_summary, :changes, :is_substantive,
-                    :critic_verdict, :critic_reason, :critic_confidence, :critic_at
+                    :critic_verdict, :critic_reason, :critic_confidence, :critic_at,
+                    :critic_auto
                 ) RETURNING id
             """), {
                 'config_hash': config_hash,
@@ -3386,6 +3528,9 @@ def _record_candidate_review(candidate, config_hash):
                 'critic_reason': critic.get('reason'),
                 'critic_confidence': critic.get('confidence'),
                 'critic_at': datetime.utcnow(),
+                # Heuristic (no-LLM) verdicts must stay distinguishable — they
+                # are not judgments and must not feed RLHF calibration.
+                'critic_auto': bool(critic.get('auto')),
             }).fetchone()
             return row.id if row else None
     except Exception as exc:
@@ -3498,6 +3643,11 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         'recent_feedback': recent_feedback,
         'performance_stats': stats,
         'recent_headlines': headlines,
+        # RLHF loop-closure: what the critic and the human did with PAST
+        # candidates for this agent, and the per-trade rows that any new
+        # claim must be groundable in.
+        'past_review_verdicts': _fetch_prompt_review_history(config_hash, agent_type, limit=8),
+        'trade_level_evidence': _fetch_trade_evidence(config_hash),
         'goal': (
             'Improve prompt quality based on current performance and feedback history. '
             'Preserve placeholders/tokens and actionable structure while tightening clarity.'
@@ -3507,9 +3657,14 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
 
     from openai import OpenAI
     client = OpenAI()
-    model = get_gpt_model()
+    model = get_agent_model('PromptEvolutionAgent')
+    generation_reasoning = get_reasoning_params('PromptEvolutionAgent', model)
+    print(
+        f"🧬 Prompt-lab generation ({agent_type}): model={model} "
+        f"reasoning={get_agent_reasoning_level('PromptEvolutionAgent')}"
+    )
 
-    response = client.chat.completions.create(
+    api_kwargs = dict(
         model=model,
         messages=[
             {
@@ -3536,6 +3691,14 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'is MINOR and behavioral=false, even if you rewrote a whole paragraph. If you only reworded '
                     'things, say so honestly with minor/false entries — do not inflate. The goal is to improve '
                     'win rate by learning from past wins and losses, not to churn text.\n\n'
+                    'LEARN FROM PAST VERDICTS (past_review_verdicts): earlier candidates were judged by a '
+                    'skeptical critic and a human (the final RLHF authority). A new candidate that repeats a '
+                    'rejected pattern without addressing the stated objection WILL be rejected again. The '
+                    'recurring bar to clear: (1) ground every behavioral change in specific rows of '
+                    'trade_level_evidence — cite tickers and their gain_pct in the "why" fields; (2) propose '
+                    'FEW, testable changes rather than bundling many edits whose impact cannot be attributed; '
+                    '(3) never claim trade-level facts (stop breaches, loss tails, outliers) that the evidence '
+                    'rows do not show. If the evidence does not support a change, do not propose it.\n\n'
                     'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
                     '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
                     'HOLD and SELL are ONLY valid for tickers the agent currently owns. '
@@ -3553,11 +3716,22 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                 'role': 'user',
                 'content': (
                     'Generate an improved prompt package from this input:\n\n'
-                    f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+                    f"{json.dumps(prompt_payload, ensure_ascii=False, indent=2, default=str)}"
                 ),
             },
         ],
     )
+    if generation_reasoning:
+        api_kwargs.update(generation_reasoning)
+    try:
+        response = client.chat.completions.create(**api_kwargs)
+    except Exception as exc:
+        if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
+            api_kwargs.pop('reasoning_effort', None)
+            response = client.chat.completions.create(**api_kwargs)
+        else:
+            raise
+    _prompt_lab_usage._record_api_usage('PromptEvolutionAgent', model, response)
 
     content = ''
     if response and getattr(response, 'choices', None):
@@ -4029,11 +4203,22 @@ def record_prompt_review_decision():
             return jsonify({'error': "verdict must be 'approve' or 'reject'"}), 400
 
         with engine.begin() as conn:
+            # human_agrees_critic is the explicit RLHF concordance label:
+            # TRUE  = human ratified the critic's genuine verdict
+            # FALSE = human overrode the critic (either direction)
+            # NULL  = no genuine critic judgment existed (heuristic auto-verdict
+            #         or critic outage) — concordance is undefined, and counting
+            #         it would poison the critic's calibration signal.
             conn.execute(text("""
                 UPDATE prompt_change_reviews
                 SET human_verdict = :verdict,
                     human_at = :now,
-                    to_version = COALESCE(:to_version, to_version)
+                    to_version = COALESCE(:to_version, to_version),
+                    human_agrees_critic = CASE
+                        WHEN COALESCE(critic_auto, FALSE)
+                             OR COALESCE(critic_confidence, 0) = 0 THEN NULL
+                        ELSE (critic_verdict = :verdict)
+                    END
                 WHERE id = :id
             """), {
                 'verdict': verdict,
