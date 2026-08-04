@@ -906,7 +906,8 @@ class TradeOutcomeTracker:
                            critic_verdict, COALESCE(critic_auto, FALSE) AS critic_auto,
                            ROUND(critic_confidence::numeric, 2) AS conf,
                            LEFT(COALESCE(critic_reason, ''), 250) AS critic_reason,
-                           human_verdict, human_agrees_critic, realized_winrate_delta
+                           human_verdict, human_agrees_critic, human_sections,
+                           realized_winrate_delta
                     FROM prompt_change_reviews
                     WHERE config_hash = :h
                       AND (COALESCE(critic_confidence, 0) > 0
@@ -917,7 +918,10 @@ class TradeOutcomeTracker:
             lines = []
             for r in rows:
                 human = r.human_verdict or "pending"
-                if r.human_agrees_critic is True:
+                if r.human_verdict == "partial" and r.human_sections:
+                    shipped = ", ".join((r.human_sections or {}).get("approved", []))
+                    human = f"partial (shipped only: {shipped or 'none'})"
+                elif r.human_agrees_critic is True:
                     human += " (agreed with critic)"
                 elif r.human_agrees_critic is False:
                     human += " (OVERRODE critic)"

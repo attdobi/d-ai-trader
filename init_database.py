@@ -743,6 +743,7 @@ def initialize_database() -> None:
                 human_verdict TEXT,
                 human_at TIMESTAMP,
                 human_agrees_critic BOOLEAN,
+                human_sections JSONB,
                 critic_auto BOOLEAN,
                 realized_winrate_delta FLOAT,
                 realized_pnl FLOAT,
@@ -760,6 +761,10 @@ def initialize_database() -> None:
         conn.execute(text(
             "ALTER TABLE prompt_change_reviews "
             "ADD COLUMN IF NOT EXISTS critic_auto BOOLEAN"
+        ))
+        conn.execute(text(
+            "ALTER TABLE prompt_change_reviews "
+            "ADD COLUMN IF NOT EXISTS human_sections JSONB"
         ))
 
         # API cost / token-usage telemetry (one row per OpenAI call).

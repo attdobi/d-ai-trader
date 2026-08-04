@@ -3351,7 +3351,7 @@ def _fetch_prompt_review_history(config_hash, agent_type=None, limit=8, genuine_
                        from_version, to_version, critic_verdict, critic_auto,
                        ROUND(critic_confidence::numeric, 2) AS critic_confidence,
                        LEFT(COALESCE(critic_reason, ''), 300) AS critic_reason,
-                       human_verdict, human_agrees_critic,
+                       human_verdict, human_agrees_critic, human_sections,
                        realized_winrate_delta, realized_pnl
                 FROM prompt_change_reviews
                 WHERE config_hash = :h {clauses}
@@ -4099,23 +4099,54 @@ def apply_prompt_evolution_candidate():
         data = request.get_json(silent=True) or {}
 
         agent_type = data.get('agent_type')
-        system_prompt = (data.get('system_prompt') or '').strip()
-        user_prompt_template = (data.get('user_prompt_template') or '').strip()
-        strategy_directives = (data.get('strategy_directives') or '').strip()
+        candidate_fields = {
+            'system_prompt': (data.get('system_prompt') or '').strip(),
+            'user_prompt_template': (data.get('user_prompt_template') or '').strip(),
+            'strategy_directives': (data.get('strategy_directives') or '').strip(),
+            'soul': (data.get('soul') or '').strip(),
+            'memory': (data.get('memory') or '').strip(),
+        }
         description = (data.get('description') or '').strip()
-        soul = (data.get('soul') or '').strip()
-        memory = (data.get('memory') or '').strip()
 
         if not agent_type:
             return jsonify({'error': 'agent_type is required'}), 400
-        if not system_prompt or not user_prompt_template:
-            return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
 
         config_hash = get_current_config_hash()
 
         # Normalize legacy name
         if agent_type == "feedback_analyzer":
             agent_type = "FeedbackAgent"
+
+        # Per-section approval: take only the approved sections from the
+        # candidate and keep the current active version's text for the rest.
+        # Omitted/None approved_sections = ship the full candidate (legacy).
+        approved_sections = data.get('approved_sections')
+        if isinstance(approved_sections, list):
+            approved = {s for s in approved_sections if s in candidate_fields}
+            with engine.connect() as conn:
+                current = conn.execute(text("""
+                    SELECT system_prompt, user_prompt_template, strategy_directives,
+                           soul, memory
+                    FROM prompt_versions
+                    WHERE agent_type = :agent_type AND config_hash = :config_hash
+                      AND is_active = TRUE
+                    ORDER BY version DESC LIMIT 1
+                """), {'agent_type': agent_type, 'config_hash': config_hash}).fetchone()
+            if current is None and approved != set(candidate_fields):
+                return jsonify({'error': 'No active version to keep unapproved sections from'}), 400
+            if current is not None:
+                for field in candidate_fields:
+                    if field not in approved:
+                        candidate_fields[field] = (getattr(current, field) or '').strip()
+
+        system_prompt = candidate_fields['system_prompt']
+        user_prompt_template = candidate_fields['user_prompt_template']
+        strategy_directives = candidate_fields['strategy_directives']
+        soul = candidate_fields['soul']
+        memory = candidate_fields['memory']
+
+        if not system_prompt or not user_prompt_template:
+            return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
 
         with engine.begin() as conn:
             conn.execute(text("""
@@ -4197,24 +4228,29 @@ def record_prompt_review_decision():
         review_id = data.get('review_id')
         verdict = str(data.get('verdict', '') or '').strip().lower()
         to_version = data.get('to_version')
+        sections = data.get('sections')
         if not review_id:
             return jsonify({'error': 'review_id is required'}), 400
-        if verdict not in ('approve', 'reject'):
-            return jsonify({'error': "verdict must be 'approve' or 'reject'"}), 400
+        if verdict not in ('approve', 'reject', 'partial'):
+            return jsonify({'error': "verdict must be 'approve', 'reject' or 'partial'"}), 400
 
         with engine.begin() as conn:
             # human_agrees_critic is the explicit RLHF concordance label:
             # TRUE  = human ratified the critic's genuine verdict
             # FALSE = human overrode the critic (either direction)
-            # NULL  = no genuine critic judgment existed (heuristic auto-verdict
-            #         or critic outage) — concordance is undefined, and counting
-            #         it would poison the critic's calibration signal.
+            # NULL  = concordance undefined — no genuine critic judgment existed
+            #         (heuristic auto-verdict or critic outage), or the human
+            #         shipped a PARTIAL subset (neither ratification nor
+            #         override of an all-or-nothing verdict).
+            # human_sections carries the per-section detail for the RLHF loop.
             conn.execute(text("""
                 UPDATE prompt_change_reviews
                 SET human_verdict = :verdict,
                     human_at = :now,
                     to_version = COALESCE(:to_version, to_version),
+                    human_sections = COALESCE(CAST(:sections AS JSONB), human_sections),
                     human_agrees_critic = CASE
+                        WHEN :verdict = 'partial' THEN NULL
                         WHEN COALESCE(critic_auto, FALSE)
                              OR COALESCE(critic_confidence, 0) = 0 THEN NULL
                         ELSE (critic_verdict = :verdict)
@@ -4224,6 +4260,7 @@ def record_prompt_review_decision():
                 'verdict': verdict,
                 'now': datetime.utcnow(),
                 'to_version': to_version,
+                'sections': json.dumps(sections) if sections else None,
                 'id': review_id,
             })
         return jsonify({'success': True, 'review_id': review_id, 'verdict': verdict})
@@ -4242,13 +4279,16 @@ def get_critic_scorecard():
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT critic_verdict, human_verdict, realized_winrate_delta
+                SELECT critic_verdict, human_verdict, human_agrees_critic,
+                       realized_winrate_delta
                 FROM prompt_change_reviews
                 WHERE config_hash = :h AND critic_verdict IS NOT NULL
             """), {'h': config_hash}).fetchall()
 
-        both = [r for r in rows if r.human_verdict]
-        human_agree = sum(1 for r in both if r.critic_verdict == r.human_verdict)
+        # Concordance uses the explicit label: partial approvals and
+        # auto/outage verdicts carry NULL and are excluded from the rate.
+        both = [r for r in rows if r.human_agrees_critic is not None]
+        human_agree = sum(1 for r in both if r.human_agrees_critic)
 
         market_rows = [r for r in rows if r.realized_winrate_delta is not None]
         market_judged = [critic_vs_market(r.critic_verdict, float(r.realized_winrate_delta))

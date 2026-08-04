@@ -26,13 +26,15 @@ function broadcastPromptApplied(agentType, version) {
 
 // Record the human's approve/reject on a candidate review row. Fire-and-forget:
 // this is training data for the critic, but must never block the UI.
-function recordReviewDecision(reviewId, verdict, toVersion) {
+function recordReviewDecision(reviewId, verdict, toVersion, sections) {
   if (!reviewId) return;
   try {
+    const body = { review_id: reviewId, verdict, to_version: toVersion };
+    if (sections) body.sections = sections;
     fetch('/api/prompt-evolution/record-decision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ review_id: reviewId, verdict, to_version: toVersion }),
+      body: JSON.stringify(body),
     }).catch(() => {});
   } catch (_) { /* ignore */ }
 }
@@ -637,7 +639,7 @@ function countDiffStats(diffLines) {
   return { added, removed };
 }
 
-function buildDiffSection(label, diffLines, openByDefault, sectionChanges) {
+function buildDiffSection(label, diffLines, openByDefault, sectionChanges, sectionToggle) {
   const wrap = document.createElement('details');
   wrap.className = 'pe-diff-section';
   if (openByDefault) wrap.open = true;
@@ -650,6 +652,23 @@ function buildDiffSection(label, diffLines, openByDefault, sectionChanges) {
       ? `<span style="color:#2e7d32;">+${added}</span> / <span style="color:#c62828;">-${removed}</span>`
       : '<span style="color:#888;">no changes</span>'
   }</span>`;
+
+  // Per-section approval checkbox — only on sections the candidate actually
+  // changes. Checked = ship this section; unchecked = keep the current text.
+  if (sectionToggle && totalChanged) {
+    const toggleWrap = document.createElement('label');
+    toggleWrap.className = 'pe-section-toggle';
+    toggleWrap.title = 'Checked = ship this section; unchecked = keep the current version of it';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = sectionToggle.initial !== false;
+    toggleWrap.appendChild(cb);
+    toggleWrap.appendChild(document.createTextNode(' include'));
+    // Keep checkbox clicks from toggling the <details> open/closed state.
+    toggleWrap.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => sectionToggle.onChange(cb.checked));
+    summary.appendChild(toggleWrap);
+  }
   wrap.appendChild(summary);
 
   // Justification chips — one per change the generator attributed to this
@@ -877,8 +896,22 @@ function setupBatchPromptLab() {
         { key: 'soul_diff', section: 'soul', label: 'Soul (mission + per-agent identity)', open: false },
         { key: 'memory_diff', section: 'memory', label: 'Memory (Obsidian-style log)', open: true },
       ];
+      // Per-section approval state: every CHANGED section starts included; the
+      // human can uncheck any of them to ship a partial version.
+      const changedSections = [];
+      const sectionApproval = {};
+      diffMap.forEach(({ key, section: sec }) => {
+        const s = countDiffStats(candidate.diffs?.[key] || []);
+        if (s.added + s.removed > 0) {
+          changedSections.push(sec);
+          sectionApproval[sec] = true;
+        }
+      });
       diffMap.forEach(({ key, section: sec, label: lbl, open }) => {
-        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open, changesBySection[sec] || []);
+        const toggle = changedSections.includes(sec)
+          ? { initial: true, onChange: (on) => { sectionApproval[sec] = on; updateApproveState(); } }
+          : null;
+        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open, changesBySection[sec] || [], toggle);
         panel.appendChild(section);
       });
 
@@ -903,8 +936,27 @@ function setupBatchPromptLab() {
         panel.appendChild(overrideWrap);
         overrideWrap.querySelector('input').addEventListener('change', (e) => {
           overrideOn = e.target.checked;
-          approveBtn.disabled = !overrideOn;
+          updateApproveState();
         });
+      }
+
+      // Approve button reflects the section selection: full approval, partial
+      // ("Approve 2/4 sections"), or disabled when nothing is selected.
+      function selectedSections() {
+        return changedSections.filter((s) => sectionApproval[s]);
+      }
+      function updateApproveState() {
+        if (approveBtn.dataset.done) return; // decision already made
+        const sel = selectedSections();
+        const noneLeft = changedSections.length > 0 && sel.length === 0;
+        approveBtn.disabled = !overrideOn || noneLeft;
+        if (noneLeft) {
+          approveBtn.textContent = '✅ Approve (select a section)';
+        } else if (sel.length === changedSections.length) {
+          approveBtn.textContent = '✅ Approve & Activate';
+        } else {
+          approveBtn.textContent = `✅ Approve ${sel.length}/${changedSections.length} Sections`;
+        }
       }
 
       // Decision bar — editable description + approve/reject
@@ -943,11 +995,17 @@ function setupBatchPromptLab() {
       decisionBar.appendChild(statusSpan);
 
       approveBtn.addEventListener('click', async () => {
-        const description = (descInput.value || '').trim() || candidate.description;
+        let description = (descInput.value || '').trim() || candidate.description;
         if (!description) {
           statusSpan.style.color = '#c62828';
           statusSpan.textContent = 'Description required.';
           return;
+        }
+        const approved = selectedSections();
+        const rejected = changedSections.filter((s) => !sectionApproval[s]);
+        const isPartial = rejected.length > 0;
+        if (isPartial && !/partial:/.test(description)) {
+          description += ` · partial: ${approved.join('+')}`;
         }
         approveBtn.disabled = true;
         rejectBtn.disabled = true;
@@ -965,6 +1023,9 @@ function setupBatchPromptLab() {
             soul: candidate.soul,
             memory: candidate.memory,
             description,
+            // Sections to take from the candidate; the server keeps the
+            // current version's text for everything else.
+            approved_sections: approved,
           };
           const data = await apiJSON('/api/prompt-evolution/apply', {
             method: 'POST',
@@ -972,16 +1033,25 @@ function setupBatchPromptLab() {
           });
           if (!data?.success) throw new Error('API did not confirm success.');
 
+          approveBtn.dataset.done = '1';
           tabBtn.classList.add('approved');
           statusSpan.style.color = '#2e7d32';
-          statusSpan.textContent = `✓ Activated as v${data.version}`;
+          statusSpan.textContent = isPartial
+            ? `✓ Activated as v${data.version} (partial: ${approved.join(', ')})`
+            : `✓ Activated as v${data.version}`;
           approveBtn.textContent = `Active v${data.version}`;
           rejectBtn.disabled = true;
           descInput.disabled = true;
-          showBatchSuccess(`${AGENT_LABELS[candidate.agent_type]} v${data.version} activated.`);
+          showBatchSuccess(`${AGENT_LABELS[candidate.agent_type]} v${data.version} activated${isPartial ? ' (partial)' : ''}.`);
           broadcastPromptApplied(candidate.agent_type, data.version);
           // Record the human label (scores the critic; market outcome later).
-          recordReviewDecision(candidate.review_id, 'approve', data.version);
+          // Partial approvals carry the per-section detail for the RLHF loop.
+          recordReviewDecision(
+            candidate.review_id,
+            isPartial ? 'partial' : 'approve',
+            data.version,
+            { approved, rejected },
+          );
           await loadPromptHistory();
         } catch (err) {
           statusSpan.style.color = '#c62828';
@@ -993,13 +1063,15 @@ function setupBatchPromptLab() {
       });
 
       rejectBtn.addEventListener('click', () => {
+        approveBtn.dataset.done = '1';
         tabBtn.classList.add('rejected');
         statusSpan.style.color = '#999';
         statusSpan.textContent = '✗ Rejected.';
         approveBtn.disabled = true;
         rejectBtn.disabled = true;
         descInput.disabled = true;
-        recordReviewDecision(candidate.review_id, 'reject', null);
+        recordReviewDecision(candidate.review_id, 'reject', null,
+          { approved: [], rejected: changedSections });
       });
 
       panel.appendChild(decisionBar);
