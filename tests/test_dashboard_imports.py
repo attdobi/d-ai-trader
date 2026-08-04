@@ -65,6 +65,18 @@ def dashboard_server_module(monkeypatch):
     config_stub = types.ModuleType("config")
     config_stub.engine = _DummyEngine()
     config_stub.get_gpt_model = lambda: "gpt-test"
+    config_stub.get_agent_model = lambda *_args, **_kwargs: "gpt-test"
+    config_stub.get_reasoning_params = lambda *_args, **_kwargs: {}
+    config_stub.get_agent_reasoning_level = lambda *_args, **_kwargs: "high"
+
+    class _DummyPromptManager:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def _record_api_usage(self, *_args, **_kwargs):
+            return None
+
+    config_stub.PromptManager = _DummyPromptManager
     config_stub.get_prompt_version_config = lambda *_args, **_kwargs: {}
     config_stub.get_trading_mode = lambda: "simulation"
     config_stub.get_current_config_hash = lambda: "test-config-hash"
