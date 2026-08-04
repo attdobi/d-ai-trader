@@ -1165,6 +1165,25 @@ def _extract_available_funds(balances: Dict[str, Any]) -> Optional[float]:
     return None
 
 def get_portfolio_snapshot() -> Optional[Dict[str, Any]]:
+    """Retrieve balances and positions from Schwab, with one self-heal retry.
+
+    A wedged in-process client (e.g. losing the startup token-refresh race
+    when trader + dashboard launch together against an expired access token)
+    used to stay broken until a process restart. On any failed attempt, force
+    a full re-auth (fresh client from the token file) and retry once.
+    """
+    snapshot = _get_portfolio_snapshot_attempt()
+    if snapshot is None:
+        logger.warning("Portfolio snapshot failed; forcing Schwab re-auth and retrying once.")
+        try:
+            if schwab_client.ensure_authenticated(force=True):
+                snapshot = _get_portfolio_snapshot_attempt()
+        except Exception as exc:
+            logger.error("Forced Schwab re-auth failed: %s", exc)
+    return snapshot
+
+
+def _get_portfolio_snapshot_attempt() -> Optional[Dict[str, Any]]:
     """
     Retrieve balances and positions from Schwab and normalize for downstream use.
     """
