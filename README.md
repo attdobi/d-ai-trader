@@ -117,9 +117,16 @@ critic calls):
 | Configuration | Feedback | Generation ×3 | Critic ×3 | ~Total/batch |
 |---|---|---|---|---|
 | All Sol | $0.22 | ~$0.93 | ~$0.41 | **~$1.55** |
-| Sol + Sol + **Terra critic** (default) | $0.22 | ~$0.93 | ~$0.16 | **~$1.30** |
-| Sol + **Terra generation** + Terra critic | $0.22 | ~$0.37 | ~$0.16 | **~$0.75** |
+| Sol + Sol generation + Terra critic | $0.22 | ~$0.93 | ~$0.16 | **~$1.30** |
+| Sol + **Terra generation** + Terra critic ⭐ default | $0.22 | ~$0.37 | ~$0.16 | **~$0.75** |
 | Terra critic at *medium* effort | — | — | ~$0.10 | saves ~$0.06 |
+
+Keep reasoning at **high** throughout the learning loop: the entire high→medium
+saving across all seven calls is ~$0.20/batch, while candidate and verdict
+quality are the loop's ceiling — one sloppy shipped prompt costs more than a
+year of effort savings. The analysis brain (feedback) stays on Sol because
+credit assignment is the step everything downstream consumes; generation and
+judging run Terra, which benches within ~1 point of Sol on reasoning.
 
 All knobs live in `.env`: `DAI_MODEL_FEEDBACK` / `DAI_MODEL_EVOLUTION` /
 `DAI_MODEL_CRITIC` and `DAI_FEEDBACK_REASONING_LEVEL` / `DAI_CRITIC_REASONING_LEVEL`.
@@ -313,7 +320,7 @@ DAI_MODEL_COMPANY=gpt-5.6-luna      # ticker/entity extraction
 DAI_MODEL_DECIDER=gpt-5.6-terra     # the trade brain
 DAI_MODEL_FEEDBACK=gpt-5.6-sol      # weekly policy updates — flagship
 DAI_MODEL_CRITIC=gpt-5.6-terra      # prompt-change reviewer (defaults to feedback model)
-#DAI_MODEL_EVOLUTION=gpt-5.6-terra  # candidate generation (defaults to feedback model)
+DAI_MODEL_EVOLUTION=gpt-5.6-terra   # candidate generation (defaults to feedback model)
 
 # Database (optional — falls back to SQLite)
 DATABASE_URI=postgresql://$(whoami)@localhost/adobi
