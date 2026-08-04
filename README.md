@@ -56,6 +56,75 @@ The trade-off is honest: a gradient learner needs thousands of noisy episodes to
 | Trust-region gate | Prompt Lab approve/reject (`/prompt-evolution`) |
 | Episode | One trading cycle (Summarizer → Decider → execution → outcome) |
 
+### The Critic & the (optional) Human Gate
+
+Policy updates are not shipped blind. Every Prompt Lab batch runs a three-stage
+review, and **every verdict feeds back into the next round** — the loop learns
+even when no human ever clicks:
+
+```mermaid
+flowchart TB
+    subgraph CYCLE["Trading cycle (every 2-3h)"]
+        NEWS[News + screenshots] --> SUM[Summarizer<br/><i>Luna · low</i>]
+        SUM --> DEC[Decider<br/><i>Terra · high</i>]
+        DEC --> EXEC[Execution<br/>Schwab / simulation]
+        EXEC --> OUT[(trade_outcomes<br/><b>market P&L = reward</b>)]
+    end
+
+    OUT -->|outcome analysis| FB[FeedbackAgent<br/><i>Sol · high</i>]
+    FB -->|guidance| GEN[Prompt evolution<br/><i>Sol · high — DAI_MODEL_EVOLUTION</i>]
+    GEN -->|candidate prompt + declared changes| CRITIC[Critic<br/><i>Terra · high — DAI_MODEL_CRITIC</i>]
+    OUT -->|"trade-level evidence<br/>(20 worst + 20 best, with reasons)"| CRITIC
+    OUT -->|trade-level evidence| GEN
+    CRITIC -->|verdict · reason · confidence| REV[(prompt_change_reviews)]
+    REV --> HUMAN{Human approve / reject<br/><b>optional RLHF gate</b>}
+    HUMAN -->|approve| POL[(prompt_versions<br/><b>active policy</b>)]
+    POL -.->|soul + directives + memory| SUM & DEC & FB
+
+    REV -->|"critic objections + human labels<br/>+ realized outcomes"| GEN
+    REV -->|lessons| FB
+    REV -->|"own genuine verdicts +<br/>human concordance (calibration)"| CRITIC
+```
+
+How the learning signal flows:
+
+- **Critic-only learning (no clicks needed).** Every candidate's verdict, reason,
+  and confidence land in `prompt_change_reviews` and are injected into the *next*
+  generation and feedback runs as `past_review_verdicts` — a candidate that repeats
+  a rejected pattern without addressing the objection is told it will be rejected
+  again. Human review is a bonus label, not a dependency.
+- **Evidence, not vibes.** Generation and the critic both receive per-trade rows
+  (worst 20 + best 20 closed trades, with entry/exit reasoning and a self-declared
+  coverage statement). Proposals must cite tickers; the critic *verifies* claims
+  against the same rows instead of rejecting for lack of data.
+- **Human RLHF labels (optional).** An approve/reject click stamps
+  `human_verdict` and `human_agrees_critic`. Concordance is only computed against
+  *genuine* critic judgments — heuristic auto-rejects and critic outages record
+  `critic_auto` / confidence 0 and are excluded, so downtime can never read as
+  "the human overrode the critic."
+- **Anti-sycophancy guardrails.** The critic calibrates only on a consistent
+  pattern (3+ same-direction human overrides among genuine verdicts), and realized
+  `winrate_delta` — measured after a shipped change has lived in the market —
+  outranks human concordance. Labeled rows are kept in the learning window ahead
+  of pending ones.
+- **Fail-closed trust region.** Cosmetic-only candidates are auto-rejected without
+  an LLM call; a critic outage defers to the human as a low-confidence reject.
+
+Per-batch cost is dominated by the three generation calls, not the critic
+(estimates at high reasoning, one click = 1 feedback + 3 generation + up to 3
+critic calls):
+
+| Configuration | Feedback | Generation ×3 | Critic ×3 | ~Total/batch |
+|---|---|---|---|---|
+| All Sol | $0.22 | ~$0.93 | ~$0.41 | **~$1.55** |
+| Sol + Sol + **Terra critic** (default) | $0.22 | ~$0.93 | ~$0.16 | **~$1.30** |
+| Sol + **Terra generation** + Terra critic | $0.22 | ~$0.37 | ~$0.16 | **~$0.75** |
+| Terra critic at *medium* effort | — | — | ~$0.10 | saves ~$0.06 |
+
+All knobs live in `.env`: `DAI_MODEL_FEEDBACK` / `DAI_MODEL_EVOLUTION` /
+`DAI_MODEL_CRITIC` and `DAI_FEEDBACK_REASONING_LEVEL` / `DAI_CRITIC_REASONING_LEVEL`.
+Every call is metered in `api_usage` (model, tokens, cost) per agent.
+
 ---
 
 ## Quick Start
@@ -235,8 +304,16 @@ Summarizer  →  Momentum Recap  →  Decider  →  Execution  →  Feedback
 # Required
 OPENAI_API_KEY=sk-proj-your_key_here
 
-# Model (default: gpt-5.4)
-DAI_GPT_MODEL=gpt-5.4
+# Global model (fallback for anything without a per-agent override; also -m flag)
+DAI_GPT_MODEL=gpt-5.6-terra
+
+# Per-agent model overrides (aliases work: sol / terra / luna)
+DAI_MODEL_SUMMARIZER=gpt-5.6-luna   # frequent vision calls — budget tier
+DAI_MODEL_COMPANY=gpt-5.6-luna      # ticker/entity extraction
+DAI_MODEL_DECIDER=gpt-5.6-terra     # the trade brain
+DAI_MODEL_FEEDBACK=gpt-5.6-sol      # weekly policy updates — flagship
+DAI_MODEL_CRITIC=gpt-5.6-terra      # prompt-change reviewer (defaults to feedback model)
+#DAI_MODEL_EVOLUTION=gpt-5.6-terra  # candidate generation (defaults to feedback model)
 
 # Database (optional — falls back to SQLite)
 DATABASE_URI=postgresql://$(whoami)@localhost/adobi
@@ -254,10 +331,11 @@ MIN_CASH_BUFFER=500          # Minimum cash reserve ($)
 DAI_MAX_TRADES=4             # Max trades per cycle (buys + sells)
 DAI_MODEL_TEMPERATURE=0.3
 
-# Reasoning levels (light | medium | high)
-DAI_SUMMARIZER_REASONING_LEVEL=medium
+# Reasoning levels (light | low | medium | high | xhigh | max*)  *GPT-5.6 only
+DAI_SUMMARIZER_REASONING_LEVEL=low
 DAI_DECIDER_REASONING_LEVEL=high
 DAI_FEEDBACK_REASONING_LEVEL=high
+DAI_CRITIC_REASONING_LEVEL=high
 
 # Schwab API (for live trading)
 SCHWAB_CLIENT_ID=your_client_id
@@ -285,14 +363,19 @@ DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
 
 ### Supported Models
 
-| Model | Use Case | Notes |
-|---|---|---|
-| **gpt-5.4** ⭐ | Default for all agents | Reasoning + vision, auto-fallback to gpt-4.1 |
-| **gpt-5.2** | Alternative reasoning | Slightly lower cost than 5.4 |
-| **gpt-5.1** | Legacy default | Still fully supported |
-| **gpt-4o** | Budget option | $2.50/$10 per 1M tokens, reliable JSON |
-| **gpt-4.1** | Fallback model | Auto-selected when 5.x fails |
-| **gpt-4o-mini** | Cheap testing | $0.15/$0.60 per 1M tokens, simulation only |
+| Model | Use Case | $/1M in/out | Notes |
+|---|---|---|---|
+| **gpt-5.6-sol** ⭐ | Feedback / evolution | $5 / $30 | Flagship; alias `sol`, bare `gpt-5.6` → Sol |
+| **gpt-5.6-terra** ⭐ | Decider, critic | $2 / $12 | Near-Sol reasoning at 40% of the price; alias `terra` (or `tera`) |
+| **gpt-5.6-luna** ⭐ | Summarizer, extraction | $0.20 / $1.20 | Vision-capable budget tier; alias `luna` |
+| **gpt-5.5** | Previous flagship | $5 / $30 | Same price as Sol, lower benchmarks |
+| **gpt-5.4 / -mini** | Previous default | — / $0.75 / $4.50 | Still supported |
+| **gpt-4o / 4o-mini** | Legacy | $2.50/$10 · $0.15/$0.60 | Non-reasoning fallbacks |
+
+All GPT-5.x models accept a reasoning suffix on `-m` (e.g. `-m gpt-5.6-sol-max`,
+`-m terra-high`); the suffix globally overrides the per-agent reasoning envs.
+Rates live in `model_pricing.json` (re-read per request) and drive the
+dashboard's per-agent cost tracking.
 
 > o1/o3 models are **not** supported (no system messages or JSON mode).
 

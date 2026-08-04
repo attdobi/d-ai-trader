@@ -379,6 +379,10 @@ AGENT_MODEL_OVERRIDES = {
     # Defaults to the feedback agent's model when unset — the critic should be
     # at least as capable as the agent whose proposals it judges.
     "critic": _load_agent_model_override("DAI_MODEL_CRITIC", "critic"),
+    # Prompt-evolution generation (writes candidate prompts). The dominant
+    # cost of a Prompt Lab batch — settable separately; defaults to the
+    # feedback model.
+    "evolution": _load_agent_model_override("DAI_MODEL_EVOLUTION", "evolution"),
 }
 
 
@@ -395,7 +399,13 @@ def get_agent_model(agent_name):
         return AGENT_MODEL_OVERRIDES.get("summarizer") or GPT_MODEL
     if "decider" in name:
         return AGENT_MODEL_OVERRIDES.get("decider") or GPT_MODEL
-    if "feedback" in name or "evolution" in name:
+    if "evolution" in name:
+        return (
+            AGENT_MODEL_OVERRIDES.get("evolution")
+            or AGENT_MODEL_OVERRIDES.get("feedback")
+            or GPT_MODEL
+        )
+    if "feedback" in name:
         return AGENT_MODEL_OVERRIDES.get("feedback") or GPT_MODEL
     if "company" in name or "extraction" in name:
         return AGENT_MODEL_OVERRIDES.get("company") or GPT_MODEL

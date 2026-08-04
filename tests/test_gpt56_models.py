@@ -20,6 +20,8 @@ _CLEAR_REASONING_ENV = {
     "DAI_COMPANY_REASONING_LEVEL": None,
     "DAI_DISABLE_REASONING_PARAM": None,
     "DAI_MODEL_COMPANY": None,
+    "DAI_MODEL_CRITIC": None,
+    "DAI_MODEL_EVOLUTION": None,
 }
 
 
@@ -92,6 +94,16 @@ def test_prompt_evolution_uses_feedback_profile(monkeypatch):
     })
     assert cfg.get_agent_model("PromptEvolutionAgent") == "gpt-5.6-sol"
     assert cfg.get_agent_reasoning_level("PromptEvolutionAgent") == "high"
+
+
+def test_evolution_dedicated_override_wins(monkeypatch):
+    # DAI_MODEL_EVOLUTION lets generation run a cheaper tier than feedback.
+    cfg = _cfg(monkeypatch, env={
+        "DAI_MODEL_FEEDBACK": "sol",
+        "DAI_MODEL_EVOLUTION": "terra",
+    })
+    assert cfg.get_agent_model("PromptEvolutionAgent") == "gpt-5.6-terra"
+    assert cfg.get_agent_model("FeedbackAgent") == "gpt-5.6-sol"
 
 
 def test_gpt56_global_env_model(monkeypatch):
