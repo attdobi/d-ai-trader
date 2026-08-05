@@ -30,6 +30,7 @@ from config import (
     PromptManager,
     session,
     openai,
+    get_agent_model,
     get_current_config_hash,
     get_trading_mode,
     IS_MARGIN_ACCOUNT,
@@ -167,6 +168,36 @@ def enforce_profit_taking_guardrail(decisions, holdings_by_ticker, threshold_pct
         print(f"🚨 Profit-taking guardrail: overriding {ticker} decision ({existing_action or 'missing'}) with SELL at +{gain_pct:.1f}%")
 
     return forced
+
+
+def record_model_transition(config_hash):
+    """Log decider-model switches to model_transitions (idempotent per cycle).
+
+    The config hash stays fixed across model upgrades (by design — it keys all
+    logging), so this table is the only record of WHEN the decider moved from
+    e.g. gpt-5.5 to Terra. The System vs Market chart annotates these dates.
+    """
+    try:
+        current_model = get_agent_model("DeciderAgent")
+        with engine.begin() as conn:
+            row = conn.execute(text("""
+                SELECT id, model_name FROM model_transitions
+                WHERE config_hash = :c AND ended_at IS NULL
+                ORDER BY started_at DESC LIMIT 1
+            """), {"c": config_hash}).fetchone()
+            if row and row.model_name == current_model:
+                return
+            if row:
+                conn.execute(text(
+                    "UPDATE model_transitions SET ended_at = CURRENT_TIMESTAMP WHERE id = :id"
+                ), {"id": row.id})
+            conn.execute(text("""
+                INSERT INTO model_transitions (config_hash, model_name, notes)
+                VALUES (:c, :m, 'auto-logged at decision cycle start')
+            """), {"c": config_hash, "m": current_model})
+            print(f"🪪 Decider model transition recorded: {row.model_name if row else '(first)'} → {current_model}")
+    except Exception as e:
+        print(f"⚠️  Could not record model transition: {e}")
 
 
 def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momentum_summary, momentum_recap):
@@ -2205,6 +2236,7 @@ def ask_decision_agent(summaries, run_id, holdings, run_context: Optional[RunCon
     # their cost can be attributed to the resulting decision on the Trades tab.
     if run_id:
         prompt_manager.run_id = run_id
+    record_model_transition(config_hash)
     market_open = is_market_open()
     print(f"⏰ Market status at decision time: {'OPEN' if market_open else 'CLOSED'}")
     # Limit summaries to the targeted run_id when provided

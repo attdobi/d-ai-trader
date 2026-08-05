@@ -155,6 +155,12 @@ against **SPY, DJIA, NASDAQ, and VTI** over the same window (`benchmark_tracker.
   risk-discipline lessons are landing even before alpha turns positive.
 - Flowless one-day V-shapes from the (since-fixed) settled-cash snapshot bug
   are auto-filtered at read time and disclosed in the panel footnote.
+- **Model-switch annotations** — the config hash stays fixed across model
+  upgrades, so decider model changes (GPT-5.4 → GPT-5.5 → Terra, …) are logged
+  to `model_transitions` at each decision-cycle start
+  (`decider_agent.record_model_transition`) and drawn as dashed vertical lines
+  on the chart. That makes "did the new brain change the curve?" readable at
+  a glance; the footnote shows the full model chain for the window.
 
 ---
 

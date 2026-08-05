@@ -384,6 +384,49 @@ const BENCH_COLORS = {
 };
 let benchmarkChart = null;
 
+// "gpt-5.6-terra" → "Terra", "gpt-5.5" → "GPT-5.5"
+function shortModelName(m) {
+  if (!m) return '?';
+  const tier = m.match(/gpt-[\d.]+-(sol|terra|luna)/i);
+  if (tier) return tier[1][0].toUpperCase() + tier[1].slice(1);
+  return m.replace(/^gpt-/i, 'GPT-');
+}
+
+// Vertical dashed line + label wherever the decider's model was switched
+// (model_transitions table). Dates snap to the next plotted trading day.
+const benchModelLinePlugin = {
+  id: 'benchModelLines',
+  afterDatasetsDraw(chart) {
+    const transitions = chart.$modelTransitions;
+    if (!transitions || !transitions.length) return;
+    const { ctx, chartArea, scales } = chart;
+    const labels = chart.data.labels;
+    ctx.save();
+    ctx.font = '600 10px Inter, system-ui, sans-serif';
+    for (const t of transitions) {
+      let idx = labels.findIndex(l => l >= t.date); // ISO dates: lexicographic works
+      if (idx === -1) continue;
+      const x = scales.x.getPixelForValue(idx);
+      if (x < chartArea.left - 1 || x > chartArea.right + 1) continue;
+      ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const text = `▸ ${shortModelName(t.model)}`;
+      const fitsRight = x + 6 + ctx.measureText(text).width < chartArea.right;
+      ctx.fillStyle = TREND_INK.label;
+      ctx.textAlign = fitsRight ? 'left' : 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(text, fitsRight ? x + 6 : x - 6, chartArea.top + 2);
+    }
+    ctx.restore();
+  }
+};
+
 function benchChip(k, v, sub, signed) {
   const cls = signed && Number.isFinite(v) ? (v >= 0 ? ' pos' : ' neg') : '';
   const val = Number.isFinite(v) ? `${signed && v >= 0 ? '+' : ''}${v.toFixed(2)}${signed ? '%' : ''}` : '—';
@@ -488,9 +531,10 @@ async function loadBenchmarkChart(days = 90) {
         },
       },
     },
-    plugins: [trendEndLabelPlugin],
+    plugins: [trendEndLabelPlugin, benchModelLinePlugin],
   });
   benchmarkChart.$trendFmt = fmtPct;
+  benchmarkChart.$modelTransitions = stats.model_transitions || [];
   benchmarkChart.draw();
 
   if (foot) {
@@ -500,6 +544,11 @@ async function loadBenchmarkChart(days = 90) {
     bits.push(`${flows.length ? flows.length : 'No'} external transfer${flows.length === 1 ? '' : 's'} in window` +
       (flows.length ? ` (${flows.map(f => `${f.amount > 0 ? '+' : '−'}$${Math.abs(f.amount).toFixed(0)} ${f.date}`).join(', ')}) stripped from returns via time-weighting` : ''));
     if (artifacts.length) bits.push(`${artifacts.length} bad snapshot day${artifacts.length === 1 ? '' : 's'} (${artifacts.join(', ')}) auto-filtered`);
+    const trans = stats.model_transitions || [];
+    if (stats.model_at_start || trans.length) {
+      const chain = [shortModelName(stats.model_at_start), ...trans.map(t => `${shortModelName(t.model)} (${t.date})`)];
+      bits.push(`Decider model: ${chain.join(' → ')}`);
+    }
     bits.push('SPY/VTI use dividend-adjusted closes; DJIA/NASDAQ are price indexes.');
     foot.textContent = bits.join(' · ');
   }

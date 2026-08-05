@@ -421,6 +421,13 @@ def get_benchmark_performance(engine, config_hash, days=90):
             WHERE config_hash = :c AND sell_timestamp >= :start
         """), {"c": config_hash, "start": window_start}).fetchall()
 
+        # Decider model switches (config hash stays fixed across model upgrades,
+        # so this table is the only record of when the brain changed).
+        transition_rows = conn.execute(text("""
+            SELECT model_name, started_at FROM model_transitions
+            WHERE config_hash = :c ORDER BY started_at
+        """), {"c": config_hash}).fetchall()
+
     portfolio_daily = last_value_per_day([(r.timestamp, r.total_portfolio_value) for r in snap_rows])
     if len(portfolio_daily) < 2:
         return {"error": "Not enough portfolio history for this window"}
@@ -507,6 +514,16 @@ def get_benchmark_performance(engine, config_hash, days=90):
                               for r in outcome_rows]),
         "external_flows": flow_list,
         "artifact_days_filtered": [d.isoformat() for d in artifact_days],
+        # Only switches inside the plotted window get an annotation line; the
+        # model already active at window start is reported separately.
+        "model_transitions": [
+            {"date": r.started_at.date().isoformat(), "model": r.model_name}
+            for r in transition_rows
+            if aligned[0][0] < r.started_at.date() <= aligned[-1][0]
+        ],
+        "model_at_start": next(
+            (r.model_name for r in reversed(transition_rows)
+             if r.started_at.date() <= aligned[0][0]), None),
         "spy_symbol": anchor_symbol,
         "spy_alpha": round(port_return_pct - spy.get("return_pct"), 2) if spy.get("return_pct") is not None else None,
     }
