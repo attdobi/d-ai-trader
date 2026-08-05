@@ -97,6 +97,9 @@ def dashboard_server_module(monkeypatch):
 
     prompt_manager_stub = types.ModuleType("prompt_manager")
     prompt_manager_stub.initialize_config_prompts = lambda *_args, **_kwargs: None
+    prompt_manager_stub.set_active_prompt_version = lambda *_args, **_kwargs: {}
+    prompt_manager_stub.undo_last_prompt_activation = lambda *_args, **_kwargs: {}
+    prompt_manager_stub.get_prompt_activation_history = lambda *_args, **_kwargs: []
     monkeypatch.setitem(sys.modules, "prompt_manager", prompt_manager_stub)
 
     decider_stub = types.ModuleType("decider_agent")

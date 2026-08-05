@@ -979,6 +979,34 @@ def initialize_database() -> None:
             "ALTER TABLE prompt_versions ADD CONSTRAINT prompt_versions_agent_version_config_unique UNIQUE (agent_type, version, config_hash)",
         )
 
+        # Prompt activation audit ledger. Every is_active flip goes through
+        # prompt_manager.set_active_prompt_version, which records the
+        # transition here — powering the dashboard's activation history and
+        # "undo last prompt change".
+        ensure_table(
+            conn,
+            stats,
+            "prompt_activation_events",
+            """
+            CREATE TABLE IF NOT EXISTS prompt_activation_events (
+                id SERIAL PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                batch_id TEXT NOT NULL,
+                config_hash TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                from_version INTEGER,
+                to_version INTEGER,
+                action TEXT NOT NULL,
+                actor TEXT,
+                reason TEXT
+            )
+            """,
+        )
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_prompt_activation_events_config
+            ON prompt_activation_events(config_hash, id DESC)
+        """))
+
         # Backfill ai_agent_prompts.version from legacy prompt_version if available.
         if column_exists(conn, "ai_agent_prompts", "prompt_version"):
             conn.execute(text(

@@ -35,7 +35,12 @@ _prompt_lab_usage = PromptManager(client=None, session=None)
 import importlib
 import difflib
 import initialize_prompts as default_prompts_module
-from prompt_manager import initialize_config_prompts
+from prompt_manager import (
+    initialize_config_prompts,
+    set_active_prompt_version,
+    undo_last_prompt_activation,
+    get_prompt_activation_history,
+)
 from decider_agent import (
     extract_companies_from_summaries,
     build_momentum_recap,
@@ -121,8 +126,17 @@ def _refresh_holdings_with_quotes(holdings):
 
 
 def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
-    """Ensure the v0 prompt for the given agent/config matches code defaults."""
+    """Ensure the v0 prompt for the given agent/config matches code defaults.
+
+    Content-only sync: the v0 row keeps whatever activation state it had
+    (activation changes must go through prompt_manager.set_active_prompt_version
+    so they are audited and undoable).
+    """
     if not prompt_payload:
+        return
+    if agent_type == "feedback_analyzer":
+        # Legacy alias of FeedbackAgent — same payload is synced under the
+        # canonical name; writing alias rows would recreate migrated cruft.
         return
 
     system_prompt = prompt_payload.get("system_prompt")
@@ -157,9 +171,40 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
             values["soul"] = soul
         if ":memory" in insert_sql:
             values["memory"] = memory
+        if ":is_active" in insert_sql:
+            values["is_active"] = v0_was_active
         conn.execute(text(insert_sql), values)
 
-    # Base table
+    # Base table — capture the row's activation state before the
+    # delete+reinsert so the content sync never steals the active flag
+    # from an evolved version (or resurrects a deliberately dormant v0).
+    if config_hash == "global":
+        cfg_clause = "(config_hash = 'global' OR config_hash IS NULL)"
+    else:
+        cfg_clause = "config_hash = :config_hash"
+
+    prev_v0 = conn.execute(text(f"""
+        SELECT is_active
+        FROM prompt_versions
+        WHERE agent_type = :agent_type
+          AND version = 0
+          AND {cfg_clause}
+        LIMIT 1
+    """), delete_params).fetchone()
+    if prev_v0 is not None:
+        v0_was_active = bool(prev_v0.is_active)
+    else:
+        # Fresh v0: active only when the agent has no active version at all,
+        # mirroring init_database's seeding rules.
+        v0_was_active = conn.execute(text(f"""
+            SELECT 1
+            FROM prompt_versions
+            WHERE agent_type = :agent_type
+              AND is_active = TRUE
+              AND {cfg_clause}
+            LIMIT 1
+        """), delete_params).fetchone() is None
+
     if config_hash == "global":
         _delete_rows("prompt_versions", """
             DELETE FROM prompt_versions
@@ -179,7 +224,7 @@ def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
         INSERT INTO prompt_versions
             (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
         VALUES
-            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :soul, :memory, :description, 'prompt_reset', TRUE, :config_hash)
+            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :soul, :memory, :description, 'prompt_reset', :is_active, :config_hash)
     """)
 
     def _table_exists(table_name):
@@ -1743,30 +1788,56 @@ def api_reset_prompts_to_baseline():
             for agent, payload in latest_defaults.items():
                 _ensure_v0_prompt(conn, agent, config_hash, payload)
 
+        # Flip activation through the audited switchboard: one batch per
+        # reset click, so /api/prompts/undo reverts all agents together.
+        batch_id = uuid.uuid4().hex
+        changes = []
         with engine.begin() as conn:
             for agent in agents:
-                conn.execute(text(
-                    "UPDATE prompt_versions SET is_active = FALSE WHERE agent_type = :agent AND config_hash = :cfg"
-                ), {"agent": agent, "cfg": config_hash})
+                try:
+                    changes.append(set_active_prompt_version(
+                        conn, agent, config_hash, 0,
+                        action="reset_v0", actor="dashboard",
+                        reason="Reset Prompts to Baseline (v0)", batch_id=batch_id,
+                    ))
+                except ValueError as exc:
+                    changes.append({"agent_type": agent, "error": str(exc), "changed": False})
 
-                updated = conn.execute(text(
-                    """
-                    UPDATE prompt_versions
-                    SET is_active = TRUE
-                    WHERE agent_type = :agent AND config_hash = :cfg AND version = 0
-                    """
-                ), {"agent": agent, "cfg": config_hash})
+        return jsonify({
+            "status": "success",
+            "batch_id": batch_id,
+            "changes": changes,
+            "undo_endpoint": "/api/prompts/undo",
+        })
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
-                if updated.rowcount == 0:
-                    conn.execute(text(
-                        """
-                        UPDATE prompt_versions
-                        SET is_active = TRUE
-                        WHERE agent_type = :agent AND version = 0 AND (config_hash IS NULL OR config_hash = 'global')
-                        """
-                    ), {"agent": agent})
 
-        return jsonify({"status": "success"})
+@app.route("/api/prompts/undo", methods=["POST"])
+def api_undo_prompt_activation():
+    """Undo the most recent prompt activation change (reset, save, apply).
+
+    Restores each agent's previously-active version from the
+    prompt_activation_events ledger; calling it again re-applies (redo).
+    """
+    try:
+        result = undo_last_prompt_activation(get_current_config_hash(), actor="dashboard")
+        status_code = 200 if result.get("undone") else 404
+        return jsonify({"status": "success" if result.get("undone") else "noop", **result}), status_code
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/prompts/activation-history")
+def api_prompt_activation_history():
+    """Recent prompt activation changes for the current config (audit trail)."""
+    try:
+        limit = max(1, min(200, int(request.args.get("limit", 50))))
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        events = get_prompt_activation_history(get_current_config_hash(), limit=limit)
+        return jsonify({"status": "success", "events": events})
     except Exception as exc:
         return jsonify({"status": "error", "message": str(exc)}), 500
 
@@ -2550,24 +2621,27 @@ def reset_prompts():
 
         # Reset prompt systems with proper error handling
         try:
+            batch_id = uuid.uuid4().hex
             with engine.begin() as conn:
-                # Reset main prompt_versions table
-                conn.execute(text("""
-                    UPDATE prompt_versions 
-                    SET is_active = FALSE
-                    WHERE config_hash = :config_hash
-                """), {"config_hash": config_hash})
-                
-                # Activate only v0 prompts in main table
-                updated_prompts = conn.execute(text("""
-                    UPDATE prompt_versions 
-                    SET is_active = TRUE
+                # Every agent that has a v0 baseline for this config goes back
+                # to it — through the audited switchboard, as one undoable batch.
+                agent_rows = conn.execute(text("""
+                    SELECT DISTINCT agent_type
+                    FROM prompt_versions
                     WHERE config_hash = :config_hash AND version = 0
-                """), {"config_hash": config_hash})
-                
-                if updated_prompts.rowcount == 0:
+                    ORDER BY agent_type
+                """), {"config_hash": config_hash}).fetchall()
+
+                if not agent_rows:
                     return jsonify({'error': 'No v0 baseline prompts found for this configuration'}), 400
-                
+
+                for row in agent_rows:
+                    set_active_prompt_version(
+                        conn, row.agent_type, config_hash, 0,
+                        action="reset_v0", actor="dashboard",
+                        reason="Reset prompts to v0 (AUTO mode)", batch_id=batch_id,
+                    )
+
                 # Get the updated prompt versions for confirmation
                 active_prompts = conn.execute(text("""
                     SELECT agent_type, version
@@ -2575,9 +2649,9 @@ def reset_prompts():
                     WHERE config_hash = :config_hash AND is_active = TRUE
                     ORDER BY agent_type
                 """), {"config_hash": config_hash}).fetchall()
-                
+
                 prompt_info = {row.agent_type: row.version for row in active_prompts}
-                
+
         except Exception as e:
             print(f"❌ Main prompt reset failed: {e}")
             return jsonify({'error': f'Failed to reset main prompts: {str(e)}'}), 500
@@ -2603,28 +2677,30 @@ def reset_prompts():
         try:
             with engine.begin() as conn:
                 unified_reset = conn.execute(text("""
-                    UPDATE unified_prompts 
+                    UPDATE unified_prompts
                     SET is_active = FALSE
                     WHERE config_hash = :config_hash
                 """), {"config_hash": config_hash})
-                
+
                 if unified_reset.rowcount > 0:
                     conn.execute(text("""
-                        UPDATE unified_prompts 
+                        UPDATE unified_prompts
                         SET is_active = TRUE
                         WHERE config_hash = :config_hash AND version = 0
                     """), {"config_hash": config_hash})
                     print(f"✅ Reset unified prompts table ({unified_reset.rowcount} prompts)")
-                    
+
         except Exception as e:
             print(f"⚠️  Unified table reset failed (table may not exist): {e}")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Prompts reset to v0 baseline. Summarizer: v{prompt_info.get("SummarizerAgent", "?")}, Decider: v{prompt_info.get("DeciderAgent", "?")}',
-                'prompt_versions': prompt_info
-            })
-            
+
+        return jsonify({
+            'success': True,
+            'message': f'Prompts reset to v0 baseline. Summarizer: v{prompt_info.get("SummarizerAgent", "?")}, Decider: v{prompt_info.get("DeciderAgent", "?")}',
+            'prompt_versions': prompt_info,
+            'batch_id': batch_id,
+            'undo_endpoint': '/api/prompts/undo'
+        })
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2712,25 +2788,24 @@ def reset_portfolio():
         message = "Portfolio reset to simulation baseline ($10,000)."
 
         if not schwab_snapshot:
+            batch_id = uuid.uuid4().hex
             with engine.begin() as conn:
                 agent_types = ['SummarizerAgent', 'DeciderAgent']
                 for agent_type in agent_types:
+                    # Scoped to the current config — the old unscoped flip
+                    # rewrote activation for every config in the table.
                     v4_exists = conn.execute(text("""
-                        SELECT id FROM prompt_versions 
+                        SELECT id FROM prompt_versions
                         WHERE agent_type = :agent_type AND version = 4
-                    """), {"agent_type": agent_type}).fetchone()
+                          AND config_hash = :config_hash
+                    """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
 
                     if v4_exists:
-                        conn.execute(text("""
-                            UPDATE prompt_versions 
-                            SET is_active = FALSE
-                            WHERE agent_type = :agent_type
-                        """), {"agent_type": agent_type})
-                        conn.execute(text("""
-                            UPDATE prompt_versions 
-                            SET is_active = TRUE
-                            WHERE agent_type = :agent_type AND version = 4
-                        """), {"agent_type": agent_type})
+                        set_active_prompt_version(
+                            conn, agent_type, config_hash, 4,
+                            action="reset_portfolio", actor="dashboard",
+                            reason="Portfolio reset to simulation baseline", batch_id=batch_id,
+                        )
 
         if schwab_snapshot:
             positions = schwab_snapshot.get('positions', [])
@@ -4196,16 +4271,6 @@ def apply_prompt_evolution_candidate():
             return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
 
         with engine.begin() as conn:
-            conn.execute(text("""
-                UPDATE prompt_versions
-                SET is_active = FALSE
-                WHERE agent_type = :agent_type
-                  AND config_hash = :config_hash
-            """), {
-                'agent_type': agent_type,
-                'config_hash': config_hash,
-            })
-
             version_row = conn.execute(text("""
                 SELECT COALESCE(MAX(version), -1) AS max_version
                 FROM prompt_versions
@@ -4239,7 +4304,7 @@ def apply_prompt_evolution_candidate():
                     :strategy_directives,
                     :description,
                     :created_by,
-                    TRUE,
+                    FALSE,
                     :config_hash,
                     :soul,
                     :memory
@@ -4257,7 +4322,18 @@ def apply_prompt_evolution_candidate():
                 'memory': memory,
             })
 
-        return jsonify({'success': True, 'version': new_version})
+            change = set_active_prompt_version(
+                conn, agent_type, config_hash, new_version,
+                action="apply_candidate", actor="prompt_lab",
+                reason=description or None,
+            )
+
+        return jsonify({
+            'success': True,
+            'version': new_version,
+            'previous_version': change.get('from_version'),
+            'batch_id': change.get('batch_id'),
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

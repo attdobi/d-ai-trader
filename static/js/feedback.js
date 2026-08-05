@@ -93,7 +93,7 @@ async function resetPromptsToBaseline() {
       throw new Error(payload.message || 'Reset failed');
     }
     if (status) {
-      status.textContent = 'Prompts reset to baseline (v0).';
+      status.textContent = 'Prompts reset to baseline (v0). Use "Undo Last Prompt Change" to revert.';
       status.style.color = '#2e7d32';
     }
     await loadPromptDetails();
@@ -101,6 +101,38 @@ async function resetPromptsToBaseline() {
     console.error('Prompt reset failed:', err);
     if (status) {
       status.textContent = `Reset failed: ${err.message}`;
+      status.style.color = '#c62828';
+    }
+  }
+}
+
+async function undoLastPromptChange() {
+  const status = document.getElementById('promptResetStatus');
+  if (status) {
+    status.textContent = 'Undoing last prompt change...';
+    status.style.color = '#555';
+  }
+  try {
+    const response = await fetch('/api/prompts/undo', { method: 'POST' });
+    const payload = await response.json();
+    if (!response.ok || !payload.undone) {
+      throw new Error(payload.message || 'Nothing to undo');
+    }
+    const restored = (payload.reverted || [])
+      .filter((r) => r.changed)
+      .map((r) => `${r.agent_type} → ${r.to_version === null ? 'none' : `v${r.to_version}`}`)
+      .join(', ');
+    if (status) {
+      status.textContent = restored
+        ? `Undid "${payload.undid_action}": ${restored}. Undo again to re-apply.`
+        : 'Undo recorded, but no versions changed.';
+      status.style.color = '#2e7d32';
+    }
+    await loadPromptDetails();
+  } catch (err) {
+    console.error('Prompt undo failed:', err);
+    if (status) {
+      status.textContent = `Undo failed: ${err.message}`;
       status.style.color = '#c62828';
     }
   }
@@ -494,5 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const resetBtn = document.getElementById('resetPromptsBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', resetPromptsToBaseline);
+  }
+  const undoBtn = document.getElementById('undoPromptChangeBtn');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', undoLastPromptChange);
   }
 });

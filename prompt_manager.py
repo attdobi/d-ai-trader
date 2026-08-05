@@ -2,6 +2,8 @@
 Prompt management utilities for using versioned prompts
 """
 
+import uuid
+
 from sqlalchemy import text
 from config import engine
 
@@ -221,6 +223,176 @@ def _canonical_agent_type(agent_type):
         return "FeedbackAgent"
     return agent_type
 
+
+def _current_active_version(conn, agent_type, config_hash):
+    row = conn.execute(text("""
+        SELECT version
+        FROM prompt_versions
+        WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
+        ORDER BY version DESC
+        LIMIT 1
+    """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
+    return row.version if row else None
+
+
+def _record_activation_event(conn, *, batch_id, config_hash, agent_type,
+                             from_version, to_version, action, actor, reason):
+    conn.execute(text("""
+        INSERT INTO prompt_activation_events
+            (batch_id, config_hash, agent_type, from_version, to_version, action, actor, reason)
+        VALUES
+            (:batch_id, :config_hash, :agent_type, :from_version, :to_version, :action, :actor, :reason)
+    """), {
+        "batch_id": batch_id,
+        "config_hash": config_hash,
+        "agent_type": agent_type,
+        "from_version": from_version,
+        "to_version": to_version,
+        "action": action,
+        "actor": actor,
+        "reason": reason,
+    })
+
+
+def set_active_prompt_version(conn, agent_type, config_hash, version, *,
+                              action, actor="system", reason=None, batch_id=None):
+    """The single write path for switching which prompt version is active.
+
+    Deactivates every version for (agent_type, config_hash), activates
+    `version` (None = leave nothing active), and records the transition in
+    prompt_activation_events so it can be audited and undone. Related
+    changes (e.g. one reset click covering several agents) should share a
+    batch_id so undo reverts them together.
+
+    Returns {"agent_type", "from_version", "to_version", "changed", "batch_id"}.
+    Raises ValueError if the target version row doesn't exist.
+    """
+    agent_type = _canonical_agent_type(agent_type)
+    batch_id = batch_id or uuid.uuid4().hex
+    from_version = _current_active_version(conn, agent_type, config_hash)
+
+    if version is not None:
+        target_exists = conn.execute(text("""
+            SELECT 1
+            FROM prompt_versions
+            WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
+            LIMIT 1
+        """), {"agent_type": agent_type, "config_hash": config_hash, "version": version}).fetchone()
+        if target_exists is None:
+            raise ValueError(
+                f"{agent_type} v{version} does not exist for config {config_hash}"
+            )
+
+    if from_version == version:
+        # Effective active version is unchanged — no event — but still
+        # enforce single-active in case older code left duplicates behind.
+        if version is not None:
+            conn.execute(text("""
+                UPDATE prompt_versions
+                SET is_active = FALSE
+                WHERE agent_type = :agent_type AND config_hash = :config_hash
+                  AND is_active = TRUE AND version != :version
+            """), {"agent_type": agent_type, "config_hash": config_hash, "version": version})
+        return {"agent_type": agent_type, "from_version": from_version,
+                "to_version": version, "changed": False, "batch_id": batch_id}
+
+    conn.execute(text("""
+        UPDATE prompt_versions
+        SET is_active = FALSE
+        WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
+    """), {"agent_type": agent_type, "config_hash": config_hash})
+
+    if version is not None:
+        conn.execute(text("""
+            UPDATE prompt_versions
+            SET is_active = TRUE
+            WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
+        """), {"agent_type": agent_type, "config_hash": config_hash, "version": version})
+
+    _record_activation_event(
+        conn, batch_id=batch_id, config_hash=config_hash, agent_type=agent_type,
+        from_version=from_version, to_version=version, action=action, actor=actor,
+        reason=reason,
+    )
+    return {"agent_type": agent_type, "from_version": from_version,
+            "to_version": version, "changed": True, "batch_id": batch_id}
+
+
+def undo_last_prompt_activation(config_hash, *, actor="dashboard", conn=None):
+    """Revert the most recent activation batch for this config.
+
+    Restores each agent's previously-active version as recorded in
+    prompt_activation_events. The undo is itself recorded as a batch, so
+    calling this again re-applies the change (undo of the undo = redo).
+    """
+    if conn is None:
+        with engine.begin() as _conn:
+            return undo_last_prompt_activation(config_hash, actor=actor, conn=_conn)
+
+    last = conn.execute(text("""
+        SELECT batch_id, action
+        FROM prompt_activation_events
+        WHERE config_hash = :config_hash
+        ORDER BY id DESC
+        LIMIT 1
+    """), {"config_hash": config_hash}).fetchone()
+    if last is None:
+        return {"undone": False, "message": "No recorded prompt activation changes to undo"}
+
+    events = conn.execute(text("""
+        SELECT agent_type, from_version, to_version
+        FROM prompt_activation_events
+        WHERE config_hash = :config_hash AND batch_id = :batch_id
+        ORDER BY id
+    """), {"config_hash": config_hash, "batch_id": last.batch_id}).fetchall()
+
+    new_batch = uuid.uuid4().hex
+    reverted = []
+    for event in events:
+        try:
+            reverted.append(set_active_prompt_version(
+                conn, event.agent_type, config_hash, event.from_version,
+                action="undo", actor=actor,
+                reason=f"undo {last.action} (batch {last.batch_id})",
+                batch_id=new_batch,
+            ))
+        except ValueError as exc:
+            # The previously-active version row no longer exists; report it
+            # instead of failing the rest of the batch.
+            reverted.append({"agent_type": event.agent_type, "error": str(exc), "changed": False})
+
+    return {"undone": True, "batch_id": new_batch, "undid_batch": last.batch_id,
+            "undid_action": last.action, "reverted": reverted}
+
+
+def get_prompt_activation_history(config_hash, limit=50, conn=None):
+    """Recent activation changes for a config, newest first."""
+    if conn is None:
+        with engine.connect() as _conn:
+            return get_prompt_activation_history(config_hash, limit=limit, conn=_conn)
+
+    rows = conn.execute(text("""
+        SELECT id, created_at, batch_id, agent_type, from_version, to_version, action, actor, reason
+        FROM prompt_activation_events
+        WHERE config_hash = :config_hash
+        ORDER BY id DESC
+        LIMIT :limit
+    """), {"config_hash": config_hash, "limit": limit}).fetchall()
+    return [
+        {
+            "id": row.id,
+            "created_at": row.created_at.isoformat() if hasattr(row.created_at, "isoformat") else row.created_at,
+            "batch_id": row.batch_id,
+            "agent_type": row.agent_type,
+            "from_version": row.from_version,
+            "to_version": row.to_version,
+            "action": row.action,
+            "actor": row.actor,
+            "reason": row.reason,
+        }
+        for row in rows
+    ]
+
 def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system", strategy_directives=None, soul=None, memory=None):
     """Create a new prompt version for the current config, reusing version numbers when possible"""
     agent_type = _canonical_agent_type(agent_type)
@@ -251,19 +423,14 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             target_version = result.next_version
             print(f"📈 Creating new version v{target_version} for {agent_type}")
         
-        # Deactivate current prompts for this config
-        conn.execute(text("""
-            UPDATE prompt_versions
-            SET is_active = FALSE
-            WHERE agent_type = :agent_type AND config_hash = :config_hash
-        """), {"agent_type": agent_type, "config_hash": config_hash})
-        
-        # Check if target version already exists - if so, update it; if not, insert it
+        # Check if target version already exists - if so, update it; if not, insert it.
+        # Rows are written inactive; activation goes through the audited
+        # switchboard below so the change lands in prompt_activation_events.
         existing_version = conn.execute(text("""
             SELECT id FROM prompt_versions
             WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
         """), {"agent_type": agent_type, "config_hash": config_hash, "version": target_version}).fetchone()
-        
+
         if existing_version:
             # Update existing version
             conn.execute(text("""
@@ -275,7 +442,6 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
                     memory = :memory,
                     description = :description,
                     created_by = :created_by,
-                    is_active = TRUE,
                     created_at = CURRENT_TIMESTAMP
                 WHERE id = :id
             """), {
@@ -288,15 +454,14 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
                 "created_by": created_by,
                 "id": existing_version.id
             })
-            
+            prompt_id = existing_version.id
             print(f"✅ Updated {agent_type} v{target_version} for config {config_hash[:8]} (overwritten)")
-            return existing_version.id
         else:
             # Insert new version
             result = conn.execute(text("""
                 INSERT INTO prompt_versions
                 (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
-                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, :created_by, TRUE, :config_hash)
+                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, :created_by, FALSE, :config_hash)
                 RETURNING id, version
             """), {
                 "agent_type": agent_type,
@@ -310,7 +475,13 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
                 "created_by": created_by,
                 "config_hash": config_hash
             })
-            
+
             new_prompt = result.fetchone()
+            prompt_id = new_prompt.id
             print(f"✅ Created {agent_type} v{new_prompt.version} for config {config_hash[:8]} (new)")
-            return new_prompt.id
+
+        set_active_prompt_version(
+            conn, agent_type, config_hash, target_version,
+            action="save", actor=created_by, reason=description,
+        )
+        return prompt_id
