@@ -641,11 +641,29 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
     }
 
 
+_SYNC_PLACEHOLDER_REASONS = {"Schwab synced position", "📡 Synced from Schwab"}
+
+
 def _sync_holdings_with_database(config_hash, holdings, cash_balance):
-    """Replace holdings in the database with the live Schwab snapshot."""
+    """Replace holdings in the database with the live Schwab snapshot.
+
+    Preserves each existing position's real buy thesis + entry timestamp
+    (mirrors sync_schwab_positions) — only genuinely new/inherited positions
+    get the generic synced label. Relabeling everything on each sync made the
+    decider treat its own fresh entries as anonymous inventory and churn them.
+    """
     now = datetime.utcnow()
     print(f"🗃️ Syncing holdings for {config_hash}: positions={len(holdings)} cash={cash_balance:.2f}")
     with engine.begin() as conn:
+        prior_provenance = {}
+        try:
+            for _r in conn.execute(text("""
+                SELECT ticker, reason, purchase_timestamp FROM holdings
+                WHERE config_hash = :config_hash AND is_active = TRUE AND ticker != 'CASH'
+            """), {"config_hash": config_hash}):
+                prior_provenance[_r.ticker] = (_r.reason, _r.purchase_timestamp)
+        except Exception:
+            prior_provenance = {}
         conn.execute(text("DELETE FROM holdings WHERE config_hash = :config_hash"), {"config_hash": config_hash})
 
         # Cash row
@@ -672,22 +690,32 @@ def _sync_holdings_with_database(config_hash, holdings, cash_balance):
 
             gain_loss = float(row.get("gain_loss") or (current_value - total_value))
 
+            ticker = row.get("ticker")
+            prev_reason, prev_ts = prior_provenance.get(ticker, (None, None))
+            has_real_provenance = bool(prev_reason) and prev_reason not in _SYNC_PLACEHOLDER_REASONS
+            incoming_reason = row.get("reason")
+            if incoming_reason in _SYNC_PLACEHOLDER_REASONS:
+                incoming_reason = None
+            reason = incoming_reason or (prev_reason if has_real_provenance else "Schwab synced position")
+            purchase_ts = prev_ts if (has_real_provenance and prev_ts) else now
+
             conn.execute(text("""
                 INSERT INTO holdings (config_hash, ticker, shares, purchase_price, current_price,
                                       purchase_timestamp, current_price_timestamp, total_value, current_value,
                                       gain_loss, reason, is_active)
                 VALUES (:config_hash, :ticker, :shares, :purchase_price, :current_price,
-                        :ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
+                        :purchase_ts, :ts, :total_value, :current_value, :gain_loss, :reason, TRUE)
             """), {
                 "config_hash": config_hash,
-                "ticker": row.get("ticker"),
+                "ticker": ticker,
                 "shares": shares,
                 "purchase_price": purchase_price,
                 "current_price": current_price,
                 "total_value": total_value,
                 "current_value": current_value,
                 "gain_loss": gain_loss,
-                "reason": row.get("reason", "Schwab synced position"),
+                "reason": reason,
+                "purchase_ts": purchase_ts,
                 "ts": now
             })
 
@@ -999,6 +1027,18 @@ def dashboard():
                 schwab_data = trading_interface.sync_schwab_positions()
                 if schwab_data.get("status") == "success":
                     positions = schwab_data.get("positions", []) or []
+                    # sync_schwab_positions just persisted holdings with real buy
+                    # provenance (thesis + entry time) preserved — read it back so
+                    # the dashboard shows the actual reason, not a generic label.
+                    provenance = {}
+                    try:
+                        prov_rows = conn.execute(text("""
+                            SELECT ticker, reason, purchase_timestamp FROM holdings
+                            WHERE config_hash = :config_hash AND is_active = TRUE
+                        """), {"config_hash": config_hash}).fetchall()
+                        provenance = {r.ticker: (r.reason, r.purchase_timestamp) for r in prov_rows}
+                    except Exception:
+                        provenance = {}
                     holdings = []
                     for position in positions:
                         shares = float(position.get("shares") or 0)
@@ -1008,15 +1048,18 @@ def dashboard():
                         market_value = float(position.get("market_value") or (shares * current_price))
                         gain_loss = float(position.get("gain_loss") or (market_value - total_cost))
 
+                        symbol = position.get("symbol", "-").upper()
+                        prov_reason, prov_ts = provenance.get(symbol, (None, None))
                         holdings.append({
-                            "ticker": position.get("symbol", "-").upper(),
+                            "ticker": symbol,
                             "shares": shares,
                             "purchase_price": avg_price,
                             "current_price": current_price,
                             "total_value": total_cost,
                             "current_value": market_value,
                             "gain_loss": gain_loss,
-                            "reason": "📡 Synced from Schwab"
+                            "reason": prov_reason or "📡 Synced from Schwab",
+                            "purchase_timestamp": prov_ts,
                         })
 
                     available_cash_effective = float(
@@ -1096,9 +1139,13 @@ def dashboard():
                     }
                     use_schwab_positions = True
 
-                    # Persist live snapshot for dashboards/charts
-                    # raw_cash_balance is total cash in account (settled + unsettled combined)
-                    _sync_holdings_with_database(config_hash, holdings, raw_cash_balance)
+                    # NOTE: do NOT rewrite the holdings table here.
+                    # sync_schwab_positions() above already persisted holdings while
+                    # preserving each position's real buy thesis + entry timestamp.
+                    # A second _sync_holdings_with_database() call was relabeling every
+                    # position "📡 Synced from Schwab" with purchase_timestamp=now on
+                    # EVERY page load, so the decider saw all inventory as anonymous
+                    # "synced" positions aged 0 and churned it (sold within hours).
                     _record_live_portfolio_snapshot(
                         config_hash,
                         total_portfolio_value,

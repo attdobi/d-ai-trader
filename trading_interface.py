@@ -754,7 +754,12 @@ class TradingInterface:
                 continue
 
             prev_reason, prev_ts = prior_provenance.get(symbol, (None, None))
-            has_real_provenance = bool(prev_reason) and prev_reason != "Schwab synced position"
+            # Both generic sync labels count as "no real thesis" (the emoji variant
+            # was written by an old dashboard-route clobber; don't let it masquerade
+            # as genuine buy provenance).
+            has_real_provenance = bool(prev_reason) and prev_reason not in (
+                "Schwab synced position", "📡 Synced from Schwab"
+            )
             processed_holdings.append({
                 "ticker": symbol,
                 "shares": shares,
