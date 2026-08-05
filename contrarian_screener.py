@@ -101,14 +101,29 @@ def get_contrarian_candidates(limit=None):
     universe = _universe()
     try:
         import yfinance as yf
+        # SPY rides along in the same batched download so relative strength costs
+        # no extra request; it is a benchmark only, never a candidate.
+        download_list = universe + (["SPY"] if "SPY" not in universe else [])
         df = yf.download(
-            universe, period="3mo", interval="1d",
+            download_list, period="3mo", interval="1d",
             group_by="ticker", auto_adjust=True, progress=False, threads=True,
         )
+
+        # SPY 5d / 20d returns — the benchmark side of RS (stock return minus SPY's).
+        spy_week = spy_month = None
+        try:
+            spy_closes = (df["SPY"] if len(download_list) > 1 else df)["Close"].dropna()
+            if len(spy_closes) >= 21:
+                spy_price = float(spy_closes.iloc[-1])
+                spy_week = (spy_price / float(spy_closes.iloc[-6]) - 1) * 100
+                spy_month = (spy_price / float(spy_closes.iloc[-21]) - 1) * 100
+        except Exception:
+            pass
+
         candidates = []
         for tk in universe:
             try:
-                sub = df[tk] if len(universe) > 1 else df
+                sub = df[tk] if len(download_list) > 1 else df
                 closes = sub["Close"].dropna()
                 highs = sub["High"].dropna()
                 if len(closes) < 25:
@@ -127,6 +142,19 @@ def get_contrarian_candidates(limit=None):
                 hi20 = float(highs.iloc[-20:].max())
                 pullback = (hi20 - price) / hi20 * 100 if hi20 else 0.0
                 rsi = _rsi([float(x) for x in closes.values])
+
+                # Relative strength vs SPY over the same 5d/20d windows (percentage points).
+                rs5 = round(week - spy_week, 2) if spy_week is not None else None
+                rs20 = round(month - spy_month, 2) if spy_month is not None else None
+
+                # Relative volume vs the trailing 20-session average (participation).
+                rel_volume = None
+                vols = sub["Volume"].dropna()
+                if len(vols) > 1:
+                    latest_vol = float(vols.iloc[-1])
+                    avg_vol = float(vols.iloc[-21:-1].mean()) if len(vols) > 20 else float(vols.iloc[:-1].mean())
+                    if latest_vol > 0 and avg_vol > 0:
+                        rel_volume = round(latest_vol / avg_vol, 2)
 
                 # Skip EXTENDED names — the gainers feed already covers those and anti-chase
                 # rejects them. We want the opposite: cooled-off, non-extended setups.
@@ -151,6 +179,8 @@ def get_contrarian_candidates(limit=None):
                     "rsi": round(rsi, 1),
                     "pullback_from_20d_high": round(pullback, 2),
                     "dist_from_20d_ma": round(dist_sma, 2),
+                    "rs5_vs_spy": rs5, "rs20_vs_spy": rs20,
+                    "rel_volume": rel_volume,
                 })
             except Exception:
                 continue
@@ -179,9 +209,17 @@ def format_contrarian_watchlist(candidates):
         "# the open. PRIORITIZE these for BUY over extended gainers; anti-chase does not apply (not popped).",
     ]
     for c in candidates:
+        rs5, rs20 = c.get("rs5_vs_spy"), c.get("rs20_vs_spy")
+        rs_text = (
+            f"| RS/SPY 5d {rs5:+.1f} / 20d {rs20:+.1f} "
+            if rs5 is not None and rs20 is not None else ""
+        )
+        rel_vol = c.get("rel_volume")
+        vol_text = f" | rel-vol {rel_vol:.1f}× 20d-avg" if rel_vol else ""
         lines.append(
             f"- {c['ticker']}: {c['setup']} | day {c['day']:+.1f}% / wk {c['week']:+.1f}% / mo {c['month']:+.1f}% "
-            f"| RSI {c['rsi']} | -{c['pullback_from_20d_high']:.1f}% from 20d high | {c['dist_from_20d_ma']:+.1f}% vs 20d MA"
+            f"{rs_text}| RSI {c['rsi']} | -{c['pullback_from_20d_high']:.1f}% from 20d high "
+            f"| {c['dist_from_20d_ma']:+.1f}% vs 20d MA{vol_text}"
         )
     return "\n".join(lines)
 
