@@ -373,6 +373,150 @@ function setupTrendRangeButtons() {
     });
   });
 }
+// --- System vs Market (benchmark-relative, TWR deposit-adjusted) ------------
+// Fixed hue order, validated for CVD separation + contrast on the dark surface.
+const BENCH_COLORS = {
+  portfolio: '#42c9ff',
+  'SPY': '#f2a35e',
+  '^DJI': '#b28dff',
+  '^IXIC': '#29d697',
+  'VTI': '#9bb0cc',
+};
+let benchmarkChart = null;
+
+function benchChip(k, v, sub, signed) {
+  const cls = signed && Number.isFinite(v) ? (v >= 0 ? ' pos' : ' neg') : '';
+  const val = Number.isFinite(v) ? `${signed && v >= 0 ? '+' : ''}${v.toFixed(2)}${signed ? '%' : ''}` : '—';
+  return `<div class="bench-chip"><div class="k">${k}</div><div class="v${cls}">${val}</div>` +
+         (sub ? `<div class="s">${sub}</div>` : '') + `</div>`;
+}
+
+function renderBenchStats(stats) {
+  const el = document.getElementById('benchStats');
+  if (!el) return;
+  const p = stats.portfolio || {};
+  const spySym = stats.spy_symbol;
+  const spy = (stats.benchmarks || {})[spySym] || {};
+  const t = stats.trade || {};
+  el.innerHTML = [
+    benchChip('Alpha vs SPY', stats.spy_alpha, `system ${fmtPct(p.return_pct)} vs SPY ${fmtPct(spy.return_pct)}`, true),
+    benchChip('System return', p.return_pct, `${stats.start} → ${stats.end}`, true),
+    benchChip('Sharpe', p.sharpe ?? NaN, `SPY ${spy.sharpe ?? '—'}`, false),
+    benchChip('Max drawdown', p.max_drawdown_pct, `SPY ${fmtPct(spy.max_drawdown_pct)}`, true),
+    benchChip('Profit factor', t.profit_factor ?? NaN, `$won / $lost, ${t.trades ?? 0} trades`, false),
+    benchChip('Expectancy', t.expectancy_pct, 'avg % per closed trade', true),
+    benchChip('Payoff ratio', t.payoff_ratio ?? NaN, `avg win ${fmtPct(t.avg_win_pct)} / loss ${fmtPct(t.avg_loss_pct)}`, false),
+  ].join('');
+}
+
+function fmtPct(v) {
+  return Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
+}
+
+async function loadBenchmarkChart(days = 90) {
+  const canvas = document.getElementById('benchmarkChart');
+  if (!canvas) return;
+  let payload;
+  try {
+    payload = await fetchJSON(`/api/feedback/benchmarks?days=${days}`);
+  } catch (e) {
+    console.error('Error loading benchmark data:', e);
+    return;
+  }
+  const foot = document.getElementById('benchFootnote');
+  if (payload?.error) {
+    if (foot) foot.textContent = `Benchmark comparison unavailable: ${payload.error}`;
+    return;
+  }
+  const { series, stats } = payload;
+  renderBenchStats(stats);
+
+  const labels = series.dates;
+  const toPct = arr => arr.map(v => (v == null ? null : v - 100));
+  const datasets = [{
+    label: 'System (TWR)',
+    data: toPct(series.portfolio),
+    borderColor: BENCH_COLORS.portfolio,
+    backgroundColor: trendRgba(BENCH_COLORS.portfolio, 0.06),
+    borderWidth: 3, fill: true, tension: 0, pointRadius: 0, pointHoverRadius: 5,
+    pointBackgroundColor: BENCH_COLORS.portfolio, pointBorderColor: '#121c33',
+  }];
+  for (const b of payload.benchmark_order || []) {
+    if (!series[b.symbol]) continue;
+    datasets.push({
+      label: b.label,
+      data: toPct(series[b.symbol]),
+      borderColor: BENCH_COLORS[b.symbol] || '#9bb0cc',
+      borderWidth: 1.5, fill: false, tension: 0, pointRadius: 0, pointHoverRadius: 4,
+      pointBackgroundColor: BENCH_COLORS[b.symbol] || '#9bb0cc', pointBorderColor: '#121c33',
+      spanGaps: true,
+    });
+  }
+
+  if (benchmarkChart) benchmarkChart.destroy();
+  benchmarkChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      layout: { padding: { right: 62, top: 6 } },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: TREND_INK.axis },
+          ticks: { color: TREND_INK.muted, font: { size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
+        },
+        y: {
+          border: { display: false },
+          grid: { color: c => c.tick.value === 0 ? TREND_INK.gridStrong : TREND_INK.grid },
+          ticks: { color: TREND_INK.muted, font: { size: 11 }, maxTicksLimit: 7, callback: v => `${v > 0 ? '+' : ''}${v}%` },
+          afterFit: axis => { axis.width = 58; },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color: TREND_INK.text, usePointStyle: true, pointStyle: 'line', boxWidth: 24, font: { size: 11 } },
+        },
+        tooltip: {
+          backgroundColor: TREND_INK.tooltipBg, borderColor: TREND_INK.tooltipBorder,
+          borderWidth: 1, titleColor: '#dfe8f7', bodyColor: TREND_INK.text,
+          padding: 10, usePointStyle: true,
+          itemSort: (a, b) => b.parsed.y - a.parsed.y,
+          callbacks: { label: item => ` ${item.dataset.label}: ${fmtPct(item.parsed.y)}` },
+        },
+      },
+    },
+    plugins: [trendEndLabelPlugin],
+  });
+  benchmarkChart.$trendFmt = fmtPct;
+  benchmarkChart.draw();
+
+  if (foot) {
+    const flows = stats.external_flows || [];
+    const artifacts = stats.artifact_days_filtered || [];
+    const bits = [];
+    bits.push(`${flows.length ? flows.length : 'No'} external transfer${flows.length === 1 ? '' : 's'} in window` +
+      (flows.length ? ` (${flows.map(f => `${f.amount > 0 ? '+' : '−'}$${Math.abs(f.amount).toFixed(0)} ${f.date}`).join(', ')}) stripped from returns via time-weighting` : ''));
+    if (artifacts.length) bits.push(`${artifacts.length} bad snapshot day${artifacts.length === 1 ? '' : 's'} (${artifacts.join(', ')}) auto-filtered`);
+    bits.push('SPY/VTI use dividend-adjusted closes; DJIA/NASDAQ are price indexes.');
+    foot.textContent = bits.join(' · ');
+  }
+}
+
+function setupBenchRangeButtons() {
+  const wrap = document.getElementById('benchRangeButtons');
+  if (!wrap) return;
+  wrap.querySelectorAll('.trend-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      wrap.querySelectorAll('.trend-range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadBenchmarkChart(parseInt(btn.dataset.days, 10) || 90);
+    });
+  });
+}
+
 async function loadFeedbackHistory() {
   const el = document.getElementById('feedbackHistory');
   try {
@@ -523,6 +667,8 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshFeedbackData();
   setInterval(refreshFeedbackData, 10000);
   setupTrendRangeButtons();
+  setupBenchRangeButtons();
+  loadBenchmarkChart(90); // fetched once per range click, not on the 10s poll
   const resetBtn = document.getElementById('resetPromptsBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', resetPromptsToBaseline);

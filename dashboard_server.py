@@ -1944,6 +1944,24 @@ def get_cost_usage():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/feedback/benchmarks')
+def get_feedback_benchmarks():
+    """System growth vs SPY/DJIA/NASDAQ/VTI over a window (TWR, deposit-adjusted)."""
+    try:
+        days_param = request.args.get('days', '90')
+        if days_param == 'all':
+            days = 3650
+        else:
+            days = max(7, min(int(days_param), 3650))
+        import benchmark_tracker
+        payload = benchmark_tracker.get_benchmark_performance(
+            engine, get_current_config_hash(), days=days
+        )
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/feedback')
 def get_feedback_data():
     """Get feedback analysis data"""

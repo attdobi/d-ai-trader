@@ -132,6 +132,30 @@ All knobs live in `.env`: `DAI_MODEL_FEEDBACK` / `DAI_MODEL_EVOLUTION` /
 `DAI_MODEL_CRITIC` and `DAI_FEEDBACK_REASONING_LEVEL` / `DAI_CRITIC_REASONING_LEVEL`.
 Every call is metered in `api_usage` (model, tokens, cost) per agent.
 
+### Is it actually beating the market?
+
+Win rate and raw % return can both look healthy while an index fund quietly
+wins, so the Feedback tab's **System vs Market** panel benchmarks the account
+against **SPY, DJIA, NASDAQ, and VTI** over the same window (`benchmark_tracker.py`,
+`/api/feedback/benchmarks`):
+
+- **Time-weighted return (TWR)** — deposits/withdrawals are pulled from the
+  Schwab transactions API into `external_cash_flows` and stripped from the
+  growth curve, so moving money in or out never reads as trading skill.
+  Attribution is settlement-aware (a transfer dated Tuesday often posts to
+  account value Wednesday); clustered transfers are resolved jointly against
+  the value series.
+- **Benchmark closes** are cached daily in `benchmark_history` via yfinance
+  (dividend-adjusted for the ETFs). Override the lineup with
+  `DAI_BENCHMARK_SYMBOLS` in `.env`.
+- **Headline stats:** alpha vs SPY, Sharpe (system vs SPY), max drawdown
+  (system vs SPY), plus trade-quality metrics the equity curve can't show —
+  profit factor ($ won / $ lost), expectancy per trade, and payoff ratio
+  (avg win % / avg loss %). Expectancy > 0 with payoff ≥ ~1.3 means the loop's
+  risk-discipline lessons are landing even before alpha turns positive.
+- Flowless one-day V-shapes from the (since-fixed) settled-cash snapshot bug
+  are auto-filtered at read time and disclosed in the panel footnote.
+
 ---
 
 ## Quick Start

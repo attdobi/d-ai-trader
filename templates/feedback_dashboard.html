@@ -204,6 +204,28 @@
   <div class="trend-panel-title"><span class="trend-swatch" style="background:#42c9ff;"></span>Average profit per closed trade</div>
   <div class="chart-canvas-box trend-panel"><canvas id="avgProfitChart"></canvas></div>
 </div>
+
+<div class="chart-container">
+  <div class="trend-header">
+    <div>
+      <h2 style="margin:0;">System vs Market</h2>
+      <div class="trend-subtitle">
+        Growth of the account against the benchmarks over the same window, both
+        starting at 0%. Deposits and withdrawals are stripped out (time-weighted
+        return), so only trading skill moves the cyan line — if it sits below
+        SPY, an index fund would have done better that window.
+      </div>
+    </div>
+    <div id="benchRangeButtons">
+      <button type="button" class="trend-range-btn" data-days="30">30d</button>
+      <button type="button" class="trend-range-btn active" data-days="90">90d</button>
+      <button type="button" class="trend-range-btn" data-days="365">1y</button>
+    </div>
+  </div>
+  <div id="benchStats" class="bench-stats"></div>
+  <div class="chart-canvas-box bench-panel"><canvas id="benchmarkChart"></canvas></div>
+  <div id="benchFootnote" class="bench-footnote"></div>
+</div>
 <style>
 .trend-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .trend-subtitle { color: #7f8ca6; font-size: 0.8em; margin: 4px 0 2px; max-width: 660px; line-height: 1.45; }
@@ -221,6 +243,19 @@
 .chart-canvas-box { position: relative; width: 100%; }
 .chart-canvas-box.trend-panel { height: 185px; }
 .chart-canvas-box.trend-panel canvas { max-height: 185px; }
+.chart-canvas-box.bench-panel { height: 290px; }
+.chart-canvas-box.bench-panel canvas { max-height: 290px; }
+.bench-stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 8px; }
+.bench-chip {
+  background: rgba(255,255,255,0.04); border: 1px solid #2c3a54; border-radius: 8px;
+  padding: 6px 12px; min-width: 108px;
+}
+.bench-chip .k { color: #7f8ca6; font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.04em; }
+.bench-chip .v { color: #dfe8f7; font-size: 1.05em; font-weight: 600; margin-top: 1px; }
+.bench-chip .s { color: #7f8ca6; font-size: 0.75em; margin-top: 1px; }
+.bench-chip .v.pos { color: #29d697; }
+.bench-chip .v.neg { color: #ff5f73; }
+.bench-footnote { color: #7f8ca6; font-size: 0.75em; margin-top: 8px; line-height: 1.5; }
 </style>
 {% endblock %}
 
