@@ -44,6 +44,8 @@ from prompt_manager import (
 from decider_agent import (
     extract_companies_from_summaries,
     build_momentum_recap,
+    merge_holdings_into_recap_entities,
+    append_momentum_coverage_gap,
     fetch_holdings,
     store_momentum_snapshot,
     SUMMARY_MAX_CHARS,
@@ -636,16 +638,19 @@ def generate_summary_analyzer_report(limit=10, force_refresh=False):
                 analysis_timestamp = snapshot.generated_at.isoformat() + "Z"
             except Exception:
                 analysis_timestamp = datetime.utcnow().isoformat() + "Z"
+    holdings = fetch_holdings()
+
     if not snapshot_loaded:
         company_entities = extract_companies_from_summaries(extraction_payload)
+        company_entities, holdings_symbols = merge_holdings_into_recap_entities(company_entities, holdings)
         momentum_data, momentum_summary = build_momentum_recap(company_entities)
+        momentum_summary = append_momentum_coverage_gap(momentum_summary, momentum_data, holdings_symbols)
         momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
         try:
             store_momentum_snapshot(config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
         except Exception as persist_err:
             print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
 
-    holdings = fetch_holdings()
     cash_balance = next((float(h.get("current_value", 0)) for h in holdings if h.get("ticker") == "CASH"), 0.0)
     stock_holdings = [h for h in holdings if h.get("ticker") not in (None, "CASH")]
 

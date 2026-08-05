@@ -1268,6 +1268,53 @@ def build_momentum_recap(entities):
 
     return momentum_data, "\n".join(lines)
 
+
+def merge_holdings_into_recap_entities(entities, holdings):
+    """Ensure every owned ticker is in the entity list fed to build_momentum_recap.
+
+    News-derived entities only cover tickers mentioned in this cycle's summaries;
+    a holding absent from the news would get no momentum row at all, render as
+    RS/rel-vol UNKNOWN, and the decider would misread the data gap as a failed
+    setup and churn the position. Returns (merged_entities, holdings_symbols).
+    """
+    merged = list(entities or [])
+    covered = {
+        clean_ticker_symbol(e.get('symbol'))
+        for e in merged if isinstance(e, dict)
+    }
+    holdings_symbols = []
+    for holding in (holdings or []):
+        ticker = holding.get('ticker') if hasattr(holding, 'get') else None
+        if not ticker or ticker == 'CASH':
+            continue
+        symbol = clean_ticker_symbol(ticker)
+        if not symbol:
+            continue
+        holdings_symbols.append(symbol)
+        if symbol not in covered:
+            merged.append({"symbol": symbol, "company": ""})
+            covered.add(symbol)
+    return merged, holdings_symbols
+
+
+def append_momentum_coverage_gap(momentum_summary, momentum_data, holdings_symbols):
+    """Flag holdings that still lack a momentum row (e.g. yfinance failure).
+
+    Called out loudly — in the log AND in the recap text — so the LLM treats the
+    missing row as a data gap rather than as evidence against the position.
+    """
+    covered = {s.get('symbol') for s in (momentum_data or []) if isinstance(s, dict)}
+    missing = [t for t in holdings_symbols if t not in covered]
+    if not missing:
+        return momentum_summary
+    print(f"⚠️ momentum coverage gap: {', '.join(missing)}")
+    gap_line = (
+        "- Momentum data unavailable for: " + ", ".join(missing)
+        + " — treat as data gap, not as evidence against the position"
+    )
+    return f"{momentum_summary}\n{gap_line}" if momentum_summary else gap_line
+
+
 def execute_real_world_trade(decision):
     """
     Execute a real trade through Schwab API when in real_world mode.
@@ -2343,7 +2390,9 @@ OUTPUT (STRICT)
         print("... (summaries truncated for console preview)")
 
     company_entities = extract_companies_from_summaries(summaries_for_extraction)
-    momentum_data, momentum_summary = build_momentum_recap(company_entities)
+    recap_entities, holdings_symbols = merge_holdings_into_recap_entities(company_entities, holdings)
+    momentum_data, momentum_summary = build_momentum_recap(recap_entities)
+    momentum_summary = append_momentum_coverage_gap(momentum_summary, momentum_data, holdings_symbols)
     print(f"📊 Momentum recap prepared for {len(momentum_data)} symbols")
     if momentum_summary:
         preview_text = momentum_summary[:6000]
@@ -2355,7 +2404,7 @@ OUTPUT (STRICT)
         print(f"🧪 Momentum data sample: {json.dumps(sample, default=str)[:500]}")
     momentum_recap = momentum_summary or "Momentum snapshot unavailable. Run the decider to refresh momentum data."
     try:
-        store_momentum_snapshot(config_hash, run_id, company_entities, momentum_data, momentum_summary, momentum_recap)
+        store_momentum_snapshot(config_hash, run_id, recap_entities, momentum_data, momentum_summary, momentum_recap)
     except Exception as persist_err:
         print(f"⚠️  Failed to persist momentum snapshot: {persist_err}")
 

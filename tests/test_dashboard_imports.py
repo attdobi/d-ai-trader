@@ -116,8 +116,16 @@ def dashboard_server_module(monkeypatch):
     def _store_momentum_snapshot(*_args, **_kwargs):
         return None
 
+    def _merge_holdings_into_recap_entities(entities, _holdings):
+        return list(entities or []), []
+
+    def _append_momentum_coverage_gap(momentum_summary, *_args, **_kwargs):
+        return momentum_summary
+
     decider_stub.extract_companies_from_summaries = _extract_companies_from_summaries
     decider_stub.build_momentum_recap = _build_momentum_recap
+    decider_stub.merge_holdings_into_recap_entities = _merge_holdings_into_recap_entities
+    decider_stub.append_momentum_coverage_gap = _append_momentum_coverage_gap
     decider_stub.fetch_holdings = _fetch_holdings
     decider_stub.store_momentum_snapshot = _store_momentum_snapshot
     decider_stub.SUMMARY_MAX_CHARS = 7777
@@ -165,6 +173,8 @@ def test_dashboard_decider_import_bindings(dashboard_server_module):
 
     assert module.extract_companies_from_summaries is decider_stub.extract_companies_from_summaries
     assert module.build_momentum_recap is decider_stub.build_momentum_recap
+    assert module.merge_holdings_into_recap_entities is decider_stub.merge_holdings_into_recap_entities
+    assert module.append_momentum_coverage_gap is decider_stub.append_momentum_coverage_gap
     assert module.fetch_holdings is decider_stub.fetch_holdings
     assert module.store_momentum_snapshot is decider_stub.store_momentum_snapshot
     assert module.SUMMARY_MAX_CHARS == 7777
