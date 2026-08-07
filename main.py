@@ -526,6 +526,12 @@ Most financial news websites still show headlines and articles even with popups 
 # ~24%; a normal fixed nav bar is ~5%, so 10% separates them cleanly.
 OVERLAY_MIN_VIEWPORT_FRACTION = 0.10
 
+# Per-agent scroll depth (viewport heights) for the second screenshot.
+# Default 0.875 keeps a slight overlap with shot 1.
+SECOND_SHOT_SCROLL_MULTIPLIERS = {
+    "Agent_AP_Business": 1.375,  # tall hero + Most Read rail; go ~1/2 page deeper
+}
+
 _OVERLAY_SWEEP_JS = """
 const minFrac = arguments[0];
 const vw = window.innerWidth, vh = window.innerHeight;
@@ -780,8 +786,14 @@ def summarize_page(agent_name, url, web_driver):
         except Exception as e:
             print(f"Retry failed for Screenshot 1: {e}")
 
+    # Scroll depth for the second screenshot, in viewport heights. AP's business
+    # hub has a tall hero section, so the default depth leaves shot 2 mostly
+    # showing the same fold; scroll ~half a page further there.
+    scroll_multiplier = SECOND_SHOT_SCROLL_MULTIPLIERS.get(agent_name, 0.875)
     try:
-        web_driver.execute_script("window.scrollBy(0, window.innerHeight * 0.875);")
+        web_driver.execute_script(
+            "window.scrollBy(0, window.innerHeight * arguments[0]);", scroll_multiplier
+        )
     except Exception as e:
         print(f"Scroll failed for {agent_name}: {e}")
 

@@ -1506,6 +1506,38 @@ def decision_feedback():
         """), {"ch": config_hash, "rid": run_id, "rating": rating, "note": note, "dd": decision_date})
     return jsonify({"ok": True, "run_id": run_id, "rating": rating})
 
+SCREENSHOTS_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots"))
+
+
+@app.route("/screenshots/<path:subpath>")
+def serve_screenshot(subpath):
+    """Serve capture screenshots (read-only) for the Summaries tab viewer.
+
+    Only files that really live under the screenshots directory are served;
+    realpath containment blocks any ../ traversal.
+    """
+    full = os.path.realpath(os.path.join(SCREENSHOTS_ROOT, subpath))
+    if not full.startswith(SCREENSHOTS_ROOT + os.sep) or not full.endswith(".png"):
+        return jsonify({"error": "not found"}), 404
+    if not os.path.isfile(full):
+        return jsonify({"error": "not found"}), 404
+    from flask import send_file
+    return send_file(full, mimetype="image/png", max_age=3600)
+
+
+def _screenshot_urls(outer_json):
+    """Map a summary row's absolute screenshot paths to served URLs (existing files only)."""
+    urls = []
+    for p in outer_json.get("screenshot_paths") or []:
+        try:
+            real = os.path.realpath(str(p))
+            if real.startswith(SCREENSHOTS_ROOT + os.sep) and os.path.isfile(real):
+                urls.append("/screenshots/" + os.path.relpath(real, SCREENSHOTS_ROOT).replace(os.sep, "/"))
+        except Exception:
+            continue
+    return urls
+
+
 @app.route("/summaries")
 def summaries():
     import pytz
@@ -1561,6 +1593,7 @@ def summaries():
                     "headlines": summary_data.get("headlines", []),
                     "insights": summary_data.get("insights", ""),
                     "summary_cost": float(stamped_cost) if stamped_cost else None,
+                    "screenshots": _screenshot_urls(outer),
                 })
             except Exception as e:
                 print(f"Failed to parse summary row {row.id}: {e}")
