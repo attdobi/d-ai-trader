@@ -1308,14 +1308,27 @@ def trade_decisions():
     config_hash = get_current_config_hash()
     pacific_tz = pytz.timezone('US/Pacific')
     
+    # The trades table paginates CLIENT-side (all rows render into the DOM and
+    # trades.js slices them), so the bound here is page weight, not the DB:
+    # ~10KB per decision run. 200 runs ≈ 2MB — months of history — while the
+    # old LIMIT 20 silently hid everything past ~3 days.
+    TRADES_MAX_RUNS = 200
+
     with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT * FROM trade_decisions 
+        runs_total = conn.execute(text("""
+            SELECT count(*) FROM trade_decisions
             WHERE config_hash = :config_hash
               AND data::text NOT LIKE '%%Max retries reached%%'
               AND data::text NOT LIKE '%%API error, no response%%'
-            ORDER BY id DESC LIMIT 20
-        """), {"config_hash": config_hash}).fetchall()
+        """), {"config_hash": config_hash}).scalar() or 0
+
+        result = conn.execute(text("""
+            SELECT * FROM trade_decisions
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%Max retries reached%%'
+              AND data::text NOT LIKE '%%API error, no response%%'
+            ORDER BY id DESC LIMIT :limit
+        """), {"config_hash": config_hash, "limit": TRADES_MAX_RUNS}).fetchall()
         
         # Active holdings — used to resolve a filled order whose broker confirmation
         # glitched (the position exists, so the buy really filled), and to gate out
@@ -1473,7 +1486,8 @@ def trade_decisions():
             for t in trades:
                 t['feedback_rating'] = fb_by_run.get(t.get('run_id')) or 0
 
-        return render_template("trades.html", active_tab="trades", trades=trades)
+        return render_template("trades.html", active_tab="trades", trades=trades,
+                               runs_shown=len(result), runs_total=runs_total)
 
 
 @app.route("/api/decision-feedback", methods=["POST"])
@@ -1539,6 +1553,9 @@ def _screenshot_urls(outer_json):
 
 
 SUMMARIES_PER_PAGE = 20
+# Deep OFFSET pagination re-skips all prior rows, so cap the browsable depth;
+# at 10k rows the worst-case offset stays trivially cheap forever.
+SUMMARIES_MAX_BROWSABLE = 10000
 
 
 @app.route("/summaries")
@@ -1558,7 +1575,8 @@ def summaries():
             WHERE config_hash = :config_hash
               AND data::text NOT LIKE '%%API error, no response%%'
         """), {"config_hash": config_hash}).scalar() or 0
-        total_pages = max(1, -(-total_count // SUMMARIES_PER_PAGE))  # ceil
+        browsable = min(total_count, SUMMARIES_MAX_BROWSABLE)
+        total_pages = max(1, -(-browsable // SUMMARIES_PER_PAGE))  # ceil
         page = min(page, total_pages)
 
         result = conn.execute(text("""

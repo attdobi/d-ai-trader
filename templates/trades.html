@@ -180,6 +180,9 @@
   <button class="pagination-btn" id="prevPage" onclick="changePage(-1)">← Previous</button>
   <span class="pagination-info" id="pageInfo">Page 1</span>
   <button class="pagination-btn" id="nextPage" onclick="changePage(1)">Next →</button>
+  {% if runs_total and runs_shown and runs_total > runs_shown %}
+  <span class="pagination-info" title="Older runs are retained in the database (trade_decisions table)">· latest {{ runs_shown }} of {{ runs_total }} decision runs loaded</span>
+  {% endif %}
 </div>
 
 <style>
