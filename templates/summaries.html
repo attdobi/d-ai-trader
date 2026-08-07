@@ -65,6 +65,22 @@
 </div>
 {% endif %}
 
+{% if total_pages and total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+  <a class="pagination-btn" href="{{ url_for('summaries', page=page-1) }}">← Previous</a>
+  {% else %}
+  <button class="pagination-btn" disabled>← Previous</button>
+  {% endif %}
+  <span class="pagination-info">Page {{ page }} of {{ total_pages }} · {{ total_count }} summaries</span>
+  {% if page < total_pages %}
+  <a class="pagination-btn" href="{{ url_for('summaries', page=page+1) }}">Next →</a>
+  {% else %}
+  <button class="pagination-btn" disabled>Next →</button>
+  {% endif %}
+</div>
+{% endif %}
+
 <div id="screenshotModal" class="screenshot-modal" hidden>
   <div class="screenshot-modal-backdrop"></div>
   <div class="screenshot-modal-panel" role="dialog" aria-modal="true" aria-label="Source screenshots">
@@ -77,6 +93,7 @@
 </div>
 
 <style>
+a.pagination-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .summary-card.has-screenshots { cursor: pointer; }
 .summary-card.has-screenshots:hover { outline: 1px solid rgba(66,201,255,0.45); }
 .screenshot-badge {

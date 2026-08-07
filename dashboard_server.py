@@ -1538,19 +1538,39 @@ def _screenshot_urls(outer_json):
     return urls
 
 
+SUMMARIES_PER_PAGE = 20
+
+
 @app.route("/summaries")
 def summaries():
     import pytz
     config_hash = get_current_config_hash()
     pacific_tz = pytz.timezone('US/Pacific')
-    
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
     with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT * FROM summaries 
+        total_count = conn.execute(text("""
+            SELECT count(*) FROM summaries
             WHERE config_hash = :config_hash
               AND data::text NOT LIKE '%%API error, no response%%'
-            ORDER BY id DESC LIMIT 20
-        """), {"config_hash": config_hash}).fetchall()
+        """), {"config_hash": config_hash}).scalar() or 0
+        total_pages = max(1, -(-total_count // SUMMARIES_PER_PAGE))  # ceil
+        page = min(page, total_pages)
+
+        result = conn.execute(text("""
+            SELECT * FROM summaries
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%API error, no response%%'
+            ORDER BY id DESC LIMIT :limit OFFSET :offset
+        """), {
+            "config_hash": config_hash,
+            "limit": SUMMARIES_PER_PAGE,
+            "offset": (page - 1) * SUMMARIES_PER_PAGE,
+        }).fetchall()
 
         summaries = []
         for row in result:
@@ -1644,7 +1664,9 @@ def summaries():
                         best, best_d = v, d
             s["summary_cost"] = (best["cost"] / best["calls"]) if (best and best_d is not None and best_d <= 180) else None
 
-        return render_template("summaries.html", summaries=summaries)
+        return render_template("summaries.html", summaries=summaries,
+                               page=page, total_pages=total_pages,
+                               total_count=total_count)
 
 @app.route("/api/configuration")
 def api_configuration():
