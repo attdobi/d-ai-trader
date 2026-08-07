@@ -520,6 +520,57 @@ Most financial news websites still show headlines and articles even with popups 
         image_paths=valid_image_paths
     )
 
+# Fixed/sticky elements covering at least this share of the viewport are
+# treated as blocking chrome (donation banners, sticky ad units, consent
+# curtains) rather than content. AP's donate bar covers ~39%, its FreeStar ad
+# ~24%; a normal fixed nav bar is ~5%, so 10% separates them cleanly.
+OVERLAY_MIN_VIEWPORT_FRACTION = 0.10
+
+_OVERLAY_SWEEP_JS = """
+const minFrac = arguments[0];
+const vw = window.innerWidth, vh = window.innerHeight;
+let hidden = 0;
+for (const el of document.querySelectorAll('body *')) {
+  const cs = getComputedStyle(el);
+  const pos = cs.position;
+  if (pos !== 'fixed' && pos !== 'sticky' && pos !== 'absolute') continue;
+  if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+  // absolute elements can be legit page content; only sweep them when they
+  // stack like an overlay
+  if (pos === 'absolute' && (parseInt(cs.zIndex) || 0) < 100) continue;
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) continue;
+  const ow = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+  const oh = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+  if ((ow * oh) / (vw * vh) >= minFrac) {
+    el.style.setProperty('display', 'none', 'important');
+    hidden++;
+  }
+}
+return hidden;
+"""
+
+
+def hide_blocking_overlays(web_driver, agent_name, label=""):
+    """Hide big fixed/sticky overlays (donate banners, sticky ads, consent
+    curtains) so screenshots capture article content instead of chrome.
+
+    Keyword-based popup clicking misses these: AP's "DONATE NOW" bar closes
+    via a textless ✕ icon and re-renders on scroll, and ad units have no
+    dismiss button at all. Hiding is also safer than clicking — no risk of
+    following an ad. Call immediately before each screenshot (overlays
+    re-appear on scroll and on delayed timers).
+    """
+    try:
+        hidden = web_driver.execute_script(_OVERLAY_SWEEP_JS, OVERLAY_MIN_VIEWPORT_FRACTION)
+        if hidden:
+            print(f"🧹 {agent_name}: hid {hidden} blocking overlay(s){' ' + label if label else ''}")
+        return hidden or 0
+    except Exception as e:
+        print(f"Overlay sweep failed for {agent_name}: {e}")
+        return 0
+
+
 def try_click_popup(web_driver, agent_name):
     """
     Try to dismiss privacy popups and consent dialogs.
@@ -705,6 +756,8 @@ def summarize_page(agent_name, url, web_driver):
         web_driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
         time.sleep(2)
 
+    hide_blocking_overlays(web_driver, agent_name, "before screenshot 1")
+
     screenshot_path_1 = os.path.join(RUN_DIR, f"{agent_name}_1.png")
     screenshot_saved_1 = False
     try:
@@ -733,6 +786,9 @@ def summarize_page(agent_name, url, web_driver):
         print(f"Scroll failed for {agent_name}: {e}")
 
     time.sleep(2)
+
+    # Overlays (and lazy-loaded ad units) frequently re-render after scrolling.
+    hide_blocking_overlays(web_driver, agent_name, "before screenshot 2")
 
     screenshot_path_2 = os.path.join(RUN_DIR, f"{agent_name}_2.png")
     screenshot_saved_2 = False
