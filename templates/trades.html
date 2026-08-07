@@ -8,24 +8,27 @@
 <div class="daily-summary-bar" id="dailySummaryBar">
   <div class="summary-stat">
     <span class="summary-label">Today's Buys</span>
-    <span class="summary-value badge-info" id="todayBuys">—</span>
+    <span class="summary-value badge-info" id="todayBuys">{{ today_buys }}</span>
   </div>
   <div class="summary-stat">
     <span class="summary-label">Today's Sells</span>
-    <span class="summary-value badge-success" id="todaySells">—</span>
+    <span class="summary-value badge-success" id="todaySells">{{ today_sells }}</span>
   </div>
   <div class="summary-stat">
     <span class="summary-label">Net Activity</span>
-    <span class="summary-value" id="todayNet">—</span>
+    <span class="summary-value" id="todayNet">{{ today_buys + today_sells }} executed</span>
   </div>
 </div>
 
+{# Filters are server-side (they select which decision RUNS match and which
+   rows render), so chips are plain links that reset to page 1. #}
 <div class="filter-chips" id="filterChips" aria-label="Filter trades">
-  <button class="chip active" data-filter="all">All</button>
-  <button class="chip" data-filter="buy">📈 Buys</button>
-  <button class="chip" data-filter="sell">📉 Sells</button>
-  <button class="chip" data-filter="hold">⏸ Holds</button>
-  <button class="chip" data-filter="market_closed">⛔ Market Closed</button>
+  {% for f, label in [('all', 'All'), ('today', '📅 Today'), ('buy', '📈 Buys'),
+                      ('sell', '📉 Sells'), ('hold', '⏸ Holds'),
+                      ('market_closed', '⛔ Market Closed')] %}
+  <a class="chip{% if active_filter == f %} active{% endif %}"
+     href="{{ url_for('trade_decisions', filter=f) }}">{{ label }}</a>
+  {% endfor %}
 </div>
 
 <div class="table-container">
@@ -177,13 +180,25 @@
 </style>
 
 <div class="pagination" id="tradesPagination">
-  <button class="pagination-btn" id="prevPage" onclick="changePage(-1)">← Previous</button>
-  <span class="pagination-info" id="pageInfo">Page 1</span>
-  <button class="pagination-btn" id="nextPage" onclick="changePage(1)">Next →</button>
-  {% if runs_total and runs_shown and runs_total > runs_shown %}
-  <span class="pagination-info" title="Older runs are retained in the database (trade_decisions table)">· latest {{ runs_shown }} of {{ runs_total }} decision runs loaded</span>
+  {% if page > 1 %}
+  <a class="pagination-btn" href="{{ url_for('trade_decisions', page=page-1, filter=active_filter) }}">← Previous</a>
+  {% else %}
+  <button class="pagination-btn" disabled>← Previous</button>
+  {% endif %}
+  <span class="pagination-info">Page {{ page }} of {{ total_pages }} · {{ runs_total }} decision run{{ 's' if runs_total != 1 }}{% if active_filter != 'all' %} ({{ active_filter }}){% endif %}</span>
+  {% if page < total_pages %}
+  <a class="pagination-btn" href="{{ url_for('trade_decisions', page=page+1, filter=active_filter) }}">Next →</a>
+  {% else %}
+  <button class="pagination-btn" disabled>Next →</button>
+  {% endif %}
+  {% if browsable_capped %}
+  <span class="pagination-info" title="Older runs are retained in the database (trade_decisions table)">· latest 2,000 runs browsable</span>
   {% endif %}
 </div>
+<style>
+a.pagination-btn { text-decoration: none; display: inline-flex; align-items: center; }
+a.chip { text-decoration: none; }
+</style>
 
 <style>
 .exec-badge {
@@ -235,4 +250,3 @@
   });
   </script>
 {% endblock %}
-}

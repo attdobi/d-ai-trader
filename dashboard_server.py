@@ -1308,27 +1308,65 @@ def trade_decisions():
     config_hash = get_current_config_hash()
     pacific_tz = pytz.timezone('US/Pacific')
     
-    # The trades table paginates CLIENT-side (all rows render into the DOM and
-    # trades.js slices them), so the bound here is page weight, not the DB:
-    # ~10KB per decision run. 200 runs ≈ 2MB — months of history — while the
-    # old LIMIT 20 silently hid everything past ~3 days.
-    TRADES_MAX_RUNS = 200
+    # Server-side pagination BY DECISION RUN (mirrors the Summaries tab).
+    # Paginating whole runs keeps each run's trade rows and its RLHF feedback /
+    # "considered" block together — the old client-side row slicing hid trade
+    # rows but not their feedback rows, dumping orphaned 👍/👎 rows.
+    TRADES_RUNS_PER_PAGE = 10
+    TRADES_MAX_BROWSABLE_RUNS = 2000  # ~10k rows; keeps worst-case OFFSET trivial
+
+    VALID_FILTERS = {"all", "today", "buy", "sell", "hold", "market_closed"}
+    active_filter = request.args.get("filter", "all")
+    if active_filter not in VALID_FILTERS:
+        active_filter = "all"
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+
+    base_where = """
+        config_hash = :config_hash
+        AND data::text NOT LIKE '%%Max retries reached%%'
+        AND data::text NOT LIKE '%%API error, no response%%'
+    """
+    params = {"config_hash": config_hash}
+
+    # Run-level filter conditions (CASE guards jsonb_array_elements against
+    # non-array payloads — CASE guarantees evaluation order, plain AND doesn't).
+    if active_filter == "today":
+        base_where += " AND timestamp::date = :today_pt"
+        params["today_pt"] = datetime.now(pacific_tz).date()
+    elif active_filter in ("buy", "sell", "hold"):
+        base_where += """
+            AND CASE WHEN jsonb_typeof(data) = 'array' THEN EXISTS (
+                SELECT 1 FROM jsonb_array_elements(data) e
+                WHERE lower(e->>'action') = :action_filter
+            ) ELSE FALSE END
+        """
+        params["action_filter"] = active_filter
+    elif active_filter == "market_closed":
+        base_where += """
+            AND CASE WHEN jsonb_typeof(data) = 'array' THEN EXISTS (
+                SELECT 1 FROM jsonb_array_elements(data) e
+                WHERE (e->>'execution_status') ILIKE '%%market%%'
+                   OR (e->>'execution_status') ILIKE '%%closed%%'
+                   OR (e->>'reason') ILIKE '%%market closed%%'
+            ) ELSE FALSE END
+        """
 
     with engine.connect() as conn:
-        runs_total = conn.execute(text("""
-            SELECT count(*) FROM trade_decisions
-            WHERE config_hash = :config_hash
-              AND data::text NOT LIKE '%%Max retries reached%%'
-              AND data::text NOT LIKE '%%API error, no response%%'
-        """), {"config_hash": config_hash}).scalar() or 0
+        runs_total = conn.execute(text(
+            f"SELECT count(*) FROM trade_decisions WHERE {base_where}"
+        ), params).scalar() or 0
+        browsable = min(runs_total, TRADES_MAX_BROWSABLE_RUNS)
+        total_pages = max(1, -(-browsable // TRADES_RUNS_PER_PAGE))  # ceil
+        page = min(page, total_pages)
 
-        result = conn.execute(text("""
-            SELECT * FROM trade_decisions
-            WHERE config_hash = :config_hash
-              AND data::text NOT LIKE '%%Max retries reached%%'
-              AND data::text NOT LIKE '%%API error, no response%%'
-            ORDER BY id DESC LIMIT :limit
-        """), {"config_hash": config_hash, "limit": TRADES_MAX_RUNS}).fetchall()
+        result = conn.execute(text(f"""
+            SELECT * FROM trade_decisions WHERE {base_where}
+            ORDER BY id DESC LIMIT :limit OFFSET :offset
+        """), {**params, "limit": TRADES_RUNS_PER_PAGE,
+               "offset": (page - 1) * TRADES_RUNS_PER_PAGE}).fetchall()
         
         # Active holdings — used to resolve a filled order whose broker confirmation
         # glitched (the position exists, so the buy really filled), and to gate out
@@ -1340,10 +1378,9 @@ def trade_decisions():
         """), {"ch": config_hash}).fetchall():
             hold_map[hr.ticker] = (float(hr.shares or 0), float(hr.purchase_price or 0))
 
-        trades = []
-        for row in result:
+        def _prepare_trade_run(row):
             trade_dict = dict(row._mapping)
-            
+
             # Format timestamp in Pacific time
             timestamp = trade_dict.get('timestamp')
             if timestamp:
@@ -1448,8 +1485,49 @@ def trade_decisions():
                             continue
                 
                 trade_dict['data'] = cleaned_data
-            
-            trades.append(trade_dict)
+
+            return trade_dict
+
+        trades = [_prepare_trade_run(row) for row in result]
+
+        # Row-level filter within matching runs (the SQL filter picks runs; a
+        # run's non-matching rows still shouldn't render). Runs left with no
+        # rows also drop their feedback block — the template guards on
+        # trade.data — so a filter can never strand an orphaned 👍/👎 row.
+        if active_filter in ("buy", "sell", "hold", "market_closed"):
+            def _row_matches(d):
+                act = (d.get('action') or '').lower()
+                es = (d.get('execution_status') or '').lower()
+                if active_filter == "market_closed":
+                    return 'market' in es or 'closed' in es
+                return active_filter in act
+            for t in trades:
+                t['data'] = [d for d in (t.get('data') or []) if _row_matches(d)]
+
+        # Today's executed buy/sell counts for the summary bar — server-side and
+        # page-independent (was derived from whichever rows the client had).
+        today_buys = today_sells = 0
+        _failed_substrings = ('rejected', 'working', 'error', 'failed',
+                              'not_filled', 'market', 'closed')
+        today_rows = conn.execute(text("""
+            SELECT * FROM trade_decisions
+            WHERE config_hash = :config_hash
+              AND data::text NOT LIKE '%%Max retries reached%%'
+              AND data::text NOT LIKE '%%API error, no response%%'
+              AND timestamp::date = :today_pt
+            ORDER BY id DESC
+        """), {"config_hash": config_hash,
+               "today_pt": datetime.now(pacific_tz).date()}).fetchall()
+        for _r in today_rows:
+            for _d in _prepare_trade_run(_r).get('data') or []:
+                _exec = (_d.get('execution_status') or '').lower()
+                if any(s in _exec for s in _failed_substrings):
+                    continue
+                _a = (_d.get('action') or '').lower()
+                if 'buy' in _a:
+                    today_buys += 1
+                elif 'sell' in _a:
+                    today_sells += 1
 
         # Attach the API cost of each decision (Decider + CompanyExtraction calls
         # for that run) so the Trades tab shows the $ that produced the trades.
@@ -1487,7 +1565,11 @@ def trade_decisions():
                 t['feedback_rating'] = fb_by_run.get(t.get('run_id')) or 0
 
         return render_template("trades.html", active_tab="trades", trades=trades,
-                               runs_shown=len(result), runs_total=runs_total)
+                               page=page, total_pages=total_pages,
+                               runs_total=runs_total,
+                               browsable_capped=(runs_total > browsable),
+                               active_filter=active_filter,
+                               today_buys=today_buys, today_sells=today_sells)
 
 
 @app.route("/api/decision-feedback", methods=["POST"])
