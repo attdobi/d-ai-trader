@@ -15,6 +15,7 @@
        data-searchable="{{ summary.agent }} {{ summary.headlines|join(' ') }} {{ summary.insights }}"
        {% if summary.screenshots %}data-screenshots="{{ summary.screenshots|join('|') }}"
        data-agent="{{ summary.agent }}" data-when="{{ summary.timestamp }}"
+       data-url="{{ summary.final_url or '' }}"
        role="button" tabindex="0" title="Click to view the screenshots this summary was generated from"{% endif %}>
     <div class="summary-source">
       <span class="source-icon">
@@ -146,7 +147,11 @@ function filterSummaries() {
     const urls = (card.dataset.screenshots || '').split('|').filter(Boolean);
     if (!urls.length) return;
     title.textContent = `${card.dataset.agent} — ${card.dataset.when}`;
-    body.innerHTML = urls.map((u, i) =>
+    const pageUrl = card.dataset.url;
+    const urlLine = pageUrl
+      ? `<p class="shot-label">Captured from: <a href="${pageUrl}" target="_blank" rel="noopener noreferrer" style="color:#42c9ff;">${pageUrl}</a></p>`
+      : '';
+    body.innerHTML = urlLine + urls.map((u, i) =>
       `<p class="shot-label">Screenshot ${i + 1} of ${urls.length}</p><img src="${u}" alt="Screenshot ${i + 1} for ${card.dataset.agent}">`
     ).join('');
     modal.hidden = false;

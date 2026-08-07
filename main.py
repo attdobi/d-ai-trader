@@ -529,7 +529,11 @@ OVERLAY_MIN_VIEWPORT_FRACTION = 0.10
 # Per-agent scroll depth (viewport heights) for the second screenshot.
 # Default 0.875 keeps a slight overlap with shot 1.
 SECOND_SHOT_SCROLL_MULTIPLIERS = {
-    "Agent_AP_Business": 1.375,  # tall hero + Most Read rail; go ~1/2 page deeper
+    # (empty) AP was overridden deeper while shot 1 started mid-page; with the
+    # post-popup scroll fixed, shot 1 covers the hero + story grid and AP's
+    # only remaining below-the-fold content is the videos rail + ad slot, so
+    # the default overlap-preserving depth wins. Add per-agent overrides here
+    # as sites change.
 }
 
 _OVERLAY_SWEEP_JS = """
@@ -753,14 +757,30 @@ def summarize_page(agent_name, url, web_driver):
         pass
 
     popup_dismissed = try_click_popup(web_driver, agent_name)
-    
+
     # If popup was dismissed, wait for content to fully load
     if popup_dismissed:
         print(f"⏳ Waiting for content to load after popup dismissal...")
         time.sleep(5)
-        # Scroll to load dynamic content
-        web_driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+        # Nudge the page to trigger lazy-loaded modules, then RETURN TO TOP.
+        # The old scrollTo(scrollHeight/2) left the viewport parked in the
+        # middle of the page for screenshot 1 — on long hubs like AP business
+        # that's the sponsored-recirculation zone, so the summarizer saw ads
+        # and generic promos instead of the top headlines.
+        web_driver.execute_script("window.scrollTo(0, window.innerHeight * 1.5);")
         time.sleep(2)
+        web_driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1)
+
+    # Where did we actually end up? (Redirects/interstitials are otherwise
+    # invisible in the screenshots.) Stamped into the summary payload below.
+    final_url = url
+    try:
+        final_url = web_driver.current_url
+        if final_url.split('#')[0].rstrip('/') != url.split('#')[0].rstrip('/'):
+            print(f"🧭 {agent_name}: final URL differs from requested: {final_url} (requested {url})")
+    except Exception:
+        pass
 
     hide_blocking_overlays(web_driver, agent_name, "before screenshot 1")
 
@@ -855,6 +875,7 @@ def summarize_page(agent_name, url, web_driver):
         "timestamp": current_capture_timestamp(),
         "summary": summary_data,
         "screenshot_paths": saved_screenshots,
+        "final_url": final_url,
         "run_id": RUN_TIMESTAMP,
         "cost_usd": (call_usage or {}).get("cost_usd"),
         "tokens": (call_usage or {}).get("total_tokens"),

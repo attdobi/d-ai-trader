@@ -1594,6 +1594,7 @@ def summaries():
                     "insights": summary_data.get("insights", ""),
                     "summary_cost": float(stamped_cost) if stamped_cost else None,
                     "screenshots": _screenshot_urls(outer),
+                    "final_url": outer.get("final_url"),
                 })
             except Exception as e:
                 print(f"Failed to parse summary row {row.id}: {e}")
