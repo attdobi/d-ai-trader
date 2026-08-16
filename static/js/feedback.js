@@ -714,7 +714,9 @@ window.addEventListener('pageshow', (event) => {
 document.addEventListener('DOMContentLoaded', () => {
   loadPromptDetails();
   refreshFeedbackData();
-  setInterval(refreshFeedbackData, 10000);
+  // 60s (was 10s): each poll re-renders sections, which yanked the page
+  // around while users were exploring the charts.
+  setInterval(refreshFeedbackData, 60000);
   setupTrendRangeButtons();
   setupBenchRangeButtons();
   loadBenchmarkChart(90); // fetched once per range click, not on the 10s poll

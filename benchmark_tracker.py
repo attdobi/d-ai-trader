@@ -465,6 +465,12 @@ def get_benchmark_performance(engine, config_hash, days=90):
     flow_list = []
     for r in flow_rows:
         d = r.flow_date
+        # Flows on/before the window's first plotted day are already embedded
+        # in the starting value; attributing them to an in-window step would
+        # subtract them a second time (a pre-window +$1,000 deposit rendered
+        # as a fake -34% first step in the 30d view).
+        if d <= aligned[0][0]:
+            continue
         flows_by_date[d] = flows_by_date.get(d, 0.0) + float(r.amount)
         flow_list.append({"date": d.isoformat(), "amount": float(r.amount),
                           "description": r.description})

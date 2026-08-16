@@ -1226,7 +1226,9 @@ def dashboard():
             prompt_versions = {'summarizer_version': 0, 'decider_version': 0}
         
         current_config = {
-            'gpt_model': get_gpt_model(),
+            # The card should show the model actually making trade decisions
+            # (per-agent override), not the global -m fallback.
+            'gpt_model': get_agent_model('DeciderAgent'),
             'prompt_config': get_prompt_version_config(),
             'trading_mode': get_trading_mode(),
             'config_hash': get_current_config_hash(),
@@ -1787,7 +1789,9 @@ def api_configuration():
             prompt_versions = {'summarizer_version': 0, 'decider_version': 0}
         
         current_config = {
-            'gpt_model': get_gpt_model(),
+            # The card should show the model actually making trade decisions
+            # (per-agent override), not the global -m fallback.
+            'gpt_model': get_agent_model('DeciderAgent'),
             'prompt_config': get_prompt_version_config(),
             'trading_mode': get_trading_mode(),
             'config_hash': get_current_config_hash(),

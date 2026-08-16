@@ -55,6 +55,18 @@ def test_transfer_cluster_resolves_jointly():
     assert all(abs(r) < 0.03 for r in rets.values()), rets
 
 
+def test_pre_window_flow_must_not_reach_attribution():
+    # A deposit dated before the window's first day is already embedded in the
+    # starting value. get_benchmark_performance filters those out before
+    # calling twr_daily_returns; this documents why — attributing it anyway
+    # fabricates a huge fake first-step loss (the -34% 30d-view cliff).
+    daily = [(d(17), 2792.0), (d(20), 2820.0), (d(21), 2825.0)]
+    clean = dict(bt.twr_daily_returns(daily, {}))
+    poisoned = dict(bt.twr_daily_returns(daily, {d(15): 1000.0}))
+    assert abs(clean[d(20)] - 0.01) < 0.001
+    assert poisoned[d(20)] < -0.3  # what the bug looked like
+
+
 def test_flow_not_yet_visible_is_ignored():
     # Deposit dated after the last snapshot: nothing to attribute it to yet.
     daily = [(d(1), 1000.0), (d(2), 1010.0)]
