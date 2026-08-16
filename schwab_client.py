@@ -317,15 +317,46 @@ class SchwabAPIClient:
             interactive_env = os.getenv("DAI_SCHWAB_INTERACTIVE")
             if interactive_env is None:
                 interactive = sys.stdin.isatty()
-                if not interactive:
-                    logger.info("No interactive TTY detected for Schwab auth; using non-interactive browser flow.")
             else:
                 interactive = interactive_env.lower() not in {"0", "false", "no"}
             manual_flow = os.getenv("DAI_SCHWAB_MANUAL_FLOW", "0").lower() in {"1", "true", "yes"}
 
+            # Server processes (dashboard/trader) must NEVER launch a login flow:
+            # easy_client's fallback starts a blocking OAuth callback server on
+            # the redirect port and waits for a human — with an expired token
+            # this wedged every dashboard worker at import/boot. Token-only mode
+            # loads the existing token file or fails fast; re-auth happens via
+            # the dashboard button or schwab_manual_auth.py.
+            token_only_env = os.getenv("DAI_SCHWAB_TOKEN_ONLY")
+            if token_only_env is None:
+                token_only = not sys.stdin.isatty()
+            else:
+                token_only = token_only_env.lower() in {"1", "true", "yes"}
+
             if SCHWAB_LIBRARY == "schwab":
                 logger.info("Authenticating with Schwab API (schwab) using token file %s", token_path)
-                if manual_flow:
+                if token_only:
+                    if token_payload is None:
+                        logger.error(
+                            "Schwab token file missing/unreadable and token-only mode active. "
+                            "Refresh the token via the dashboard button or schwab_manual_auth.py."
+                        )
+                        return False
+                    remaining = _refresh_token_lifespan_seconds(token_payload)
+                    if remaining is not None and remaining <= 0:
+                        logger.error(
+                            "Schwab refresh token EXPIRED and token-only mode active. "
+                            "Refresh the token via the dashboard button or schwab_manual_auth.py."
+                        )
+                        return False
+                    from schwab.auth import client_from_token_file
+                    client = client_from_token_file(
+                        token_path=token_path,
+                        api_key=SCHWAB_CLIENT_ID,
+                        app_secret=SCHWAB_CLIENT_SECRET,
+                        enforce_enums=True,
+                    )
+                elif manual_flow:
                     from schwab.auth import client_from_manual_flow
                     client = client_from_manual_flow(
                         api_key=SCHWAB_CLIENT_ID,

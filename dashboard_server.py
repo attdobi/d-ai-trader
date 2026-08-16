@@ -3044,6 +3044,94 @@ def reset_portfolio():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+SCHWAB_REFRESH_TOKEN_TTL_SECONDS = 7 * 86400
+
+
+def _schwab_token_status_dict():
+    from schwab_client import schwab_client as _sc
+    path = str(_sc._resolve_token_path())
+    if not os.path.exists(path):
+        return {"exists": False, "expired": True}
+    try:
+        bundle = json.loads(open(path).read())
+    except Exception as e:
+        return {"exists": True, "expired": True, "error": f"unreadable token file: {e}"}
+    ct = bundle.get("creation_timestamp") or (bundle.get("token") or {}).get("creation_timestamp")
+    if not ct:
+        return {"exists": True, "expired": True, "error": "no creation timestamp"}
+    import time as _time
+    expires = float(ct) + SCHWAB_REFRESH_TOKEN_TTL_SECONDS
+    now = _time.time()
+    return {
+        "exists": True,
+        "created": datetime.fromtimestamp(ct).strftime("%m/%d %I:%M %p"),
+        "expires_at": datetime.fromtimestamp(expires).strftime("%a %m/%d %I:%M %p"),
+        "days_left": round((expires - now) / 86400, 1),
+        "expired": now >= expires,
+    }
+
+
+@app.route('/api/schwab/token-status')
+def schwab_token_status():
+    try:
+        return jsonify(_schwab_token_status_dict())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/schwab/reauth/start', methods=['POST'])
+def schwab_reauth_start():
+    """Step 1 of the in-dashboard token refresh: hand the browser the Schwab
+    authorize URL. (Equivalent of schwab_manual_auth.py's login step.)"""
+    try:
+        from config import SCHWAB_CLIENT_ID, SCHWAB_REDIRECT_URI
+        if not SCHWAB_CLIENT_ID:
+            return jsonify({"error": "SCHWAB_CLIENT_ID not configured"}), 400
+        from urllib.parse import urlencode
+        from schwab_manual_auth import AUTH_URL
+        auth_url = AUTH_URL + "?" + urlencode({
+            "response_type": "code",
+            "client_id": SCHWAB_CLIENT_ID,
+            "redirect_uri": SCHWAB_REDIRECT_URI,
+        })
+        return jsonify({"auth_url": auth_url, "redirect_uri": SCHWAB_REDIRECT_URI})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/schwab/reauth/complete', methods=['POST'])
+def schwab_reauth_complete():
+    """Step 2: exchange the pasted callback URL's code for fresh tokens and
+    save them (resets the 7-day refresh-token clock). The auth code is
+    single-use and short-lived; it is never logged."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        returned_url = (payload.get("returned_url") or "").strip()
+        if not returned_url:
+            return jsonify({"error": "Paste the full URL from the browser address bar"}), 400
+        from urllib.parse import urlparse, parse_qs, unquote
+        parsed = urlparse(returned_url)
+        code = parse_qs(parsed.query).get("code", [None])[0]
+        if not code and parsed.fragment:
+            code = parse_qs(parsed.fragment).get("code", [None])[0]
+        if not code:
+            return jsonify({"error": "No 'code' parameter found in that URL — paste the full redirected URL"}), 400
+
+        from config import SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET, SCHWAB_REDIRECT_URI
+        from schwab_manual_auth import _exchange_code_for_tokens, _save_tokens
+        from schwab_client import schwab_client as _sc
+        from pathlib import Path as _Path
+        tokens = _exchange_code_for_tokens(
+            SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET, SCHWAB_REDIRECT_URI, unquote(code)
+        )
+        _save_tokens(_Path(str(_sc._resolve_token_path())), tokens)  # fresh creation_ts
+        _sc.ensure_authenticated(force=True)
+        return jsonify({"success": True, "status": _schwab_token_status_dict()})
+    except Exception as e:
+        # requests.HTTPError from the token exchange lands here (e.g. expired code)
+        return jsonify({"error": f"Token exchange failed: {e}"}), 500
+
+
 @app.route('/api/schwab/holdings')
 def get_schwab_holdings():
     """Get current Schwab holdings and portfolio data (READ-ONLY)"""

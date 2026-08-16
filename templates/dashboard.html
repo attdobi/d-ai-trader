@@ -294,6 +294,83 @@
     <div id="price-update-status" class="price-update-status"></div>
   </div>
 
+  <div class="trigger-section" id="schwabTokenSection">
+    <h3>Schwab API Token</h3>
+    <p class="trigger-description">
+      <span id="tokenStatusChip" class="token-chip">checking…</span>
+      Schwab's refresh token expires every 7 days and renewing it requires your login.
+    </p>
+    <div class="trigger-buttons">
+      <button class="trigger-btn" id="refreshTokenBtn" aria-label="Refresh Schwab API token"><span class="btn-icon">🔑</span>Refresh Schwab Token</button>
+    </div>
+    <div id="tokenReauthPanel" class="token-reauth-panel" style="display:none;">
+      <ol>
+        <li>A Schwab login tab just opened — sign in and approve access.</li>
+        <li>You'll land on a <code>https://127.0.0.1:5556/callback…</code> page that <em>fails to load</em>. That's expected — nothing needs to be listening.</li>
+        <li>Copy the <strong>full URL</strong> from that tab's address bar and paste it below.</li>
+      </ol>
+      <div class="token-reauth-row">
+        <input type="text" id="callbackUrlInput" placeholder="https://127.0.0.1:5556/callback?code=…" autocomplete="off" spellcheck="false">
+        <button class="trigger-btn" id="completeReauthBtn">✅ Complete</button>
+      </div>
+      <div id="reauthStatus" class="trigger-status"></div>
+    </div>
+  </div>
+  <style>
+  .token-chip { display:inline-block; padding:2px 10px; border-radius:10px; font-weight:600; font-size:0.85em; margin-right:8px; }
+  .token-chip.ok { background:rgba(41,214,151,0.15); color:#29d697; }
+  .token-chip.warn { background:rgba(250,219,95,0.15); color:#fadb5f; }
+  .token-chip.bad { background:rgba(255,95,115,0.18); color:#ff5f73; }
+  .token-reauth-panel { margin-top:10px; padding:12px 14px; border:1px solid #2c3a54; border-radius:10px; background:rgba(255,255,255,0.03); }
+  .token-reauth-panel ol { margin:0 0 10px 18px; padding:0; color:#9bb0cc; font-size:0.9em; line-height:1.6; }
+  .token-reauth-row { display:flex; gap:8px; }
+  .token-reauth-row input { flex:1; background:rgba(0,0,0,0.3); border:1px solid #3a4a63; border-radius:8px; color:#dfe8f7; padding:8px 10px; font-family:ui-monospace,Menlo,monospace; font-size:0.85em; }
+  </style>
+  <script>
+  (function () {
+    const chip = () => document.getElementById('tokenStatusChip');
+    function renderStatus(s) {
+      const el = chip();
+      if (!el) return;
+      if (s.error && !s.exists) { el.textContent = '🔑 no token file'; el.className = 'token-chip bad'; return; }
+      if (s.expired) { el.textContent = '🔑 token EXPIRED — refresh now'; el.className = 'token-chip bad'; }
+      else if (s.days_left <= 2) { el.textContent = `🔑 token expires ${s.expires_at} (${s.days_left}d left)`; el.className = 'token-chip warn'; }
+      else { el.textContent = `🔑 token valid — expires ${s.expires_at} (${s.days_left}d left)`; el.className = 'token-chip ok'; }
+    }
+    function loadStatus() {
+      fetch('/api/schwab/token-status').then(r => r.json()).then(renderStatus).catch(() => {});
+    }
+    document.getElementById('refreshTokenBtn').addEventListener('click', () => {
+      fetch('/api/schwab/reauth/start', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => {
+          if (d.error) { document.getElementById('reauthStatus').textContent = d.error; return; }
+          window.open(d.auth_url, '_blank', 'noopener');
+          document.getElementById('tokenReauthPanel').style.display = '';
+          document.getElementById('callbackUrlInput').focus();
+        });
+    });
+    document.getElementById('completeReauthBtn').addEventListener('click', () => {
+      const status = document.getElementById('reauthStatus');
+      status.textContent = 'Exchanging code…';
+      fetch('/api/schwab/reauth/complete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({returned_url: document.getElementById('callbackUrlInput').value})
+      }).then(r => r.json()).then(d => {
+        if (d.success) {
+          status.textContent = '✅ Token refreshed — good for 7 days. Live data resumes on the next refresh.';
+          document.getElementById('callbackUrlInput').value = '';
+          setTimeout(() => { document.getElementById('tokenReauthPanel').style.display = 'none'; }, 4000);
+          renderStatus(d.status);
+        } else {
+          status.textContent = '❌ ' + (d.error || 'failed');
+        }
+      }).catch(e => { status.textContent = '❌ ' + e; });
+    });
+    loadStatus();
+  })();
+  </script>
+
   <div class="reset-container">
     <button class="reset-btn-small" onclick="resetPortfolio()" aria-label="Reset portfolio"><span class="btn-icon">🔄</span>Reset Portfolio</button>
     <div id="reset-status" class="reset-status-small"></div>
