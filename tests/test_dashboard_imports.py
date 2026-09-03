@@ -207,6 +207,9 @@ def test_dashboard_registers_policy_graph_routes(dashboard_server_module):
     assert "/api/policy-graph/graph" in paths
     assert "/api/policy-graph/versions" in paths
     assert "/api/policy-graph/rebuild" in paths
+    assert "/api/policy-graph/proposals" in paths
+    assert "/api/policy-graph/proposals/<int:proposal_id>/apply" in paths
+    assert "/api/policy-graph/proposals/<int:proposal_id>/reject" in paths
 
 
 def test_policy_graph_routes_import_alone_under_stubs(monkeypatch, isolated_policy_graph):

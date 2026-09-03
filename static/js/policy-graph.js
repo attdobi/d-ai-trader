@@ -97,7 +97,10 @@
     pendingNode: null,
     graphSeq: 0,
     hashWriting: false,
-    rebuildReason: null
+    rebuildReason: null,
+    proposals: [],
+    proposalsAgent: null,
+    proposalPoll: null
   };
 
   // Live d3 selections for the current render (null before the first render).
@@ -136,6 +139,19 @@
 
   async function apiGet(url) {
     const res = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    let body = null;
+    try { body = await res.json(); } catch (_) { body = null; }
+    if (!res.ok) {
+      const err = new Error((body && body.error) || `${res.status} ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
+    return body;
+  }
+
+  async function fetchJSON(url, options = {}) {
+    const headers = { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) };
+    const res = await fetch(url, { ...options, headers, cache: 'no-store' });
     let body = null;
     try { body = await res.json(); } catch (_) { body = null; }
     if (!res.ok) {
@@ -242,7 +258,7 @@
     return null;
   }
   function nodeFill(node) {
-    return node.owner === 'default-file' ? 'var(--surface)' : 'var(--card)';
+    return node.owner === 'default-file' || node.owner === 'proposal' ? 'var(--surface)' : 'var(--card)';
   }
 
   function lineagePath(id, nodes) {
@@ -751,6 +767,7 @@
     if (seq !== state.graphSeq) return;
 
     backfillParentEdges(payload, payload.root_id);
+    decorateWithProposals(payload);
     const previousSelected = keepSelection ? state.selected : null;
     state.prevPayload = state.payload;
     state.payload = payload;
@@ -888,7 +905,7 @@
 
     const link = viewport.append('g').attr('class', 'pg-links')
       .selectAll('line').data(links).join('line')
-      .attr('class', edge => `pg-link ${linkClass(edge)}`);
+      .attr('class', edge => `pg-link ${linkClass(edge)}${edge.proposed ? ' proposed' : ''}`);
     link.append('title').text(edge => `${EDGE_KIND_LABEL[edge.kind] || edge.kind}${edge.via ? ` via ${edge.via}` : ''}${edge.confidence !== null && edge.confidence !== undefined && edge.kind === 'overlaps' ? ` · ${Math.round(Number(edge.confidence) * 100)} % similar` : ''}`);
 
     const node = viewport.append('g').attr('class', 'pg-nodes')
@@ -896,6 +913,7 @@
       .attr('class', d => {
         const cls = ['pg-node', d.id === payload.root_id || hasChildren(d, allNodes) ? 'parent-node' : 'leaf-node'];
         if (d.status === 'inert') cls.push('is-inert');
+        if (d.ghost) cls.push(`pg-ghost-${d.ghost}`);
         return cls.join(' ');
       })
       .attr('data-id', d => d.id)
@@ -1025,6 +1043,7 @@
       else if (isRef(n)) present.add('ref');
       else present.add(String(n.polarity || 'mixed'));
       if (n.owner === 'default-file') present.add('inherited');
+      if (n.ghost) present.add('proposed');
     });
     const rows = [
       ['root', 'root', COLORS.root, ''],
@@ -1039,7 +1058,8 @@
       ['inherited', 'inherited from default file', COLORS.principle, 'hollow'],
       ['code', 'code-owned (read-only)', COLORS.code_ring, 'dashed'],
       ['ltm', 'long-term memory row (read-only)', COLORS.evidence, 'dotted'],
-      ['ref', 'reference (ticker / concept)', COLORS.ref, '']
+      ['ref', 'reference (ticker / concept)', COLORS.ref, ''],
+      ['proposed', 'proposed change awaiting your review', COLORS.action, 'ghost']
     ].filter(([key]) => present.has(key))
       .map(([, label, color, mod]) => `<span><i class="${mod}" style="color:${color};background:${mod === 'hollow' ? 'var(--surface)' : color}"></i>${esc(label)}</span>`);
     const kinds = new Set((payload.edges || []).map(e => edgeType(e)));
@@ -1200,6 +1220,7 @@
   function ownerSentence(node, payload) {
     const owner = node.owner || 'db';
     const v = payload.version;
+    if (owner === 'proposal') return `Proposed in proposal #${node.proposal_id ?? '?'} — not part of the policy yet`;
     if (owner === 'db') {
       const m = /prompt_versions#(\d+)/.exec(String(node.provenance || ''));
       const id = m ? m[1] : payload.prompt_version_id;
@@ -1265,6 +1286,7 @@
     else if (status === 'inactive') text = node.owner === 'code' ? 'inactive for this version' : 'inactive row';
     else if (status === 'read-only') text = 'read-only';
     else if (status === 'generated') text = 'generated';
+    else if (status === 'proposed') text = 'proposed — awaiting your review';
     else text = status;
     return `${esc(text)} · ${esc(compiled)}${badges.length ? ' ' + badges.join(' ') : ''}`;
   }
@@ -1328,8 +1350,11 @@
 
     const filesBase = payload.links?.files || '';
     const fileUrl = `${API}/file?agent=${encodeURIComponent(payload.agent_type)}&version=${encodeURIComponent(payload.version)}&id=${encodeURIComponent(node.id)}`;
-    qs('#pgNodeFile').innerHTML = `Source file: <a href="${esc(fileUrl)}" target="_blank" rel="noopener"><code>${esc(`${filesBase}${node.id}.md`)}</code></a>`;
+    qs('#pgNodeFile').innerHTML = node.owner === 'proposal'
+      ? 'Not a file yet — it becomes one when the proposal is applied.'
+      : `Source file: <a href="${esc(fileUrl)}" target="_blank" rel="noopener"><code>${esc(`${filesBase}${node.id}.md`)}</code></a>`;
 
+    renderNodeProposal(node);
     loadNodeDetail(node);
   }
 
@@ -1354,6 +1379,10 @@
 
   async function loadNodeDetail(node) {
     const payload = state.payload;
+    if (node.owner === 'proposal') {
+      qs('#pgNodeHealth').innerHTML = `<p class="pg-muted">Proposed guideline — not in policy v${esc(payload.version)} yet. Approve it in Proposed changes to ship it.</p>`;
+      return;
+    }
     const key = `${payload.agent_type}@${payload.version}#${node.id}`;
     let detail = state.nodeCache.get(key);
     if (!detail) {
@@ -1686,6 +1715,313 @@
   }
   window.pgOpenNode = pgOpenNode;
 
+  // ------------------------------------------------------------------ proposals (the loop edits the graph)
+  const PROPOSAL_STATUS_LABEL = {
+    drafting: 'drafting',
+    critiquing: 'critic reviewing',
+    review: 'awaiting your review',
+    applied: 'applied',
+    rejected: 'rejected',
+    failed: 'failed'
+  };
+  const ACTION_LABEL = { edit: 'edit', add: 'new guideline', remove: 'remove' };
+
+  function proposalsInReview() {
+    return (state.proposals || []).filter(p => p.status === 'review');
+  }
+
+  function proposalTargets(p) {
+    const targets = new Set([Number(p.base_version)]);
+    if (p.applies_to && p.applies_to.ok && Number.isFinite(Number(p.applies_to.target_version))) targets.add(Number(p.applies_to.target_version));
+    return targets;
+  }
+
+  // Ghost nodes: proposed additions appear as dotted nodes; edited / removed guidelines are marked.
+  function decorateWithProposals(payload) {
+    if (!payload || !Array.isArray(payload.nodes)) return;
+    payload.nodes = payload.nodes.filter(n => n.owner !== 'proposal');
+    payload.edges = (payload.edges || []).filter(e => !e.proposed);
+    payload.nodes.forEach(n => { delete n.ghost; delete n.proposal_id; delete n.proposed_body; });
+    const version = Number(payload.version);
+    proposalsInReview().forEach(p => {
+      if (!proposalTargets(p).has(version)) return;
+      (p.files || []).forEach(f => {
+        if (f.action === 'add') {
+          const parent = payload.nodes.find(n => n.id === f.parent);
+          if (!parent) return;
+          payload.nodes.push({
+            id: f.id, title: f.title || f.id, node_type: 'proposed', polarity: 'action', polarity_source: 'derived',
+            parent: f.parent, field: f.field, depth: String(f.id).split('.').length - 1, owner: 'proposal', status: 'proposed',
+            compiled: 'stored', locked: false, provenance: `proposal#${p.id}`, order: 10000, tags: [], tickers: [], links: {},
+            body: f.body || '', sep_before: '', sep_after: '', change: null, has_children: false,
+            ghost: 'add', proposal_id: p.id, proposed_body: f.body || ''
+          });
+          payload.edges.push({ source: f.id, target: f.parent, edge_type: 'subtype_of', provenance: 'proposal', proposed: true, synthetic: false });
+        } else {
+          const node = payload.nodes.find(n => n.id === f.id || n.id === f.proposed_id);
+          if (!node) return;
+          node.ghost = f.action === 'remove' ? 'remove' : 'edit';
+          node.proposal_id = p.id;
+          node.proposed_body = f.body || '';
+        }
+      });
+    });
+  }
+
+  function stopProposalPoll() {
+    if (state.proposalPoll) { window.clearTimeout(state.proposalPoll); state.proposalPoll = null; }
+  }
+
+  async function loadProposals(agent, { quiet = false } = {}) {
+    stopProposalPoll();
+    if (!agent) return null;
+    let data;
+    try {
+      data = await apiGet(`${API}/proposals?agent=${encodeURIComponent(agent)}`);
+    } catch (error) {
+      if (!quiet) toast(`Proposals: ${error.message}`, 'error');
+      state.proposals = [];
+      state.proposalsAgent = agent;
+      renderProposals();
+      return null;
+    }
+    if (agent !== state.agent) return data;
+    const before = state.proposals || [];
+    const busyBefore = before.some(p => p.status === 'drafting' || p.status === 'critiquing');
+    state.proposals = Array.isArray(data.proposals) ? data.proposals : [];
+    state.proposalsAgent = agent;
+    renderProposals();
+    const busyNow = state.proposals.some(p => p.status === 'drafting' || p.status === 'critiquing');
+    if (busyNow) {
+      state.proposalPoll = window.setTimeout(() => loadProposals(agent, { quiet: true }), 3000);
+    } else if (busyBefore) {
+      const done = state.proposals.find(p => !before.some(b => b.id === p.id && b.status === p.status));
+      if (done && done.status === 'review') toast(`Proposal #${done.id} is ready for your review`, 'success');
+      else if (done && done.status === 'failed') toast(`Proposal #${done.id} failed: ${done.error || 'unknown error'}`, 'error');
+      if (state.payload) loadGraph(state.agent, state.version, { keepSelection: true });
+    }
+    return data;
+  }
+
+  function fileBadge(text, cls) { return `<span class="pg-badge ${esc(cls)}">${esc(text)}</span>`; }
+
+  function fileCardHtml(p, f) {
+    const critic = f.critic || null;
+    const interactive = p.status === 'review';
+    const checked = interactive ? (f.primary || !(critic && critic.verdict === 'reject')) : (p.status === 'applied' ? (p.human?.approved || []).includes(f.id) : false);
+    const badges = [
+      f.primary ? fileBadge('primary', 'primary') : '',
+      fileBadge(ACTION_LABEL[f.action] || f.action, f.action),
+      f.kind ? fileBadge(f.kind === 'major' ? 'changes behavior' : 'wording', f.kind) : '',
+      f.field ? `<span class="pg-muted">${esc(FIELD_LABEL[f.field] || f.field)}</span>` : ''
+    ].filter(Boolean).join('');
+    const stats = f.diff_stats ? `<span class="pg-change-stats"><span class="add">+${Number(f.diff_stats.added || 0)}</span> <span class="rem">−${Number(f.diff_stats.removed || 0)}</span></span>` : '';
+    const title = f.action === 'add' ? (f.title || f.id) : (f.old_title || f.title || f.id);
+    const idLabel = f.action === 'add' ? `${f.id} (new)` : f.id;
+    const grid = [
+      ['What', f.what], ['Why', f.why], ['Expected effect', f.expected_effect], ['Falsified if', f.falsified_if]
+    ].filter(([, v]) => v).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+    const criticLine = critic
+      ? `<p class="pg-file-critic">${fileBadge(critic.verdict === 'approve' ? 'critic ✓' : 'critic ✗', critic.verdict === 'approve' ? 'critic-ok' : 'critic-bad')} ${esc(critic.reason || '')}</p>`
+      : '';
+    const control = interactive
+      ? `<label><input type="checkbox" class="pg-file-approve" data-file-id="${esc(f.id)}"${checked ? ' checked' : ''}${f.primary ? ' disabled' : ''} /> ${esc(title)}</label>${f.primary ? '<span class="pg-muted">(the primary change ships or the proposal is rejected)</span>' : ''}`
+      : `<span class="${checked ? '' : 'pg-muted'}"><strong>${esc(title)}</strong>${p.status === 'applied' && !checked ? ' (not shipped)' : ''}</span>`;
+    return `<div class="pg-file-card${interactive && !checked ? ' is-off' : ''}" data-file-id="${esc(f.id)}">
+        <div class="pg-file-head">${control}<button type="button" class="pg-file-id" data-node-id="${esc(f.action === 'add' ? f.id : (f.proposed_id || f.id))}" title="Show on the graph">${esc(idLabel)}</button>${badges}${stats}</div>
+        ${grid ? `<dl class="pg-file-grid">${grid}</dl>` : ''}
+        ${criticLine}
+        ${Array.isArray(f.diff) && f.diff.length ? `<details class="pg-file-diff"${f.primary && interactive ? ' open' : ''}><summary>${f.action === 'add' ? 'Proposed text' : f.action === 'remove' ? 'Text to remove' : 'What would change'}</summary><div class="pe-diff-view"></div></details>` : ''}
+      </div>`;
+  }
+
+  function proposalCardHtml(p) {
+    const status = String(p.status || '');
+    const busy = status === 'drafting' || status === 'critiquing';
+    const classes = ['pg-proposal', `pg-proposal--${status}`];
+    if (busy) classes.push('pg-proposal--busy');
+    const title = [`<strong>Proposal #${esc(p.id)}</strong>`, `<span class="pg-proposal-status ${esc(status)}">${esc(PROPOSAL_STATUS_LABEL[status] || status)}</span>`,
+      `drafted ${esc(fmtPT(p.created_at))}`, `against v${esc(p.base_version)}`];
+    if (p.model) title.push(`model ${esc(p.model)}`);
+    if (p.focus) title.push(`focus: “${esc(p.focus)}”`);
+    if (p.result_version !== null && p.result_version !== undefined) title.push(`<button type="button" class="pg-link-chip pg-proposal-version" data-version="${esc(p.result_version)}">became v${esc(p.result_version)}</button>`);
+    let critic = '';
+    if (p.critic) {
+      const ok = p.critic.verdict === 'approve';
+      const conf = Number.isFinite(Number(p.critic.confidence)) ? ` ${Number(p.critic.confidence).toFixed(2)}` : '';
+      const gates = Array.isArray(p.critic.unexecutable_gates) && p.critic.unexecutable_gates.length ? ` Unexecutable gates: ${p.critic.unexecutable_gates.join('; ')}.` : '';
+      const ship = p.critic.ship_first ? ` Ship first: ${p.critic.ship_first}.` : '';
+      critic = `<p class="pg-proposal-critic"><span class="${ok ? 'ok' : 'bad'}">Critic ${ok ? '✓ approve' : '✗ reject'}${conf}${p.critic.auto ? ' (automatic)' : ''}</span> — ${esc(p.critic.reason || '')}${esc(ship)}${esc(gates)}</p>`;
+    }
+    const human = p.human && (status === 'applied' || status === 'rejected')
+      ? `<p class="pg-proposal-critic">You ${status === 'applied' ? (p.human.verdict === 'partial' ? 'shipped part of it' : 'shipped it') : 'rejected it'}${p.human.reason ? ` — ${esc(p.human.reason)}` : ''}${p.human_at ? ` · ${esc(fmtPT(p.human_at))}` : ''}</p>`
+      : '';
+    const busyLine = busy ? `<p class="pg-proposal-critic"><span class="pe-loading"></span> ${status === 'drafting' ? 'The drafter is reading the guideline files, the diagnostics and the trade evidence…' : 'The critic is judging each guideline file…'}</p>` : '';
+    const error = status === 'failed' ? `<p class="pg-proposal-error">${esc(p.error || 'unknown error')}</p>` : '';
+    const reasoning = p.reasoning ? `<p class="pg-proposal-reasoning">${esc(p.reasoning)}</p>` : '';
+    const files = (p.files || []).length ? `<div class="pg-proposal-files">${(p.files || []).map(f => fileCardHtml(p, f)).join('')}</div>` : '';
+    let actions = '';
+    if (status === 'review') {
+      const applies = p.applies_to || {};
+      const target = Number.isFinite(Number(applies.target_version)) ? Number(applies.target_version) : Number(p.base_version);
+      const note = applies.ok === false
+        ? `<p class="pg-muted">Cannot apply: ${esc(applies.reason || 'the active version moved')}</p>`
+        : `<p class="pg-muted">${applies.reason ? esc(applies.reason) + ' · ' : ''}Approved files compile into v${target + 1} and activate immediately; the trader picks it up on its next cycle.</p>`;
+      actions = `<div class="pg-proposal-actions">${note}
+          <button type="button" class="pe-btn pg-btn-small pg-proposal-apply" data-proposal-id="${esc(p.id)}"${applies.ok === false ? ' disabled' : ''}>Apply approved guidelines → v${target + 1}</button>
+          <button type="button" class="pe-btn secondary pg-btn-small pg-proposal-reject" data-proposal-id="${esc(p.id)}">Reject proposal</button>
+        </div>`;
+    } else if (status === 'failed') {
+      actions = `<div class="pg-proposal-actions"><button type="button" class="pe-btn secondary pg-btn-small pg-proposal-reject" data-proposal-id="${esc(p.id)}" data-reason="failed">Discard</button></div>`;
+    }
+    return `<article class="${classes.join(' ')}" data-proposal-id="${esc(p.id)}">
+        <div class="pg-proposal-title">${title.join('<span class="pg-sep">·</span>')}</div>
+        ${busyLine}${error}${reasoning}${critic}${human}${files}${actions}
+      </article>`;
+  }
+
+  function renderProposals() {
+    const box = qs('#pgProposalList');
+    const form = qs('#pgProposeForm');
+    if (!box) return;
+    const list = state.proposals || [];
+    const busy = list.some(p => p.status === 'drafting' || p.status === 'critiquing');
+    const button = qs('#pgPropose');
+    if (button) {
+      button.disabled = busy;
+      button.textContent = busy ? 'Drafting…' : `Propose a change to ${agentMeta(state.agent).label} v${state.current ?? '?'}`;
+    }
+    if (form) form.hidden = false;
+    const open = list.filter(p => p.status === 'review' || p.status === 'drafting' || p.status === 'critiquing' || p.status === 'failed');
+    const history = list.filter(p => !open.includes(p));
+    const historyHtml = history.length
+      ? `<details class="pg-proposal-history"><summary>${history.length === 1 ? '1 earlier proposal' : `${history.length} earlier proposals`}</summary><ul>${history.map(p => {
+        const primary = (p.files || []).find(f => f.primary) || (p.files || [])[0] || {};
+        const c = p.critic ? `<span class="${p.critic.verdict === 'approve' ? 'ok' : 'bad'}">critic ${p.critic.verdict === 'approve' ? '✓' : '✗'}</span>` : '';
+        const v = p.result_version !== null && p.result_version !== undefined ? `<button type="button" class="pg-link-chip pg-proposal-version" data-version="${esc(p.result_version)}">v${esc(p.result_version)}</button>` : '';
+        return `<li><strong>#${esc(p.id)}</strong><span class="pg-proposal-status ${esc(p.status)}">${esc(PROPOSAL_STATUS_LABEL[p.status] || p.status)}</span><span>${esc(fmtShortDate(p.created_at))}</span><span>${esc(primary.what || primary.id || '')}</span>${c}${v}<button type="button" class="pg-link-chip pg-proposal-open" data-proposal-id="${esc(p.id)}">details</button></li>`;
+      }).join('')}</ul></details>`
+      : '';
+    box.innerHTML = open.map(proposalCardHtml).join('') + historyHtml;
+
+    box.querySelectorAll('.pg-file-card').forEach(card => {
+      const details = card.querySelector('.pg-file-diff .pe-diff-view');
+      if (!details) return;
+      const pid = Number(card.closest('.pg-proposal')?.dataset.proposalId);
+      const p = list.find(x => Number(x.id) === pid);
+      const f = (p?.files || []).find(x => x.id === card.dataset.fileId);
+      if (f) renderDiff(f.diff, details);
+    });
+    box.querySelectorAll('.pg-file-approve').forEach(input => input.addEventListener('change', () => {
+      input.closest('.pg-file-card')?.classList.toggle('is-off', !input.checked);
+      const article = input.closest('.pg-proposal');
+      const count = article ? article.querySelectorAll('.pg-file-approve:checked').length : 0;
+      const total = article ? article.querySelectorAll('.pg-file-approve').length : 0;
+      const btn = article?.querySelector('.pg-proposal-apply');
+      if (btn && total) btn.textContent = btn.textContent.replace(/^Apply (approved|\d+ of \d+) guidelines?/, count === total ? 'Apply approved guidelines' : `Apply ${count} of ${total} guidelines`);
+    }));
+    box.querySelectorAll('.pg-file-id').forEach(btn => btn.addEventListener('click', () => {
+      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
+    box.querySelectorAll('.pg-proposal-apply').forEach(btn => btn.addEventListener('click', () => applyProposal(Number(btn.dataset.proposalId))));
+    box.querySelectorAll('.pg-proposal-reject').forEach(btn => btn.addEventListener('click', () => rejectProposal(Number(btn.dataset.proposalId), btn.dataset.reason)));
+    box.querySelectorAll('.pg-proposal-version').forEach(btn => btn.addEventListener('click', () => {
+      const select = qs('#pgVersion');
+      if (!select) return;
+      select.value = String(btn.dataset.version);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }));
+    box.querySelectorAll('.pg-proposal-open').forEach(btn => btn.addEventListener('click', () => {
+      const p = list.find(x => Number(x.id) === Number(btn.dataset.proposalId));
+      if (!p) return;
+      const holder = document.createElement('div');
+      holder.innerHTML = proposalCardHtml(p);
+      const li = btn.closest('li');
+      li.replaceWith(holder.firstElementChild);
+      holder.firstElementChild?.querySelectorAll('.pg-file-card').forEach(card => {
+        const f = (p.files || []).find(x => x.id === card.dataset.fileId);
+        const view = card.querySelector('.pe-diff-view');
+        if (f && view) renderDiff(f.diff, view);
+      });
+    }));
+  }
+
+  async function proposeChange(event) {
+    if (event) event.preventDefault();
+    if (!state.agent) return;
+    const input = qs('#pgProposeFocus');
+    const focus = input ? input.value.trim() : '';
+    const button = qs('#pgPropose');
+    if (button) { button.disabled = true; button.textContent = 'Drafting…'; }
+    try {
+      const res = await fetchJSON(`${API}/proposals`, { method: 'POST', body: JSON.stringify({ agent_type: state.agent, focus }) });
+      toast(`Drafting proposal #${res.id} against v${res.base_version} — usually one to two minutes`, 'info');
+      if (input) input.value = '';
+      await loadProposals(state.agent, { quiet: true });
+    } catch (error) {
+      toast(`Could not start a proposal: ${error.message}`, 'error');
+      renderProposals();
+    }
+  }
+
+  async function applyProposal(id) {
+    const article = document.querySelector(`.pg-proposal[data-proposal-id="${id}"]`);
+    if (!article) return;
+    const approved = Array.from(article.querySelectorAll('.pg-file-approve')).filter(i => i.checked || i.disabled).map(i => i.dataset.fileId);
+    const btn = article.querySelector('.pg-proposal-apply');
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+    try {
+      const res = await fetchJSON(`${API}/proposals/${id}/apply`, { method: 'POST', body: JSON.stringify({ approved }) });
+      toast(`${agentMeta(state.agent).label} policy v${res.version} is now active (${res.approved.length} guideline${res.approved.length === 1 ? '' : 's'} from proposal #${id})`, 'success');
+      try { new BroadcastChannel('dai-prompts').postMessage({ type: 'prompt-applied', agent: state.agent, version: res.version }); } catch (_) { /* unsupported */ }
+      state.nodeCache.clear();
+      await loadAgents();
+      await loadVersions(state.agent);
+      await loadProposals(state.agent, { quiet: true });
+      populateVersions(res.version);
+      renderTimeline();
+      await loadGraph(state.agent, res.version, { pulse: true });
+    } catch (error) {
+      toast(`Could not apply proposal #${id}: ${error.message}`, 'error');
+      await loadProposals(state.agent, { quiet: true });
+    }
+  }
+
+  async function rejectProposal(id, presetReason) {
+    let reason = presetReason || '';
+    if (!presetReason) {
+      reason = window.prompt(`Reject proposal #${id}? Optional reason (recorded for the critic's calibration):`, '');
+      if (reason === null) return;
+    }
+    try {
+      await fetchJSON(`${API}/proposals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+      toast(presetReason ? `Proposal #${id} discarded` : `Proposal #${id} rejected`, 'info');
+      await loadProposals(state.agent, { quiet: true });
+      if (state.payload) await loadGraph(state.agent, state.version, { keepSelection: true });
+    } catch (error) {
+      toast(`Could not reject proposal #${id}: ${error.message}`, 'error');
+    }
+  }
+
+  function renderNodeProposal(node) {
+    const box = qs('#pgNodeProposal');
+    if (!box) return;
+    if (!node || !node.ghost) { box.innerHTML = ''; return; }
+    const p = (state.proposals || []).find(x => Number(x.id) === Number(node.proposal_id));
+    const f = p ? (p.files || []).find(x => x.id === node.id || x.proposed_id === node.id) : null;
+    const verb = node.ghost === 'add' ? 'adds this guideline' : node.ghost === 'remove' ? 'removes this guideline' : 'changes this guideline';
+    box.innerHTML = `<h4>Proposal #${esc(node.proposal_id)} ${esc(verb)}</h4>
+      ${f && f.what ? `<p>${esc(f.what)}</p>` : ''}
+      ${f && Array.isArray(f.diff) && f.diff.length ? '<div class="pe-diff-view"></div>' : ''}
+      <button type="button" class="pg-link-chip pg-node-proposal-go">Review it in Proposed changes</button>`;
+    const view = box.querySelector('.pe-diff-view');
+    if (view && f) renderDiff(f.diff, view);
+    box.querySelector('.pg-node-proposal-go')?.addEventListener('click', () => {
+      const article = document.querySelector(`.pg-proposal[data-proposal-id="${node.proposal_id}"]`);
+      if (article && typeof article.scrollIntoView === 'function') article.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
   // ------------------------------------------------------------------ agent / version flow
   async function selectAgent(agent, { version = null, node = null, pulse = false } = {}) {
     if (!AGENT_TYPES.has(agent)) agent = AGENTS[0].agent_type;
@@ -1696,6 +2032,7 @@
     renderAgentSwitch();
     lsSet(LS_AGENT, agent);
     const data = await loadVersions(agent);
+    await loadProposals(agent, { quiet: true });
     if (!data) { populateVersions(null); renderTimeline(); return; }
     if (!state.versions.length) {
       populateVersions(null);
@@ -1734,6 +2071,7 @@
       });
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
+    qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';
@@ -1798,6 +2136,7 @@
         const data = event?.data || {};
         if (data.type !== 'prompt-applied') return;
         loadAgents();
+        loadProposals(state.agent, { quiet: true });
         if (data.agent && data.agent !== state.agent) return;
         (async () => {
           const before = state.current;

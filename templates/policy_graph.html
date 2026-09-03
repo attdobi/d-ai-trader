@@ -45,6 +45,22 @@
     <div id="pgVersionMeta" class="pg-version-summary"></div>
   </section>
 
+
+  <!-- Card 1b: proposals — the loop edits the graph, you approve per guideline -->
+  <section class="pe-card" id="pgProposalCard">
+    <div class="pg-proposal-head">
+      <div class="pg-proposal-intro">
+        <h2>Proposed changes</h2>
+        <p class="pg-muted">The drafter proposes a patch of at most three guideline files against the active version. The critic judges each file; you approve per guideline. Approved files compile into the next policy version and go live.</p>
+      </div>
+      <form id="pgProposeForm" class="pg-propose-form" autocomplete="off">
+        <input id="pgProposeFocus" class="pg-select pg-propose-input" type="text" maxlength="500" placeholder="Optional focus for the drafter, e.g. “kill distance” or “same-ticker re-entries”" aria-label="Optional focus for the drafter" />
+        <button type="submit" id="pgPropose" class="pe-btn pg-btn-small">Propose a change</button>
+      </form>
+    </div>
+    <div id="pgProposalList" class="pg-proposal-list" aria-live="polite"></div>
+  </section>
+
   <!-- Card 2: graph + details panel -->
   <section class="pe-card" id="pgGraphCard">
     <div class="pg-layout">
@@ -92,6 +108,7 @@
             <summary>What changed vs previous version</summary>
             <div id="pgNodeDiffView" class="pe-diff-view"></div>
           </details>
+          <div id="pgNodeProposal" class="pg-node-proposal"></div>
           <div id="pgNodeOverlaps" class="pg-node-overlaps"></div>
           <div id="pgNodeLinks" class="pg-node-links"></div>
           <p id="pgNodeFile" class="pg-node-file"></p>
@@ -338,6 +355,77 @@
 .pg-change-list .pe-diff-view { margin: 0 12px 12px; max-height: 360px; }
 .pg-change-list .pe-diff-line { white-space: pre-wrap; word-break: break-word; }
 .pg-change-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+
+/* ----- proposals card ----- */
+.pg-proposal-head { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; }
+.pg-proposal-intro { flex: 1 1 320px; }
+.pg-proposal-intro h2 { margin: 0 0 4px; }
+.pg-proposal-intro .pg-muted { margin: 0; max-width: 720px; }
+.pg-propose-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: 1 1 380px; justify-content: flex-end; }
+.pg-propose-input { flex: 1 1 260px; max-width: 460px; }
+.pg-proposal-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.pg-proposal-list:empty { display: none; }
+.pg-proposal { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; background: rgba(16,26,49,.45); padding: 12px 14px; }
+.pg-proposal--review { border-color: rgba(66,201,255,.45); }
+.pg-proposal--busy { border-style: dashed; }
+.pg-proposal-title { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; color: #d5dcf0; }
+.pg-proposal-title strong { color: var(--text); font-size: 14px; }
+.pg-proposal-status { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; border-radius: 999px; padding: 2px 8px; background: rgba(127,140,166,.14); color: var(--muted); }
+.pg-proposal-status.review { color: var(--accent); background: rgba(66,201,255,.14); }
+.pg-proposal-status.applied { color: var(--success); background: rgba(41,214,151,.14); }
+.pg-proposal-status.rejected, .pg-proposal-status.failed { color: var(--danger); background: rgba(255,95,115,.14); }
+.pg-proposal-status.drafting, .pg-proposal-status.critiquing { color: var(--warning); background: rgba(250,219,95,.14); }
+.pg-proposal-critic { margin: 8px 0 0; font-size: 12.5px; color: #d5dcf0; line-height: 1.5; }
+.pg-proposal-critic .ok { color: var(--success); font-weight: 700; }
+.pg-proposal-critic .bad { color: var(--danger); font-weight: 700; }
+.pg-proposal-reasoning { margin: 8px 0 0; font-size: 13px; color: #dce8ff; line-height: 1.5; }
+.pg-proposal-error { margin: 8px 0 0; color: #ffb2bd; font-size: 12.5px; white-space: pre-wrap; }
+.pg-proposal-files { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pg-file-card { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px 12px; background: rgba(7,16,31,.55); }
+.pg-file-card.is-off { opacity: .55; }
+.pg-file-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pg-file-head label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; color: var(--text); font-size: 13px; }
+.pg-file-head input { accent-color: var(--accent); }
+.pg-file-id { font-family: var(--font-mono); font-size: 11.5px; color: #aecdff; cursor: pointer; background: none; border: none; padding: 0; }
+.pg-file-id:hover { text-decoration: underline; }
+.pg-badge { display: inline-block; border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.pg-badge.primary { background: rgba(66,201,255,.16); color: var(--accent); border: 1px solid rgba(66,201,255,.4); }
+.pg-badge.major { background: rgba(250,219,95,.14); color: var(--warning); border: 1px solid rgba(250,219,95,.35); }
+.pg-badge.minor { background: rgba(127,140,166,.14); color: var(--muted); border: 1px solid rgba(127,140,166,.35); }
+.pg-badge.edit { background: rgba(250,219,95,.1); color: #f2d67a; }
+.pg-badge.add { background: rgba(41,214,151,.12); color: var(--success); }
+.pg-badge.remove { background: rgba(255,95,115,.12); color: var(--danger); }
+.pg-badge.critic-ok { background: rgba(41,214,151,.12); color: var(--success); }
+.pg-badge.critic-bad { background: rgba(255,95,115,.12); color: var(--danger); }
+.pg-file-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 14px; margin: 8px 0 0; font-size: 12.5px; color: #d5dcf0; line-height: 1.45; }
+.pg-file-grid dt { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.pg-file-grid dd { margin: 2px 0 0; }
+.pg-file-critic { margin: 8px 0 0; font-size: 12.5px; color: #d5dcf0; }
+.pg-file-diff { margin-top: 8px; }
+.pg-file-diff summary { cursor: pointer; font-size: 12.5px; color: var(--accent); font-weight: 600; }
+.pg-file-diff .pe-diff-view { margin-top: 6px; max-height: 320px; }
+.pg-file-diff .pe-diff-line { white-space: pre-wrap; word-break: break-word; }
+.pg-proposal-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 12px; }
+.pg-proposal-actions .pg-muted { flex: 1 1 240px; margin: 0; }
+.pg-proposal-history summary { cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.pg-proposal-history ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pg-proposal-history li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12.5px; color: #d5dcf0; border: 1px solid rgba(255,255,255,.06); border-radius: 8px; padding: 6px 10px; }
+.pg-proposal-history .pg-link-chip { font-family: var(--font-mono); }
+.pg-node-proposal { margin: 10px 0; border: 1px dashed rgba(66,201,255,.45); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; color: #d5dcf0; background: rgba(66,201,255,.06); }
+.pg-node-proposal:empty { display: none; }
+.pg-node-proposal h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.pg-node-proposal .pe-diff-view { margin-top: 6px; max-height: 240px; }
+.pg-node-proposal .pe-diff-line { white-space: pre-wrap; word-break: break-word; }
+
+/* proposed (ghost) nodes on the graph */
+.pg-node.pg-ghost-add circle.pg-core { stroke: var(--success); stroke-dasharray: 2 3; fill: var(--surface); }
+.pg-node.pg-ghost-add text { fill: var(--success); font-style: italic; }
+.pg-node.pg-ghost-edit circle.pg-ring { stroke: var(--accent); stroke-dasharray: 2 3; }
+.pg-node.pg-ghost-remove circle.pg-core { stroke: var(--danger); stroke-dasharray: 2 3; opacity: .65; }
+.pg-node.pg-ghost-remove text { text-decoration: line-through; opacity: .6; }
+.pg-link.proposed { stroke: var(--success); stroke-dasharray: 2 3; }
+.pg-legend i.ghost { border-style: dotted; }
 
 @media (max-width: 1040px) {
   .pg-layout { grid-template-columns: 1fr; }

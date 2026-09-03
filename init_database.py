@@ -767,6 +767,13 @@ def initialize_database() -> None:
             "ADD COLUMN IF NOT EXISTS human_sections JSONB"
         ))
 
+        # Policy-graph proposals (Phase 2 of the guideline graph): one row per drafted patch of
+        # guideline files — the drafter's files, the critic's per-file verdicts, the human's
+        # decisions and the resulting prompt version. JSON columns are TEXT so the same DDL runs
+        # on SQLite in tests (policy_graph/proposals.py owns the schema).
+        from policy_graph.proposals import DDL_POSTGRES as _POLICY_PROPOSALS_DDL
+        ensure_table(conn, stats, "policy_graph_proposals", _POLICY_PROPOSALS_DDL)
+
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(
             conn,

@@ -70,30 +70,53 @@ evidence/lessons (cyan), structure (grey).
 Rules for the package: stdlib only, never imports `config`, never reads `os.environ`; `config_hash`
 and `repo_root` are explicit parameters. Tests are DB-free (`tests/test_policy_graph_*.py`).
 
-## Phase 2 — the loop edits the graph (designed, not built)
+## Phase 2 — the loop edits the graph
 
-1. **Proposals as guideline-file patches.** The generator returns at most 3 node files (RUSH clip),
-   exactly one marked `primary`, each with `what / why / expected_effect / falsified_if` and the full
-   file content. Locked nodes (Mission, Shared Principles, GROUND TRUTH, templates, code, memory rows,
-   the weekly reminder) cannot be edited. `kind` is derived from the diff (a numeric threshold or a
-   regime/kill/quarantine/extension/harvest change is `major`; whitespace/reorder is `minor`).
-   Proposals persist in a `policy_graph_proposals` table and `proposals/<id>/` so they survive
-   dashboard restarts.
-2. **Critic on per-node diffs.** The critic receives one unified diff per guideline file and judges
-   the diff, not the self-description; `is_substantive` comes from the diff.
-3. **Per-guideline human approval** on the tab: file cards with diffs, approve checkboxes (the
-   primary cannot be unchecked), proposed nodes drawn as ghosts on the graph.
-4. **Accept = mint → compile → activate.** Copy the active version dir, overlay approved files,
-   validate the graph, compile the five fields, run the existing guards, insert the `prompt_versions`
-   row and activate through `prompt_manager.set_active_prompt_version` in one transaction, then rename
-   the directory into place. Weekly reminder-only drift is rebased, not rejected.
-5. **Weekly Thursday path** becomes "append the reminder node + memory entry, then compile", using the
-   same string functions as today so bytes stay identical, and writing memory into the new row before
-   activation (versions become immutable after creation).
-6. **Citations and node health (2c).** The Decider output gains a `cited: [guideline ids]` list per
-   decision; outcomes are joined back to the cited guidelines so each node shows "cited by N buys ·
-   wins/losses · P&L" and the drafter gets RUSH-style `policy_blame`.
+Built 2026-09-03 (`policy_graph/proposals.py`, the **Proposed changes** card on the tab).
 
-Two decisions are yours before Phase 2 ships: (a) accept a reviewed prompt change that relaxes the
-Decider's "No extra keys" contract to carry `cited` ids; (b) make weekly versions immutable (memory
-written into the new row before activation instead of updating the active row afterwards).
+**Where things live.** Guideline files stay on disk under git (`agents/<dir>/policy-graph/…`), the
+compiled prompt stays in `prompt_versions` (the trader reads only that), and proposals are the
+one new SQL table, `policy_graph_proposals` (JSON as text; `init_database.py` creates it, the
+module also creates it lazily). Proposal files are never written to SQL: when a proposal is applied
+the compiled row is inserted and the version directory is rebuilt from it by the same store as
+every historical version, so the graph remains a byte-exact mirror of the database.
+
+1. **Proposals are guideline-file patches.** `POST /api/policy-graph/proposals {agent_type, focus}`
+   starts a background draft against the active version. The drafter (PromptEvolutionAgent's
+   model, `policy_graph/prompts.py: DRAFTER_SYSTEM`) sees every editable guideline with its id,
+   the locked ids, the code-owned blocks and memory rows as read-only context, the population
+   diagnostics, trade evidence, past verdicts and past proposals, and returns at most 3 files —
+   `edit` / `add` / `remove`, exactly one `primary`, each with what / why / expected_effect /
+   falsified_if. Locked nodes (root, templates, code, memory rows, GROUND TRUTH, Mission, Shared
+   Principles) cannot be touched; only strategy directives, soul and memory guidelines can.
+2. **Validation is a dry run of the fidelity contract.** The patch is applied to the node sequence
+   of the base version (sep_before + body + sep_after), compiled to text, and decomposed again
+   with the standard builder; it is accepted only when every edited or added guideline is still
+   exactly one file after the round trip. Failures come back in plain language ("merged into its
+   neighbour — match the sibling format", "splits into several — remove the heading") and the
+   drafter gets one retry with that message. Added guidelines receive the id the builder would
+   give them (`DA.directives.strategy.liquidity`, `DA.memory.log.2026_09_03_kill_distance`).
+   `kind` (major / minor) is derived from the diff in code, never from the model's description.
+3. **Critic on per-file diffs.** The critic (same doctrine as the Prompt Lab gate,
+   `CRITIC_DOCTRINE`, shared from `policy_graph/prompts.py`) judges each file's unified diff and
+   returns per-file verdicts plus the overall trust-region verdict. Wording-only patches are
+   auto-rejected without a model call. A `prompt_change_reviews` row is written at critic time so
+   the scorecard, the timeline glyphs and the RLHF concordance label keep working.
+4. **Per-guideline human approval on the tab.** Proposals awaiting review show file cards with
+   the diff, the drafter's claims and the critic's verdict; every supporting file has a checkbox,
+   the primary cannot be unchecked. Proposed additions appear as dotted green ghost nodes on the
+   graph, edited guidelines get a dotted ring, removals a red one; clicking one shows the proposed
+   diff in the details panel.
+5. **Apply = mint → activate → materialize.** `POST …/proposals/<id>/apply {approved: [ids]}`
+   re-applies the approved files on the active version, inserts the `prompt_versions` row
+   (`created_by = policy_graph`, description names the proposal), activates it through
+   `prompt_manager.set_active_prompt_version` in the same transaction (`action = apply_proposal`),
+   records the human verdict on the review row, then materializes the directory. If the active
+   version moved since the draft (the weekly loop appended a reminder), the proposal is rebased
+   automatically as long as the guidelines it touches are unchanged; otherwise it reports a
+   conflict and asks for a fresh draft.
+
+Still open: the weekly Thursday path (step 5 of the original plan — append the reminder node and
+write memory into the new row before activation so versions become immutable) and citations /
+node health (step 6 — `cited` guideline ids on decisions, which needs the Decider's "No extra
+keys" contract relaxed). Both are the user's call.

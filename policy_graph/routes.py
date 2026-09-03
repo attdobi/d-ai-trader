@@ -16,7 +16,7 @@ from pathlib import Path
 
 from flask import Response, jsonify, render_template, request
 
-from . import service
+from . import proposals, service
 from .model import AGENT_PREFIX, FIELDS, ID_RE
 
 BUSY_MESSAGE = "policy graph is being rebuilt — retry"
@@ -48,6 +48,12 @@ def _run(fn):
         return _error(str(exc), 400)
     except service.NotFound as exc:
         return _error(str(exc), 404)
+    except proposals.ProposalError as exc:
+        return _error(str(exc), 400)
+    except proposals.ProposalConflict as exc:
+        return _error(str(exc), 409)
+    except proposals.NotConfigured as exc:
+        return _error(str(exc), 503)
     except RoundTripError as exc:
         return _error(f"compiled prompt does not match the stored version: {exc}", 500)
     except ValueError as exc:
@@ -99,7 +105,11 @@ def _id_arg() -> str:
     return node_id
 
 
-def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_margin_account) -> None:
+def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_margin_account,
+                                 llm=None, proposal_context=None, activate=None, proposal_model=None) -> None:
+    """`llm(role, system_text, user_text) -> str` (roles: drafter, critic), `proposal_context(config_hash,
+    agent_type) -> dict` (diagnostics, evidence, verdict history) and `activate` (prompt_manager
+    .set_active_prompt_version) are optional: without them the proposal routes answer 503."""
     repo_root = Path(repo_root)
     is_margin_account = bool(is_margin_account)
     common = dict(repo_root=repo_root, is_margin_account=is_margin_account)
@@ -215,6 +225,61 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             force = _bool(body.get("force"))
             return jsonify(service.rebuild(engine, config_hash, agent, version, force=force,
                                            materialized_by="dashboard", **common))
+        return _run(go)
+
+
+    # ------------------------------------------------------------------ proposals (Phase 2)
+    def _json_body() -> dict:
+        body = request.get_json(silent=True) if hasattr(request, "get_json") else None
+        return body if isinstance(body, dict) else {}
+
+    @app.route("/api/policy-graph/proposals", methods=["GET"])
+    def policy_graph_proposals_list():
+        config_hash = get_config_hash()
+
+        def go():
+            agent = _agent_arg()
+            raw = request.args.get("limit")
+            limit = int(raw) if raw and _VERSION_RE.match(str(raw)) else 20
+            return jsonify(proposals.list_proposals(engine, config_hash, agent, limit=max(1, min(limit, 100)), **common))
+        return _run(go)
+
+    @app.route("/api/policy-graph/proposals", methods=["POST"])
+    def policy_graph_proposals_draft():
+        config_hash = get_config_hash()
+
+        def go():
+            body = _json_body()
+            agent = (body.get("agent_type") or body.get("agent") or "").strip()
+            if agent not in AGENT_PREFIX:
+                raise service.BadRequest("agent_type is required (DeciderAgent | SummarizerAgent | FeedbackAgent)")
+            focus = str(body.get("focus") or "")
+            model = proposal_model() if callable(proposal_model) else proposal_model
+            return jsonify(proposals.start_draft(engine, config_hash, agent, llm=llm, context_fn=proposal_context,
+                                                 focus=focus, created_by="dashboard", model=model, **common))
+        return _run(go)
+
+    @app.route("/api/policy-graph/proposals/<int:proposal_id>", methods=["GET"])
+    def policy_graph_proposal_get(proposal_id):
+        return _run(lambda: jsonify(proposals.get_proposal(engine, proposal_id, **common)))
+
+    @app.route("/api/policy-graph/proposals/<int:proposal_id>/apply", methods=["POST"])
+    def policy_graph_proposal_apply(proposal_id):
+        def go():
+            body = _json_body()
+            approved = body.get("approved")
+            if not isinstance(approved, list):
+                raise service.BadRequest("approved must be a list of guideline ids")
+            return jsonify(proposals.apply_proposal(engine, proposal_id, approved, activate=activate,
+                                                    actor="dashboard", **common))
+        return _run(go)
+
+    @app.route("/api/policy-graph/proposals/<int:proposal_id>/reject", methods=["POST"])
+    def policy_graph_proposal_reject(proposal_id):
+        def go():
+            body = _json_body()
+            return jsonify(proposals.reject_proposal(engine, proposal_id, reason=str(body.get("reason") or ""),
+                                                     actor="dashboard"))
         return _run(go)
 
 

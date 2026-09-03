@@ -69,13 +69,57 @@ from d_ai_trader import (
 )
 from pathlib import Path
 from policy_graph.routes import register_policy_graph_routes
+from policy_graph.prompts import CRITIC_DOCTRINE, CRITIC_OUTPUT_CANDIDATE
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
+
+
+def _policy_graph_llm(role, system_text, user_text):
+    """Model call for the policy-graph proposal flow. Roles: drafter (PromptEvolutionAgent's model),
+    critic (CriticAgent's model). Usage is recorded under the same agent names as the Prompt Lab."""
+    from openai import OpenAI
+    agent_name = 'CriticAgent' if role == 'critic' else 'PromptEvolutionAgent'
+    model = get_agent_model(agent_name)
+    reasoning = get_reasoning_params(agent_name, model)
+    print(f"🧬 Policy graph {role}: model={model} reasoning={get_agent_reasoning_level(agent_name)}")
+    api_kwargs = dict(model=model, messages=[{'role': 'system', 'content': system_text},
+                                             {'role': 'user', 'content': user_text}])
+    if reasoning:
+        api_kwargs.update(reasoning)
+    client = OpenAI()
+    try:
+        response = client.chat.completions.create(**api_kwargs)
+    except Exception as exc:
+        if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
+            api_kwargs.pop('reasoning_effort', None)
+            response = client.chat.completions.create(**api_kwargs)
+        else:
+            raise
+    _prompt_lab_usage._record_api_usage(agent_name, model, response)
+    if response and getattr(response, 'choices', None):
+        return response.choices[0].message.content
+    return ''
+
+
+def _policy_graph_context(config_hash, agent_type):
+    """What the drafter and the critic see besides the guideline files: the same evidence the
+    Prompt Lab generator gets (defined further down in this module; resolved at call time)."""
+    return {
+        'computed_diagnostics': _safe_diagnostics(config_hash),
+        'decider_supplied_fields': _generation_supplied_fields(),
+        'trade_level_evidence': _fetch_trade_evidence(config_hash),
+        'past_review_verdicts': _fetch_prompt_review_history(config_hash, agent_type, limit=8),
+        'your_recent_verdicts_and_human_response': _fetch_prompt_review_history(config_hash, limit=10, genuine_only=True),
+    }
+
+
 register_policy_graph_routes(
     app, engine=engine, get_config_hash=get_current_config_hash,
-    repo_root=Path(__file__).resolve().parent, is_margin_account=IS_MARGIN_ACCOUNT)
+    repo_root=Path(__file__).resolve().parent, is_margin_account=IS_MARGIN_ACCOUNT,
+    llm=_policy_graph_llm, proposal_context=_policy_graph_context, activate=set_active_prompt_version,
+    proposal_model=lambda: get_agent_model('PromptEvolutionAgent'))
 
 # Manual "Run All" concurrency guard and state tracking
 _manual_run_lock = threading.Lock()
@@ -3855,45 +3899,7 @@ def _critique_candidate(candidate, feedback_summary=None):
             messages=[
                 {
                     'role': 'system',
-                    'content': (
-                        'You are the trust-region gate of a reinforcement-learning loop for an autonomous 1-5 day '
-                        'swing trading system (Schwab cash account, ~$400-$700 tickets, <=5 positions). A candidate '
-                        'prompt change is a policy step. Your job is to keep each step SMALL, ATTRIBUTABLE, EXECUTABLE '
-                        'and CONSISTENT WITH THE MEASURED LEAKS — not to demand statistical proof. With 30-60 closed '
-                        'trades nothing is ever "validated"; a small sample is a reason to keep the step small, never '
-                        'a reason to reject on its own. "The rows do not validate this" is NOT an objection unless the '
-                        'rows or computed_diagnostics CONTRADICT the change.\n\n'
-                        'APPROVE when all of these hold:\n'
-                        '(a) ONE primary behavioral change (a second minor supporting edit is tolerable) so its realized '
-                        'effect can be attributed;\n'
-                        '(b) it targets a leak that computed_diagnostics rank near the top (regime, entry extension above '
-                        'the 20d MA, kill distance, same-ticker re-entry, loss tail, payoff cap) or a documented failure '
-                        'the evidence rows do not contradict;\n'
-                        '(c) it states a falsification metric (which number over how many trades would prove it wrong) '
-                        'or is trivially measurable;\n'
-                        '(d) every gate it adds is executable from decider_supplied_fields — a rule that needs data the '
-                        'Decider never receives locks the system in cash (Decider v20 rejected every candidate on '
-                        '2026-09-02 for lacking a "quoted entry price" nothing supplied);\n'
-                        '(e) it does not widen risk (wider stops, more size, more slots, re-entry exceptions) without a '
-                        'diagnostic that supports it;\n'
-                        '(f) it preserves the Holdings ground-truth / anti-hallucination rules and the verbatim Mission '
-                        'and Shared Principles.\n\n'
-                        'REJECT — and name the specific fix — when: it bundles 3+ behavioral changes (put the ONE to ship '
-                        'first in ship_first); it contradicts the diagnostics (e.g. softens a re-entry quarantine while '
-                        're-entries are a ranked leak); it is cosmetic; it gates on unsupplied data (list them in '
-                        'unexecutable_gates); it asserts trade-level facts the rows contradict; it hedges a rule into '
-                        '"consider testing" language the Decider cannot execute.\n\n'
-                        'CALIBRATE: your_recent_verdicts_and_human_response shows your genuine verdicts and the '
-                        "human's response (the human is the final RLHF authority). Three or more same-direction human "
-                        'overrides mean YOUR bar is miscalibrated in that direction — say so in the reason and move it. '
-                        'realized_winrate_delta outranks concordance, BUT it is regime-confounded: a change shipped into '
-                        'a falling tape shows a negative delta regardless of merit — read computed_diagnostics.regime_split '
-                        'before blaming the change. Judge the evidence in front of you; never approve merely because you '
-                        'predict the human will.\n\n'
-                        'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one to three sentences citing '
-                        'tickers or numbers, "confidence": number 0-1, "ship_first": string or null, '
-                        '"unexecutable_gates": [strings]}.'
-                    ),
+                    'content': CRITIC_DOCTRINE + CRITIC_OUTPUT_CANDIDATE,
                 },
                 {
                     'role': 'user',
