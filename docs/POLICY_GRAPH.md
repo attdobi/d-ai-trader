@@ -18,7 +18,11 @@ agents/decider/policy-graph/
     .lock              inter-process lock (trader + dashboard worker may both write)
 ```
 
-Git tracks only `baseline/` and `latest/` (`.gitignore`); `latest/` is refreshed whenever the
+A new config's v0 is seeded from one of the two tracked folders: `DAI_POLICY_SEED=default`
+(`start_d_ai_trader.sh -s default`) uses the code defaults, `DAI_POLICY_SEED=latest` (`-s latest`)
+compiles `latest/` into the v0 row (`policy_graph/seed.py`; rows carry `created_by = seed_latest`
+so later startups never re-sync them to the defaults). The choice applies only while the config
+has no prompt rows. Git tracks only `baseline/` and `latest/` (`.gitignore`); `latest/` is refreshed whenever the
 active row is materialized (`store.sync_latest`, volatile manifest keys scrubbed) so the repo
 always carries the current policy as a graph without the per-version churn. Push the per-config
 history deliberately if you ever want it (`git add -f agents/*/policy-graph/<hash>`).

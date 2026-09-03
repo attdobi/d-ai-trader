@@ -246,7 +246,10 @@ every fresh checkout starts from — and `init_database.py` writes your own conf
 Versions v1… are the evolution on your machine (weekly feedback, Prompt Lab, and proposals the
 loop drafts as guideline-file patches for you to approve); they stay local, and the repository
 tracks only the baseline plus `agents/<agent>/policy-graph/latest/`, a copy of the active
-version that refreshes on every activation. See `docs/POLICY_GRAPH.md`.
+version that refreshes on every activation. A fresh checkout can start from either one:
+`./start_d_ai_trader.sh -s default` seeds v0 from the code defaults (the baseline), `-s latest`
+seeds v0 from the shipped latest graph so you begin with the learned rules (`DAI_POLICY_SEED`;
+applies only the first time a config is seeded). See `docs/POLICY_GRAPH.md`.
 
 ### How It Works
 

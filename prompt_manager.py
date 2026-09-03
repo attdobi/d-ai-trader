@@ -79,25 +79,49 @@ def initialize_config_prompts(config_hash):
         baseline_prompts = list(baseline_result)
         if not baseline_prompts:
             raise ValueError("No global v0 baseline prompts found!")
+
+        # DAI_POLICY_SEED=latest: a new config starts from the shipped latest policy graph
+        # (agents/<dir>/policy-graph/latest) instead of the code defaults.
+        seeded = {}
+        try:
+            from pathlib import Path as _Path
+            from config import env_first as _env_first
+            from policy_graph.seed import normalize_mode as _norm, seed_rows as _seed_rows
+            _mode = _norm(_env_first("DAI_POLICY_SEED", "default"))
+            if _mode == "latest":
+                defaults = {p.agent_type: {
+                    "system_prompt": p.system_prompt, "user_prompt_template": p.user_prompt_template,
+                    "strategy_directives": p.strategy_directives or "", "soul": getattr(p, 'soul', '') or '',
+                    "memory": getattr(p, 'memory', '') or '',
+                    "description": f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
+                } for p in baseline_prompts}
+                seeded = _seed_rows("latest", _Path(__file__).resolve().parent, defaults)
+                _summary = ", ".join(f"{a} {r['seed']}" for a, r in seeded.items())
+                print(f"  🌱 Policy seed: shipped latest graph ({_summary})")
+        except Exception as _seed_exc:
+            print(f"  ⚠️ Could not read the shipped latest policy graph, using code defaults: {_seed_exc}")
+            seeded = {}
         
         # Create config-specific v0 prompts
         with engine.begin() as write_conn:
             for prompt in baseline_prompts:
+                row = seeded.get(prompt.agent_type) or {}
                 write_conn.execute(text("""
                     INSERT INTO prompt_versions
                     (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
-                    VALUES (:agent_type, 0, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, 'auto_init', TRUE, :config_hash)
+                    VALUES (:agent_type, 0, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, :created_by, TRUE, :config_hash)
                 """), {
                     "agent_type": prompt.agent_type,
-                    "system_prompt": prompt.system_prompt,
-                    "user_prompt_template": prompt.user_prompt_template,
-                    "strategy_directives": prompt.strategy_directives,
-                    "soul": getattr(prompt, 'soul', '') or '',
-                    "memory": getattr(prompt, 'memory', '') or '',
-                    "description": f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
+                    "system_prompt": row.get("system_prompt") or prompt.system_prompt,
+                    "user_prompt_template": row.get("user_prompt_template") or prompt.user_prompt_template,
+                    "strategy_directives": row.get("strategy_directives", prompt.strategy_directives),
+                    "soul": row.get("soul", getattr(prompt, 'soul', '') or ''),
+                    "memory": row.get("memory", getattr(prompt, 'memory', '') or ''),
+                    "description": row.get("description") or f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
+                    "created_by": ("seed_latest" if row.get("seed") == "latest" else "auto_init"),
                     "config_hash": config_hash,
                 })
-                print(f"  ✅ Created {prompt.agent_type} v0")
+                print(f"  ✅ Created {prompt.agent_type} v0 ({row.get('seed', 'default')})")
         
         return True
 

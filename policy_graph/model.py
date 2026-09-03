@@ -305,7 +305,7 @@ def actor_kind(created_by: str) -> str:
         return "human"
     if cb == "claude_code":
         return "claude_code"
-    if cb in ("init_database", "auto_init", "prompt_reset"):
+    if cb in ("init_database", "auto_init", "prompt_reset", "seed_latest"):
         return "seed"
     if cb == "policy_graph":
         return "rl_loop"

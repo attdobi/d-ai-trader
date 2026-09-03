@@ -8,7 +8,9 @@ It creates/updates schema pieces that are otherwise created lazily across the ap
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict
 
 from sqlalchemy import text
@@ -196,8 +198,28 @@ def _any_active_prompt_exists(conn, agent_type: str, config_hash: str) -> bool:
     ).fetchone() is not None
 
 
+def _policy_seed_mode() -> str:
+    """DAI_POLICY_SEED: 'default' (code defaults) or 'latest' (the shipped agents/*/policy-graph/latest)."""
+    try:
+        from config import env_first
+        raw = env_first("DAI_POLICY_SEED", "default")
+    except Exception:
+        raw = os.getenv("DAI_POLICY_SEED", "default")
+    from policy_graph.seed import normalize_mode
+    return normalize_mode(raw)
+
+
 def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
-    prompt_rows = _normalized_prompt_rows()
+    from policy_graph.seed import CREATED_BY_LATEST, describe, seed_rows
+    mode = _policy_seed_mode()
+    repo_root = Path(__file__).resolve().parent
+    # The seed choice only matters for a config with no rows yet; existing rows are never
+    # re-seeded. 'global' always carries the code defaults (it is what "reset" restores).
+    fresh = config_hash != "global" and not any(
+        _any_prompt_version_exists(conn, a, config_hash) for a in ("SummarizerAgent", "DeciderAgent", "FeedbackAgent"))
+    if fresh:
+        print(f"   🌱 Policy seed for new config {config_hash}: {describe(mode, repo_root)}")
+    prompt_rows = seed_rows(mode if fresh else "default", repo_root, _normalized_prompt_rows())
 
     # Skip seeding the legacy alias — FeedbackAgent is the canonical name
     for agent_type, payload in prompt_rows.items():
@@ -206,7 +228,8 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
         existing = conn.execute(
             text(
                 """
-                SELECT id, system_prompt, user_prompt_template, strategy_directives, description, is_active, soul, memory
+                SELECT id, system_prompt, user_prompt_template, strategy_directives, description, is_active, soul, memory,
+                       created_by
                 FROM prompt_versions
                 WHERE agent_type = :agent_type
                   AND version = 0
@@ -249,7 +272,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                         :user_prompt_template,
                         :strategy_directives,
                         :description,
-                        'init_database',
+                        :created_by,
                         TRUE,
                         :config_hash,
                         :soul,
@@ -259,6 +282,7 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                 ),
                 {
                     "agent_type": agent_type,
+                    "created_by": payload.get("created_by", "init_database"),
                     "system_prompt": payload["system_prompt"],
                     "user_prompt_template": payload["user_prompt_template"],
                     "strategy_directives": payload["strategy_directives"],
@@ -269,7 +293,19 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
                 },
             )
             stats.seeded_prompts += 1
-            print(f"   ✅ Seeded v0 prompt: {agent_type} ({config_hash})")
+            print(f"   ✅ Seeded v0 prompt: {agent_type} ({config_hash}) from {payload.get('seed', 'default')}")
+            continue
+
+        if getattr(existing, "created_by", None) == CREATED_BY_LATEST:
+            # A v0 seeded from the shipped latest policy is not the code default — never
+            # re-sync its text to DEFAULT_PROMPTS; only the dormant-reactivation rule applies.
+            if not bool(existing.is_active) and not _any_active_prompt_exists(conn, agent_type, config_hash):
+                conn.execute(text("UPDATE prompt_versions SET is_active = TRUE WHERE id = :id"), {"id": existing.id})
+                stats.updated_prompts += 1
+                print(f"   🔄 Re-activated v0 (seeded from latest): {agent_type} ({config_hash})")
+            else:
+                stats.skipped_prompts += 1
+                print(f"   ↪ v0 seeded from the shipped latest policy — left as is: {agent_type} ({config_hash})")
             continue
 
         needs_update = (
