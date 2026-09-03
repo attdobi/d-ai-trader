@@ -306,10 +306,23 @@ def _normalize_model_name(model_name):
 
 
 def _announce_model(model_name: str):
+    """Startup banner. Once the per-agent overrides are loaded it lists what each agent
+    actually runs on; before that (set_gpt_model at import time) only the default is known."""
     global _last_announced_model
-    if model_name and model_name != _last_announced_model:
+    if not model_name or model_name == _last_announced_model:
+        return
+    _last_announced_model = model_name
+    overrides = globals().get("AGENT_MODEL_OVERRIDES") or {}
+    used = {k: v for k, v in overrides.items() if v}
+    if not used:
         print(f"🤖 Using AI model: {model_name}")
-        _last_announced_model = model_name
+        return
+    labels = [("decider", "Decider"), ("summarizer", "Summarizer"), ("feedback", "Feedback"),
+              ("evolution", "Evolution"), ("critic", "Critic"), ("company", "Company")]
+    parts = [f"{label} {used[key]}" for key, label in labels if key in used]
+    unset = [label for key, label in labels if key not in used]
+    tail = f" · default {model_name} for {', '.join(unset)}" if unset else f" · default {model_name} (unused)"
+    print("🤖 Models: " + " · ".join(parts) + tail)
 
 
 def set_gpt_model(model_name):

@@ -12,9 +12,9 @@
  "actor_kind": "seed",
  "description": "SummarizerAgent — aggressive, image-first narrative (~200 words) with ticker-centric headlines and a final Watchlist, same JSON shape",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:24-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:35:16-07:00",
+ "materialized_by": "init_database",
+ "pid": 38279,
  "source_sha256": {
   "system_prompt": "2e4c0cec3f6bee2f3ed137e1ea3b929f8fb3a7c0d0ffe3859e733a09a4d3907d",
   "user_prompt_template": "424185356d70cdaff5016bfacae6dc858a64efeba63342558473148ca57fd076",
@@ -74,9 +74,9 @@
  "node_count": 14,
  "edge_count": 18,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "0348e9eb",
   "fires": {
    "SA.code.feedback_suffix": true
   }

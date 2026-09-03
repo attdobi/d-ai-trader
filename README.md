@@ -17,6 +17,8 @@ The system is a reinforcement-learning loop with two deliberate substitutions fr
 
 An **episode** is one trading cycle. A **policy update** is the feedback agent reading recent outcomes, attributing them to the reasons the Decider gave, and rewriting the prompt. Updates are human-readable diffs, gated by an approve/reject step in the Prompt Lab.
 
+The policy is also kept as a **knowledge graph**: every prompt version is decomposed into one Markdown guideline per file (`agents/<agent>/policy-graph/<config>/v<N>/*.md` + `edges.json`), in the RUSH layout, and compiles back to the stored prompt byte-for-byte. The **Policy Graph** tab renders it as a force graph — rules, lessons, identity, code-owned blocks and memory rows as nodes; hierarchy, links, overlaps and "code constrains rule" as edges — with a version timeline so you can watch the policy evolve. The loop edits the graph directly: it proposes patches of at most three guideline files, the critic judges each file's diff, you approve per guideline, and the Decider cites the guideline ids that drove each decision, so every rule gets its own realized win rate. See [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md).
+
 ```
         policy = prompt (soul + strategy directives + memory)
                               │
@@ -51,9 +53,10 @@ The trade-off is honest: a gradient learner needs thousands of noisy episodes to
 | Concept | Implementation |
 |---|---|
 | Policy | `prompt_versions` table (`soul` / `strategy_directives` / `memory`), injected at runtime as `## AGENT IDENTITY`, `## STRATEGY DIRECTIVES`, `## LESSONS FROM EXPERIENCE` |
+| Policy as a graph | `policy_graph/` + `agents/<agent>/policy-graph/…/v<N>/*.md` — one guideline per file, same bytes as the row; `/policy-graph` tab; proposals in `policy_graph_proposals`; citations in each decision's reason (`[cites: DA.…]`) |
 | Reward | `trade_outcomes.gain_loss_percentage` + `outcome_category` |
 | Policy update | `feedback_agent.py` — weekly outcome analysis → prompt rewrite |
-| Trust-region gate | Prompt Lab approve/reject (`/prompt-evolution`) |
+| Trust-region gate | Prompt Lab approve/reject (`/prompt-evolution`); per-guideline approve on the Policy Graph tab (`/policy-graph`) |
 | Episode | One trading cycle (Summarizer → Decider → execution → outcome) |
 
 ### The Critic & the (optional) Human Gate
@@ -72,7 +75,7 @@ flowchart TB
     end
 
     OUT -->|outcome analysis| FB[FeedbackAgent<br/><i>Sol · high</i>]
-    FB -->|guidance| GEN[Prompt evolution<br/><i>Sol · high — DAI_MODEL_EVOLUTION</i>]
+    FB -->|guidance| GEN[Prompt evolution<br/><i>Terra · high — DAI_MODEL_EVOLUTION</i>]
     GEN -->|candidate prompt + declared changes| CRITIC[Critic<br/><i>Terra · high — DAI_MODEL_CRITIC</i>]
     OUT -->|"trade-level evidence<br/>(20 worst + 20 best, with reasons)"| CRITIC
     OUT -->|trade-level evidence| GEN
