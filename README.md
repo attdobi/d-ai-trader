@@ -214,6 +214,23 @@ Skip this and the app boots on SQLite automatically.
 
 The launcher auto-creates a virtualenv and installs dependencies on first run.
 
+**Pick your starting policy.** The repository ships two policy graphs per agent (see
+[Policy graph](#policy-graph-guidelines-as-a-knowledge-graph)): the committed **baseline** (v0 =
+the code defaults) and **latest**, a copy of the active, learned policy the repo was last pushed
+with. A fresh config seeds its v0 from whichever you choose; the choice applies only the first
+time a config hash is seeded and never touches an existing one.
+
+```bash
+# start from the code defaults (baseline) — the textbook starting point
+./start_d_ai_trader.sh -p 8080 -t simulation -s default
+
+# start from the shipped latest policy — begin with the rules the loop has already learned
+./start_d_ai_trader.sh -p 8080 -t simulation -s latest
+```
+
+The same switch is `DAI_POLICY_SEED=default|latest` in `.env`. The initializer prints which
+seed it used, e.g. `v0 = shipped latest policy (Decider v23, Summarizer v17, Feedback v8)`.
+
 **Dashboard:** http://localhost:8080
 
 ---
@@ -414,6 +431,10 @@ DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
   -P, --prompt-profile PROF  standard | gpt-pro (default: standard)
   -t, --trading-mode MODE    simulation | live (default: simulation)
   -c, --cadence MINUTES      180 (default) | 60 | 30 | 15
+  -H, --config-hash HASH     Force a specific configuration hash for this run
+  -s, --policy-seed SEED     default | latest — where a NEW config's v0 policy comes from
+                             (default: the code defaults; latest: the shipped active
+                             policy graph in agents/*/policy-graph/latest). First seed only.
 ```
 
 ### Supported Models
