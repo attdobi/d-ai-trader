@@ -1,0 +1,24 @@
+{
+ "code_sha": "3674eb0468b4",
+ "git_sha": "cc1d5aff",
+ "kind": "code",
+ "sha": "3674eb0468b4",
+ "node_ids": [
+  "DA.code.crowd_fade",
+  "DA.code.cash_playbook",
+  "DA.code.index_regime",
+  "DA.code.watchlist_header",
+  "DA.code.quarantine_line",
+  "DA.code.lessons_header",
+  "DA.code.recent_activity_header",
+  "DA.code.cash_disclosure",
+  "DA.code.justification_detail",
+  "DA.code.considered_setups",
+  "DA.code.data_availability",
+  "DA.code.deploy_policy",
+  "DA.code.confirmation_policy",
+  "DA.code.recency_provenance",
+  "DA.code.guideline_citations",
+  "DA.code.json_fallback"
+ ]
+}

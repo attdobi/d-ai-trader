@@ -415,7 +415,14 @@ def _ensure(ctx: _Ctx, agent_type: str, row: dict, *, materialized_by: str, forc
     res = store.materialize(ctx.repo_root, agent_type, ctx.config_hash, version, fields,
                             **_materialize_kwargs(store, kwargs))
     ctx.forget(agent_type, version)
+    latest = None
+    if row["is_active"] and hasattr(store, "sync_latest"):
+        try:      # git-tracked copy of the active version (agents/<dir>/policy-graph/latest/)
+            latest = store.sync_latest(ctx.repo_root, agent_type, ctx.config_hash, version)
+        except Exception as exc:     # noqa: BLE001 — informational; never blocks a read
+            latest = f"error: {type(exc).__name__}: {exc}"
     return {
+        "latest": latest,
         "agent_type": agent_type, "version": version, "action": getattr(res, "action", "unknown"),
         "path": str(getattr(res, "path", ctx.version_dir(agent_type, version))),
         "roundtrip": getattr(res, "roundtrip", "ok"),

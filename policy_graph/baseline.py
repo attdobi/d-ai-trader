@@ -45,13 +45,10 @@ def baseline_root(repo_root: Path, agent_type: str) -> Path:
 
 def _scrub(path: Path) -> None:
     """Remove volatile keys from every manifest under `path` so the tree is reproducible."""
+    store.scrub_volatile(path)
     for m in Path(path).rglob("manifest.json"):
         data = json.loads(m.read_text(encoding="utf-8"))
         changed = False
-        for k in _VOLATILE:
-            if k in data:
-                data.pop(k)
-                changed = True
         code = data.get("code")
         if isinstance(code, dict) and code.get("git_sha") not in (None, BASELINE_HASH):
             code["git_sha"] = BASELINE_HASH

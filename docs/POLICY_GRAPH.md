@@ -7,13 +7,21 @@ force-directed graph with a version timeline, so you can watch the policy evolve
 reinforcement-learning loop instead of reading five-field diffs.
 
 ```
-agents/decider/policy-graph/9ea09b9as/
-  v0/ … v21/           <id>.md guideline files + edges.json + manifest.json  (one dir per prompt version)
-  _code/<sha12>/       code-owned prompt blocks (decider_agent.py etc.), content-addressed, read-only
-  _ltm/<sha12>/        decider_memory rows as of that version, content-addressed, read-only
-  _prior/v<N>-<sha8>/  previous contents of a version whose database row was rewritten in place
-  .lock                inter-process lock (trader + dashboard worker may both write)
+agents/decider/policy-graph/
+  baseline/v0/         the v0 policy every fresh checkout starts from            (git-tracked)
+  latest/              copy of the ACTIVE version: v<N>/ + its _code/ + _ltm/    (git-tracked)
+  9ea09b9as/           this machine's history — one dir per prompt version       (local only)
+    v0/ … v23/         <id>.md guideline files + edges.json + manifest.json
+    _code/<sha12>/     code-owned prompt blocks (decider_agent.py etc.), content-addressed, read-only
+    _ltm/<sha12>/      decider_memory rows as of that version, content-addressed, read-only
+    _prior/v<N>-<sha8>/ previous contents of a version whose database row was rewritten in place
+    .lock              inter-process lock (trader + dashboard worker may both write)
 ```
+
+Git tracks only `baseline/` and `latest/` (`.gitignore`); `latest/` is refreshed whenever the
+active row is materialized (`store.sync_latest`, volatile manifest keys scrubbed) so the repo
+always carries the current policy as a graph without the per-version churn. Push the per-config
+history deliberately if you ever want it (`git add -f agents/*/policy-graph/<hash>`).
 
 Node ids are dotted and agent-prefixed (`DA.`, `SA.`, `FA.`), filename == id + `.md`, one root per
 graph. Examples from Decider v21: `DA.directives.strategy.priced_kill`, `DA.soul.core_philosophy`,

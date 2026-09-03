@@ -239,12 +239,14 @@ agents/
 ### Policy graph (guidelines as a knowledge graph)
 
 Every prompt version is also a folder of Markdown guideline files plus `edges.json`, RUSH-style,
-under `agents/<agent>/policy-graph/<config_hash>/v<N>/`, and the dashboard's **Policy Graph** tab
+under `agents/<agent>/policy-graph/<config_hash>/v<N>/` (local; `baseline/` and `latest/` are the tracked copies), and the dashboard's **Policy Graph** tab
 renders it as a force graph with a version timeline, per-guideline history, citations and health.
 The repository ships the baseline in `agents/<agent>/policy-graph/baseline/v0/` — the v0 policy
 every fresh checkout starts from — and `init_database.py` writes your own config's v0 next to it.
 Versions v1… are the evolution on your machine (weekly feedback, Prompt Lab, and proposals the
-loop drafts as guideline-file patches for you to approve). See `docs/POLICY_GRAPH.md`.
+loop drafts as guideline-file patches for you to approve); they stay local, and the repository
+tracks only the baseline plus `agents/<agent>/policy-graph/latest/`, a copy of the active
+version that refreshes on every activation. See `docs/POLICY_GRAPH.md`.
 
 ### How It Works
 

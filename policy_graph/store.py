@@ -580,8 +580,92 @@ def materialize(repo_root: Path, agent_type: str, config_hash: str, version: int
         return MaterializeResult(path=dest, action=action, roundtrip="ok")
 
 
+# ----------------------------------------------------------------------------- latest (git-tracked copy)
+LATEST_DIR = "latest"
+_VOLATILE_MANIFEST_KEYS = ("materialized_at", "pid", "written_at", "extracted_at")
+
+
+def latest_root(repo_root: Path, agent_type: str) -> Path:
+    """`agents/<dir>/policy-graph/latest/` — the ACTIVE version copied as a self-contained bundle
+    (v<N>/ + the _code/ and _ltm/ overlays it links to + LATEST.json). This and baseline/ are the
+    only graph folders git tracks; per-config history stays local."""
+    if agent_type not in AGENT_DIR:
+        raise ValueError(f"unknown agent_type {agent_type!r}")
+    return Path(repo_root) / "agents" / AGENT_DIR[agent_type] / "policy-graph" / LATEST_DIR
+
+
+def scrub_volatile(path: Path) -> None:
+    """Drop timestamps / pids from every manifest under `path` so a copy is byte-stable in git."""
+    for m in Path(path).rglob("manifest.json"):
+        try:
+            data = json.loads(m.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        changed = False
+        for k in _VOLATILE_MANIFEST_KEYS:
+            if k in data:
+                data.pop(k)
+                changed = True
+        if changed:
+            _write_json(m, data)
+
+
+def _latest_stamp(manifest: dict, config_hash: str) -> dict:
+    return {
+        "config_hash": str(config_hash), "version": int(manifest.get("version", 0)),
+        "prompt_version_id": manifest.get("prompt_version_id"), "source_sha256": manifest.get("source_sha256"),
+        "code_sha": (manifest.get("code") or {}).get("sha"), "ltm_sha": (manifest.get("ltm") or {}).get("sha"),
+        "builder_version": manifest.get("builder_version"),
+    }
+
+
+def sync_latest(repo_root: Path, agent_type: str, config_hash: str, version: int) -> Optional[str]:
+    """Copy `<config>/v<version>` (plus its overlays) to `latest/`. Returns 'synced' when written,
+    'unchanged' when LATEST.json already matches, None when the source dir is missing."""
+    root = version_root(repo_root, agent_type, config_hash)
+    src = version_dir(root, version)
+    manifest = _read_manifest(src)
+    if manifest is None:
+        return None
+    dest_root = latest_root(repo_root, agent_type)
+    stamp = _latest_stamp(manifest, config_hash)
+    try:
+        with open(dest_root / "LATEST.json", "rb") as fh:
+            current = json.loads(fh.read().decode("utf-8"))
+    except (OSError, ValueError):
+        current = None
+    if current == stamp and (dest_root / f"v{int(version)}" / "manifest.json").is_file():
+        return "unchanged"
+    with _Lock(root):
+        tmp = dest_root.parent / f".tmp-latest-{os.getpid()}-{secrets.token_hex(3)}"
+        try:
+            shutil.copytree(src, tmp / f"v{int(version)}")
+            for key in ("code", "ltm"):
+                link = (manifest.get(key) or {}).get("dir")
+                if link:
+                    overlay = (src / link).resolve()
+                    if overlay.is_dir():
+                        shutil.copytree(overlay, tmp / f"_{key}" / overlay.name)
+            scrub_volatile(tmp)
+            _write_json(tmp / "LATEST.json", stamp)
+            _fsync_tree(tmp)
+            if dest_root.exists():
+                old = dest_root.parent / f".old-latest-{os.getpid()}-{secrets.token_hex(3)}"
+                os.rename(dest_root, old)
+                os.rename(tmp, dest_root)
+                shutil.rmtree(old, ignore_errors=True)
+            else:
+                os.rename(tmp, dest_root)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        _fsync_dir(dest_root.parent)
+    return "synced"
+
+
 __all__ = [
     "StoreBusy", "RoundTripError", "MaterializeResult", "version_root", "version_dir", "list_version_dirs",
+    "latest_root", "sync_latest", "scrub_volatile", "LATEST_DIR",
     "materialize", "write_overlay_dir", "sweep_stale_tmp", "source_sha256", "git_short_sha", "build_manifest",
     "LOCK_TIMEOUT_S", "TMP_MAX_AGE_S", "MANIFEST_SCHEMA",
 ]
