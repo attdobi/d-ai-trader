@@ -829,10 +829,19 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
     edges = [e for e in edges if e.source in nodes and e.target in nodes]
 
     fires_map = (cur.manifest.get("code") or {}).get("fires") or {}
+    hits = {}
+    if agent_type == "DeciderAgent":
+        try:
+            from . import citations as _cit
+            hits = _cit.hit_map(engine, config_hash)
+        except Exception:     # noqa: BLE001 — the table may not exist yet
+            hits = {}
     node_list = []
     for i, x in sorted(nodes.items(), key=lambda kv: (kv[1].depth, kv[1].order, kv[0])):
         ch, rf = flags.get(i, (None, None))
-        node_list.append(_node_dict(x, prefix=prefix, by_id=nodes, change=ch, renamed_from=rf, fires_map=fires_map))
+        d = _node_dict(x, prefix=prefix, by_id=nodes, change=ch, renamed_from=rf, fires_map=fires_map)
+        d["hits"] = hits.get(i)
+        node_list.append(d)
     edge_list = [{
         "source": e.source, "target": e.target, "edge_type": e.edge_type, "provenance": e.provenance,
         "via": e.via, "confidence": e.confidence,
@@ -969,17 +978,21 @@ def node_payload(engine, config_hash: str, agent_type: str, version, node_id: st
                              "owner": cur.nodes[other].owner})
     overlaps.sort(key=lambda o: -(o["confidence"] or 0))
     fires_map = (cur.manifest.get("code") or {}).get("fires") or {}
-    citations = None
+    citations, hits = None, None
     if agent_type == "DeciderAgent" and node.owner in ("db", "default-file", "code"):
         try:
             from . import citations as _cit
             citations = _cit.citation_health(engine, config_hash, node_id)
         except Exception as exc:     # noqa: BLE001 — health is informational
             citations = {"error": f"{type(exc).__name__}: {exc}"}
+        try:
+            hits = _cit.hit_counts(engine, config_hash, node_id)
+        except Exception as exc:     # noqa: BLE001 — the table may not exist yet
+            hits = {"error": f"{type(exc).__name__}: {exc}"}
     return _json_safe({
         "agent_type": agent_type, "version": n, "prompt_version_id": row["id"],
         "node": _node_dict(node, prefix=prefix, by_id=cur.nodes, change=ch, renamed_from=rf, fires_map=fires_map),
-        "citations": citations,
+        "citations": citations, "hits": hits,
         "previous": previous, "diff_vs_previous": udiff, "history": hist,
         "first_seen": (versions_present[0] if versions_present else n),
         "present_in": (len(versions_present) if versions_present else 1),

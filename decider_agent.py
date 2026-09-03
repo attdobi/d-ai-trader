@@ -2653,6 +2653,24 @@ OUTPUT (STRICT)
     except Exception as _contra_exc:
         print(f"⚠️  Contrarian screen skipped: {_contra_exc}")
 
+    # Graph-driven assembly (DAI_GRAPH_ASSEMBLY, default on): rebuild the soul / directives /
+    # memory the model reads from the policy graph — guidelines selected and ordered by this
+    # cycle's regime, holdings, watchlist and quarantine, each tagged with its id and record.
+    # Falls back to the flat stored text on any failure; the stored prompt row is untouched.
+    _graph_served = None
+    try:
+        if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
+            _ctx_regime = str(((locals().get("_regime") or {}).get("label")) or "")
+            _ctx_watch = [c.get("ticker") for c in (locals().get("_contra") or []) if isinstance(c, dict)]
+            _ctx_quar = sorted(locals().get("_quarantined") or [])
+            _assembled = _graph_assemble_system_prompt(
+                prompt_data, prompt_version, run_id, regime=_ctx_regime,
+                holdings=[h.get("ticker") for h in stock_holdings], watchlist=_ctx_watch, quarantined=_ctx_quar)
+            if _assembled is not None:
+                system_prompt, _graph_served = _assembled
+    except Exception as _asm_exc:
+        print(f"⚠️  Graph assembly skipped (flat prompt kept): {_asm_exc}")
+
     # Decider memory: long-term structured lessons (retrieved by relevance) + short-term
     # working memory (the decider's own recent activity). Both best-effort — a memory
     # failure must never break the decision path.
@@ -2752,12 +2770,17 @@ OUTPUT (STRICT)
     )
     prompt += (
     "\n\nGUIDELINE CITATIONS (policy graph — record which guidelines drove each decision):"
-    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids taken from the"
-    " GUIDELINE INDEX below — the rule you applied, the lesson you weighed, the code policy you followed."
-    " Cite ids exactly as printed; never invent one. The ids are stored with the reason so every guideline's"
-    " realized win rate can be measured on the Policy Graph tab. Omit the key when no listed guideline applies."
+    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids — the rule you"
+    " applied, the lesson you weighed, the code policy you followed. Ids appear as ⟨id⟩ after each"
+    " guideline in your system prompt (with its record: how often it was cited in the last 7/30/90 days"
+    " and the win rate of the trades it drove — weigh a rule by that record, not by its wording) and in"
+    " the GUIDELINE INDEX below when present. Cite ids exactly as printed; never invent one. The ids are"
+    " stored with the reason so every guideline's realized win rate can be measured on the Policy Graph"
+    " tab. Omit the key when no listed guideline applies."
     )
-    _guideline_index_lines = _guideline_index_text(prompt_version)
+    _guideline_index_lines = "" if _graph_served else _guideline_index_text(prompt_version)
+    if _graph_served:
+        _GUIDELINE_IDS_STASH[run_id] = {sel.node_id for sel in _graph_served}
     if _guideline_index_lines:
         prompt += "\n\nGUIDELINE INDEX (id — title):\n" + _guideline_index_lines
         _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
@@ -2903,6 +2926,11 @@ OUTPUT (STRICT)
         _used_ids = _fold_cites(ai_response, _known_ids)
         if _used_ids:
             print(f"📎 Guidelines cited this cycle: {', '.join(_used_ids)}")
+            try:
+                from policy_graph.citations import record_cited as _record_cited
+                _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response)
+            except Exception as _hit_exc:
+                print(f"⚠️  Could not log guideline hits: {_hit_exc}")
     except Exception as _cite_exc:
         print(f"⚠️  Could not record guideline citations: {_cite_exc}")
 
@@ -3093,6 +3121,54 @@ _CONSIDERED_STASH = {}
 # Per-run set of citable guideline ids (from the policy graph of the active prompt version), so the
 # "cited" ids the model returns are validated before they are folded into each reason.
 _GUIDELINE_IDS_STASH = {}
+
+
+def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined):
+    """(system_prompt, served) built from the policy graph of the active version, or None when the
+    graph is unavailable. Records the served guidelines (with routes) in policy_graph_hits."""
+    from pathlib import Path as _Path
+    from policy_graph import service as _pg_service
+    from policy_graph.assembly import Context as _Ctx, assemble as _assemble
+    from policy_graph.citations import ensure_hits_schema as _ensure_hits, health_for_prompt as _health, \
+        record_served as _record_served
+    from policy_graph.compile import read_version_dir as _read_version_dir
+    if prompt_version is None:
+        return None
+    _root = _Path(__file__).resolve().parent
+    _cfg = get_current_config_hash()
+    _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
+                                    is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
+    _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
+    ctx = _Ctx(regime=regime or "", holdings=[t for t in holdings if t], watchlist=[t for t in watchlist if t],
+               quarantined=list(quarantined or []))
+    _ensure_hits(engine)
+    ids = [n.id for n in _version.nodes.values() if n.owner in ("db", "default-file", "code")]
+    try:
+        health = _health(engine, _cfg, ids)
+    except Exception as _h_exc:
+        print(f"⚠️  Guideline health unavailable: {_h_exc}")
+        health = {}
+    out = _assemble(_version, ctx, health=health)
+    system_prompt = prompt_data["system_prompt"]
+    if out.soul:
+        system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{out.soul}"
+    if out.strategy_directives and "{strategy_directives}" in system_prompt:
+        system_prompt = system_prompt.replace("{strategy_directives}", out.strategy_directives)
+    elif out.strategy_directives:
+        system_prompt = system_prompt + "\n\n" + out.strategy_directives
+    if out.memory:
+        system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{out.memory}"
+    routes = {}
+    for sel in out.served:
+        routes[sel.route] = routes.get(sel.route, 0) + 1
+    print(f"🕸️  Graph assembly v{prompt_version}: {len(out.served)} guidelines served "
+          f"({', '.join(f'{k} {v}' for k, v in sorted(routes.items()))}), {len(out.dropped)} not shown; "
+          f"regime={regime or 'n/a'} tickers={len(ctx.tickers)} health={'yes' if health else 'none yet'}")
+    try:
+        _record_served(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, out.served)
+    except Exception as _s_exc:
+        print(f"⚠️  Could not log served guidelines: {_s_exc}")
+    return system_prompt, out.served
 
 
 def _guideline_index_text(prompt_version):

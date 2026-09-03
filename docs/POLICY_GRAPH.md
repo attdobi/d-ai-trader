@@ -143,6 +143,30 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    cited guidelines as an expandable chip row linking to the graph, and a guideline's panel shows
    "Cited by N decisions · M closed trades · win rate · P&L" (`citation_health`).
 
+## Phase 3 — the graph at decision time
+
+1. **Graph-driven assembly** (`policy_graph/assembly.py`, `DAI_GRAPH_ASSEMBLY`, default on).
+   Each cycle the Decider's soul / directives / memory are rebuilt from the active version's
+   graph instead of the flat stored text. A deterministic query over the cycle's context — regime,
+   holdings, watchlist, quarantine, date — decides what is served and in which order: locked
+   structure and every numbered rule always (`core`; rules naming the current regime move to the
+   front of their section), soul sections verbatim (`identity`), the weekly reminder, lessons and
+   log entries that name the regime (`regime`), cite a ticker in play (`ticker`), concern re-entry
+   while the quarantine line is non-empty (`quarantine`), or are dated within 30 days (`recent`).
+   Everything else is dropped from the rendering and listed by id in one line so it stays
+   citable. No model routes anything; the route each guideline took is recorded per run, so route
+   importance (served versus cited) is measurable. The stored prompt row is untouched; a failure
+   to read the graph falls back to the flat text.
+2. **Evidence inline.** Every rendered guideline ends with ` ⟨id⟩`, or, once it has a record,
+   ` ⟨id · cited 7d/30d/90d: 3/12/20 · win 58% n=12⟩` (`citations.health_for_prompt`), and the
+   citations block tells the Decider to weigh a rule by that record rather than its wording.
+3. **Hit log** (`policy_graph_hits`, one row per guideline per run: `served` with its route,
+   `cited` with ticker and action). The node panel shows hits per window — 7d / 30d / 90d / 1y,
+   cited over served, win rate of the closed trades the guideline drove — and the routes that
+   carried it into the prompt; on the graph, nodes grow with their 90-day citations and wear a
+   badge with the 30-day count. `citations.backfill_hits_from_decisions` fills `unserved` rows
+   for decisions made before the log existed.
+
 ## Baseline for fresh checkouts
 
 `agents/<dir>/policy-graph/baseline/v0/` is committed: the v0 policy of every agent decomposed

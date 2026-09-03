@@ -809,6 +809,12 @@ def initialize_database() -> None:
         # on SQLite in tests (policy_graph/proposals.py owns the schema).
         from policy_graph.proposals import DDL_POSTGRES as _POLICY_PROPOSALS_DDL
         ensure_table(conn, stats, "policy_graph_proposals", _POLICY_PROPOSALS_DDL)
+        # Per-run guideline hit log (served / cited per node, with the route that selected it) —
+        # the "N hits in 7d / 30d / 90d / 1y" importance figures on the Policy Graph tab.
+        from policy_graph.citations import DDL_HITS_POSTGRES as _POLICY_HITS_DDL
+        ensure_table(conn, stats, "policy_graph_hits", _POLICY_HITS_DDL)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_node ON policy_graph_hits (config_hash, node_id, decided_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_run ON policy_graph_hits (config_hash, run_id)"))
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(

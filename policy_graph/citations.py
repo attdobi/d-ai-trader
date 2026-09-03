@@ -184,5 +184,246 @@ def citation_health(engine, config_hash: str, node_id: str, *, recent: int = 8) 
     }
 
 
-__all__ = ["CITE_RE", "MAX_CITES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
+# ----------------------------------------------------------------------------- hit log (per run, per guideline)
+# One row per guideline per decision run: `served` = it was in the prompt (with the route that
+# selected it), `cited` = a decision cited it (with the ticker / action). Windows over decided_at
+# give the "N hits in 7d / 30d / 90d / 1y" importance figures; routes give route importance.
+DDL_HITS_POSTGRES = """
+CREATE TABLE IF NOT EXISTS policy_graph_hits (
+    id SERIAL PRIMARY KEY,
+    config_hash VARCHAR(50) NOT NULL,
+    agent_type TEXT NOT NULL,
+    prompt_version INTEGER,
+    run_id TEXT,
+    decided_at TIMESTAMP,
+    node_id TEXT NOT NULL,
+    route TEXT,
+    served BOOLEAN DEFAULT FALSE,
+    cited BOOLEAN DEFAULT FALSE,
+    ticker TEXT,
+    action TEXT
+)
+"""
+DDL_HITS_SQLITE = DDL_HITS_POSTGRES.replace("id SERIAL PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
+WINDOWS = (("7d", 7), ("30d", 30), ("90d", 90), ("1y", 365))
+
+
+def ensure_hits_schema(engine) -> None:
+    dialect = getattr(getattr(engine, "dialect", None), "name", "") or ""
+    with engine.begin() as conn:
+        conn.execute(text(DDL_HITS_POSTGRES if dialect == "postgresql" else DDL_HITS_SQLITE))
+        try:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_node ON policy_graph_hits (config_hash, node_id, decided_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_run ON policy_graph_hits (config_hash, run_id)"))
+        except Exception:     # noqa: BLE001 — index creation is best effort
+            pass
+
+
+def record_served(engine, config_hash: str, agent_type: str, prompt_version, run_id: str, served, *, decided_at=None) -> int:
+    """Insert one served row per (node_id, route) for this run. `served` = [(node_id, route)] or
+    objects with .node_id/.route. Returns the row count."""
+    rows = []
+    seen = set()
+    for item in served or []:
+        nid = getattr(item, "node_id", None) or (item[0] if isinstance(item, (tuple, list)) else None)
+        route = getattr(item, "route", None) or (item[1] if isinstance(item, (tuple, list)) and len(item) > 1 else None)
+        if not nid or nid in seen:
+            continue
+        seen.add(nid)
+        rows.append({"h": config_hash, "a": agent_type, "v": prompt_version, "r": run_id,
+                     "t": decided_at or _now(), "n": nid, "route": route})
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO policy_graph_hits (config_hash, agent_type, prompt_version, run_id, decided_at, node_id, route, served, cited)
+            VALUES (:h, :a, :v, :r, :t, :n, :route, :served, :cited)
+        """), [dict(r, served=True, cited=False) for r in rows])
+    return len(rows)
+
+
+def record_cited(engine, config_hash: str, agent_type: str, prompt_version, run_id: str, decisions, *, decided_at=None) -> int:
+    """Mark the guideline ids cited by each decision of this run (rows exist when the id was served;
+    an id cited without being served gets its own row with route 'unserved')."""
+    hits = []
+    for d in decisions or []:
+        if not isinstance(d, dict):
+            continue
+        for nid in parse_cites(d.get("reason")):
+            hits.append((nid, str(d.get("ticker") or "").upper() or None, str(d.get("action") or "").lower() or None))
+    if not hits:
+        return 0
+    n = 0
+    with engine.begin() as conn:
+        for nid, ticker, action in hits:
+            res = conn.execute(text("""
+                UPDATE policy_graph_hits SET cited = :cited, ticker = COALESCE(ticker, :tk), action = COALESCE(action, :ac)
+                WHERE config_hash = :h AND run_id = :r AND node_id = :n AND served = :served
+            """), {"cited": True, "served": True, "tk": ticker, "ac": action, "h": config_hash, "r": run_id, "n": nid})
+            if getattr(res, "rowcount", 0):
+                n += 1
+                continue
+            conn.execute(text("""
+                INSERT INTO policy_graph_hits (config_hash, agent_type, prompt_version, run_id, decided_at, node_id, route, served, cited, ticker, action)
+                VALUES (:h, :a, :v, :r, :t, :n, 'unserved', :served, :cited, :tk, :ac)
+            """), {"h": config_hash, "a": agent_type, "v": prompt_version, "r": run_id, "t": decided_at or _now(),
+                   "n": nid, "served": False, "cited": True, "tk": ticker, "ac": action})
+            n += 1
+    return n
+
+
+def _now():
+    from datetime import datetime
+    return datetime.now()
+
+
+def _windows(now=None):
+    from datetime import datetime, timedelta
+    now = now or datetime.now()
+    return [(label, now - timedelta(days=days)) for label, days in WINDOWS]
+
+
+def hit_counts(engine, config_hash: str, node_id: str, *, now=None) -> dict:
+    """{window: {served, cited, closed, wins, win_rate, pnl}} plus {"routes": {route: cited}} for
+    one guideline. Closed trades come from trade_outcomes (buy reasons carrying the citation)."""
+    out: dict = {}
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT decided_at, route, served, cited FROM policy_graph_hits
+            WHERE config_hash = :h AND node_id = :n
+        """), {"h": config_hash, "n": node_id}).fetchall()
+        outcomes = conn.execute(text("""
+            SELECT sell_timestamp, gain_loss_percentage, gain_loss_amount, original_reason
+            FROM trade_outcomes
+            WHERE config_hash = :h AND original_reason LIKE '%[cites:%' AND original_reason NOT LIKE :synced
+        """), {"h": config_hash, "synced": f"%{SYNCED_REASON}%"}).fetchall()
+    from .health import to_datetime
+    closed = [(to_datetime(r[0]), r[1], r[2]) for r in outcomes if node_id in parse_cites(r[3])]
+    routes: dict = {}
+    for label, since in _windows(now):
+        served = cited = 0
+        for r in rows:
+            at = to_datetime(r[0])
+            if at is None or at < since:
+                continue
+            if r[2]:
+                served += 1
+            if r[3]:
+                cited += 1
+        win = [c for c in closed if c[0] is not None and c[0] >= since]
+        wins = sum(1 for c in win if (c[1] or 0) > 0)
+        out[label] = {"served": served, "cited": cited, "closed": len(win), "wins": wins,
+                      "win_rate": (wins / len(win)) if win else None,
+                      "pnl": float(sum(float(c[2] or 0) for c in win))}
+    for r in rows:
+        if r[3]:
+            routes[r[1] or "?"] = routes.get(r[1] or "?", 0) + 1
+    out["routes"] = routes
+    return out
+
+
+def hit_map(engine, config_hash: str, *, now=None) -> dict:
+    """{node_id: {"cited_7d", "cited_30d", "cited_90d", "cited_1y", "served_90d"}} for every guideline
+    with any row — one query, for graph sizing."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT node_id, decided_at, served, cited FROM policy_graph_hits WHERE config_hash = :h
+        """), {"h": config_hash}).fetchall()
+    from .health import to_datetime
+    wins = _windows(now)
+    out: dict = {}
+    for nid, at, served, cited in rows:
+        at = to_datetime(at)
+        if at is None:
+            continue
+        d = out.setdefault(nid, {"cited_7d": 0, "cited_30d": 0, "cited_90d": 0, "cited_1y": 0, "served_90d": 0})
+        for label, since in wins:
+            if at >= since:
+                if cited:
+                    d[f"cited_{label}"] += 1
+                if served and label == "90d":
+                    d["served_90d"] += 1
+    return out
+
+
+def health_for_prompt(engine, config_hash: str, node_ids, *, now=None) -> dict:
+    """{node_id: {"7d": {...}, "30d": {...}, "90d": {...}}} for the ids in `node_ids` — the
+    figures rendered next to each guideline; empty when the guideline has no record."""
+    ids = set(node_ids or [])
+    if not ids:
+        return {}
+    m = hit_map(engine, config_hash, now=now)
+    with engine.connect() as conn:
+        outcomes = conn.execute(text("""
+            SELECT sell_timestamp, gain_loss_percentage, original_reason FROM trade_outcomes
+            WHERE config_hash = :h AND original_reason LIKE '%[cites:%' AND original_reason NOT LIKE :synced
+        """), {"h": config_hash, "synced": f"%{SYNCED_REASON}%"}).fetchall()
+    from .health import to_datetime
+    since90 = dict(_windows(now))["90d"]
+    closed_by: dict = {}
+    for r in outcomes:
+        at = to_datetime(r[0])
+        if at is None or at < since90:
+            continue
+        for nid in parse_cites(r[2]):
+            if nid in ids:
+                c = closed_by.setdefault(nid, [0, 0])
+                c[0] += 1
+                if (r[1] or 0) > 0:
+                    c[1] += 1
+    out = {}
+    for nid in ids:
+        h = m.get(nid)
+        c = closed_by.get(nid)
+        if not h and not c:
+            continue
+        entry = {}
+        for w in ("7d", "30d", "90d"):
+            entry[w] = {"cited": (h or {}).get(f"cited_{w}", 0)}
+        if c:
+            entry["90d"].update({"closed": c[0], "wins": c[1], "win_rate": (c[1] / c[0]) if c[0] else None})
+        out[nid] = entry
+    return out
+
+
+def backfill_hits_from_decisions(engine, config_hash: str, agent_type: str = "DeciderAgent") -> int:
+    """Create 'unserved' cited rows for historical decisions whose reasons carry citations but
+    have no hit row yet (decisions made before the hit log existed). Idempotent."""
+    ensure_hits_schema(engine)
+    with engine.connect() as conn:
+        have = {(r[0], r[1]) for r in conn.execute(text(
+            "SELECT run_id, node_id FROM policy_graph_hits WHERE config_hash = :h"), {"h": config_hash}).fetchall()}
+        rows = conn.execute(text("""
+            SELECT run_id, timestamp, data FROM trade_decisions
+            WHERE config_hash = :h AND CAST(data AS TEXT) LIKE '%[cites:%'
+        """), {"h": config_hash}).fetchall()
+    inserts = []
+    for run_id, ts, data in rows:
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                continue
+        if isinstance(data, dict):
+            data = data.get("decisions") or []
+        for d in data or []:
+            if not isinstance(d, dict):
+                continue
+            for nid in parse_cites(d.get("reason")):
+                if (run_id, nid) in have:
+                    continue
+                have.add((run_id, nid))
+                inserts.append({"h": config_hash, "a": agent_type, "r": run_id, "t": ts, "n": nid,
+                                "tk": str(d.get("ticker") or "").upper() or None, "ac": str(d.get("action") or "").lower() or None})
+    if inserts:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO policy_graph_hits (config_hash, agent_type, prompt_version, run_id, decided_at, node_id, route, served, cited, ticker, action)
+                VALUES (:h, :a, NULL, :r, :t, :n, 'unserved', :served, :cited, :tk, :ac)
+            """), [dict(i, served=False, cited=True) for i in inserts])
+    return len(inserts)
+
+
+__all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "record_served", "record_cited", "hit_counts",
+           "hit_map", "health_for_prompt", "backfill_hits_from_decisions", "DDL_HITS_POSTGRES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
            "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health"]

@@ -233,11 +233,29 @@
     return t === 'ticker' || t === 'concept';
   }
 
+  function hitBoost(node) {
+    const h = node && node.hits;
+    if (!h) return 0;
+    const n = Number(h.cited_90d || 0);
+    return n > 0 ? Math.min(6, 1.5 * Math.log2(n + 1)) : 0;
+  }
+
   function nodeRadius(node, nodes) {
     if (node.id === rootId() || String(node.node_type).toLowerCase() === 'root') return 14;
     if (isRef(node)) return 4;
-    if (hasChildren(node, nodes)) return 10;
-    return 7;
+    const base = hasChildren(node, nodes) ? 10 : 7;
+    return base + hitBoost(node);
+  }
+
+  function hitsLabel(node) {
+    const h = node && node.hits;
+    if (!h) return '';
+    const parts = [];
+    if (h.cited_7d) parts.push(`${h.cited_7d} in 7d`);
+    if (h.cited_30d) parts.push(`${h.cited_30d} in 30d`);
+    if (h.cited_90d) parts.push(`${h.cited_90d} in 90d`);
+    if (h.cited_1y) parts.push(`${h.cited_1y} in 1y`);
+    return parts.length ? `cited ${parts.join(' · ')}` : '';
   }
 
   function nodeLabel(node) {
@@ -939,7 +957,12 @@
       .attr('text-anchor', 'middle')
       .attr('font-size', d => isRef(d) ? 9 : 11)
       .text(d => nodeLabel(d));
-    node.append('title').text(d => `${d.title || d.id}\n${d.id}`);
+    node.append('title').text(d => `${d.title || d.id}\n${d.id}${hitsLabel(d) ? `\n${hitsLabel(d)}` : ''}`);
+    node.filter(d => Number(d.hits?.cited_30d || 0) > 0).append('text')
+      .attr('class', 'pg-hit-badge')
+      .attr('y', d => -(nodeRadius(d, allNodes) + 4))
+      .attr('text-anchor', 'middle')
+      .text(d => `${d.hits.cited_30d}`);
 
     node.on('mouseover', (_, d) => highlight(d.id))
       .on('mouseout', clearHighlight)
@@ -1444,6 +1467,16 @@
     }
     const c = detail.citations && !detail.citations.error ? detail.citations : null;
     let cites = '';
+    const hw = detail.hits && !detail.hits.error ? detail.hits : null;
+    if (hw && ['7d', '30d', '90d', '1y'].some(w => (hw[w]?.cited || hw[w]?.served))) {
+      const cells = ['7d', '30d', '90d', '1y'].map(w => {
+        const x = hw[w] || {};
+        const wr = x.closed ? ` · ${pct(x.win_rate)} (${x.wins}W/${x.closed - x.wins}L)` : '';
+        return `<td><strong>${esc(x.cited || 0)}</strong><span class="pg-muted"> / ${esc(x.served || 0)}</span>${esc(wr)}</td>`;
+      }).join('');
+      const routes = Object.entries(hw.routes || {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(' · ');
+      cites += `<table class="pg-hits"><thead><tr><th>hits</th><th>7d</th><th>30d</th><th>90d</th><th>1y</th></tr></thead><tbody><tr><td class="pg-muted">cited / served</td>${cells}</tr></tbody><caption>${esc(routes ? `reached the prompt via: ${routes}` : 'served = shown to the Decider that cycle; cited = named in a decision')}</caption></table>`;
+    }
     if (c && (c.decisions || c.closed)) {
       const acts = Object.entries(c.by_action || {}).map(([a, n]) => `${n} ${a}`).join(', ');
       const wr = c.win_rate !== null && c.win_rate !== undefined ? pct(c.win_rate) : '—';

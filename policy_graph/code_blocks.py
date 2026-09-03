@@ -151,10 +151,13 @@ _RECENCY_PROVENANCE = (
 )
 _GUIDELINE_CITATIONS = (
     "\n\nGUIDELINE CITATIONS (policy graph — record which guidelines drove each decision):"
-    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids taken from the"
-    " GUIDELINE INDEX below — the rule you applied, the lesson you weighed, the code policy you followed."
-    " Cite ids exactly as printed; never invent one. The ids are stored with the reason so every guideline's"
-    " realized win rate can be measured on the Policy Graph tab. Omit the key when no listed guideline applies."
+    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids — the rule you"
+    " applied, the lesson you weighed, the code policy you followed. Ids appear as ⟨id⟩ after each"
+    " guideline in your system prompt (with its record: how often it was cited in the last 7/30/90 days"
+    " and the win rate of the trades it drove — weigh a rule by that record, not by its wording) and in"
+    " the GUIDELINE INDEX below when present. Cite ids exactly as printed; never invent one. The ids are"
+    " stored with the reason so every guideline's realized win rate can be measured on the Policy Graph"
+    " tab. Omit the key when no listed guideline applies."
 )
 
 # ----------------------------------------------------------------------------- contrarian_screener.py
