@@ -495,67 +495,8 @@
     }
     const badge = qs('#pgActiveBadge');
     if (badge) badge.hidden = !(state.current !== null && Number(state.current) === current);
-    syncSlider(list, index);
   }
 
-  // ------------------------------------------------------------------ evolution slider
-  function syncSlider(list, index) {
-    const slider = qs('#pgSlider');
-    const label = qs('#pgSliderLabel');
-    if (!slider) return;
-    slider.max = String(Math.max(0, list.length - 1));
-    slider.disabled = list.length < 2;
-    if (index >= 0 && String(slider.value) !== String(index)) slider.value = String(index);
-    if (label) {
-      const v = index >= 0 ? versionEntry(list[index]) : null;
-      label.textContent = v ? `v${v.version} · ${actorLabel(v.actor_kind, v.created_by)} · ${fmtShortDate(v.created_at)}${index + 1 < list.length ? '' : ' · latest'}` : '';
-    }
-    const play = qs('#pgPlay');
-    if (play) play.disabled = list.length < 2;
-  }
-
-  let sliderTimer = null;
-  function onSliderInput() {
-    const slider = qs('#pgSlider');
-    const list = versionNumbers();
-    if (!slider || !list.length) return;
-    const index = Math.max(0, Math.min(list.length - 1, Number(slider.value)));
-    const v = versionEntry(list[index]);
-    const label = qs('#pgSliderLabel');
-    if (label && v) label.textContent = `v${v.version} · ${actorLabel(v.actor_kind, v.created_by)} · ${fmtShortDate(v.created_at)}`;
-    window.clearTimeout(sliderTimer);
-    sliderTimer = window.setTimeout(() => {
-      if (Number(list[index]) === Number(state.version)) return;
-      const select = qs('#pgVersion');
-      if (!select) return;
-      select.value = String(list[index]);
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    }, 180);
-  }
-
-  let playTimer = null;
-  function stopPlay() {
-    if (playTimer) { window.clearTimeout(playTimer); playTimer = null; }
-    const play = qs('#pgPlay');
-    if (play) { play.classList.remove('is-playing'); play.textContent = '▶ Play evolution'; }
-  }
-  function togglePlay() {
-    if (playTimer) { stopPlay(); return; }
-    const list = versionNumbers();
-    if (list.length < 2) return;
-    const play = qs('#pgPlay');
-    if (play) { play.classList.add('is-playing'); play.textContent = '⏸ Pause'; }
-    let index = list.indexOf(Number(state.version));
-    if (index < 0 || index >= list.length - 1) index = -1;       // at the end (or unknown): start over from v0
-    const step = async () => {
-      index += 1;
-      if (index >= list.length) { stopPlay(); return; }
-      await loadGraph(state.agent, list[index], { pulse: true });
-      if (!playTimer) return;
-      playTimer = window.setTimeout(step, 2200);
-    };
-    playTimer = window.setTimeout(step, 50);
-  }
 
   // ------------------------------------------------------------------ timeline strip (§11.4)
   function reviewGlyphs(v) {
@@ -2142,9 +2083,6 @@
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
     qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
-    qs('#pgSlider')?.addEventListener('input', onSliderInput);
-    qs('#pgPlay')?.addEventListener('click', togglePlay);
-    qs('#pgVersion')?.addEventListener('change', () => { if (playTimer && !document.activeElement?.closest?.('#pgPlay')) { /* user moved off-play; keep playing */ } });
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';

@@ -14,6 +14,21 @@ const selectedVersions = {
 // Notify any other open dashboard page (e.g. the Feedback tab) that a new
 // prompt version was activated, so it can refresh its version display
 // instantly instead of waiting for its poll interval.
+// Listen for the same event from other pages (the Policy Graph tab applies proposals): a
+// candidate drafted against an older version will be refused at apply, so say so up front.
+try {
+  const _promptChannel = new BroadcastChannel('dai-prompts');
+  _promptChannel.onmessage = (event) => {
+    const data = event?.data || {};
+    if (data.type !== 'prompt-applied' || !data.agent) return;
+    const label = (typeof AGENT_LABELS !== 'undefined' && AGENT_LABELS[data.agent]) || data.agent;
+    setPromptLabMessage(`${label} v${data.version} was activated from the Policy Graph tab. Candidates drafted against an older version will be refused when applied — run the generation again to build on the current policy.`);
+    document.querySelectorAll('.prompt-lab-candidate-tab, [data-candidate-agent]').forEach((el) => el.classList.add('stale'));
+  };
+} catch (_) {
+  // BroadcastChannel unsupported — the server-side base_version check still protects the apply.
+}
+
 function broadcastPromptApplied(agentType, version) {
   try {
     const channel = new BroadcastChannel('dai-prompts');
@@ -1026,6 +1041,9 @@ function setupBatchPromptLab() {
             // Sections to take from the candidate; the server keeps the
             // current version's text for everything else.
             approved_sections: approved,
+            // The version this candidate was drafted against — the server refuses the apply
+            // when the active version moved meanwhile (e.g. a Policy Graph proposal shipped).
+            base_version: candidate.current_version,
           };
           const data = await apiJSON('/api/prompt-evolution/apply', {
             method: 'POST',

@@ -119,8 +119,8 @@ every historical version, so the graph remains a byte-exact mirror of the databa
 6. **Weekly versions are immutable.** The Thursday path computes the new memory text first and
    writes it into the new `prompt_versions` row together with the reminder section, then
    activates it (`feedback_agent._next_memory_text`). No row is rewritten after creation, so a
-   version's guideline files never move to `_prior/` again and the slider shows the weekly
-   versions as their own steps.
+   version's guideline files never move to `_prior/` again; weekly versions are their own chips
+   on the timeline.
 7. **Citations and per-guideline health.** Decider v22 relaxed the output contract: each decision
    may carry `"cited": [guideline ids]`. The trader appends a `GUIDELINE INDEX (id — title)` of the
    active version's citable guidelines (rules, lessons, log entries, sections, and the code-owned
@@ -130,12 +130,6 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    `trade_decisions`, `holdings` and `trade_outcomes.original_reason`, so the Trades tab shows the
    cited guidelines as an expandable chip row linking to the graph, and a guideline's panel shows
    "Cited by N decisions · M closed trades · win rate · P&L" (`citation_health`).
-
-## Evolution slider
-
-The header carries a slider over every version (v0 … latest) and a **Play evolution** button
-that steps through them; each forward step pulses the guidelines that version added (green)
-or changed (amber) and the "keep changes highlighted" toggle leaves the rings on.
 
 ## Baseline for fresh checkouts
 

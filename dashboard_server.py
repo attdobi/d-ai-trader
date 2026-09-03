@@ -4599,6 +4599,28 @@ def apply_prompt_evolution_candidate():
         if agent_type == "feedback_analyzer":
             agent_type = "FeedbackAgent"
 
+        # Keep the Prompt Lab and the Policy Graph tab in sync: a candidate is drafted against one
+        # active version; if a policy-graph proposal (or another apply) activated a newer version
+        # meanwhile, shipping this candidate would silently overwrite that change in every
+        # approved section. Refuse and ask for a fresh draft.
+        base_version = data.get('base_version')
+        if base_version is not None and str(base_version).strip() != '':
+            try:
+                base_version = int(base_version)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'base_version must be an integer'}), 400
+            with engine.connect() as conn:
+                active_row = conn.execute(text("""
+                    SELECT version, created_by, description FROM prompt_versions
+                    WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
+                    ORDER BY version DESC LIMIT 1
+                """), {'agent_type': agent_type, 'config_hash': config_hash}).fetchone()
+            if active_row is not None and int(active_row.version) != base_version:
+                who = 'a policy graph proposal' if active_row.created_by == 'policy_graph' else f"'{active_row.created_by}'"
+                return jsonify({'error': (f"the active {agent_type} version moved to v{active_row.version} ({who}) after this "
+                                          f"candidate was drafted against v{base_version} — regenerate the candidate so "
+                                          f"it builds on the current policy")}), 409
+
         # Per-section approval: take only the approved sections from the
         # candidate and keep the current active version's text for the rest.
         # Omitted/None approved_sections = ship the full candidate (legacy).

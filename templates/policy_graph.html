@@ -41,11 +41,6 @@
       </div>
     </div>
     <p id="pgStatus" class="status-line pg-status" aria-live="polite"></p>
-    <div class="pg-slider-row">
-      <button type="button" id="pgPlay" class="pe-btn secondary pg-btn-small" title="Step through every policy version, highlighting what each one changed">▶ Play evolution</button>
-      <input type="range" id="pgSlider" class="pg-slider" min="0" max="0" value="0" step="1" aria-label="Policy version slider" />
-      <span id="pgSliderLabel" class="pg-slider-label"></span>
-    </div>
     <div id="pgTimeline" class="pg-timeline" aria-label="Policy versions over time"></div>
     <div id="pgVersionMeta" class="pg-version-summary"></div>
   </section>
@@ -162,13 +157,6 @@
 .pg-status.is-error { color: #ff8a9a; }
 .pg-status .pe-loading { padding: 0; }
 .pg-rebuild-slot:empty { display: none; }
-
-/* ----- evolution slider ----- */
-.pg-slider-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.05); }
-.pg-slider { flex: 1 1 200px; accent-color: var(--accent); cursor: pointer; }
-.pg-slider:disabled { opacity: .4; cursor: default; }
-.pg-slider-label { font-family: var(--font-mono); font-size: 12px; color: #d5dcf0; min-width: 160px; white-space: nowrap; }
-#pgPlay.is-playing { background: rgba(66,201,255,.18); }
 
 /* ----- timeline strip ----- */
 .pg-timeline { display: flex; align-items: flex-end; gap: 6px; margin-top: 14px; padding: 10px 6px 12px; overflow-x: auto; position: relative; border-top: 1px solid rgba(255,255,255,.05); }
