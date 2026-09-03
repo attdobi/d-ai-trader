@@ -19,6 +19,18 @@ An **episode** is one trading cycle. A **policy update** is the feedback agent r
 
 The policy is also kept as a **knowledge graph**: every prompt version is decomposed into one Markdown guideline per file (`agents/<agent>/policy-graph/<config>/v<N>/*.md` + `edges.json`), in the RUSH layout, and compiles back to the stored prompt byte-for-byte. The **Policy Graph** tab renders it as a force graph — rules, lessons, identity, code-owned blocks and memory rows as nodes; hierarchy, links, overlaps and "code constrains rule" as edges — with a version timeline so you can watch the policy evolve. The loop edits the graph directly: it proposes patches of at most three guideline files, the critic judges each file's diff, you approve per guideline, and the Decider cites the guideline ids that drove each decision, so every rule gets its own realized win rate. At decision time the Decider's prompt is assembled *from* the graph: a deterministic query over the cycle's regime, holdings, watchlist and quarantine selects and orders the guidelines, each tagged with its id and its record (hits in the last 7/30/90 days, win rate), so rules are weighed by evidence rather than wording. See [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md).
 
+**Decision paths.** The bottom of the Policy Graph tab shows how the graph is actually used. A
+decision's path is *context → route that pulled a guideline into the prompt → guideline the
+Decider cited → action → outcome*, and every cycle logs it. **Path frequency** draws the paths as a
+three-column flow — routes (regime, holdings, watchlist, news, entities, trends, quarantine,
+recency, tag) on the left, the most-cited guidelines in the middle showing cited over served,
+buy/sell/hold on the right, link width by count — and lists the two gaps that matter: guidelines
+cited but never served (the query missed them) and guidelines served but never cited (dead weight
+in the prompt). **Path quality** is a per-guideline table over the closed trades that cited it:
+win rate, P&L, and the guidelines most often co-cited on its winners versus its losers, which is
+the credit-assignment view of the policy. Both come with 30-, 90- and 365-day windows and start
+empty until cited decisions accumulate.
+
 ```
         policy = prompt (soul + strategy directives + memory)
                               │
