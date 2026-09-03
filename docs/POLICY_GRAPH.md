@@ -116,7 +116,35 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    automatically as long as the guidelines it touches are unchanged; otherwise it reports a
    conflict and asks for a fresh draft.
 
-Still open: the weekly Thursday path (step 5 of the original plan — append the reminder node and
-write memory into the new row before activation so versions become immutable) and citations /
-node health (step 6 — `cited` guideline ids on decisions, which needs the Decider's "No extra
-keys" contract relaxed). Both are the user's call.
+6. **Weekly versions are immutable.** The Thursday path computes the new memory text first and
+   writes it into the new `prompt_versions` row together with the reminder section, then
+   activates it (`feedback_agent._next_memory_text`). No row is rewritten after creation, so a
+   version's guideline files never move to `_prior/` again and the slider shows the weekly
+   versions as their own steps.
+7. **Citations and per-guideline health.** Decider v22 relaxed the output contract: each decision
+   may carry `"cited": [guideline ids]`. The trader appends a `GUIDELINE INDEX (id — title)` of the
+   active version's citable guidelines (rules, lessons, log entries, sections, and the code-owned
+   blocks that fire) to every prompt (`decider_agent._guideline_index_text`, code-owned block
+   `DA.code.guideline_citations`) and folds the returned ids into the reason as a trailing
+   ` [cites: DA.…, DA.…]` (`policy_graph/citations.py`). The suffix travels with the reason into
+   `trade_decisions`, `holdings` and `trade_outcomes.original_reason`, so the Trades tab shows the
+   cited guidelines as an expandable chip row linking to the graph, and a guideline's panel shows
+   "Cited by N decisions · M closed trades · win rate · P&L" (`citation_health`).
+
+## Evolution slider
+
+The header carries a slider over every version (v0 … latest) and a **Play evolution** button
+that steps through them; each forward step pulses the guidelines that version added (green)
+or changed (amber) and the "keep changes highlighted" toggle leaves the rings on.
+
+## Baseline for fresh checkouts
+
+`agents/<dir>/policy-graph/baseline/v0/` is committed: the v0 policy of every agent decomposed
+from `initialize_prompts.DEFAULT_PROMPTS` (templates, directives, `SOUL.default.md`,
+`MEMORY.default.md`) under the pseudo config hash `baseline`, with volatile manifest keys
+scrubbed so it is byte-stable. Regenerate it after editing the defaults with
+`./dai/bin/python -m policy_graph.backfill --baseline`; `tests/test_policy_graph_baseline.py`
+fails when it drifts. `init_database.py` also writes the same v0 under the machine's own config
+hash, so a fresh checkout has its graph on disk from the first run. Personal evolution (v1…)
+under a machine's config hash is not needed to start; this repository happens to carry the
+author's `9ea09b9as` history as an example.

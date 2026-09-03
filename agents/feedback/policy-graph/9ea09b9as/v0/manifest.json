@@ -12,9 +12,9 @@
  "actor_kind": "seed",
  "description": "feedback_analyzer — concise, rule-driven EOD reviewer (~300 words) producing two deterministic snippet lines.",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:25-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:25:46-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36375,
  "source_sha256": {
   "system_prompt": "bdc4eeedb30aafdeaf0ca77b2cef3364784dc85cf7023247dc5276d40232fece",
   "user_prompt_template": "d661219ef430e7187063968fa7e1e52f67c9dafb69ac11889220c80100e3402c",
@@ -80,9 +80,9 @@
  "node_count": 17,
  "edge_count": 24,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "FA.code.system_base": true,
    "FA.code.base_instructions": true,

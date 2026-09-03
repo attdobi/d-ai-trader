@@ -12,9 +12,9 @@
  "actor_kind": "human",
  "description": "v20 Decider (auto) · feedback#1251 · success 49.1% · 55 trades · 2026-09-01 20:28 UTC",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:24-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:27:35-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36524,
  "source_sha256": {
   "system_prompt": "3aeb04b76afc5ebdd282254e3cb1ad5323c313d89c853a7c4927c3ca040bb188",
   "user_prompt_template": "2525d2c1b55989f314ee3843455714de4fdcbb0862a313958237abdd67f1b441",
@@ -84,12 +84,12 @@
    "DA.memory.log.2026_09_01_technical_pullback"
   ]
  },
- "node_count": 66,
- "edge_count": 103,
+ "node_count": 67,
+ "edge_count": 105,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "DA.code.crowd_fade": true,
    "DA.code.cash_playbook": true,
@@ -105,6 +105,7 @@
    "DA.code.deploy_policy": true,
    "DA.code.confirmation_policy": true,
    "DA.code.recency_provenance": true,
+   "DA.code.guideline_citations": true,
    "DA.code.json_fallback": false
   }
  },

@@ -104,6 +104,14 @@
   "version": "DeciderAgent.9ea09b9as.v21"
  },
  {
+  "source_node_id": "DA.code.guideline_citations",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v21"
+ },
+ {
   "source_node_id": "DA.code.index_regime",
   "target_node_id": "DA.directives.strategy.regime_gate",
   "edge_type": "constrains",
@@ -217,14 +225,6 @@
  },
  {
   "source_node_id": "DA.directives.strategy.correlation",
-  "target_node_id": "DA.ltm.22",
-  "edge_type": "overlaps",
-  "confidence": 0.812,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.directives.strategy.correlation",
   "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -265,26 +265,10 @@
  },
  {
   "source_node_id": "DA.directives.strategy.priced_kill",
-  "target_node_id": "DA.ltm.20",
-  "edge_type": "overlaps",
-  "confidence": 0.545,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.directives.strategy.priced_kill",
   "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.directives.strategy.re_entry_quarantine",
-  "target_node_id": "DA.ltm.21",
-  "edge_type": "overlaps",
-  "confidence": 0.404,
-  "provenance": "derived:similarity",
   "version": "DeciderAgent.9ea09b9as.v21"
  },
  {
@@ -305,14 +289,6 @@
  },
  {
   "source_node_id": "DA.directives.strategy.regime_gate",
-  "target_node_id": "DA.ltm.18",
-  "edge_type": "overlaps",
-  "confidence": 0.538,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.directives.strategy.regime_gate",
   "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -326,15 +302,6 @@
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.1",
-  "target_node_id": "DA.ltm.19",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#gap-chase"
  },
  {
   "source_node_id": "DA.ltm.1",
@@ -436,163 +403,7 @@
   "version": "DeciderAgent.9ea09b9as.v21"
  },
  {
-  "source_node_id": "DA.ltm.18",
-  "target_node_id": "DA.ltm.23",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#regime"
- },
- {
-  "source_node_id": "DA.ltm.18",
-  "target_node_id": "DA.memory.lessons.regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#regime"
- },
- {
-  "source_node_id": "DA.ltm.18",
-  "target_node_id": "DA.memory.log.2026_09_02_regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#regime"
- },
- {
-  "source_node_id": "DA.ltm.18",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.19",
-  "target_node_id": "DA.ltm.7",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#gap-chase"
- },
- {
-  "source_node_id": "DA.ltm.19",
-  "target_node_id": "DA.memory.lessons.gap_chase",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#gap-chase"
- },
- {
-  "source_node_id": "DA.ltm.19",
-  "target_node_id": "DA.memory.log.2026_06_29_irdm",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#gap-chase"
- },
- {
-  "source_node_id": "DA.ltm.19",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
   "source_node_id": "DA.ltm.2",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.20",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.21",
-  "target_node_id": "DA.ltm.4",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#churn"
- },
- {
-  "source_node_id": "DA.ltm.21",
-  "target_node_id": "DA.ltm.8",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#churn"
- },
- {
-  "source_node_id": "DA.ltm.21",
-  "target_node_id": "DA.memory.log.2026_09_02_regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#reentry"
- },
- {
-  "source_node_id": "DA.ltm.21",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.22",
-  "target_node_id": "DA.ltm",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.ltm.23",
-  "target_node_id": "DA.ltm.6",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#deploy"
- },
- {
-  "source_node_id": "DA.ltm.23",
-  "target_node_id": "DA.memory.lessons.regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#regime"
- },
- {
-  "source_node_id": "DA.ltm.23",
-  "target_node_id": "DA.memory.log.2026_09_02_regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.9ea09b9as.v21",
-  "via": "#regime"
- },
- {
-  "source_node_id": "DA.ltm.23",
   "target_node_id": "DA.ltm",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -754,14 +565,6 @@
  },
  {
   "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.ltm.19",
-  "edge_type": "overlaps",
-  "confidence": 0.8,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
   "target_node_id": "DA.memory.log.2026_09_02_regime",
   "edge_type": "related_to",
   "confidence": 1.0,
@@ -821,26 +624,10 @@
  },
  {
   "source_node_id": "DA.memory.lessons.priced_kill",
-  "target_node_id": "DA.ltm.20",
-  "edge_type": "overlaps",
-  "confidence": 0.366,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.memory.lessons.priced_kill",
   "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.memory.lessons.reentry_quarantine",
-  "target_node_id": "DA.ltm.21",
-  "edge_type": "overlaps",
-  "confidence": 0.657,
-  "provenance": "derived:similarity",
   "version": "DeciderAgent.9ea09b9as.v21"
  },
  {
@@ -856,14 +643,6 @@
   "target_node_id": "DA.code.index_regime",
   "edge_type": "overlaps",
   "confidence": 0.513,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.9ea09b9as.v21"
- },
- {
-  "source_node_id": "DA.memory.lessons.regime",
-  "target_node_id": "DA.ltm.18",
-  "edge_type": "overlaps",
-  "confidence": 0.618,
   "provenance": "derived:similarity",
   "version": "DeciderAgent.9ea09b9as.v21"
  },
@@ -1329,6 +1108,15 @@
  {
   "source_node_id": "DA.template.user",
   "target_node_id": "DA.code.deploy_policy",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v21",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.guideline_citations",
   "edge_type": "includes",
   "confidence": 1.0,
   "provenance": "derived:assembly",

@@ -12,9 +12,9 @@
  "actor_kind": "claude_code",
  "description": "v17 Summarizer (claude_code 2026-09-02) · regime-first insights, crowding/extension + event-risk flags, compact card (Decider reads only headlines+insights)",
  "is_active": true,
- "materialized_at": "2026-09-02T17:19:25-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:25:20-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36344,
  "source_sha256": {
   "system_prompt": "02b9426b755208d88b9e30c824d99b57b967e6f1b1bedab60f381308c438be92",
   "user_prompt_template": "156be55624a3475624240cf5305d9a6f48c8f852b24e5194076858a634198d02",
@@ -84,9 +84,9 @@
  "node_count": 27,
  "edge_count": 35,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "SA.code.feedback_suffix": true
   }

@@ -1,0 +1,109 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "baseline",
+ "version": 0,
+ "root_id": "SA.root",
+ "prompt_version_id": 0,
+ "created_at": "2026-01-01T00:00:00",
+ "created_by": "init_database",
+ "actor_kind": "seed",
+ "description": "v0 baseline SummarizerAgent — committed with the repository",
+ "is_active": true,
+ "materialized_by": "baseline",
+ "source_sha256": {
+  "system_prompt": "2e4c0cec3f6bee2f3ed137e1ea3b929f8fb3a7c0d0ffe3859e733a09a4d3907d",
+  "user_prompt_template": "424185356d70cdaff5016bfacae6dc858a64efeba63342558473148ca57fd076",
+  "strategy_directives": "eeedb0972d6851fd13a2ea5bf9317682e8706dbf6e6367eaecc58521c1bc535c",
+  "soul": "e8a34046eeaf7561ef798eb5c2f3f95407c0810c82fb06eb568fcb0f9bdd3d9d",
+  "memory": "bec457e20e861ce49c7816229da5bc4ebb7d14cde6478a09ba52d9251d3faec7"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.guidelines"
+  ],
+  "soul": [
+   "SA.soul",
+   "SA.soul.mission",
+   "SA.soul.principles",
+   "SA.soul.identity",
+   "SA.soul.core_philosophy",
+   "SA.soul.extraction_style"
+  ],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.extraction_patterns",
+   "SA.memory.media_manipulation",
+   "SA.memory.log",
+   "SA.memory.log.2026_09_02_pipeline",
+   "SA.memory.log.2026_09_02_edge"
+  ]
+ },
+ "node_count": 24,
+ "edge_count": 31,
+ "code": {
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "baseline",
+  "fires": {
+   "SA.code.feedback_suffix": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": null,
+ "delta_vs_prev": {
+  "added": 17,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": null
+ },
+ "kind": "seed",
+ "history": []
+}

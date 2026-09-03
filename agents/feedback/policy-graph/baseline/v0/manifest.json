@@ -1,0 +1,104 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "baseline",
+ "version": 0,
+ "root_id": "FA.root",
+ "prompt_version_id": 0,
+ "created_at": "2026-01-01T00:00:00",
+ "created_by": "init_database",
+ "actor_kind": "seed",
+ "description": "v0 baseline FeedbackAgent — committed with the repository",
+ "is_active": true,
+ "materialized_by": "baseline",
+ "source_sha256": {
+  "system_prompt": "bdc4eeedb30aafdeaf0ca77b2cef3364784dc85cf7023247dc5276d40232fece",
+  "user_prompt_template": "d661219ef430e7187063968fa7e1e52f67c9dafb69ac11889220c80100e3402c",
+  "strategy_directives": "25adfa26cb3788baa7992e0cd0c2c7a0ef79a32b4688c8e7d3884bee8161c495",
+  "soul": "360f9213cc8ef942a2ae0e87dd92f8c292270014b5a081fd7b085b3859e41c1b",
+  "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": true,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style"
+  ],
+  "memory": [
+   "FA.memory"
+  ]
+ },
+ "node_count": 16,
+ "edge_count": 21,
+ "code": {
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "baseline",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": null,
+ "delta_vs_prev": {
+  "added": 10,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": null
+ },
+ "kind": "seed",
+ "history": []
+}

@@ -12,9 +12,9 @@
  "actor_kind": "weekly",
  "description": "Strategy updated from feedback (ID: 1247)",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:23-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:27:34-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36524,
  "source_sha256": {
   "system_prompt": "0a030fcd486540ea7dcf469d0109a2c5ac92e12e0819c7c08cddb5db31d708a4",
   "user_prompt_template": "c1ab311afcae95654598dae5bd09ee600db076792b64ca89a5dd8edf7b84b769",
@@ -86,12 +86,12 @@
    "DA.memory.log.2026_08_13"
   ]
  },
- "node_count": 55,
- "edge_count": 87,
+ "node_count": 56,
+ "edge_count": 89,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "DA.code.crowd_fade": true,
    "DA.code.cash_playbook": true,
@@ -107,6 +107,7 @@
    "DA.code.deploy_policy": true,
    "DA.code.confirmation_policy": true,
    "DA.code.recency_provenance": true,
+   "DA.code.guideline_citations": true,
    "DA.code.json_fallback": false
   }
  },

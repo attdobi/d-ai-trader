@@ -495,6 +495,66 @@
     }
     const badge = qs('#pgActiveBadge');
     if (badge) badge.hidden = !(state.current !== null && Number(state.current) === current);
+    syncSlider(list, index);
+  }
+
+  // ------------------------------------------------------------------ evolution slider
+  function syncSlider(list, index) {
+    const slider = qs('#pgSlider');
+    const label = qs('#pgSliderLabel');
+    if (!slider) return;
+    slider.max = String(Math.max(0, list.length - 1));
+    slider.disabled = list.length < 2;
+    if (index >= 0 && String(slider.value) !== String(index)) slider.value = String(index);
+    if (label) {
+      const v = index >= 0 ? versionEntry(list[index]) : null;
+      label.textContent = v ? `v${v.version} · ${actorLabel(v.actor_kind, v.created_by)} · ${fmtShortDate(v.created_at)}${index + 1 < list.length ? '' : ' · latest'}` : '';
+    }
+    const play = qs('#pgPlay');
+    if (play) play.disabled = list.length < 2;
+  }
+
+  let sliderTimer = null;
+  function onSliderInput() {
+    const slider = qs('#pgSlider');
+    const list = versionNumbers();
+    if (!slider || !list.length) return;
+    const index = Math.max(0, Math.min(list.length - 1, Number(slider.value)));
+    const v = versionEntry(list[index]);
+    const label = qs('#pgSliderLabel');
+    if (label && v) label.textContent = `v${v.version} · ${actorLabel(v.actor_kind, v.created_by)} · ${fmtShortDate(v.created_at)}`;
+    window.clearTimeout(sliderTimer);
+    sliderTimer = window.setTimeout(() => {
+      if (Number(list[index]) === Number(state.version)) return;
+      const select = qs('#pgVersion');
+      if (!select) return;
+      select.value = String(list[index]);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 180);
+  }
+
+  let playTimer = null;
+  function stopPlay() {
+    if (playTimer) { window.clearTimeout(playTimer); playTimer = null; }
+    const play = qs('#pgPlay');
+    if (play) { play.classList.remove('is-playing'); play.textContent = '▶ Play evolution'; }
+  }
+  function togglePlay() {
+    if (playTimer) { stopPlay(); return; }
+    const list = versionNumbers();
+    if (list.length < 2) return;
+    const play = qs('#pgPlay');
+    if (play) { play.classList.add('is-playing'); play.textContent = '⏸ Pause'; }
+    let index = list.indexOf(Number(state.version));
+    if (index < 0 || index >= list.length - 1) index = -1;       // at the end (or unknown): start over from v0
+    const step = async () => {
+      index += 1;
+      if (index >= list.length) { stopPlay(); return; }
+      await loadGraph(state.agent, list[index], { pulse: true });
+      if (!playTimer) return;
+      playTimer = window.setTimeout(step, 2200);
+    };
+    playTimer = window.setTimeout(step, 50);
   }
 
   // ------------------------------------------------------------------ timeline strip (§11.4)
@@ -1441,8 +1501,18 @@
     } else if (payload.agent_type !== 'DeciderAgent') {
       table = '<p class="pg-muted">No direct trade attribution for this agent.</p>';
     }
-    const note = detail.attribution_note ? `<p class="pg-muted">${esc(detail.attribution_note)}</p>` : '';
-    box.innerHTML = `<h4>History &amp; health</h4>${bits.length ? `<div>${esc(bits.join(' · '))}</div>` : '<div class="pg-muted">No history recorded for this guideline.</div>'}${table}${note}`;
+    const c = detail.citations && !detail.citations.error ? detail.citations : null;
+    let cites = '';
+    if (c && (c.decisions || c.closed)) {
+      const acts = Object.entries(c.by_action || {}).map(([a, n]) => `${n} ${a}`).join(', ');
+      const wr = c.win_rate !== null && c.win_rate !== undefined ? pct(c.win_rate) : '—';
+      const pnl = Number.isFinite(Number(c.pnl)) ? `${Number(c.pnl) >= 0 ? '+' : '−'}$${Math.abs(Number(c.pnl)).toFixed(0)}` : '—';
+      const avg = c.avg_gain_pct !== null && c.avg_gain_pct !== undefined ? `${Number(c.avg_gain_pct) >= 0 ? '+' : ''}${Number(c.avg_gain_pct).toFixed(2)}%` : '—';
+      const recent = (c.recent_closed || []).slice(0, 5).map(r => `${r.ticker} ${Number(r.gain_pct) >= 0 ? '+' : ''}${Number(r.gain_pct).toFixed(1)}%`).join(' · ');
+      cites = `<div class="pg-cites"><strong>Cited by ${plural(c.decisions, 'decision')}</strong>${acts ? ` (${esc(acts)})` : ''} · ${plural(c.closed, 'closed trade')}${c.closed ? ` · win rate ${esc(wr)} (${c.wins}W/${c.losses}L) · avg ${esc(avg)} · P&amp;L ${esc(pnl)}` : ''}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
+    }
+    const note = !cites && detail.attribution_note ? `<p class="pg-muted">${esc(detail.attribution_note)}</p>` : '';
+    box.innerHTML = `<h4>History &amp; health</h4>${bits.length ? `<div>${esc(bits.join(' · '))}</div>` : '<div class="pg-muted">No history recorded for this guideline.</div>'}${cites}${table}${note}`;
   }
 
   // ------------------------------------------------------------------ markdown (★ extended)
@@ -2072,6 +2142,9 @@
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
     qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
+    qs('#pgSlider')?.addEventListener('input', onSliderInput);
+    qs('#pgPlay')?.addEventListener('click', togglePlay);
+    qs('#pgVersion')?.addEventListener('change', () => { if (playTimer && !document.activeElement?.closest?.('#pgPlay')) { /* user moved off-play; keep playing */ } });
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';

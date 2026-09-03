@@ -1116,6 +1116,22 @@ def initialize_database() -> None:
         # duplicates across ALL configs so only one version stays active.
         deactivate_superseded_v0_prompts(conn, stats)
 
+    # 7d) Policy graph: write the guideline files of this config's v0 so a fresh checkout has
+    # its graph on disk from the first run (the committed baseline lives under
+    # agents/*/policy-graph/baseline/v0; this is the same decomposition under the config hash).
+    try:
+        from pathlib import Path as _Path
+        import config as _config
+        from policy_graph import service as _pg_service
+        from policy_graph.model import AGENT_PREFIX as _PG_AGENTS
+        for _agent in _PG_AGENTS:
+            _res = _pg_service.ensure_materialized(
+                engine, current_config_hash, _agent, 0, repo_root=_Path(__file__).resolve().parent,
+                is_margin_account=bool(getattr(_config, "IS_MARGIN_ACCOUNT", False)), materialized_by="init_database")
+            print(f"   🕸️  Policy graph {_agent} v0: {_res.get('action')}")
+    except Exception as _pg_exc:
+        print(f"   ⚠️  Policy graph v0 not written (the tab writes it on first view): {_pg_exc}")
+
     print("\n📋 Database initialization summary")
     print("---------------------------------")
     print(f"Tables created:        {stats.created_tables}")

@@ -233,6 +233,16 @@ agents/
     └── SOUL.md      # Review philosophy, feedback style
 ```
 
+### Policy graph (guidelines as a knowledge graph)
+
+Every prompt version is also a folder of Markdown guideline files plus `edges.json`, RUSH-style,
+under `agents/<agent>/policy-graph/<config_hash>/v<N>/`, and the dashboard's **Policy Graph** tab
+renders it as a force graph with a version slider, per-guideline history, citations and health.
+The repository ships the baseline in `agents/<agent>/policy-graph/baseline/v0/` — the v0 policy
+every fresh checkout starts from — and `init_database.py` writes your own config's v0 next to it.
+Versions v1… are the evolution on your machine (weekly feedback, Prompt Lab, and proposals the
+loop drafts as guideline-file patches for you to approve). See `docs/POLICY_GRAPH.md`.
+
 ### How It Works
 
 - **Soul** defines *who the agent is* — personality, philosophy, decision-making style. Loaded from `agents/<name>/SOUL.md` as defaults, stored in DB, editable in Prompt Lab.

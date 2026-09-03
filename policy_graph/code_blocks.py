@@ -149,6 +149,13 @@ _RECENCY_PROVENANCE = (
     " synced/inherited losers' rules apply ONLY to positions actually labeled 'Schwab synced"
     " position', never to your own recent buys."
 )
+_GUIDELINE_CITATIONS = (
+    "\n\nGUIDELINE CITATIONS (policy graph — record which guidelines drove each decision):"
+    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids taken from the"
+    " GUIDELINE INDEX below — the rule you applied, the lesson you weighed, the code policy you followed."
+    " Cite ids exactly as printed; never invent one. The ids are stored with the reason so every guideline's"
+    " realized win rate can be measured on the Policy Graph tab. Omit the key when no listed guideline applies."
+)
 
 # ----------------------------------------------------------------------------- contrarian_screener.py
 # format_index_regime: the constant tail of the returned f-string (after the per-cycle INDEX REGIME line)
@@ -262,6 +269,8 @@ CODE_BLOCKS: list = [
               ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill"]),
     CodeBlock("DA.code.recency_provenance", "RECENCY & PROVENANCE", _RECENCY_PROVENANCE,
               "decider_agent.py", f"{_DA_ASK}:prompt+=#7", None, "user_prompt_tail", []),
+    CodeBlock("DA.code.guideline_citations", "GUIDELINE CITATIONS", _GUIDELINE_CITATIONS,
+              "decider_agent.py", f"{_DA_ASK}:prompt+=#8", None, "user_prompt_tail", []),
     CodeBlock("DA.code.json_fallback", "JSON output fallback", _JSON_FALLBACK,
               "decider_agent.py", f"{_DA_ASK}:user_prompt_template+=",
               "'JSON' not in user_prompt_template.upper()", "user_template_tail", []),

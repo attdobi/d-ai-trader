@@ -114,13 +114,25 @@
           {% endif %}
         </td>
         <td class="reason-cell">
-          {% set reason = decision.get('reason', 'N/A') %}
+          {% set reason_parts = decision.get('reason', 'N/A')|split_cites %}
+          {% set reason = reason_parts[0] %}
+          {% set cited = reason_parts[1] %}
           {% if reason|length > 80 %}
             <span class="reason-truncated">{{ reason[:80] }}...</span>
             <span class="reason-full" style="display:none;">{{ reason }}</span>
             <button class="reason-toggle" onclick="this.previousElementSibling.style.display='inline';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';">more</button>
           {% else %}
             {{ reason }}
+          {% endif %}
+          {% if cited %}
+            <details class="cited-box">
+              <summary title="Guidelines the Decider cited for this decision">{{ cited|length }} guideline{{ '' if cited|length == 1 else 's' }} cited</summary>
+              <div class="cited-chips">
+                {% for cid in cited %}
+                  <a class="cited-chip" href="/policy-graph#agent=DeciderAgent&node={{ cid }}" title="Open {{ cid }} on the Policy Graph tab">{{ cid }}</a>
+                {% endfor %}
+              </div>
+            </details>
           {% endif %}
         </td>
         <td>

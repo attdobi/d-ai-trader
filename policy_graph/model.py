@@ -130,6 +130,7 @@ POLARITY_OVERRIDES = {
     "log": "structure", "root": "structure", "template": "structure", "system": "structure", "user": "structure",
     "code.deploy_policy": "action", "code.crowd_fade": "caution", "code.data_availability": "caution",
     "code.confirmation_policy": "gate", "code.recency_provenance": "gate", "code.cash_disclosure": "structure",
+    "code.guideline_citations": "structure",
     "code.justification_detail": "structure", "code.considered_setups": "structure", "code.cash_playbook": "caution",
     "code.index_regime": "gate", "code.watchlist_header": "action", "code.quarantine_line": "gate",
     "code.lessons_header": "structure", "code.recent_activity_header": "structure", "code.json_fallback": "structure",

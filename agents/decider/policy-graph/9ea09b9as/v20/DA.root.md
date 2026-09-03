@@ -16,8 +16,8 @@ locked: true
 provenance: generated
 sep_before: ""
 sep_after: ""
-body_sha256: bceda20036f3e59bb450bb6f5946a7bf24d7d31283070ed3ac65b30c4f3c1f61
+body_sha256: 9e7673eea485a975d65c4119385aa48631071345c44530071454ae1c023c4258
 tags: []
 tickers: []
 ---
-Decider policy version 20 (config 9ea09b9as, prompt_versions#597, created 2026-09-01 18:38:15 by prompt_lab [human] — v20 Decider (auto) · feedback#1251 · success 49.1% · 55 trades · 2026-09-01 20:28 UTC). Fields: system_prompt: stored; user_prompt_template: stored; strategy_directives: stored; soul: stored; memory: stored. Overlays: 15 code-owned block(s), 17 long-term memory row(s). Runtime assembly (decider_agent.ask_decision_agent): system prompt = system_prompt template, then '## AGENT IDENTITY' + soul, then strategy_directives substituted for {strategy_directives} (appended when the placeholder is absent), then '## LESSONS FROM EXPERIENCE' + memory; user prompt = user_prompt_template with the per-cycle data blocks filled in, plus the code-owned blocks that fire for this version, plus the long-term memory rows (decider_memory).
+Decider policy version 20 (config 9ea09b9as, prompt_versions#597, created 2026-09-01 18:38:15 by prompt_lab [human] — v20 Decider (auto) · feedback#1251 · success 49.1% · 55 trades · 2026-09-01 20:28 UTC). Fields: system_prompt: stored; user_prompt_template: stored; strategy_directives: stored; soul: stored; memory: stored. Overlays: 16 code-owned block(s), 17 long-term memory row(s). Runtime assembly (decider_agent.ask_decision_agent): system prompt = system_prompt template, then '## AGENT IDENTITY' + soul, then strategy_directives substituted for {strategy_directives} (appended when the placeholder is absent), then '## LESSONS FROM EXPERIENCE' + memory; user prompt = user_prompt_template with the per-cycle data blocks filled in, plus the code-owned blocks that fire for this version, plus the long-term memory rows (decider_memory).

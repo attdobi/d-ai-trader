@@ -68,7 +68,7 @@ def extract_from_source() -> list:
                 prompt_adds.append(text)
             elif n.target.id == "user_prompt_template":
                 template_adds.append(text)
-    assert len(prompt_adds) == 7, f"expected seven `prompt += (...)` literals, found {len(prompt_adds)}"
+    assert len(prompt_adds) == 8, f"expected eight `prompt += (...)` literals, found {len(prompt_adds)}"
     assert len(template_adds) == 1, "expected one `user_prompt_template += ...` literal (JSON fallback)"
 
     # contrarian_screener
@@ -124,6 +124,7 @@ def extract_from_source() -> list:
         ("DA.code.deploy_policy", prompt_adds[4]),
         ("DA.code.confirmation_policy", prompt_adds[5]),
         ("DA.code.recency_provenance", prompt_adds[6]),
+        ("DA.code.guideline_citations", prompt_adds[7]),
         ("DA.code.json_fallback", template_adds[0]),
         ("SA.code.feedback_suffix", found["feedback_suffix"]),
         ("FA.code.system_base", found["FEEDBACK_SYSTEM_BASE"]),
@@ -144,7 +145,7 @@ def test_code_blocks_match_source_verbatim():
 
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 19
+    assert len(ids) == len(set(ids)) == 20
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title

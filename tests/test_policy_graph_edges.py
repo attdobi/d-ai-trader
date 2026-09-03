@@ -311,7 +311,7 @@ def test_v21_like_graph_edges_and_constrains():
     by_id = {n.id: n for n in nodes}
     for s, t, _ in ov:
         assert by_id[s].owner == "db" and by_id[t].owner in ("code", "decider_memory")
-    assert len(BLOCKS_BY_ID) == 19
+    assert len(BLOCKS_BY_ID) == 20
 
 
 # ----------------------------------------------------------------------------- decider_memory snapshot

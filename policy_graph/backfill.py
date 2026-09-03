@@ -2,6 +2,7 @@
 
     ./dai/bin/python -m policy_graph.backfill --config-hash 9ea09b9as [--agent DeciderAgent]
                                              [--dry-run] [--verify-only] [--force] [--repo-root DIR]
+    ./dai/bin/python -m policy_graph.backfill --baseline [--verify-only]     # committed v0, no database
 
 Prints one line per version, e.g.
 
@@ -99,7 +100,10 @@ def run(engine, config_hash: str, *, repo_root: Path, is_margin_account: bool, a
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="python -m policy_graph.backfill", description=__doc__.split("\n\n")[0])
-    p.add_argument("--config-hash", required=True, help="config hash whose prompt_versions rows are mirrored")
+    p.add_argument("--config-hash", default=None, help="config hash whose prompt_versions rows are mirrored")
+    p.add_argument("--baseline", action="store_true",
+                   help="write the committed baseline instead: agents/*/policy-graph/baseline/v0 from "
+                        "initialize_prompts.DEFAULT_PROMPTS (no database)")
     p.add_argument("--agent", choices=sorted(AGENT_PREFIX), default=None, help="one agent only (default: all three)")
     p.add_argument("--dry-run", action="store_true", help="print what each version would do; write nothing")
     p.add_argument("--verify-only", action="store_true", help="only compare existing dirs with the rows (no writes)")
@@ -109,6 +113,23 @@ def main(argv=None) -> int:
                    help="checkout used to resolve inherited SOUL/MEMORY defaults via git (default: --repo-root)")
     p.add_argument("--margin", action="store_true", help="evaluate code-block conditions for a margin account")
     args = p.parse_args(argv)
+
+    if args.baseline:
+        from .baseline import verify_baseline, write_baseline
+        repo_root = Path(args.repo_root).resolve() if args.repo_root else Path(__file__).resolve().parent.parent
+        agents = [args.agent] if args.agent else list(AGENT_PREFIX)
+        if args.verify_only:
+            problems = verify_baseline(repo_root, agents=agents)
+            for agent, problem in problems:
+                print(f"{agent}  baseline v0  {problem}")
+            print(f"baseline versions {len(agents)}  failures {len(problems)}")
+            return 1 if problems else 0
+        for agent, action, path in write_baseline(repo_root, agents=agents, is_margin_account=bool(args.margin)):
+            print(f"{agent} v0  {action}  {path}")
+        problems = verify_baseline(repo_root, agents=agents)
+        return 1 if problems else 0
+    if not args.config_hash:
+        p.error("--config-hash is required (or use --baseline)")
 
     import config  # lazy: the only place the policy_graph package touches config
     engine = config.engine

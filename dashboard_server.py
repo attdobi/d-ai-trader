@@ -1345,6 +1345,16 @@ def dashboard():
             model_history=model_history,
         )
 
+@app.template_filter('split_cites')
+def _split_cites_filter(reason):
+    """(reason without the trailing ` [cites: …]` suffix, [guideline ids]) for the Trades tab."""
+    try:
+        from policy_graph.citations import split_cites
+        return split_cites(reason)
+    except Exception:
+        return (reason, [])
+
+
 @app.template_filter('from_json')
 def from_json_filter(s):
     try:

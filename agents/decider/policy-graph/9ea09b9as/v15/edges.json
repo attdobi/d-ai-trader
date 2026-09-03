@@ -64,6 +64,14 @@
   "version": "DeciderAgent.9ea09b9as.v15"
  },
  {
+  "source_node_id": "DA.code.guideline_citations",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v15"
+ },
+ {
   "source_node_id": "DA.code.index_regime",
   "target_node_id": "DA.code",
   "edge_type": "subtype_of",
@@ -599,6 +607,15 @@
  {
   "source_node_id": "DA.template.user",
   "target_node_id": "DA.code.deploy_policy",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v15",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.guideline_citations",
   "edge_type": "includes",
   "confidence": 1.0,
   "provenance": "derived:assembly",

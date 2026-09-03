@@ -734,15 +734,22 @@ class TradeOutcomeTracker:
                 if not (isinstance(feedback, dict) and (feedback.get(fb_key) or feedback.get(rules_key))):
                     continue
                 reminder_block, rules = self._build_reminder_block(feedback, fb_key, rules_key)
+                # Versions are immutable: the new memory text goes INTO the new row before it is
+                # activated (until 2026-09-03 the active row's memory column was rewritten in place
+                # afterwards, so a version's text changed after its creation and the policy graph
+                # had to archive the earlier files under _prior/).
+                lessons_text = "\n".join(f"- {r}" for r in rules)
+                new_memory = self._next_memory_text(agent_type, lessons_text, config_hash)
                 self._update_strategy_directives_for_config(
                     agent_type,
                     reminder_block,
                     f'Weekly feedback reminder appended (ID: {feedback_id}) — approved policy preserved',
                     config_hash,
+                    memory=new_memory,
                 )
                 print(f"✅ Appended {agent_type} feedback reminder for config {config_hash}")
                 self._update_agent_memory(
-                    agent_type, "\n".join(f"- {r}" for r in rules), config_hash, rules=rules,
+                    agent_type, lessons_text, config_hash, rules=rules, write_prompt_row=False,
                 )
 
         except Exception as e:
@@ -750,9 +757,11 @@ class TradeOutcomeTracker:
             import traceback
             traceback.print_exc()
 
-    def _update_strategy_directives_for_config(self, agent_type, reminder_block, description, config_hash):
+    def _update_strategy_directives_for_config(self, agent_type, reminder_block, description, config_hash,
+                                               memory=None):
         """Create a new version whose strategy_directives = current directives + the
-        reminder section (previous reminder replaced), carrying soul and memory forward."""
+        reminder section (previous reminder replaced), carrying soul forward and writing
+        `memory` (default: the current memory, unchanged) into the new row."""
         try:
             import os
             original_hash = os.environ.get('CURRENT_CONFIG_HASH')
@@ -779,7 +788,7 @@ class TradeOutcomeTracker:
                     description,
                     strategy_directives=merged,
                     soul=current.get("soul", "") or "",
-                    memory=current.get("memory", "") or "",
+                    memory=(memory if memory is not None else (current.get("memory", "") or "")),
                 )
 
                 with engine.connect() as conn:
@@ -800,9 +809,42 @@ class TradeOutcomeTracker:
             import traceback
             traceback.print_exc()
 
-    def _update_agent_memory(self, agent_type, new_lessons, config_hash, rules=None):
-        """Append new lessons to an agent's memory, compressing if over limit."""
-        MAX_MEMORY_CHARS = 4000
+    MAX_MEMORY_CHARS = 4000
+
+    def _next_memory_text(self, agent_type, new_lessons, config_hash):
+        """The active memory plus a dated section of `new_lessons`, compressed to the limit —
+        computed WITHOUT writing, so the caller can put it into a new prompt_versions row."""
+        import os
+        original_hash = os.environ.get('CURRENT_CONFIG_HASH')
+        os.environ['CURRENT_CONFIG_HASH'] = config_hash
+        try:
+            from prompt_manager import get_active_prompt
+            prompt_data = get_active_prompt(agent_type) or {}
+            current_memory = prompt_data.get("memory", "") or ""
+        finally:
+            if original_hash is not None:
+                os.environ['CURRENT_CONFIG_HASH'] = original_hash
+            elif 'CURRENT_CONFIG_HASH' in os.environ:
+                del os.environ['CURRENT_CONFIG_HASH']
+        return self._append_memory_section(current_memory, new_lessons)
+
+    @classmethod
+    def _append_memory_section(cls, current_memory, new_lessons):
+        """Pure: current memory + "## <today>\n<lessons>", compressed to MAX_MEMORY_CHARS."""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d")
+        body = (new_lessons or "").strip()
+        if not body:
+            return (current_memory or "").strip()
+        updated_memory = f"{(current_memory or '').strip()}\n\n## {timestamp}\n{body}".strip()
+        if len(updated_memory) > cls.MAX_MEMORY_CHARS:
+            updated_memory = cls._compress_memory_static(updated_memory, cls.MAX_MEMORY_CHARS)
+        return updated_memory
+
+    def _update_agent_memory(self, agent_type, new_lessons, config_hash, rules=None, write_prompt_row=True):
+        """Record lessons in decider_memory and, unless `write_prompt_row` is False (the weekly
+        path, which writes memory into the NEW row instead), append them to the active row's memory."""
+        MAX_MEMORY_CHARS = self.MAX_MEMORY_CHARS
 
         # Record decider lessons in the structured long-term store (decider_memory) — the
         # source of truth the decider retrieves from by relevance. One row per rule so the
@@ -820,39 +862,22 @@ class TradeOutcomeTracker:
             except Exception as _dm_exc:
                 print(f"⚠️  decider_memory write skipped: {_dm_exc}")
 
+        if not write_prompt_row:
+            return
         try:
-            import os
-            original_hash = os.environ.get('CURRENT_CONFIG_HASH')
-            os.environ['CURRENT_CONFIG_HASH'] = config_hash
-
-            try:
-                from prompt_manager import get_active_prompt
-                prompt_data = get_active_prompt(agent_type)
-                current_memory = prompt_data.get("memory", "")
-
-                # Append new lessons
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y-%m-%d")
-                updated_memory = f"{current_memory}\n\n## {timestamp}\n{new_lessons}".strip()
-
-                # If over limit, compress
-                if len(updated_memory) > MAX_MEMORY_CHARS:
-                    updated_memory = self._compress_memory(updated_memory, MAX_MEMORY_CHARS)
-
-                # Save updated memory
-                self._update_memory_field(agent_type, updated_memory, config_hash)
-                print(f"🧠 Updated {agent_type} memory for config {config_hash[:8]}")
-            finally:
-                if original_hash is not None:
-                    os.environ['CURRENT_CONFIG_HASH'] = original_hash
-                elif 'CURRENT_CONFIG_HASH' in os.environ:
-                    del os.environ['CURRENT_CONFIG_HASH']
+            updated_memory = self._next_memory_text(agent_type, new_lessons, config_hash)
+            self._update_memory_field(agent_type, updated_memory, config_hash)
+            print(f"🧠 Updated {agent_type} memory for config {config_hash[:8]}")
         except Exception as e:
             print(f"⚠️ Failed to update {agent_type} memory: {e}")
             import traceback
             traceback.print_exc()
 
     def _compress_memory(self, memory_text, max_chars):
+        return self._compress_memory_static(memory_text, max_chars)
+
+    @staticmethod
+    def _compress_memory_static(memory_text, max_chars):
         """Keep header + most recent entries that fit within limit."""
         lines = memory_text.split("\n")
 

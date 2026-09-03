@@ -2750,6 +2750,19 @@ OUTPUT (STRICT)
         " synced/inherited losers' rules apply ONLY to positions actually labeled 'Schwab synced"
         " position', never to your own recent buys."
     )
+    prompt += (
+    "\n\nGUIDELINE CITATIONS (policy graph — record which guidelines drove each decision):"
+    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids taken from the"
+    " GUIDELINE INDEX below — the rule you applied, the lesson you weighed, the code policy you followed."
+    " Cite ids exactly as printed; never invent one. The ids are stored with the reason so every guideline's"
+    " realized win rate can be measured on the Policy Graph tab. Omit the key when no listed guideline applies."
+    )
+    _guideline_index_lines = _guideline_index_text(prompt_version)
+    if _guideline_index_lines:
+        prompt += "\n\nGUIDELINE INDEX (id — title):\n" + _guideline_index_lines
+        _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
+    else:
+        _GUIDELINE_IDS_STASH.pop(run_id, None)
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
@@ -2881,6 +2894,17 @@ OUTPUT (STRICT)
             continue
         filtered_decisions.append(decision)
     ai_response = filtered_decisions
+
+    # Fold the optional "cited" guideline ids into each reason (" [cites: DA.…]") so the citation
+    # travels with the reason into trade_decisions, holdings and trade_outcomes.
+    try:
+        from policy_graph.citations import fold_into_decisions as _fold_cites
+        _known_ids = _GUIDELINE_IDS_STASH.pop(run_id, None)
+        _used_ids = _fold_cites(ai_response, _known_ids)
+        if _used_ids:
+            print(f"📎 Guidelines cited this cycle: {', '.join(_used_ids)}")
+    except Exception as _cite_exc:
+        print(f"⚠️  Could not record guideline citations: {_cite_exc}")
 
     # Guarantee a decision exists for every current holding
     existing_decisions = {}
@@ -3065,6 +3089,31 @@ def extract_decision_info_from_text(text_content):
 # fills it; store_trade_decisions drains it and persists it as a non-executable element
 # (appended only to the stored JSON, never to the validated/executed decisions list).
 _CONSIDERED_STASH = {}
+
+# Per-run set of citable guideline ids (from the policy graph of the active prompt version), so the
+# "cited" ids the model returns are validated before they are folded into each reason.
+_GUIDELINE_IDS_STASH = {}
+
+
+def _guideline_index_text(prompt_version):
+    """`id — title` lines of the active policy version's citable guidelines, or "" when the policy
+    graph directory cannot be read (the decision cycle never depends on it)."""
+    try:
+        if prompt_version is None:
+            return ""
+        from pathlib import Path as _Path
+        from policy_graph import service as _pg_service
+        from policy_graph.citations import guideline_index as _guideline_index
+        from policy_graph.compile import read_version_dir as _read_version_dir
+        _root = _Path(__file__).resolve().parent
+        _cfg = get_current_config_hash()
+        _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
+                                        is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
+        _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
+        return _guideline_index(_version)
+    except Exception as _exc:
+        print(f"⚠️  Guideline index unavailable for citations: {_exc}")
+        return ""
 
 
 def store_trade_decisions(decisions, run_id):

@@ -12,9 +12,9 @@
  "actor_kind": "human",
  "description": "v1 Feedback (auto) · feedback#1234 · success 29.4% · 17 trades · 2026-06-20 16:02 UTC",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:25-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:25:46-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36375,
  "source_sha256": {
   "system_prompt": "9d855875babfc3dfde7b3f131f5be494e6c81daa9dc243e7640c0be94a83c1a9",
   "user_prompt_template": "a88f0135981e3d7cbcecdeedc5774a1beb39bf8ba05c4d0a710b3a2a7be5eb6f",
@@ -85,9 +85,9 @@
  "node_count": 27,
  "edge_count": 33,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "FA.code.system_base": true,
    "FA.code.base_instructions": true,

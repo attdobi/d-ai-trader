@@ -12,9 +12,9 @@
  "actor_kind": "seed",
  "description": "DeciderAgent — profit-harvesting first, rotation second; enforces contrarian crowd-fade behavior and compact JSON output.",
  "is_active": false,
- "materialized_at": "2026-09-02T17:19:21-07:00",
- "materialized_by": "backfill",
- "pid": 31151,
+ "materialized_at": "2026-09-02T20:27:33-07:00",
+ "materialized_by": "dashboard",
+ "pid": 36524,
  "source_sha256": {
   "system_prompt": "bded9112bf6bae7348ed826d7f871fb8cf58d150d16b2877747369838b3504ec",
   "user_prompt_template": "e94d0b02224def5b9432ba6a60c7c6af9d509a29f6a63b978ca56331679f3930",
@@ -86,12 +86,12 @@
    "DA.memory.mistakes"
   ]
  },
- "node_count": 59,
- "edge_count": 83,
+ "node_count": 60,
+ "edge_count": 85,
  "code": {
-  "sha": "062f5ef0d69f",
-  "dir": "../_code/062f5ef0d69f",
-  "git_sha": "2cd93723",
+  "sha": "3674eb0468b4",
+  "dir": "../_code/3674eb0468b4",
+  "git_sha": "cc1d5aff",
   "fires": {
    "DA.code.crowd_fade": false,
    "DA.code.cash_playbook": true,
@@ -107,6 +107,7 @@
    "DA.code.deploy_policy": true,
    "DA.code.confirmation_policy": true,
    "DA.code.recency_provenance": true,
+   "DA.code.guideline_citations": true,
    "DA.code.json_fallback": false
   }
  },
