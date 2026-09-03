@@ -146,3 +146,50 @@ def test_backfill_hits_from_decisions(hits_db):
     assert C.backfill_hits_from_decisions(hits_db, "h") == 0
     h = C.hit_counts(hits_db, "h", pk, now=datetime(2026, 9, 4))
     assert h["7d"]["cited"] == 1 and h["routes"] == {"unserved": 1}
+
+
+def test_news_entities_trend_and_tag_routes(version):
+    irdm = next(i for i in version.nodes if "irdm" in i)
+    far = datetime(2026, 12, 1)
+    routes = lambda ctx: {s.node_id: s.route for s in A.assemble(version, ctx).served}
+    assert routes(A.Context(news=["IRDM"], today=far))[irdm] == "news"
+    assert routes(A.Context(entities=["irdm"], today=far))[irdm] == "entities"
+    assert routes(A.Context(trend=["IRDM"], today=far))[irdm] == "trend"
+    assert routes(A.Context(holdings=["IRDM"], news=["IRDM"], today=far))[irdm] == "ticker"     # holdings win
+    # tag hop: an entry sharing a #tag with a contextually served entry comes along
+    tagged = [i for i in version.nodes if version.nodes[i].node_type == "entry" and A._plain_tags(version.nodes[i])]
+    assert tagged
+    src = tagged[0]
+    tag = sorted(A._plain_tags(version.nodes[src]))[0]
+    partner = next((i for i in tagged if i != src and tag in A._plain_tags(version.nodes[i])), None)
+    ctx = A.Context(regime="", today=far)
+    base = A.assemble(version, ctx)
+    assert src in base.dropped
+    if partner:
+        # serve `src` via a ticker in its body, then its tag partner should ride along
+        tk = sorted(A._node_tickers(version.nodes[src]))
+        if tk:
+            out = A.assemble(version, A.Context(holdings=[tk[0]], today=far))
+            r = {s.node_id: s.route for s in out.served}
+            assert r[src] == "ticker" and r.get(partner) == "tag"
+
+
+def test_assembled_sizes_and_context_summary(version):
+    out = A.assemble(version, A.Context(regime="MIXED", holdings=["X"], news=["A", "B"]))
+    assert out.chars_full > 0 and out.chars_served > 0
+    assert out.routes["core"] >= 8 and out.routes.get("identity")
+    assert A.Context(regime="MIXED", holdings=["X"], news=["A", "B"]).summary() == {
+        "regime": "MIXED", "holdings": 1, "watchlist": 0, "quarantined": 0, "news": 2, "entities": 0, "trend": 0}
+
+
+def test_run_log_and_stats(hits_db):
+    now = datetime(2026, 9, 10, 12)
+    C.record_run(hits_db, "h", "DeciderAgent", 23, "run1", served=30, dropped=4, chars_full=16000, chars_served=14800,
+                 routes={"core": 14, "news": 2}, context={"regime": "RISK-OFF"}, decided_at=now)
+    C.record_run(hits_db, "h", "DeciderAgent", 23, "run2", served=28, dropped=6, chars_full=16000, chars_served=13200,
+                 routes={"core": 14, "trend": 1}, context={"regime": "MIXED"}, decided_at=now + timedelta(hours=2))
+    st = C.run_stats(hits_db, "h", "DeciderAgent")
+    assert st["runs"] == 2 and st["latest"]["run_id"] == "run2" and st["latest"]["served"] == 28
+    assert abs(st["latest"]["ratio"] - 0.825) < 1e-9 and abs(st["average"]["ratio"] - 0.875) < 1e-9
+    assert st["routes"] == {"core": 28, "news": 2, "trend": 1} and st["latest"]["context"] == {"regime": "MIXED"}
+    assert C.run_stats(hits_db, "h", "SummarizerAgent") is None

@@ -1047,11 +1047,17 @@ def extract_companies_from_summaries(summary_text):
         prompt_data = get_active_prompt("CompanyExtractionAgent")
         system_prompt = prompt_data["system_prompt"]
         user_prompt_template = prompt_data["user_prompt_template"]
+        soul = prompt_data.get("soul", "")
+        if soul:
+            system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{soul}"
         strategy = prompt_data.get("strategy_directives", "")
         if strategy and "{strategy_directives}" in system_prompt:
             system_prompt = system_prompt.replace("{strategy_directives}", strategy)
         elif strategy and "{strategy_directives}" not in system_prompt:
             system_prompt = system_prompt + "\n\n" + strategy
+        memory = prompt_data.get("memory", "")
+        if memory:
+            system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{memory}"
         print(f"🧬 Using CompanyExtractionAgent prompt v{prompt_data.get('version', 'unknown')}")
     except Exception as e:
         print(f"⚠️  Falling back to default company extraction prompt: {e}")
@@ -2663,9 +2669,13 @@ OUTPUT (STRICT)
             _ctx_regime = str(((locals().get("_regime") or {}).get("label")) or "")
             _ctx_watch = [c.get("ticker") for c in (locals().get("_contra") or []) if isinstance(c, dict)]
             _ctx_quar = sorted(locals().get("_quarantined") or [])
+            _ctx_news = _tickers_in_summaries(parsed_summaries)
+            _ctx_entities = [clean_ticker_symbol(e.get("symbol")) for e in (company_entities or []) if isinstance(e, dict)]
+            _ctx_trend = [(d.get("symbol") or d.get("ticker")) for d in (momentum_data or []) if isinstance(d, dict)]
             _assembled = _graph_assemble_system_prompt(
                 prompt_data, prompt_version, run_id, regime=_ctx_regime,
-                holdings=[h.get("ticker") for h in stock_holdings], watchlist=_ctx_watch, quarantined=_ctx_quar)
+                holdings=[h.get("ticker") for h in stock_holdings], watchlist=_ctx_watch, quarantined=_ctx_quar,
+                news=_ctx_news, entities=_ctx_entities, trend=_ctx_trend)
             if _assembled is not None:
                 system_prompt, _graph_served = _assembled
     except Exception as _asm_exc:
@@ -3123,7 +3133,32 @@ _CONSIDERED_STASH = {}
 _GUIDELINE_IDS_STASH = {}
 
 
-def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined):
+_HEADLINE_TICKER_RE = re.compile(r"\[([A-Z]{1,5})\]")
+_WATCHLIST_LINE_RE = re.compile(r"Watchlist:\s*([A-Z0-9 ,;/&]+)", re.I)
+
+
+def _tickers_in_summaries(parsed_summaries):
+    """Tickers the Summarizers surfaced: `[TICKER]` headline prefixes and the trailing
+    `Watchlist: …` line of each insight paragraph."""
+    out = []
+    for s in parsed_summaries or []:
+        if not isinstance(s, dict):
+            continue
+        for h in s.get("headlines") or []:
+            out.extend(_HEADLINE_TICKER_RE.findall(str(h)))
+        m = _WATCHLIST_LINE_RE.search(str(s.get("insights") or ""))
+        if m:
+            out.extend(t.strip().upper() for t in re.split(r"[,;/ ]+", m.group(1)) if 1 <= len(t.strip()) <= 5 and t.strip().isalpha())
+    seen, uniq = set(), []
+    for t in out:
+        if t and t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return uniq
+
+
+def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,
+                                  news=(), entities=(), trend=()):
     """(system_prompt, served) built from the policy graph of the active version, or None when the
     graph is unavailable. Records the served guidelines (with routes) in policy_graph_hits."""
     from pathlib import Path as _Path
@@ -3140,7 +3175,8 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
                                     is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
     _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
     ctx = _Ctx(regime=regime or "", holdings=[t for t in holdings if t], watchlist=[t for t in watchlist if t],
-               quarantined=list(quarantined or []))
+               quarantined=list(quarantined or []), news=[t for t in news if t], entities=[t for t in entities if t],
+               trend=[t for t in trend if t])
     _ensure_hits(engine)
     ids = [n.id for n in _version.nodes.values() if n.owner in ("db", "default-file", "code")]
     try:
@@ -3158,14 +3194,18 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
         system_prompt = system_prompt + "\n\n" + out.strategy_directives
     if out.memory:
         system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{out.memory}"
-    routes = {}
-    for sel in out.served:
-        routes[sel.route] = routes.get(sel.route, 0) + 1
+    routes = out.routes
+    _ratio = (out.chars_served / out.chars_full * 100) if out.chars_full else 0
     print(f"🕸️  Graph assembly v{prompt_version}: {len(out.served)} guidelines served "
           f"({', '.join(f'{k} {v}' for k, v in sorted(routes.items()))}), {len(out.dropped)} not shown; "
-          f"regime={regime or 'n/a'} tickers={len(ctx.tickers)} health={'yes' if health else 'none yet'}")
+          f"{out.chars_served:,} of {out.chars_full:,} chars ({_ratio:.0f}%) · context {ctx.summary()} · "
+          f"health={'yes' if health else 'none yet'}")
     try:
         _record_served(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, out.served)
+        from policy_graph.citations import record_run as _record_run
+        _record_run(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, served=len(out.served),
+                    dropped=len(out.dropped), chars_full=out.chars_full, chars_served=out.chars_served,
+                    routes=routes, context=ctx.summary())
     except Exception as _s_exc:
         print(f"⚠️  Could not log served guidelines: {_s_exc}")
     return system_prompt, out.served

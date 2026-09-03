@@ -13,6 +13,7 @@ _AGENT_DIR_MAP = {
     "SummarizerAgent": "summarizer",
     "FeedbackAgent": "feedback",
     "feedback_analyzer": "feedback",
+    "CompanyExtractionAgent": "company",
 }
 
 

@@ -81,7 +81,7 @@ def _bool(value, default: bool = False) -> bool:
 def _agent_arg(default=None) -> str:
     agent = (request.args.get("agent") or request.args.get("agent_type") or default or "").strip()
     if not agent:
-        raise service.BadRequest("agent is required (DeciderAgent | SummarizerAgent | FeedbackAgent)")
+        raise service.BadRequest("agent is required (DeciderAgent | SummarizerAgent | FeedbackAgent | CompanyExtractionAgent)")
     if agent not in AGENT_PREFIX:
         raise service.BadRequest(f"unknown agent {agent!r}")
     return agent
@@ -101,7 +101,7 @@ def _version_arg(name: str = "version", *, required: bool = False):
 def _id_arg() -> str:
     node_id = (request.args.get("id") or "").strip()
     if not node_id or not ID_RE.match(node_id):
-        raise service.BadRequest("id must match ^(DA|SA|FA)(\\.[a-z0-9_]+)+$")
+        raise service.BadRequest("id must match ^(DA|SA|FA|CA)(\\.[a-z0-9_]+)+$")
     return node_id
 
 

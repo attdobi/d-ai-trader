@@ -1,0 +1,15 @@
+{
+ "config_hash": "9ea09b9as",
+ "version": 0,
+ "prompt_version_id": 548,
+ "source_sha256": {
+  "system_prompt": "ff40a46f8ab2c57f89c7040b846f773af4f1277fffb61bce65a70dd3abd5f4ce",
+  "user_prompt_template": "710de1d6bb083b8e4615990d6f564d2e5c77c69c1c73ad17fcfbbecfe5f1619b",
+  "strategy_directives": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "soul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "code_sha": "9ee0e6c1cfea",
+ "ltm_sha": "4f53cda18c2b",
+ "builder_version": 1
+}

@@ -254,8 +254,8 @@ No explanation, no markdown, just JSON."""
         ),
         "strategy_directives": "",
         "description": "Extracts companies (rolled up to parent) and ticker symbols from summarizer output",
-        "soul": "",
-        "memory": "",
+        "soul": _load_agent_file("company", "SOUL.md"),
+        "memory": _load_agent_file("company", "MEMORY.md"),
     },
     "FeedbackAgent": {
         "user_prompt_template": (

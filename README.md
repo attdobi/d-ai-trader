@@ -68,8 +68,11 @@ even when no human ever clicks:
 ```mermaid
 flowchart TB
     subgraph CYCLE["Trading cycle (every 2-3h)"]
-        NEWS[News + screenshots] --> SUM[Summarizer<br/><i>Luna · low</i>]
-        SUM --> DEC[Decider<br/><i>Terra · high</i>]
+        NEWS[News + screenshots] --> SUM[Summarizers ×~6<br/><i>Luna · low</i>]
+        SUM --> CO[Company extraction<br/><i>Luna · low — DAI_MODEL_COMPANY</i>]
+        CO --> TR[Market trends API<br/>momentum recap · no LLM]
+        SUM & CO & TR --> KG{{Policy graph query<br/>regime · holdings · watchlist ·<br/>news · entities · trends → trimmed guidelines}}
+        KG --> DEC[Decider<br/><i>Terra · high</i>]
         DEC --> EXEC[Execution<br/>Schwab / simulation]
         EXEC --> OUT[(trade_outcomes<br/><b>market P&L = reward</b>)]
     end
@@ -82,7 +85,7 @@ flowchart TB
     CRITIC -->|verdict · reason · confidence| REV[(prompt_change_reviews)]
     REV --> HUMAN{Human approve / reject<br/><b>optional RLHF gate</b>}
     HUMAN -->|approve| POL[(prompt_versions<br/><b>active policy</b>)]
-    POL -.->|soul + directives + memory| SUM & DEC & FB
+    POL -.->|soul + directives + memory| SUM & CO & DEC & FB
 
     REV -->|"critic objections + human labels<br/>+ realized outcomes"| GEN
     REV -->|lessons| FB
@@ -249,8 +252,13 @@ agents/
 ├── summarizer/
 │   ├── SOUL.md      # Extraction philosophy, signal priorities
 │   └── MEMORY.md    # Source quality notes, extraction patterns
-└── feedback/
-    └── SOUL.md      # Review philosophy, feedback style
+├── company/
+│   ├── SOUL.md      # Entity resolution: parent roll-up, never guess a ticker
+│   └── MEMORY.md    # Extraction lessons (parent roll-ups, look-alike tickers)
+├── feedback/
+│   └── SOUL.md      # Review philosophy, feedback style
+└── <agent>/policy-graph/   # the same policy as a knowledge graph: baseline/v0 + latest/ (tracked),
+                            # <config_hash>/v<N>/ (this machine's evolution, local)
 ```
 
 ### Policy graph (guidelines as a knowledge graph)
@@ -297,9 +305,31 @@ Empty soul/memory fields are fully backwards compatible — agents behave exactl
 
 ## Architecture
 
+One trading cycle, left to right — every LLM agent has its own soul / directives / memory in
+`prompt_versions` and its own folder under `agents/`:
+
 ```
-Summarizer  →  Momentum Recap  →  Decider  →  Execution  →  Feedback
-(6 sources)    (scorable view)    (LLM)       (sim/Schwab)  (weekly RLMF)
+  news + screenshots (6 sources)
+        │
+        ▼
+  Summarizers (~6 per cycle, Luna·low)      → headlines + insights + "Watchlist:" per source
+        │
+        ▼
+  Company extraction agent (Luna·low)       → listed companies + tickers rolled up to the parent
+        │
+        ▼
+  Market trends API (yfinance, no LLM)       → momentum recap for those tickers + holdings
+        │
+        ▼
+  Policy graph query (deterministic, no LLM) → the Decider's guidelines, selected & ordered by
+        │                                      regime · holdings · contrarian watchlist · quarantine ·
+        │                                      news tickers · extracted entities · trend tickers;
+        │                                      each tagged ⟨id · hits 7d/30d/90d · win rate⟩
+        ▼
+  Decider (Terra·high)                       → decisions with cited guideline ids
+        │
+        ▼
+  Validator → execution (Schwab / sim) → trade_outcomes (the reward) → Feedback agent (Sol·high, weekly RLMF)
 ```
 
 ### Pipeline Detail
@@ -351,7 +381,8 @@ Summarizer  →  Momentum Recap  →  Decider  →  Execution  →  Feedback
 |---|---|
 | `d_ai_trader.py` | Main orchestrator + scheduler |
 | `main.py` | News scraping & screenshot analysis |
-| `decider_agent.py` | Trading decision engine |
+| `decider_agent.py` | Trading decision engine; also hosts the company-extraction agent call and the market-trends recap |
+| `policy_graph/` | Guideline knowledge graph: decomposition, proposals, citations, the decision-time graph query |
 | `decision_validator.py` | Financial guardrails — prevents hallucinated trades |
 | `feedback_agent.py` | Post-close performance analysis |
 | `config.py` | Model config, env loading, DB setup |

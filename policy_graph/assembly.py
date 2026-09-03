@@ -9,8 +9,12 @@ Routes (why a guideline reached the prompt — recorded per run for route import
 
     core        locked structure and every numbered rule (the policy itself is never trimmed)
     regime      the guideline's text or tags name the current regime (RISK-ON / MIXED / RISK-OFF)
-    ticker      it cites a ticker in holdings or on the watchlist (graph `cites` edges / tickers)
+    ticker      it cites a ticker in holdings or on the contrarian watchlist
+    news        it cites a ticker in the Summarizers' headlines / Watchlist lines (~6 summaries a cycle)
+    entities    it cites a ticker the company-extraction agent pulled from those summaries
+    trend       it cites a ticker in the market-trends recap (momentum API)
     quarantine  quarantine / re-entry guidance while the quarantine line is non-empty
+    tag         one hop over the graph's tag edges: shares a #tag with a contextually served entry
     recent      a memory log entry dated within RECENT_DAYS
     reminder    the weekly "Latest Feedback Reminder" section
     identity    soul sections (always, verbatim)
@@ -44,15 +48,40 @@ DATE_RE = re.compile(r"\.(\d{4})_(\d{2})_(\d{2})")
 
 @dataclass
 class Context:
+    """Everything the Decider is about to be shown, reduced to what the query needs."""
     regime: str = ""                      # RISK-ON | MIXED | RISK-OFF | ""
-    holdings: list = dc_field(default_factory=list)
-    watchlist: list = dc_field(default_factory=list)
-    quarantined: list = dc_field(default_factory=list)
+    holdings: list = dc_field(default_factory=list)      # tickers held
+    watchlist: list = dc_field(default_factory=list)     # contrarian screen candidates
+    quarantined: list = dc_field(default_factory=list)   # recently exited tickers
+    news: list = dc_field(default_factory=list)          # tickers in the Summarizers' headlines / Watchlist lines
+    entities: list = dc_field(default_factory=list)      # tickers the company-extraction agent pulled from the summaries
+    trend: list = dc_field(default_factory=list)         # tickers in the market-trends recap (momentum API)
     today: Optional[datetime] = None
+
+    @staticmethod
+    def _up(values) -> set:
+        return {str(t).upper() for t in (values or []) if t}
 
     @property
     def tickers(self) -> set:
-        return {str(t).upper() for t in list(self.holdings) + list(self.watchlist) if t}
+        return self._up(self.holdings) | self._up(self.watchlist)
+
+    @property
+    def news_tickers(self) -> set:
+        return self._up(self.news)
+
+    @property
+    def entity_tickers(self) -> set:
+        return self._up(self.entities)
+
+    @property
+    def trend_tickers(self) -> set:
+        return self._up(self.trend)
+
+    def summary(self) -> dict:
+        return {"regime": self.regime or None, "holdings": len(self._up(self.holdings)),
+                "watchlist": len(self._up(self.watchlist)), "quarantined": len(self._up(self.quarantined)),
+                "news": len(self.news_tickers), "entities": len(self.entity_tickers), "trend": len(self.trend_tickers)}
 
 
 @dataclass
@@ -70,6 +99,15 @@ class Assembled:
     served: list                         # [Selected] in rendered order
     dropped: list                        # node ids left out of the rendering
     health_used: bool
+    chars_full: int = 0                  # stored soul + directives + memory (what the flat prompt carries)
+    chars_served: int = 0                # the rendered three fields (ids and records included)
+
+    @property
+    def routes(self) -> dict:
+        out: dict = {}
+        for s in self.served:
+            out[s.route] = out.get(s.route, 0) + 1
+        return out
 
 
 # ----------------------------------------------------------------------------- selection
@@ -89,6 +127,13 @@ def _mentions_regime(text: str, regime: str) -> bool:
         return False
     low = (text or "").lower()
     return any(w in low for w in words)
+
+
+CONTEXT_ROUTES = ("regime", "ticker", "news", "entities", "trend", "quarantine")
+
+
+def _plain_tags(node) -> set:
+    return {str(t).lower().lstrip("#") for t in (node.tags or []) if t and not TICKER_RE.fullmatch(str(t).upper())}
 
 
 def _node_tickers(node) -> set:
@@ -111,8 +156,15 @@ def route_for(node, ctx: Context, *, field: str) -> Optional[str]:
     # lessons are policy and always stay; the specific route is recorded when one applies
     if ctx.regime and _mentions_regime(node.body, ctx.regime):
         return "regime"
-    if _node_tickers(node) & ctx.tickers:
+    mine = _node_tickers(node)
+    if mine & ctx.tickers:
         return "ticker"
+    if mine & ctx.news_tickers:
+        return "news"
+    if mine & ctx.entity_tickers:
+        return "entities"
+    if mine & ctx.trend_tickers:
+        return "trend"
     if ctx.quarantined and QUARANTINE_RE.search(node.body or ""):
         return "quarantine"
     if nt == "entry":                # dated log entries are the diary: only recent ones stay
@@ -171,6 +223,23 @@ def select(version: Version, ctx: Context) -> tuple:
                     out.append((i, r))
             kept = out
         served.extend(Selected(node_id=i, route=r, field=field) for i, r in kept)
+    # one hop over the graph's tag edges: a dropped entry sharing a #tag with an entry that was
+    # served for a contextual reason comes along (route "tag")
+    hot_tags: set = set()
+    for s in served:
+        if s.route in CONTEXT_ROUTES:
+            hot_tags |= _plain_tags(version.nodes[s.node_id])
+    if hot_tags and dropped:
+        still_dropped = []
+        for i in dropped:
+            n = version.nodes[i]
+            if _plain_tags(n) & hot_tags:
+                served.append(Selected(node_id=i, route="tag", field=n.field or ""))
+            else:
+                still_dropped.append(i)
+        dropped = still_dropped
+        order = {i: k for k, i in enumerate([x for f in COMPILED_FIELDS for x in _ordered_ids(version, f)])}
+        served.sort(key=lambda s: order.get(s.node_id, 10 ** 9))
     return served, dropped
 
 
@@ -214,9 +283,13 @@ def assemble(version: Version, ctx: Context, *, health: Optional[dict] = None) -
     soul = render_field(version, served, "soul", health)
     if dropped:
         listed = ", ".join(dropped[:40]) + (" …" if len(dropped) > 40 else "")
-        mem = (mem + f"\n\nNot shown this cycle (not relevant to today's regime, holdings or watchlist; still citable by id): {listed}").strip()
+        mem = (mem + f"\n\nNot shown this cycle (not tied to today's regime, holdings, watchlist, news or trends; "
+                     f"still citable by id): {listed}").strip()
+    full = 0
+    for f in COMPILED_FIELDS:
+        full += sum(len(version.nodes[i].text) for i in _ordered_ids(version, f) if i in version.nodes)
     return Assembled(strategy_directives=sd, memory=mem, soul=soul, served=served, dropped=dropped,
-                     health_used=bool(health))
+                     health_used=bool(health), chars_full=full, chars_served=len(sd) + len(mem) + len(soul))
 
 
 __all__ = ["Context", "Selected", "Assembled", "route_for", "select", "assemble", "health_tag", "render_field",

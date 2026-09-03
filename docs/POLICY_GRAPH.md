@@ -1,6 +1,6 @@
 # Policy Graph
 
-Each agent's prompt (Summarizer, Decider, Feedback) is now also a **versioned knowledge graph**:
+Each agent's prompt (Summarizer, Company extraction, Decider, Feedback) is now also a **versioned knowledge graph**:
 a directory of Markdown guideline files plus `edges.json`, one directory per prompt version, in the
 RUSH layout (see `~/RUSH/policy-graph/`). The dashboard's **Policy Graph** tab renders it as a
 force-directed graph with a version timeline, so you can watch the policy evolve through the
@@ -27,7 +27,7 @@ active row is materialized (`store.sync_latest`, volatile manifest keys scrubbed
 always carries the current policy as a graph without the per-version churn. Push the per-config
 history deliberately if you ever want it (`git add -f agents/*/policy-graph/<hash>`).
 
-Node ids are dotted and agent-prefixed (`DA.`, `SA.`, `FA.`), filename == id + `.md`, one root per
+Node ids are dotted and agent-prefixed (`DA.`, `SA.`, `FA.`, `CA.`), filename == id + `.md`, one root per
 graph. Examples from Decider v21: `DA.directives.strategy.priced_kill`, `DA.soul.core_philosophy`,
 `DA.memory.lessons.extension_chase`, `DA.memory.log.2026_09_02_regime`, `DA.code.confirmation_policy`,
 `DA.ltm.20`.
@@ -149,14 +149,22 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    Each cycle the Decider's soul / directives / memory are rebuilt from the active version's
    graph instead of the flat stored text. A deterministic query over the cycle's context — regime,
    holdings, watchlist, quarantine, date — decides what is served and in which order: locked
-   structure and every numbered rule always (`core`; rules naming the current regime move to the
-   front of their section), soul sections verbatim (`identity`), the weekly reminder, lessons and
-   log entries that name the regime (`regime`), cite a ticker in play (`ticker`), concern re-entry
-   while the quarantine line is non-empty (`quarantine`), or are dated within 30 days (`recent`).
+   structure, every numbered rule and every lesson always (`core`; rules naming the current regime
+   move to the front of their section), soul sections verbatim (`identity`), the weekly reminder;
+   dated log entries only when they name the regime (`regime`), cite a ticker that is held or on
+   the contrarian watchlist (`ticker`), in the Summarizers' headlines or `Watchlist:` lines
+   (`news`, about six summaries a cycle), among the companies the extraction agent resolved
+   (`entities`), in the market-trends recap (`trend`), concern re-entry while the quarantine line
+   is non-empty (`quarantine`), are dated within 30 days (`recent`), or share a `#tag` with an
+   entry served for one of those reasons (`tag`, one hop over the graph's tag edges). The query is
+   text and attribute matching over what the decomposer already extracted — tickers from
+   `[[links]]` and `#tags`, dates from ids, regime words in the body — never an embedding and
+   never a model call, so every served guideline is reproducible from its recorded route.
    Everything else is dropped from the rendering and listed by id in one line so it stays
-   citable. No model routes anything; the route each guideline took is recorded per run, so route
-   importance (served versus cited) is measurable. The stored prompt row is untouched; a failure
-   to read the graph falls back to the flat text.
+   citable. The stored prompt row is untouched; a failure to read the graph falls back to the
+   flat text. Each run also records its trim size in `policy_graph_runs` (served / dropped
+   guidelines, chars served versus the full guideline text, routes, context); the tab's version
+   note shows the latest run and the 30-run average.
 2. **Evidence inline.** Every rendered guideline ends with ` ⟨id⟩`, or, once it has a record,
    ` ⟨id · cited 7d/30d/90d: 3/12/20 · win 58% n=12⟩` (`citations.health_for_prompt`), and the
    citations block tells the Decider to weigh a rule by that record rather than its wording.

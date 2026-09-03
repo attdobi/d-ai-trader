@@ -424,6 +424,83 @@ def backfill_hits_from_decisions(engine, config_hash: str, agent_type: str = "De
     return len(inserts)
 
 
-__all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "record_served", "record_cited", "hit_counts",
+# ----------------------------------------------------------------------------- run log (trim size per cycle)
+DDL_RUNS_POSTGRES = """
+CREATE TABLE IF NOT EXISTS policy_graph_runs (
+    id SERIAL PRIMARY KEY,
+    config_hash VARCHAR(50) NOT NULL,
+    agent_type TEXT NOT NULL,
+    prompt_version INTEGER,
+    run_id TEXT,
+    decided_at TIMESTAMP,
+    served INTEGER,
+    dropped INTEGER,
+    chars_full INTEGER,
+    chars_served INTEGER,
+    routes TEXT,
+    context TEXT
+)
+"""
+DDL_RUNS_SQLITE = DDL_RUNS_POSTGRES.replace("id SERIAL PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
+
+
+def ensure_runs_schema(engine) -> None:
+    dialect = getattr(getattr(engine, "dialect", None), "name", "") or ""
+    with engine.begin() as conn:
+        conn.execute(text(DDL_RUNS_POSTGRES if dialect == "postgresql" else DDL_RUNS_SQLITE))
+
+
+def record_run(engine, config_hash: str, agent_type: str, prompt_version, run_id: str, *, served: int, dropped: int,
+               chars_full: int, chars_served: int, routes: dict, context: dict, decided_at=None) -> None:
+    ensure_runs_schema(engine)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO policy_graph_runs (config_hash, agent_type, prompt_version, run_id, decided_at, served, dropped,
+                chars_full, chars_served, routes, context)
+            VALUES (:h, :a, :v, :r, :t, :s, :d, :cf, :cs, :routes, :ctx)
+        """), {"h": config_hash, "a": agent_type, "v": prompt_version, "r": run_id, "t": decided_at or _now(),
+               "s": int(served), "d": int(dropped), "cf": int(chars_full), "cs": int(chars_served),
+               "routes": json.dumps(routes or {}, sort_keys=True), "ctx": json.dumps(context or {}, sort_keys=True)})
+
+
+def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> Optional[dict]:
+    """Trim statistics over the last `limit` runs: the latest run plus averages — how much of the
+    full guideline text the graph query served."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT decided_at, prompt_version, run_id, served, dropped, chars_full, chars_served, routes, context
+            FROM policy_graph_runs WHERE config_hash = :h AND agent_type = :a
+            ORDER BY id DESC LIMIT :lim
+        """), {"h": config_hash, "a": agent_type, "lim": int(limit)}).fetchall()
+    if not rows:
+        return None
+    from .health import iso
+    latest = rows[0]
+    n = len(rows)
+    avg_served = sum(r[3] or 0 for r in rows) / n
+    avg_dropped = sum(r[4] or 0 for r in rows) / n
+    avg_full = sum(r[5] or 0 for r in rows) / n
+    avg_out = sum(r[6] or 0 for r in rows) / n
+    route_totals: dict = {}
+    for r in rows:
+        try:
+            for k, v in (json.loads(r[7] or "{}")).items():
+                route_totals[k] = route_totals.get(k, 0) + int(v)
+        except ValueError:
+            pass
+    return {
+        "runs": n,
+        "latest": {"decided_at": iso(latest[0]), "prompt_version": latest[1], "run_id": latest[2], "served": latest[3],
+                   "dropped": latest[4], "chars_full": latest[5], "chars_served": latest[6],
+                   "ratio": (latest[6] / latest[5]) if latest[5] else None,
+                   "routes": (json.loads(latest[7]) if latest[7] else {}), "context": (json.loads(latest[8]) if latest[8] else {})},
+        "average": {"served": avg_served, "dropped": avg_dropped, "chars_full": avg_full, "chars_served": avg_out,
+                    "ratio": (avg_out / avg_full) if avg_full else None},
+        "routes": route_totals,
+    }
+
+
+__all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "ensure_runs_schema", "record_run", "run_stats",
+           "DDL_RUNS_POSTGRES", "record_served", "record_cited", "hit_counts",
            "hit_map", "health_for_prompt", "backfill_hits_from_decisions", "DDL_HITS_POSTGRES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
            "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health"]

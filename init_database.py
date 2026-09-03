@@ -815,6 +815,9 @@ def initialize_database() -> None:
         ensure_table(conn, stats, "policy_graph_hits", _POLICY_HITS_DDL)
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_node ON policy_graph_hits (config_hash, node_id, decided_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_policy_graph_hits_run ON policy_graph_hits (config_hash, run_id)"))
+        # Per-run trim statistics of the graph query (served / dropped guidelines, full vs served chars).
+        from policy_graph.citations import DDL_RUNS_POSTGRES as _POLICY_RUNS_DDL
+        ensure_table(conn, stats, "policy_graph_runs", _POLICY_RUNS_DDL)
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(

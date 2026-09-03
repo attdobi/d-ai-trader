@@ -503,7 +503,7 @@ def test_routes_json_shapes_and_errors(client):
     assert r.status_code == 200 and r.get_json()["results"][0]["action"] == "rebuilt"
 
     # error envelope
-    assert client.get("/api/policy-graph/versions").get_json() == {"error": "agent is required (DeciderAgent | SummarizerAgent | FeedbackAgent)"}
+    assert client.get("/api/policy-graph/versions").get_json() == {"error": "agent is required (DeciderAgent | SummarizerAgent | FeedbackAgent | CompanyExtractionAgent)"}
     assert client.get("/api/policy-graph/versions").status_code == 400
     r = client.get("/api/policy-graph/graph?agent=DeciderAgent&version=3")
     assert r.status_code == 404 and "error" in r.get_json()

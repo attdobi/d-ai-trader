@@ -96,7 +96,7 @@ def test_version_root_uses_explicit_repo_root_and_config_hash(tmp_path):
     assert root == tmp_path / "agents" / "decider" / "policy-graph" / CFG
     assert store.version_root(tmp_path, "SummarizerAgent", "9ea09b9as") == tmp_path / "agents" / "summarizer" / "policy-graph" / "9ea09b9as"
     with pytest.raises(ValueError):
-        store.version_root(tmp_path, "CompanyExtractionAgent", CFG)
+        store.version_root(tmp_path, "NoSuchAgent", CFG)
     with pytest.raises(ValueError):
         store.version_root(tmp_path, AGENT, "../escape")
 

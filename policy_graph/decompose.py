@@ -545,6 +545,12 @@ def _root_body(agent_type: str, config_hash: str, version: int, meta: RowMeta, f
                   "'## AGENT IDENTITY' + soul, then strategy_directives substituted for {strategy_directives} "
                   "(appended when absent), then '## LESSONS FROM EXPERIENCE' + memory, then the "
                   "PERFORMANCE FEEDBACK suffix; user prompt = user_prompt_template filled per cycle.")
+    elif agent_type == "CompanyExtractionAgent":
+        recipe = ("Runtime assembly (decider_agent.extract_companies_from_summaries): system prompt = system_prompt "
+                  "template, then '## AGENT IDENTITY' + soul, then strategy_directives substituted for "
+                  "{strategy_directives} (appended when absent), then '## LESSONS FROM EXPERIENCE' + memory; user "
+                  "prompt = user_prompt_template with the cycle's summaries filled in. Its tickers seed the "
+                  "market-trends recap and the Decider's graph query (route 'entities').")
     else:
         recipe = ("Runtime assembly (feedback_agent._generate_ai_feedback): only the soul is injected "
                   "('## AGENT IDENTITY' after the hardcoded system base); the stored templates, "
@@ -588,6 +594,10 @@ def _runtime_inputs_body(agent_type: str, fields: dict) -> str:
         lines.append("")
         lines.append("Blocks supplied by main.get_openai_summary every cycle: article text / screenshots, "
                      "portfolio holdings snapshot, PERFORMANCE FEEDBACK from the latest feedback row.")
+    elif agent_type == "CompanyExtractionAgent":
+        lines.append("")
+        lines.append("Blocks supplied by decider_agent.extract_companies_from_summaries every cycle: the "
+                     "Summarizers' headlines and insights (about six summaries), one block per summarizer.")
     else:
         lines.append("")
         lines.append("Blocks supplied by feedback_agent._generate_ai_feedback: closed-trade sample, computed "

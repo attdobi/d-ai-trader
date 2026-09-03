@@ -31,7 +31,8 @@
   const AGENTS = [
     { agent_type: 'DeciderAgent', label: 'Decider', prefix: 'DA' },
     { agent_type: 'SummarizerAgent', label: 'Summarizer', prefix: 'SA' },
-    { agent_type: 'FeedbackAgent', label: 'Feedback', prefix: 'FA' }
+    { agent_type: 'FeedbackAgent', label: 'Feedback', prefix: 'FA' },
+    { agent_type: 'CompanyExtractionAgent', label: 'Company', prefix: 'CA' }
   ];
   const AGENT_TYPES = new Set(AGENTS.map(a => a.agent_type));
 
@@ -100,7 +101,8 @@
     rebuildReason: null,
     proposals: [],
     proposalsAgent: null,
-    proposalPoll: null
+    proposalPoll: null,
+    trim: null
   };
 
   // Live d3 selections for the current render (null before the first render).
@@ -428,6 +430,7 @@
       state.versions = (Array.isArray(data.versions) ? data.versions : []).slice().sort((a, b) => Number(a.version) - Number(b.version));
       state.current = data.current ?? null;
       state.versionNotes = Array.isArray(data.notes) ? data.notes : [];
+      state.trim = data.trim || null;
       return data;
     } catch (error) {
       if (error.status === 503 && retry) {
@@ -652,6 +655,14 @@
       notes.push(`${inForce} · ${window_}`);
     }
     state.versionNotes.forEach(n => notes.push(String(n)));
+    const t = state.trim;
+    if (t && t.latest) {
+      const l = t.latest;
+      const a = t.average || {};
+      const pctOf = r => (r === null || r === undefined) ? '—' : `${Math.round(Number(r) * 100)}%`;
+      const routes = Object.entries(l.routes || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${v}`).join(', ');
+      notes.push(`graph query (last run v${l.prompt_version ?? '?'} ${fmtPT(l.decided_at)}): served ${l.served} guidelines, ${l.dropped} not shown · ${Number(l.chars_served || 0).toLocaleString()} of ${Number(l.chars_full || 0).toLocaleString()} chars (${pctOf(l.ratio)})${routes ? ` · routes ${routes}` : ''} · ${t.runs}-run average ${pctOf(a.ratio)} of the full text, ${Math.round(a.served || 0)} served / ${Math.round(a.dropped || 0)} not shown`);
+    }
     const existing = meta.querySelector('.pg-timeline-note');
     if (existing) existing.remove();
     const p = document.createElement('p');

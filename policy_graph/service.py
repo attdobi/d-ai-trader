@@ -647,6 +647,13 @@ def list_versions(engine, config_hash: str, agent_type: str, *, repo_root, is_ma
                          f"activation: not recorded")
     else:
         notes.append("no activation events recorded for this agent — windows fall back to row created_at")
+    trim = None
+    if agent_type == "DeciderAgent":
+        try:
+            from . import citations as _cit
+            trim = _cit.run_stats(engine, config_hash, agent_type)
+        except Exception:     # noqa: BLE001 — the table may not exist yet
+            trim = None
     by_v = {r["version"]: r for r in rows}
     if 0 in by_v and 1 in by_v and by_v[0]["created_at"] and by_v[1]["created_at"] \
             and by_v[0]["created_at"] > by_v[1]["created_at"]:
@@ -659,7 +666,7 @@ def list_versions(engine, config_hash: str, agent_type: str, *, repo_root, is_ma
     return {
         "agent_type": agent_type, "prefix": AGENT_PREFIX[agent_type], "config_hash": config_hash,
         "current": ctx.current_version(agent_type), "latest": ctx.latest_version(agent_type),
-        "versions": versions, "notes": notes, "store_busy": busy,
+        "versions": versions, "notes": notes, "store_busy": busy, "trim": trim,
     }
 
 

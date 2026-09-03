@@ -441,7 +441,7 @@ def test_feedback_status_inert_except_soul():
 
 def test_unknown_agent_rejected():
     with pytest.raises(ValueError):
-        build("CompanyExtractionAgent", {"soul": "x"})
+        build("NoSuchAgent", {"soul": "x"})
 
 
 def test_colors_mirror_has_all_polarities():

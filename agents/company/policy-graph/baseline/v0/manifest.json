@@ -1,0 +1,104 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "CompanyExtractionAgent",
+ "prefix": "CA",
+ "config_hash": "baseline",
+ "version": 0,
+ "root_id": "CA.root",
+ "prompt_version_id": 0,
+ "created_at": "2026-01-01T00:00:00",
+ "created_by": "init_database",
+ "actor_kind": "seed",
+ "description": "v0 baseline CompanyExtractionAgent — committed with the repository",
+ "is_active": true,
+ "materialized_by": "baseline",
+ "source_sha256": {
+  "system_prompt": "ff40a46f8ab2c57f89c7040b846f773af4f1277fffb61bce65a70dd3abd5f4ce",
+  "user_prompt_template": "710de1d6bb083b8e4615990d6f564d2e5c77c69c1c73ad17fcfbbecfe5f1619b",
+  "strategy_directives": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "soul": "80ce6fad0b4ab24c7035c50dc43d6bf07e0051611b3eecbda57490f0f67cb00f",
+  "memory": "7a5504d5afdf4e8e346acda2bfb3794248c573fa46e4ddfafe28b8ffd7c1fd2d"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": true,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "CA.template.system"
+  ],
+  "user_prompt_template": [
+   "CA.template.user"
+  ],
+  "strategy_directives": [
+   "CA.directives"
+  ],
+  "soul": [
+   "CA.soul",
+   "CA.soul.mission",
+   "CA.soul.principles",
+   "CA.soul.identity",
+   "CA.soul.style"
+  ],
+  "memory": [
+   "CA.memory",
+   "CA.memory.lessons",
+   "CA.memory.lessons.parent_rollup",
+   "CA.memory.lessons.no_guess",
+   "CA.memory.lessons.dedupe",
+   "CA.memory.log"
+  ]
+ },
+ "node_count": 16,
+ "edge_count": 18,
+ "code": {
+  "sha": "9ee0e6c1cfea",
+  "dir": null,
+  "git_sha": "baseline",
+  "fires": {}
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": null,
+ "delta_vs_prev": {
+  "added": 14,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": null
+ },
+ "kind": "seed",
+ "history": []
+}

@@ -1,0 +1,149 @@
+[
+ {
+  "source_node_id": "CA.directives",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.lessons",
+  "target_node_id": "CA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.lessons.dedupe",
+  "target_node_id": "CA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.lessons.no_guess",
+  "target_node_id": "CA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.lessons.parent_rollup",
+  "target_node_id": "CA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.log",
+  "target_node_id": "CA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.runtime.inputs",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.soul",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.soul.identity",
+  "target_node_id": "CA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.soul.mission",
+  "target_node_id": "CA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.soul.principles",
+  "target_node_id": "CA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.soul.style",
+  "target_node_id": "CA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.template.system",
+  "target_node_id": "CA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "CompanyExtractionAgent.baseline.v0",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "CA.template.system",
+  "target_node_id": "CA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "CompanyExtractionAgent.baseline.v0",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "CA.template.system",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.template.user",
+  "target_node_id": "CA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "CompanyExtractionAgent.baseline.v0",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "CA.template.user",
+  "target_node_id": "CA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ }
+]

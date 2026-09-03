@@ -6,9 +6,11 @@ from dataclasses import dataclass, field as dc_field
 from typing import Optional
 
 # ----------------------------------------------------------------------------- agents
-AGENT_PREFIX = {"DeciderAgent": "DA", "SummarizerAgent": "SA", "FeedbackAgent": "FA"}
-AGENT_DIR = {"DeciderAgent": "decider", "SummarizerAgent": "summarizer", "FeedbackAgent": "feedback"}
-AGENT_LABEL = {"DeciderAgent": "Decider", "SummarizerAgent": "Summarizer", "FeedbackAgent": "Feedback"}
+AGENT_PREFIX = {"DeciderAgent": "DA", "SummarizerAgent": "SA", "FeedbackAgent": "FA", "CompanyExtractionAgent": "CA"}
+AGENT_DIR = {"DeciderAgent": "decider", "SummarizerAgent": "summarizer", "FeedbackAgent": "feedback",
+             "CompanyExtractionAgent": "company"}
+AGENT_LABEL = {"DeciderAgent": "Decider", "SummarizerAgent": "Summarizer", "FeedbackAgent": "Feedback",
+               "CompanyExtractionAgent": "Company extraction"}
 PREFIX_AGENT = {v: k for k, v in AGENT_PREFIX.items()}
 
 FIELDS = ("system_prompt", "user_prompt_template", "strategy_directives", "soul", "memory")
@@ -40,7 +42,7 @@ EDGE_TYPES = (
     "includes", "related_to", "cites", "overlaps", "constrains", "enforced_by",
 )
 
-ID_RE = re.compile(r"^(DA|SA|FA)(\.[a-z0-9_]+)+$")
+ID_RE = re.compile(r"^(DA|SA|FA|CA)(\.[a-z0-9_]+)+$")
 VERSION_DIR_RE = re.compile(r"^v(\d+)$")
 
 # ----------------------------------------------------------------------------- colours (mirrored in JS)

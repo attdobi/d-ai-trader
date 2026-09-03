@@ -225,7 +225,8 @@ def test_code_nodes_conditions():
     assert by_id["DA.code.json_fallback"].extra["fires"] is True
 
 
-@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 1), ("FeedbackAgent", "FA", 3)])
+@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 1), ("FeedbackAgent", "FA", 3),
+                                                ("CompanyExtractionAgent", "CA", 0)])
 def test_code_nodes_other_agents(agent, prefix, count):
     nodes = code_nodes(agent, {}, is_margin_account=False)
     assert len(nodes) == count

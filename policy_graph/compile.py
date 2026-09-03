@@ -233,7 +233,7 @@ def compile_runtime_preview(version: Version, *, is_margin_account: bool) -> dic
     soul, strategy, memory = eff["soul"], eff["strategy_directives"], eff["memory"]
     fires: dict = {}
 
-    if agent in ("DeciderAgent", "SummarizerAgent"):
+    if agent in ("DeciderAgent", "SummarizerAgent", "CompanyExtractionAgent"):
         if soul:
             system = f"{system}\n\n## AGENT IDENTITY\n{soul}"
         if strategy and "{strategy_directives}" in system:
