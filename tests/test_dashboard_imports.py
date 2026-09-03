@@ -7,8 +7,25 @@ import types
 import pytest
 
 
+def _policy_graph_modules():
+    return {k: v for k, v in sys.modules.items() if k == "policy_graph" or k.startswith("policy_graph.")}
+
+
 @pytest.fixture
-def dashboard_server_module(monkeypatch):
+def isolated_policy_graph():
+    """policy_graph.* imported under the stubs must not leak into later tests (they would keep
+    the stub flask/sqlalchemy bindings): drop them before, restore the originals after."""
+    before = _policy_graph_modules()
+    for k in before:
+        del sys.modules[k]
+    yield
+    for k in _policy_graph_modules():
+        del sys.modules[k]
+    sys.modules.update(before)
+
+
+@pytest.fixture
+def dashboard_server_module(monkeypatch, isolated_policy_graph):
     """Import dashboard_server with deterministic stub dependencies."""
 
     flask_stub = types.ModuleType("flask")
@@ -34,6 +51,7 @@ def dashboard_server_module(monkeypatch):
     flask_stub.render_template = lambda *args, **kwargs: {"template": args[0] if args else None}
     flask_stub.jsonify = lambda *args, **kwargs: {"args": args, "kwargs": kwargs}
     flask_stub.request = types.SimpleNamespace(args={}, json=None, method="GET")
+    flask_stub.Response = lambda *args, **kwargs: {"response": args, "kwargs": kwargs}
     monkeypatch.setitem(sys.modules, "flask", flask_stub)
 
     sqlalchemy_stub = types.ModuleType("sqlalchemy")
@@ -165,7 +183,8 @@ def dashboard_server_module(monkeypatch):
 
     sys.modules.pop("dashboard_server", None)
     module = importlib.import_module("dashboard_server")
-    return module, decider_stub
+    yield module, decider_stub
+    sys.modules.pop("dashboard_server", None)
 
 
 def test_dashboard_decider_import_bindings(dashboard_server_module):
@@ -178,3 +197,54 @@ def test_dashboard_decider_import_bindings(dashboard_server_module):
     assert module.fetch_holdings is decider_stub.fetch_holdings
     assert module.store_momentum_snapshot is decider_stub.store_momentum_snapshot
     assert module.SUMMARY_MAX_CHARS == 7777
+
+
+def test_dashboard_registers_policy_graph_routes(dashboard_server_module):
+    module, _decider_stub = dashboard_server_module
+
+    paths = [r[0][0] for r in module.app.routes if r[0]]
+    assert "/policy-graph" in paths
+    assert "/api/policy-graph/graph" in paths
+    assert "/api/policy-graph/versions" in paths
+    assert "/api/policy-graph/rebuild" in paths
+
+
+def test_policy_graph_routes_import_alone_under_stubs(monkeypatch, isolated_policy_graph):
+    """policy_graph.routes needs only flask + sqlalchemy.text — never config."""
+    flask_stub = types.ModuleType("flask")
+
+    class _DummyFlaskApp:
+        def __init__(self, *args, **kwargs):
+            self.routes = []
+
+        def route(self, *args, **kwargs):
+            def _decorator(func):
+                self.routes.append((args, kwargs, func.__name__))
+                return func
+
+            return _decorator
+
+    flask_stub.Flask = _DummyFlaskApp
+    flask_stub.render_template = lambda *args, **kwargs: None
+    flask_stub.jsonify = lambda *args, **kwargs: None
+    flask_stub.request = types.SimpleNamespace(args={}, json=None, method="GET")
+    flask_stub.Response = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "flask", flask_stub)
+
+    sqlalchemy_stub = types.ModuleType("sqlalchemy")
+    sqlalchemy_stub.text = lambda sql: sql
+    monkeypatch.setitem(sys.modules, "sqlalchemy", sqlalchemy_stub)
+    monkeypatch.delitem(sys.modules, "config", raising=False)
+
+    routes = importlib.import_module("policy_graph.routes")
+
+    app = _DummyFlaskApp()
+    routes.register_policy_graph_routes(
+        app, engine=object(), get_config_hash=lambda: "test-config-hash", repo_root="/tmp/nowhere",
+        is_margin_account=False)
+    paths = [r[0][0] for r in app.routes]
+    assert paths[0] == "/policy-graph"
+    assert {"/api/policy-graph/agents", "/api/policy-graph/versions", "/api/policy-graph/graph",
+            "/api/policy-graph/node", "/api/policy-graph/diff", "/api/policy-graph/compiled",
+            "/api/policy-graph/bundle", "/api/policy-graph/file", "/api/policy-graph/rebuild"} <= set(paths)
+    assert "config" not in sys.modules

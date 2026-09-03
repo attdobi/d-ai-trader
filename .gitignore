@@ -73,3 +73,8 @@ requirements.fragment.txt
 startup_config.py
 schwab_tokens.json
 schwab_tokens.json
+
+# Policy graph store scratch (agents/*/policy-graph/<config>/): lock, build temp, partial writes
+agents/*/policy-graph/*/.lock
+agents/*/policy-graph/*/.tmp-*
+agents/*/policy-graph/**/*.part

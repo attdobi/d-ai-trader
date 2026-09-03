@@ -51,3 +51,9 @@ Template for new entries:
 - **Lesson:** the Summarizer's leverage is CONTEXT the screener cannot see: index and leader regime, sector-ETF direction, crowding/extension of headlined names, scheduled events (earnings — [[MDB]] −15.2% gapped through an earnings print), coordinated coverage. Say "leaders rolling over" when the tape shows it.
 - **Confidence:** high
 - **Related:** [[feedback_agent]] [[regime]]
+
+## 2026-09-01 #catalyst-provenance #analyst-opinion
+- **Observation:** [[AMZN]] entered on a fresh Evercore AI call after an initial +3.7% move, but reported 0.9x volume and closed at -1.9%.
+- **Lesson:** Record the underlying event time and classify analyst opinion separately from a hard corporate event; article recency alone is not validation.
+- **Confidence:** medium
+- **Related:** [[AMZN]] [[shared/media-narrative-playbook]]

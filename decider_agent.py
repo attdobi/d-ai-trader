@@ -263,6 +263,40 @@ def store_momentum_snapshot(config_hash, run_id, companies, momentum_data, momen
 
 
 
+def _sessions_ago_cutoff(sessions: int = 2):
+    """Start (UTC midnight) of the trading session `sessions` sessions before today, weekends skipped."""
+    from datetime import datetime as _dt, timedelta as _td
+    day = _dt.utcnow().date()
+    remaining = int(sessions)
+    while remaining > 0:
+        day -= _td(days=1)
+        if day.weekday() < 5:
+            remaining -= 1
+    return _dt.combine(day, _dt.min.time())
+
+
+def recently_exited_tickers(config_hash: str, sessions: int = 2) -> set:
+    """Tickers this config SOLD within the last `sessions` trading sessions.
+
+    Re-entry quarantine: same-ticker entries within 3 days of an exit were the single
+    largest measured leak (Jul-Sep 2026: 18 re-entries, 33% win, -$156, vs 53% win and
+    +$145 for spaced entries). The set is removed from the contrarian watchlist and
+    printed as a QUARANTINE line in the prompt. Best-effort — empty set on any error.
+    """
+    try:
+        from config import engine as _engine
+        from sqlalchemy import text as _text
+        with _engine.connect() as conn:
+            rows = conn.execute(_text("""
+                SELECT DISTINCT ticker FROM trade_outcomes
+                WHERE config_hash = :h AND ticker != 'N/A' AND sell_timestamp >= :cutoff
+            """), {"h": config_hash, "cutoff": _sessions_ago_cutoff(sessions)}).fetchall()
+        return {str(r.ticker).upper() for r in rows if r.ticker}
+    except Exception as exc:
+        print(f"⚠️  Re-entry quarantine lookup skipped: {exc}")
+        return set()
+
+
 def get_daily_trade_usage(config_hash: str) -> Dict[str, Any]:
     """Summarize today's recorded decisions for pacing logic."""
     now_pacific = datetime.now(PACIFIC_TIMEZONE)
@@ -2532,7 +2566,25 @@ OUTPUT (STRICT)
     tickers_entered_today_list = daily_usage.get("tickers_entered_today", [])
     tickers_entered_today_str = ", ".join(tickers_entered_today_list) if tickers_entered_today_list else "none"
 
+    # Index regime (SPY/QQQ vs 20d MA + momentum-leader cohort), computed by the contrarian
+    # screener from its batched download. The same pullback rules made money in RISK-ON and
+    # lost in every bucket once the leaders rolled over (Aug 2026), so the regime gates
+    # deployment. Best-effort — an unavailable read degrades to MIXED (half size, max 2 buys).
+    index_regime_text = (
+        "# INDEX REGIME: UNAVAILABLE this cycle — treat as MIXED: at most 2 new BUYs at half size, "
+        "extension ≤5% above the 20d MA only, priced kill required."
+    )
+    try:
+        from contrarian_screener import get_index_regime, format_index_regime
+        _regime = get_index_regime()
+        if _regime:
+            index_regime_text = format_index_regime(_regime)
+            print(f"🌡️  Index regime: {_regime.get('label')} ({_regime.get('why')})")
+    except Exception as _regime_exc:
+        print(f"⚠️  Index regime skipped: {_regime_exc}")
+
     template_has_holdings = "{holdings}" in user_prompt_template
+    template_has_regime = "{index_regime}" in user_prompt_template
     template_has_summaries = "{summaries}" in user_prompt_template
     template_has_momentum = "{momentum_recap}" in user_prompt_template
     template_has_feedback = "{feedback_context}" in user_prompt_template
@@ -2561,6 +2613,7 @@ OUTPUT (STRICT)
         "summaries": summarized_text,
         "momentum_recap": momentum_recap,
         "feedback_context": feedback_context,
+        "index_regime": index_regime_text,
     }
     prompt = safe_format_template(user_prompt_template, user_prompt_values)
     auto_context_sections = []
@@ -2576,19 +2629,25 @@ OUTPUT (STRICT)
         auto_context_sections.append("Momentum recap:\n" + momentum_recap)
     if not template_has_feedback and feedback_context and feedback_context.strip():
         auto_context_sections.append("Feedback context:\n" + feedback_context.strip())
+    if not template_has_regime and index_regime_text:
+        auto_context_sections.append(index_regime_text)
     if auto_context_sections:
         prompt += "\n\n# Auto-context (missing fields in prompt template)\n" + "\n\n".join(auto_context_sections)
 
     # Front-run candidate source: non-extended pullback / oversold names so the anti-chase
     # doctrine actually has something to BUY (the news/gainers feed only surfaces already-
-    # extended movers). Best-effort — a screener failure must never break the decider.
+    # extended movers). Tickers exited within the last 2 sessions are QUARANTINED — removed
+    # from the candidates and named in the block — because same-ticker re-entry within 3 days
+    # was the largest measured leak (Jul-Sep 2026). Best-effort — never breaks the decider.
     try:
         from contrarian_screener import get_contrarian_candidates, format_contrarian_watchlist
-        _contra = get_contrarian_candidates()
-        _contra_block = format_contrarian_watchlist(_contra)
+        _quarantined = recently_exited_tickers(config_hash)
+        _contra = get_contrarian_candidates(exclude=_quarantined)
+        _contra_block = format_contrarian_watchlist(_contra, quarantined=_quarantined)
         if _contra_block:
             prompt += "\n\n" + _contra_block
-            print(f"🎯 Contrarian watchlist: {len(_contra)} non-extended front-run candidates fed to decider")
+            print(f"🎯 Contrarian watchlist: {len(_contra)} non-extended front-run candidates fed to decider"
+                  + (f" | quarantined: {', '.join(sorted(_quarantined))}" if _quarantined else ""))
         else:
             print("🎯 Contrarian watchlist: no non-extended candidates screened this cycle")
     except Exception as _contra_exc:
@@ -2648,29 +2707,34 @@ OUTPUT (STRICT)
         " when a real, non-chase setup clears the signals you actually have."
     )
     prompt += (
-        "\n\nDEPLOY BIAS (you are a TRADER, not a cash custodian):"
-        " Your sources surface names that are already moving, so most candidates will be somewhat"
-        " green — that is normal, NOT a reason to reject them all. Block genuine post-pop chases (≥8%"
-        " day moves, vertical/parabolic spikes, climactic exhaustion-volume tops), but a name near its"
-        " day-high or 52-week high is NOT automatically a chase — strong stocks trend at highs. When"
-        " 1-2 non-extended candidates have a fresh catalyst, a positive 10m/1h trend, and adequate"
-        " (≥ ~0.8x) volume, TAKE the best of them rather than defaulting to cash. Cash is a position,"
-        " not a hiding place; sitting 100% in cash cycle after cycle while reasonable entries pass is failure."
-        " The CONTRARIAN WATCHLIST names are your PRIME front-run candidates — evaluate them FIRST; for"
-        " them a valid pullback/reversal setup with technical confirmation IS the thesis even without a"
-        " fresh news catalyst (that is exactly what front-running means: position before the obvious catalyst)."
+        "\n\nDEPLOY POLICY (regime-aware — you are a trader, not a cash custodian, but deployment is conditional):"
+        " Read the INDEX REGIME line first. RISK-ON: when 1-2 watchlist setups clear the filter, TAKE the best"
+        " rather than defaulting to cash; full rails; extension ≤5% above the 20d MA at full size, 5-8% at half"
+        " size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: cash IS the correct default;"
+        " at most 1 new BUY at half size and only an oversold reversal or a name ≤3% above its 20d MA; harvest at"
+        " +2%; no re-entry exceptions. Never deploy in RISK-OFF because cash 'feels like failure'. In every regime"
+        " block genuine post-pop chases (≥8% day moves, vertical/parabolic spikes, climactic exhaustion-volume"
+        " tops) and any name tagged EXTENDED beyond the regime's allowance; a name near its day-high or 52-week"
+        " high is NOT automatically a chase. The CONTRARIAN WATCHLIST names are your PRIME front-run candidates —"
+        " evaluate them FIRST; for them a valid pullback/reversal setup with technical confirmation IS the thesis"
+        " even without a fresh news catalyst. Names on the QUARANTINE line are not candidates this cycle."
     )
     prompt += (
-        "\n\nCONFIRMATION POLICY (this OVERRIDES any stricter 'require confirmation' language above):"
+        "\n\nCONFIRMATION POLICY (intraday micro-signals only — it never relaxes the regime gate, the extension"
+        " cap, the re-entry quarantine or the priced-kill requirement):"
         " Intraday micro-signals — VWAP, 10-minute and 1-hour trend, and abnormal/relative volume — are"
         " FREQUENTLY UNAVAILABLE, above all in the first ~30-45 minutes after the open (no intraday history"
         " exists yet) and for the contrarian watchlist. Their absence ('N/A', '0.0x') is EXPECTED and must"
-        " NEVER block a BUY or force a cash-hold. Confirm with the signals that ARE reliable: multi-day and"
-        " monthly trend, relative strength vs SPY, position vs the 20-day MA and recent range, the"
+        " NEVER by itself block a BUY or force a cash-hold. Confirm with the signals that ARE reliable: multi-day"
+        " and monthly trend, relative strength vs SPY, position vs the 20-day MA and recent range, the"
         " pullback/reversal setup itself, and catalyst. A quality non-extended setup — above all a pullback"
-        " in an uptrend on a down day (buying the dip) — is BUYABLE on those alone. When you have settled"
-        " cash and 1-2 such setups exist, TAKE the best; do not hide in cash waiting for intraday signals"
-        " that will not exist for another half hour."
+        " in an uptrend on a down day (buying the dip) — is BUYABLE on those alone when the regime allows it."
+        " PRICED KILL: every BUY reason ends with K:<price>;D:<%>. Form the kill from SUPPLIED numbers — the"
+        " HIGHER of the watchlist's 20d MA level (or a stated support level) and entry × 0.97 (the 3% kill)."
+        " The watchlist prints the price, the 20d MA and the 3% kill; the Momentum Recap prints the price."
+        " You never need a quoted 'entry reference' beyond that price. If no supplied number puts a kill within"
+        " 3%, size half; if none within 6%, PASS. The kill is binding on the first breach — no widening, no"
+        " waiting for the close, no averaging."
     )
     prompt += (
         "\n\nRECENCY & PROVENANCE (do NOT churn your own fresh entries):"

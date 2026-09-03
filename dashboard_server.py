@@ -67,10 +67,15 @@ from d_ai_trader import (
     DAITraderOrchestrator,
     mark_manual_decider_window,
 )
+from pathlib import Path
+from policy_graph.routes import register_policy_graph_routes
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
 app = Flask(__name__)
+register_policy_graph_routes(
+    app, engine=engine, get_config_hash=get_current_config_hash,
+    repo_root=Path(__file__).resolve().parent, is_margin_account=IS_MARGIN_ACCOUNT)
 
 # Manual "Run All" concurrency guard and state tracking
 _manual_run_lock = threading.Lock()
@@ -3757,15 +3762,43 @@ def _fetch_prompt_review_history(config_hash, agent_type=None, limit=8, genuine_
         return []
 
 
+def _generation_supplied_fields():
+    try:
+        from feedback_diagnostics import SUPPLIED_DECIDER_FIELDS
+        return SUPPLIED_DECIDER_FIELDS
+    except Exception:
+        return 'unavailable'
+
+
+def _safe_diagnostics(config_hash, days=30):
+    """Population-level diagnostics (feedback_diagnostics.py) for the generator and the
+    critic — regime split, extension buckets, re-entry churn, payoff/breakeven, ranked
+    leaks in dollars. Never blocks the flow."""
+    try:
+        from feedback_diagnostics import compute_trade_diagnostics, format_diagnostics
+        diag = compute_trade_diagnostics(config_hash, days)
+        return {"text": format_diagnostics(diag), "ranked_leaks_usd": diag.get("ranked_leaks_usd", []),
+                "regime_split": diag.get("regime_split", {}), "current_regime": diag.get("current_regime"),
+                "payoff": diag.get("payoff", {}), "reentry": diag.get("reentry", {})}
+    except Exception as exc:
+        print(f"⚠️ Could not compute trade diagnostics: {exc}")
+        return {"text": "unavailable"}
+
+
 def _critique_candidate(candidate, feedback_summary=None):
-    """Critic agent: decide whether a candidate change is worth shipping.
+    """Critic agent (the "gate"): decide whether a candidate prompt change is worth shipping.
 
-    The objective is improving realized win rate by learning from past wins and
-    losses — NOT prose quality. Returns {verdict: 'approve'|'reject', reason,
-    confidence (0-1), auto (bool)}.
+    Recalibrated 2026-09-02. The old bar — "the trade rows must VALIDATE the rule" — can
+    never be met with 30-60 closed trades, so the critic rejected 6/6 candidates in the
+    last two batches at 0.90-0.95 confidence, the human overrode 6/6, and the feedback
+    agent (told to treat critic objections as standing requirements) then softened the
+    one rule with the largest measured effect (re-entry quarantine, -$156 over 18 trades).
+    The gate now enforces a TRUST REGION: one attributable, falsifiable, executable change
+    per candidate that targets a measured leak. A small sample is a reason to keep the
+    step small — never a reason to reject on its own.
 
-    Cosmetic-only candidates (no behaviorally-major change) are auto-rejected
-    without an LLM call. Substantive candidates get a skeptical LLM review.
+    Returns {verdict: 'approve'|'reject', reason, confidence (0-1), auto (bool)}.
+    Cosmetic-only candidates are auto-rejected without an LLM call.
     """
     summary = candidate.get('change_summary') or {}
     changes = candidate.get('changes') or []
@@ -3780,13 +3813,17 @@ def _critique_candidate(candidate, feedback_summary=None):
 
     perf = feedback_summary or {}
     config_hash = get_current_config_hash()
-    # Give the critic what it needs to VERIFY claims instead of rejecting for
-    # lack of evidence: per-trade outcomes, plus its own recent verdicts with
-    # the human's RLHF response for calibration.
+    # Give the critic what it needs to VERIFY claims instead of rejecting for lack of
+    # evidence: population diagnostics, per-trade outcomes, the fields the Decider
+    # actually receives, plus its own recent verdicts with the human's RLHF response.
     trade_evidence = _fetch_trade_evidence(config_hash)
     # genuine_only: heuristic auto-rejects and outage rows are NOT judgments —
     # feeding them here taught the critic to "calibrate" on its own downtime.
     own_track_record = _fetch_prompt_review_history(config_hash, limit=10, genuine_only=True)
+    try:
+        from feedback_diagnostics import SUPPLIED_DECIDER_FIELDS as _supplied
+    except Exception:
+        _supplied = 'unavailable'
     critic_payload = {
         'agent_type': candidate.get('agent_type'),
         'change_summary': summary,
@@ -3798,6 +3835,8 @@ def _critique_candidate(candidate, feedback_summary=None):
             'total_trades': perf.get('total_trades'),
             'decisions_analyzed': perf.get('decisions_analyzed'),
         },
+        'computed_diagnostics': _safe_diagnostics(config_hash),
+        'decider_supplied_fields': _supplied,
         'trade_level_evidence': trade_evidence,
         'your_recent_verdicts_and_human_response': own_track_record,
     }
@@ -3817,29 +3856,43 @@ def _critique_candidate(candidate, feedback_summary=None):
                 {
                     'role': 'system',
                     'content': (
-                        'You are a skeptical critic in a reinforcement-learning loop for an autonomous '
-                        'trading system. The ONLY objective is to improve realized win rate / expectancy by '
-                        'learning from past wins and losses. You are reviewing a proposed prompt change before '
-                        'it reaches a human and possibly production.\n\n'
-                        'APPROVE only if the change is (a) behaviorally meaningful, (b) grounded in the actual '
-                        'recent performance/feedback data, and (c) plausibly improves win rate or loss '
-                        'containment. REJECT if it is churn, ungrounded speculation, weakens risk discipline '
-                        'without evidence, over-fits to a tiny sample, or just reorganizes text. When in doubt, '
-                        'REJECT — a missed improvement is cheaper than shipping noise into the policy.\n\n'
-                        'VERIFY BEFORE YOU JUDGE: trade_level_evidence contains the actual per-trade outcomes '
-                        '(worst first). Check the candidate\'s claims against those rows — a claim the rows '
-                        'support is grounded even if the candidate did not cite them; a claim the rows '
-                        'contradict is disqualifying. Cite tickers from the evidence in your reason.\n\n'
-                        'CALIBRATE — CAUTIOUSLY: your_recent_verdicts_and_human_response shows your past '
-                        'genuine verdicts and the human\'s response (the human is the final RLHF authority). '
-                        'Adjust your bar ONLY on a consistent pattern: three or more same-direction human '
-                        'overrides. A single disagreement is noise — never chase it. When '
-                        'realized_winrate_delta is present it OUTRANKS human concordance: a shipped change '
-                        'that lowered win rate was a wrong approval no matter who approved it, and a rejected '
-                        'direction later proven right should soften your bar for that direction. Judge the '
-                        'evidence in front of you; never approve merely because you predict the human will.\n\n'
-                        'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one or two '
-                        'sentences, "confidence": number 0-1}.'
+                        'You are the trust-region gate of a reinforcement-learning loop for an autonomous 1-5 day '
+                        'swing trading system (Schwab cash account, ~$400-$700 tickets, <=5 positions). A candidate '
+                        'prompt change is a policy step. Your job is to keep each step SMALL, ATTRIBUTABLE, EXECUTABLE '
+                        'and CONSISTENT WITH THE MEASURED LEAKS — not to demand statistical proof. With 30-60 closed '
+                        'trades nothing is ever "validated"; a small sample is a reason to keep the step small, never '
+                        'a reason to reject on its own. "The rows do not validate this" is NOT an objection unless the '
+                        'rows or computed_diagnostics CONTRADICT the change.\n\n'
+                        'APPROVE when all of these hold:\n'
+                        '(a) ONE primary behavioral change (a second minor supporting edit is tolerable) so its realized '
+                        'effect can be attributed;\n'
+                        '(b) it targets a leak that computed_diagnostics rank near the top (regime, entry extension above '
+                        'the 20d MA, kill distance, same-ticker re-entry, loss tail, payoff cap) or a documented failure '
+                        'the evidence rows do not contradict;\n'
+                        '(c) it states a falsification metric (which number over how many trades would prove it wrong) '
+                        'or is trivially measurable;\n'
+                        '(d) every gate it adds is executable from decider_supplied_fields — a rule that needs data the '
+                        'Decider never receives locks the system in cash (Decider v20 rejected every candidate on '
+                        '2026-09-02 for lacking a "quoted entry price" nothing supplied);\n'
+                        '(e) it does not widen risk (wider stops, more size, more slots, re-entry exceptions) without a '
+                        'diagnostic that supports it;\n'
+                        '(f) it preserves the Holdings ground-truth / anti-hallucination rules and the verbatim Mission '
+                        'and Shared Principles.\n\n'
+                        'REJECT — and name the specific fix — when: it bundles 3+ behavioral changes (put the ONE to ship '
+                        'first in ship_first); it contradicts the diagnostics (e.g. softens a re-entry quarantine while '
+                        're-entries are a ranked leak); it is cosmetic; it gates on unsupplied data (list them in '
+                        'unexecutable_gates); it asserts trade-level facts the rows contradict; it hedges a rule into '
+                        '"consider testing" language the Decider cannot execute.\n\n'
+                        'CALIBRATE: your_recent_verdicts_and_human_response shows your genuine verdicts and the '
+                        "human's response (the human is the final RLHF authority). Three or more same-direction human "
+                        'overrides mean YOUR bar is miscalibrated in that direction — say so in the reason and move it. '
+                        'realized_winrate_delta outranks concordance, BUT it is regime-confounded: a change shipped into '
+                        'a falling tape shows a negative delta regardless of merit — read computed_diagnostics.regime_split '
+                        'before blaming the change. Judge the evidence in front of you; never approve merely because you '
+                        'predict the human will.\n\n'
+                        'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one to three sentences citing '
+                        'tickers or numbers, "confidence": number 0-1, "ship_first": string or null, '
+                        '"unexecutable_gates": [strings]}.'
                     ),
                 },
                 {
@@ -3874,9 +3927,16 @@ def _critique_candidate(candidate, feedback_summary=None):
         except (TypeError, ValueError):
             confidence = 0.5
         confidence = max(0.0, min(1.0, confidence))
+        reason = str(parsed.get('reason', '') or '').strip() or 'No reason returned.'
+        ship_first = parsed.get('ship_first')
+        if ship_first:
+            reason += f" Ship first: {ship_first}."
+        gates = parsed.get('unexecutable_gates')
+        if isinstance(gates, list) and gates:
+            reason += " Unexecutable gates: " + "; ".join(str(g) for g in gates[:4]) + "."
         return {
             'verdict': verdict,
-            'reason': str(parsed.get('reason', '') or '').strip() or 'No reason returned.',
+            'reason': reason,
             'confidence': confidence,
             'auto': False,
         }
@@ -4041,6 +4101,10 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         # claim must be groundable in.
         'past_review_verdicts': _fetch_prompt_review_history(config_hash, agent_type, limit=8),
         'trade_level_evidence': _fetch_trade_evidence(config_hash),
+        # Population-level facts (regime split, extension, re-entry, payoff, ranked leaks)
+        # and the fields the Decider actually receives — a gate on anything else is a cash-lock.
+        'computed_diagnostics': _safe_diagnostics(config_hash),
+        'decider_supplied_fields': _generation_supplied_fields(),
         'goal': (
             'Improve prompt quality based on current performance and feedback history. '
             'Preserve placeholders/tokens and actionable structure while tightening clarity.'
@@ -4092,6 +4156,15 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'FEW, testable changes rather than bundling many edits whose impact cannot be attributed; '
                     '(3) never claim trade-level facts (stop breaches, loss tails, outliers) that the evidence '
                     'rows do not show. If the evidence does not support a change, do not propose it.\n\n'
+                    'ONE CHANGE PER CANDIDATE: ship exactly ONE primary behavioral change (plus at most one minor '
+                    'supporting edit) so its realized effect is attributable; a bundle of 4-5 "major" edits cannot be '
+                    'scored and will be split or rejected. computed_diagnostics are population-level facts computed in '
+                    'code over ALL closed campaigns — they outrank the 20+20 trade sample; target the top ranked leak '
+                    'first (regime, entry extension above the 20d MA, kill distance, same-ticker re-entry, loss tail). '
+                    'Every gate you add must be executable from decider_supplied_fields — never require data the '
+                    'Decider is not given (a candidate that demanded a "quoted entry reference and fixed kill" nothing '
+                    'supplied locked the system in cash on 2026-09-02). Do not hedge rules into "consider prospectively '
+                    'testing" language; state the trigger, the action and the falsification metric.\n\n'
                     'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
                     '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
                     'HOLD and SELL are ONLY valid for tickers the agent currently owns. '

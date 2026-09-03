@@ -15,6 +15,9 @@
   --radius: 16px;
   --font-display: 'Inter', 'Roboto', 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', monospace;
+  --graph-principle: #b28dff;
+  --graph-evidence: #4dd0e1;
+  --graph-mixed: #9aa7c7;
 }
 
 * { box-sizing: border-box; }

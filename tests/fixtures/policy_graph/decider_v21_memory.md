@@ -59,3 +59,12 @@ Template for new entries:
 - **Root cause:** (1) the screener capped only the DAY move, so "pullbacks" 9–18% above the 20d MA were served as front-run candidates; (2) the only kill was "exit on 20d break" — 9–15% away; (3) same-ticker re-entry within 3 days of an exit (18 trades, −$156) was the largest single leak; (4) no regime read — the prompt said cash is failure, so the book stayed deployed into a momentum unwind.
 - **Adjustment:** INDEX REGIME gate; extension cap ≤5% full / 5–8% half (RISK-ON only) / >8% reject; `K:<price>;D:<%>` from supplied numbers, ≤3% or half size, ≤6% or pass; 2-session re-entry quarantine (screener drops exited names); max 2 correlated semis/AI/quantum names.
 - **Related:** [[front-run-not-chase]] [[feedback_agent]] [[reentry-quarantine]]
+
+## 2026-09-01 #kill-geometry #risk-management
+- [[IONQ]] lost -10.4% after an entry 15% above its 20-day level with only an "exit on 20d break" condition.
+- [[LRCX]] lost -3.0% after its declared <$310 kill was breached at $304.24.
+- **Adjustment:** record a fixed numeric kill and entry-to-kill distance at entry; never treat a moving or unrecorded average as a complete kill plan.
+
+## 2026-09-01 #technical-pullback #evidence-calibration
+- [[TEAM]] +37.1%, [[SMCI]] +7.1%, and [[NET]] +8.9% were profitable technical-dip entries despite sparse supplied live support/tape fields.
+- **Adjustment:** keep controlled pullback, positive RS20, and intact-trend requirements, but mark absent support/tape as UNKNOWN and use it for ranking rather than automatically rejecting the setup.

@@ -549,9 +549,9 @@ class TradeOutcomeTracker:
             return trades
 
     def _generate_ai_feedback_for_config(self, outcomes, success_rate, avg_profit, analysis, config_hash):
-        """Generate AI feedback for a specific config without changing global state"""
-        return self._generate_ai_feedback(outcomes, success_rate, avg_profit, analysis)
-    
+        """Generate AI feedback for a specific config (diagnostics are computed for that config)."""
+        return self._generate_ai_feedback(outcomes, success_rate, avg_profit, analysis, config_hash=config_hash)
+
     def _store_feedback_for_config(self, lookback_days, total_trades, success_rate, avg_profit, analysis, feedback, config_hash):
         """Store feedback for a specific config"""
         with engine.begin() as conn:
@@ -639,23 +639,78 @@ class TradeOutcomeTracker:
         
         return str(value)
     
-    def _extract_feedback_snippet(self, feedback_value, max_chars=500):
-        """Create a short, formatting-safe feedback snippet for prompt injection"""
+    def _extract_feedback_snippet(self, feedback_value, max_chars=900):
+        """Create a compact, formatting-safe feedback snippet for prompt injection.
+
+        Cuts at a sentence boundary when possible: the old 500-char word cut left the
+        Decider with standing reminders ending mid-rule ("...shared those features with
+        IONQ -10.4%, RKLB..."), which is how v15-v19 spent weeks on truncated policy.
+        """
         text_value = self._flatten_feedback_text(feedback_value)
         if not text_value:
             text_value = "No recent feedback. Stay consistent with the current playbook."
-        
+
         condensed = " ".join(text_value.split())
         if len(condensed) > max_chars:
-            truncated = condensed[:max_chars].rsplit(" ", 1)[0]
-            if not truncated:
-                truncated = condensed[:max_chars]
-            condensed = f"{truncated}..."
-        
+            head = condensed[:max_chars]
+            cut = max(head.rfind(". "), head.rfind("; "), head.rfind(" | "))
+            if cut >= int(max_chars * 0.6):
+                condensed = head[:cut + 1].rstrip()
+            else:
+                condensed = head.rsplit(" ", 1)[0].rstrip() + "..."
+
         return condensed.replace("{", "{{").replace("}", "}}")
 
+    @staticmethod
+    def _rules_from_feedback(feedback, key):
+        """The compact rule list the feedback agent emits (decider_rules / summarizer_rules)."""
+        rules = feedback.get(key) if isinstance(feedback, dict) else None
+        if isinstance(rules, str):
+            try:
+                rules = json.loads(rules)
+            except Exception:
+                rules = [rules]
+        out = []
+        for r in rules or []:
+            r = " ".join(str(r).split()).strip()
+            if r:
+                out.append(r[:260].replace("{", "{{").replace("}", "}}"))
+        return out[:4]
+
+    def _build_reminder_block(self, feedback, feedback_key, rules_key):
+        """'## Latest Feedback Reminder (date)' section: the rule list when the feedback
+        agent supplied one, else a sentence-bounded snippet of the prose. Returns (block, rules)."""
+        from datetime import datetime as _dt
+        header = f"## Latest Feedback Reminder ({_dt.now().strftime('%Y-%m-%d')})"
+        rules = self._rules_from_feedback(feedback, rules_key)
+        if rules:
+            return header + "\n" + "\n".join(f"- {r}" for r in rules), rules
+        snippet = self._extract_feedback_snippet(feedback.get(feedback_key, "") if isinstance(feedback, dict) else feedback)
+        return header + "\n- " + snippet, [snippet]
+
+    @staticmethod
+    def _merge_reminder_into_directives(current_directives, reminder_block):
+        """Append/replace ONLY the reminder section; the rest of the directives survive.
+
+        Until 2026-09-02 the weekly AUTO path REPLACED the whole strategy_directives
+        column with a 500-char reminder and blanked soul + memory, wiping every
+        human-approved Prompt Lab policy within days (Decider v14 lived 2 days, v18
+        6 days). The approved policy must survive the weekly cycle.
+        """
+        import re as _re
+        base = (current_directives or "").strip()
+        marker = "## Latest Feedback Reminder"
+        idx = base.find(marker)
+        if idx != -1:
+            nxt = base.find("\n## ", idx + len(marker))
+            base = (base[:idx].rstrip() + ("\n\n" + base[nxt + 1:] if nxt != -1 else "")).strip()
+        # Legacy bare reminder written by the pre-2026-09-02 path.
+        base = _re.sub(r"(?ms)^Latest Feedback Reminder:.*?(?=\n## |\Z)", "", base).strip()
+        return (base + "\n\n" + reminder_block).strip() if base else reminder_block
+
     def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
-        """Generate prompts for a specific config without changing global state"""
+        """Weekly AUTO path: append the latest feedback reminder to each agent's
+        strategy directives and memory WITHOUT replacing the human-approved policy."""
         # Check if this config is in FIXED mode - if so, don't auto-update prompts
         if not self._is_config_in_auto_mode(config_hash):
             with engine.connect() as conn:
@@ -664,58 +719,47 @@ class TradeOutcomeTracker:
                     FROM run_configurations
                     WHERE config_hash = :config_hash
                 """), {"config_hash": config_hash}).fetchone()
-                
+
                 forced_version = config_result.forced_prompt_version if config_result else "unknown"
                 print(f"🔒 Config {config_hash} is in FIXED v{forced_version} mode - skipping auto-prompt updates")
                 return
-        
-        print(f"🔄 Config {config_hash} is in AUTO mode - generating simple prompt updates")
-        
-        # SIMPLIFIED: Generate basic prompt updates without complex historical context
+
+        print(f"🔄 Config {config_hash} is in AUTO mode - appending feedback reminder (approved policy preserved)")
+
         try:
-            summarizer_feedback = feedback.get('summarizer_feedback', '')
-            decider_feedback = feedback.get('decider_feedback', '')
-
-            if summarizer_feedback:
-                snippet = self._extract_feedback_snippet(summarizer_feedback)
-                strategy_update = f"Latest Feedback Reminder: {snippet}"
+            for agent_type, fb_key, rules_key in (
+                ("SummarizerAgent", "summarizer_feedback", "summarizer_rules"),
+                ("DeciderAgent", "decider_feedback", "decider_rules"),
+            ):
+                if not (isinstance(feedback, dict) and (feedback.get(fb_key) or feedback.get(rules_key))):
+                    continue
+                reminder_block, rules = self._build_reminder_block(feedback, fb_key, rules_key)
                 self._update_strategy_directives_for_config(
-                    'SummarizerAgent',
-                    strategy_update,
-                    f'Strategy updated from feedback (ID: {feedback_id})',
-                    config_hash
+                    agent_type,
+                    reminder_block,
+                    f'Weekly feedback reminder appended (ID: {feedback_id}) — approved policy preserved',
+                    config_hash,
                 )
-                print(f"✅ Updated SummarizerAgent strategy_directives for config {config_hash}")
-                # Update summarizer memory with feedback lessons
-                self._update_agent_memory("SummarizerAgent", snippet, config_hash)
+                print(f"✅ Appended {agent_type} feedback reminder for config {config_hash}")
+                self._update_agent_memory(
+                    agent_type, "\n".join(f"- {r}" for r in rules), config_hash, rules=rules,
+                )
 
-            if decider_feedback:
-                snippet = self._extract_feedback_snippet(decider_feedback)
-                strategy_update = f"Latest Feedback Reminder: {snippet}"
-                self._update_strategy_directives_for_config(
-                    'DeciderAgent',
-                    strategy_update,
-                    f'Strategy updated from feedback (ID: {feedback_id})',
-                    config_hash
-                )
-                print(f"✅ Updated DeciderAgent strategy_directives for config {config_hash}")
-                # Update decider memory with feedback lessons
-                self._update_agent_memory("DeciderAgent", snippet, config_hash)
-                
         except Exception as e:
             print(f"❌ Error generating prompts for config {config_hash}: {e}")
             import traceback
             traceback.print_exc()
 
-    def _update_strategy_directives_for_config(self, agent_type, new_strategy_directives, description, config_hash):
-        """Update only strategy_directives while keeping structural template intact"""
+    def _update_strategy_directives_for_config(self, agent_type, reminder_block, description, config_hash):
+        """Create a new version whose strategy_directives = current directives + the
+        reminder section (previous reminder replaced), carrying soul and memory forward."""
         try:
             import os
             original_hash = os.environ.get('CURRENT_CONFIG_HASH')
             os.environ['CURRENT_CONFIG_HASH'] = config_hash
 
             try:
-                # Get current active prompt to preserve structure
+                # Get current active prompt to preserve structure AND policy
                 from prompt_manager import get_active_prompt
                 current = get_active_prompt(agent_type)
 
@@ -723,14 +767,19 @@ class TradeOutcomeTracker:
                     print(f"⚠️ No active prompt found for {agent_type}, skipping strategy update")
                     return
 
-                # Create new version with same structural template but updated strategy
+                merged = self._merge_reminder_into_directives(
+                    current.get("strategy_directives", ""), reminder_block
+                )
+
                 from prompt_manager import create_new_prompt_version
                 prompt_id = create_new_prompt_version(
                     agent_type,
                     current["system_prompt"],
                     current["user_prompt_template"],
                     description,
-                    strategy_directives=new_strategy_directives
+                    strategy_directives=merged,
+                    soul=current.get("soul", "") or "",
+                    memory=current.get("memory", "") or "",
                 )
 
                 with engine.connect() as conn:
@@ -739,7 +788,7 @@ class TradeOutcomeTracker:
                     """), {"id": prompt_id}).fetchone()
                     version = result.version if result else "?"
 
-                print(f"✅ Updated {agent_type} strategy_directives → v{version} for config {config_hash}")
+                print(f"✅ Updated {agent_type} strategy_directives → v{version} for config {config_hash} (policy preserved)")
                 return version
             finally:
                 if original_hash is not None:
@@ -751,17 +800,23 @@ class TradeOutcomeTracker:
             import traceback
             traceback.print_exc()
 
-    def _update_agent_memory(self, agent_type, new_lessons, config_hash):
+    def _update_agent_memory(self, agent_type, new_lessons, config_hash, rules=None):
         """Append new lessons to an agent's memory, compressing if over limit."""
         MAX_MEMORY_CHARS = 4000
 
         # Record decider lessons in the structured long-term store (decider_memory) — the
-        # source of truth the decider now retrieves from by relevance. Best-effort.
-        if agent_type == "DeciderAgent" and new_lessons and str(new_lessons).strip():
+        # source of truth the decider retrieves from by relevance. One row per rule so the
+        # retrieval budget carries executable rules, not truncated paragraphs. Best-effort.
+        if agent_type == "DeciderAgent":
             try:
                 from decider_memory import add_memory
-                add_memory(config_hash, str(new_lessons).strip(), kind="lesson",
-                           source="feedback", weight=1.2)
+                if rules:
+                    for _rule in rules:
+                        add_memory(config_hash, str(_rule).strip(), kind="rule",
+                                   source="feedback", weight=1.3)
+                elif new_lessons and str(new_lessons).strip():
+                    add_memory(config_hash, str(new_lessons).strip(), kind="lesson",
+                               source="feedback", weight=1.2)
             except Exception as _dm_exc:
                 print(f"⚠️  decider_memory write skipped: {_dm_exc}")
 
@@ -942,8 +997,16 @@ class TradeOutcomeTracker:
             print(f"⚠️ Could not load prompt review lessons: {exc}")
             return ""
 
-    def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis):
-        """Use AI to generate feedback for improving agent performance"""
+    def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis, config_hash=None):
+        """Use AI to generate feedback for improving agent performance.
+
+        The decider_feedback string is injected VERBATIM into every future Decider cycle
+        (Feedback Snapshot) and decider_rules become the Decider's standing "Latest
+        Feedback Reminder", so the output is a compact, executable rule set — not the
+        3,000-character narrative the loop produced through Aug 2026. The prompt starts
+        from COMPUTED DIAGNOSTICS (feedback_diagnostics.py): population-level regime,
+        extension, re-entry and payoff numbers that outrank any 40-row sample.
+        """
         outcomes_summary = json.dumps({
             "total_trades": len(outcomes),
             "success_rate": success_rate,
@@ -956,25 +1019,37 @@ class TradeOutcomeTracker:
                 "unprofitable_avg_hold_days": analysis["avg_hold_duration_unprofitable"]
             }
         }, indent=2)
-        
+
         # Get recent individual trades for detailed analysis
         recent_trades = self._get_detailed_trade_analysis()
 
         # RLHF loop-closure: what happened to past prompt-change proposals —
-        # the critic's verdicts and the human's response. Guidance that ignores
-        # these objections produces proposals that get rejected again.
+        # the critic's verdicts and the human's response.
         critic_lessons = self._get_prompt_review_lessons()
 
-        # FIXED TEMPLATE COMPONENTS (never change)
-        FEEDBACK_BASE_INSTRUCTIONS = '''Analyze the following trading performance data and provide specific feedback to improve the performance of our AI trading agents.
+        # Deterministic diagnostics over the whole population (no LLM).
+        diagnostics_block = ""
+        supplied_fields = "unavailable"
+        try:
+            from feedback_diagnostics import compute_trade_diagnostics, format_diagnostics, SUPPLIED_DECIDER_FIELDS
+            _cfg = config_hash or get_current_config_hash()
+            diagnostics_block = format_diagnostics(compute_trade_diagnostics(_cfg, FEEDBACK_LOOKBACK_DAYS))
+            supplied_fields = SUPPLIED_DECIDER_FIELDS
+        except Exception as _diag_exc:
+            print(f"⚠️ Trade diagnostics unavailable: {_diag_exc}")
 
-Focus on:
-1. Key insights about what's working well and what isn't  
-2. Specific recommendations for the SUMMARIZER agents (how they should adjust their news analysis focus)
-3. Specific recommendations for the DECIDER agent (how it should adjust its trading strategy)
-4. Patterns in successful vs unsuccessful trades
-5. Timing and market context insights - especially entry/exit timing
-6. Specific trade examples of mistakes and successes'''
+        # FIXED TEMPLATE COMPONENTS (never change)
+        FEEDBACK_BASE_INSTRUCTIONS = f'''You are auditing the closed trades of an autonomous 1-5 day swing-trading system (Schwab cash account, $400-$700 tickets, ≤5 positions, +3% default harvest). Your decider_feedback is injected VERBATIM into every future Decider cycle and your decider_rules become the Decider's standing "Latest Feedback Reminder" — write executable rules, not narrative.
+
+METHOD (in this order — do not skip a step):
+1. Start from COMPUTED DIAGNOSTICS. They are computed over ALL closed campaigns, not a sample, and they outrank your impression of the trade rows and prior feedback. Name the single largest measured leak in dollars first.
+2. REGIME: compare the same rules across RISK-ON vs MIXED/RISK-OFF entries. If the rules made money in one and lost in the other, the lesson is a REGIME rule (what changes when the index and the momentum leaders are below their 20d MA), not a setup rule.
+3. ENTRY GEOMETRY: extension above the 20d MA at entry and the distance to the kill. A kill 8-15% away is not risk control for a 1-5 day trade — it is the loss tail. A -2% day in a name 12% above its 20d MA is the first leg of an unwind, not a pullback into support.
+4. RE-ENTRY: same-ticker entries within 3 days of an exit are scored separately. If they lose, the rule is a quarantine with the number attached.
+5. PAYOFF: state the breakeven win rate implied by avg win / avg loss and whether the current win rate clears it. If winners are capped by the +3% harvest rule, say what that implies for the required stop distance.
+6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
+7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
+8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.'''
 
         # MODIFIABLE COMPONENTS (updated based on context data)
         critic_lessons_block = ""
@@ -984,41 +1059,40 @@ Focus on:
 PROMPT-CHANGE REVIEW HISTORY (critic verdicts + human RLHF response):
 {critic_lessons}
 
-Your guidance seeds future prompt-change proposals, which must survive a
-skeptical critic and a human reviewer. Learn from the verdicts above:
-- Ground every recommendation in SPECIFIC trades from the data (cite tickers
-  and their outcomes) — unverifiable trade-level claims get proposals rejected.
-- Prefer one or two testable changes over broad bundles whose impact cannot
-  be attributed.
-- Where the human agreed with a rejection, treat that objection as a standing
-  requirement; where the human overrode the critic, weight the human.'''
+Read this for what SHIPPED and what it realized — not as a list of objections to satisfy. A critic's "the rows do not validate this" is not evidence against a rule the COMPUTED DIAGNOSTICS support: cite the diagnostic and keep the rule. Where the human overrode the critic, the human's direction stands. Keep each proposal to one testable change so realized deltas are attributable.'''
 
-        performance_guidance = f'''
-Performance Data:
+        diagnostics_section = f"\n\n{diagnostics_block}" if diagnostics_block else ""
+
+        performance_guidance = f'''{diagnostics_section}
+
+Performance Data (aggregate):
 {outcomes_summary}
 
-Recent Trade Details (for pattern analysis):
+Recent Trade Details (sample, for pattern illustration only):
 {json.dumps(recent_trades, indent=2)}{critic_lessons_block}
 
 ANALYSIS REQUIREMENTS:
-- Focus on actionable improvements that can be incorporated into agent prompts and decision-making logic
-- Pay special attention to entry and exit timing to maximize profits
-- Create COMPREHENSIVE feedback that preserves important historical lessons
-- Group insights by categories: timing, risk management, sector analysis, technical patterns
-- Provide specific examples from the trade data
-- Make feedback cumulative - build upon previous lessons rather than replacing them'''
+- Lead with the ranked leaks in dollars; every insight carries a number from the diagnostics.
+- Rules must be executable by the Decider from the supplied fields, with a falsification metric.
+- Keep decider_feedback ≤ 900 characters and summarizer_feedback ≤ 600 characters — both are injected into live prompts.
+- Preserve rules that the diagnostics still support; retire rules the diagnostics contradict, and say which.'''
 
         FEEDBACK_JSON_FORMAT = '''
 🚨 CRITICAL JSON REQUIREMENT:
 Return ONLY valid JSON in this EXACT format:
 {
-    "summarizer_feedback": "Comprehensive recommendations for the summarizer agent including historical context",
-    "decider_feedback": "Comprehensive recommendations for the decider agent including historical context", 
-    "key_insights": ["insight 1", "insight 2", "insight 3", "insight 4", "insight 5"],
-    "timing_patterns": "Specific patterns about entry/exit timing",
-    "risk_management": "Risk management recommendations",
-    "sector_insights": "Sector-specific trading insights"
+    "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
+    "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
+    "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
+    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … — one clause per rule, ≤ 900 characters total, no narrative",
+    "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
+    "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
+    "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],
+    "timing_patterns": "entry/exit timing finding with numbers",
+    "risk_management": "kill geometry / sizing finding with numbers",
+    "sector_insights": "correlation / sector finding with numbers"
 }
+Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 characters, each a single trigger → action → metric rule.
 
 ⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
 ✅ ONLY pure JSON starting with { and ending with }'''
@@ -1030,7 +1104,7 @@ Return ONLY valid JSON in this EXACT format:
 
 {FEEDBACK_JSON_FORMAT}'''
 
-        FEEDBACK_SYSTEM_BASE = '''You are an intelligent, machiavellian day trading agent providing system-wide performance analysis. You are a trading performance analyst providing feedback to improve AI trading agents. Your analysis should be data-driven, specific, and actionable.'''
+        FEEDBACK_SYSTEM_BASE = '''You are the evidence judge of an autonomous trading system's learning loop. You turn realized P&L into a few executable, falsifiable rules. You are data-driven, specific, and immune to narrative — including the narrative of your own previous feedback.'''
 
         # Inject feedback agent soul if available
         feedback_soul = ""
@@ -1040,18 +1114,19 @@ Return ONLY valid JSON in this EXACT format:
             feedback_soul = feedback_prompt_data.get("soul", "")
         except Exception:
             pass
-        
+
         feedback_soul_section = f"\n\n## AGENT IDENTITY\n{feedback_soul}" if feedback_soul else ""
 
         system_prompt = f'''{FEEDBACK_SYSTEM_BASE}{feedback_soul_section}
 
 CRITICAL INSTRUCTIONS:
-1. Create COMPREHENSIVE feedback that preserves important historical lessons
-2. Group insights by categories: timing, risk management, sector analysis, technical patterns  
-3. Provide specific examples from the trade data
-4. Include both tactical improvements (immediate actions) and strategic insights (long-term patterns)
-5. Make feedback cumulative - build upon previous lessons rather than replacing them'''
-        
+1. COMPUTED DIAGNOSTICS outrank the trade sample and outrank prior feedback. Cite them by number.
+2. Order of analysis: regime, entry geometry, re-entry, payoff — then rules.
+3. One primary change per agent with a falsification metric. No hedging language ("consider", "prospectively test", "not an automatic rejection"): a rule is a rule until falsified.
+4. Every gate must be executable from the supplied fields.
+5. decider_feedback ≤ 900 characters, summarizer_feedback ≤ 600 characters, rules ≤ 220 characters each — they are injected into live prompts.
+6. Return ONLY the JSON object.'''
+
         try:
             token_cap = get_reasoning_token_cap("FeedbackAgent", get_agent_model("FeedbackAgent"), 4000)
             api_params = _build_feedback_api_params(
@@ -1060,16 +1135,19 @@ CRITICAL INSTRUCTIONS:
                 agent_label="FeedbackAgent",
                 base_max_tokens=4000,
             )
-            
+
             print(f"🔧 Using simple JSON mode for FeedbackAgent (reasoning={get_agent_reasoning_level('FeedbackAgent')}, token_cap={token_cap})")
             response = _execute_feedback_api(api_params, "FeedbackAgent")
             ai_response = response.choices[0].message.content.strip()
-            
+
             # Parse the response to extract summarizer and decider feedback
-            # The AI should provide structured feedback, but we'll handle it gracefully
             try:
-                # Try to parse as JSON first
                 feedback_data = json.loads(ai_response)
+                if isinstance(feedback_data, dict):
+                    # Guarantee the keys downstream readers expect.
+                    feedback_data.setdefault("decider_feedback", " | ".join(feedback_data.get("decider_rules") or []))
+                    feedback_data.setdefault("summarizer_feedback", " | ".join(feedback_data.get("summarizer_rules") or []))
+                    feedback_data.setdefault("key_insights", [])
                 return feedback_data
             except json.JSONDecodeError:
                 # If not JSON, create a structured response from the text
@@ -1078,11 +1156,11 @@ CRITICAL INSTRUCTIONS:
                     "decider_feedback": ai_response,
                     "key_insights": [ai_response],
                     "timing_patterns": "Analysis provided in main feedback",
-                    "risk_management": "Analysis provided in main feedback", 
+                    "risk_management": "Analysis provided in main feedback",
                     "sector_insights": "Analysis provided in main feedback",
                     "raw_response": ai_response
                 }
-                
+
         except Exception as e:
             print(f"Failed to generate AI feedback: {e}")
             return {
@@ -1090,7 +1168,7 @@ CRITICAL INSTRUCTIONS:
                 "decider_feedback": "Unable to generate AI feedback",
                 "key_insights": []
             }
-    
+
     def get_latest_feedback(self):
         """Get the most recent feedback for agent improvement"""
         from config import get_current_config_hash

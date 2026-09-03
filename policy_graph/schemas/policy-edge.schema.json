@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://d-ai-trader.local/schemas/policy-edge.schema.json",
+  "title": "Policy graph edge record",
+  "description": "One element of edges.json (a JSON array sorted by source, edge_type, target). The reader unions these with authored frontmatter `edges:` and dedupes on (source, target, edge_type).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_node_id", "target_node_id", "edge_type", "confidence", "provenance", "version"],
+  "properties": {
+    "source_node_id": {"type": "string", "pattern": "^(DA|SA|FA)(\\.[a-z0-9_]+)+$"},
+    "target_node_id": {"type": "string", "pattern": "^(DA|SA|FA)(\\.[a-z0-9_]+)+$"},
+    "edge_type": {"type": "string", "enum": ["subtype_of", "exception_to", "boundary_with", "confused_with", "clarifies", "example_of", "negative_example_of", "includes", "related_to", "cites", "overlaps", "constrains", "enforced_by"]},
+    "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "provenance": {"type": "string", "description": "derived:hierarchy | derived:assembly | derived:wikilink | derived:tag | derived:ticker | derived:similarity | authored:code_map | authored"},
+    "version": {"type": "string", "description": "version stamp <agent_type>.<config_hash>.v<N>"},
+    "via": {"type": ["string", "null"], "description": "what produced the edge: a placeholder, a heading, a [[link]], a #tag, or an injection position"}
+  }
+}
