@@ -128,6 +128,35 @@
     </div>
     <ul id="pgChangeList" class="pg-change-list"></ul>
   </section>
+
+  <!-- Card 4: decision paths (route → guideline → action → outcome) -->
+  <section class="pe-card" id="pgPathsCard">
+    <div class="pg-change-head">
+      <div>
+        <h2>Decision paths</h2>
+        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed.</p>
+      </div>
+      <label class="pg-check">Window
+        <select id="pgPathsDays" class="pe-select pg-select" aria-label="Path window">
+          <option value="30">last 30 days</option>
+          <option value="90" selected>last 90 days</option>
+          <option value="365">last year</option>
+        </select>
+      </label>
+    </div>
+    <p id="pgPathsSummary" class="pg-muted"></p>
+    <div class="pg-paths-grid">
+      <div>
+        <h3 class="pg-paths-h">Path frequency <span class="pg-muted">route → guideline → action, by cited decisions</span></h3>
+        <div id="pgPathsFlow" class="pg-paths-flow"></div>
+        <div id="pgPathsGaps" class="pg-paths-gaps"></div>
+      </div>
+      <div>
+        <h3 class="pg-paths-h">Path quality <span class="pg-muted">per guideline, over the closed trades it drove</span></h3>
+        <div id="pgPathsQuality" class="pg-paths-quality"></div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <style>
@@ -433,6 +462,34 @@
 .pg-node.pg-ghost-remove text { text-decoration: line-through; opacity: .6; }
 .pg-link.proposed { stroke: var(--success); stroke-dasharray: 2 3; }
 .pg-legend i.ghost { border-style: dotted; }
+
+/* ----- decision paths ----- */
+.pg-paths-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 8px; }
+.pg-paths-h { margin: 0 0 8px; font-size: 14px; }
+.pg-paths-h .pg-muted { font-weight: 400; font-size: 12px; margin-left: 6px; }
+.pg-paths-flow { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: var(--surface); min-height: 160px; overflow: auto; }
+.pg-paths-flow svg { width: 100%; height: auto; display: block; }
+.pg-paths-flow .pg-flow-node { fill: rgba(125,176,255,.18); stroke: rgba(125,176,255,.55); }
+.pg-paths-flow .pg-flow-node.route { fill: rgba(178,141,255,.18); stroke: rgba(178,141,255,.6); }
+.pg-paths-flow .pg-flow-node.action-buy { fill: rgba(41,214,151,.18); stroke: rgba(41,214,151,.6); }
+.pg-paths-flow .pg-flow-node.action-sell { fill: rgba(255,95,115,.18); stroke: rgba(255,95,115,.6); }
+.pg-paths-flow .pg-flow-node.action-hold { fill: rgba(250,219,95,.16); stroke: rgba(250,219,95,.6); }
+.pg-paths-flow .pg-flow-node.is-clickable { cursor: pointer; }
+.pg-paths-flow .pg-flow-link { fill: none; stroke: rgba(216,226,242,.28); stroke-linecap: round; }
+.pg-paths-flow .pg-flow-link:hover { stroke: rgba(66,201,255,.7); }
+.pg-paths-flow text { font-size: 10.5px; fill: var(--text); pointer-events: none; }
+.pg-paths-flow text.pg-flow-count { fill: var(--muted); font-family: var(--font-mono); font-size: 9.5px; }
+.pg-paths-empty { padding: 26px 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.pg-paths-gaps { margin-top: 8px; font-size: 12px; color: #d5dcf0; display: flex; flex-direction: column; gap: 4px; }
+.pg-paths-gaps:empty { display: none; }
+.pg-paths-quality table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.pg-paths-quality th, .pg-paths-quality td { padding: 4px 6px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
+.pg-paths-quality th { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.pg-paths-quality .pos { color: var(--success); }
+.pg-paths-quality .neg { color: var(--danger); }
+.pg-paths-quality .pg-link-chip { font-family: var(--font-mono); font-size: 10.5px; }
+.pg-paths-quality .pg-co { display: flex; flex-wrap: wrap; gap: 3px; }
+@media (max-width: 1040px) { .pg-paths-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 1040px) {
   .pg-layout { grid-template-columns: 1fr; }

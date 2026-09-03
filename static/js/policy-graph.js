@@ -102,7 +102,8 @@
     proposals: [],
     proposalsAgent: null,
     proposalPoll: null,
-    trim: null
+    trim: null,
+    paths: null
   };
 
   // Live d3 selections for the current render (null before the first render).
@@ -2033,6 +2034,7 @@
       await loadAgents();
       await loadVersions(state.agent);
       await loadProposals(state.agent, { quiet: true });
+      loadPaths(state.agent);
       populateVersions(res.version);
       renderTimeline();
       await loadGraph(state.agent, res.version, { pulse: true });
@@ -2077,6 +2079,113 @@
     });
   }
 
+  // ------------------------------------------------------------------ decision paths (route → guideline → action → outcome)
+  async function loadPaths(agent, { quiet = true } = {}) {
+    const box = qs('#pgPathsCard');
+    if (!box || !agent) return;
+    const days = Number(qs('#pgPathsDays')?.value || 90);
+    let data;
+    try {
+      data = await apiGet(`${API}/paths?agent=${encodeURIComponent(agent)}&days=${days}`);
+    } catch (error) {
+      if (!quiet) toast(`Decision paths: ${error.message}`, 'error');
+      renderPaths({ empty: true, note: `Decision paths unavailable: ${error.message}`, frequency: {}, quality: [] });
+      return;
+    }
+    if (agent !== state.agent) return;
+    state.paths = data;
+    renderPaths(data);
+  }
+
+  function renderPaths(data) {
+    const summary = qs('#pgPathsSummary');
+    const flow = qs('#pgPathsFlow');
+    const gaps = qs('#pgPathsGaps');
+    const quality = qs('#pgPathsQuality');
+    if (!summary || !flow || !gaps || !quality) return;
+    const f = data.frequency || {};
+    if (data.empty || !(f.guidelines || []).length) {
+      summary.textContent = data.note || 'No cited decisions in this window yet.';
+      flow.innerHTML = `<div class="pg-paths-empty">Nothing to draw yet. Once the Decider has cited guidelines, this shows which input (regime, holdings, watchlist, news, entities, trends, quarantine, recency, tag) pulled each guideline into the prompt and what the Decider did with it.</div>`;
+      gaps.innerHTML = '';
+      quality.innerHTML = `<div class="pg-paths-empty">Per-guideline win rate and P&amp;L appear once closed trades carry citations.</div>`;
+      return;
+    }
+    const wr = data.win_rate !== null && data.win_rate !== undefined ? ` · win rate ${pct(data.win_rate)}` : '';
+    summary.textContent = `${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${wr} · since ${fmtDateOnly(data.since)}`;
+    renderPathFlow(flow, f);
+    const bits = [];
+    if ((f.cited_unserved || []).length) {
+      bits.push(`<div><strong>Cited but not served</strong> (the graph query missed them): ${f.cited_unserved.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))} ×${g.cited}</button>`).join(' ')}</div>`);
+    }
+    if ((f.served_never_cited || []).length) {
+      bits.push(`<div><strong>Served but never cited</strong> (${f.served_never_cited_total} guidelines): ${f.served_never_cited.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))}</button>`).join(' ')}</div>`);
+    }
+    gaps.innerHTML = bits.join('');
+    gaps.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => pgOpenNode(btn.dataset.nodeId)));
+    renderPathQuality(quality, data.quality || []);
+  }
+
+  // Three-column flow drawn by hand (no d3-sankey): routes | guidelines | actions.
+  function renderPathFlow(container, f) {
+    const routes = f.routes || [];
+    const guides = f.guidelines || [];
+    const actions = f.actions || [];
+    const flowsIn = f.flows_in || [];
+    const flowsOut = f.flows_out || [];
+    const W = 860;
+    const rowH = 24;
+    const rows = Math.max(routes.length, guides.length, actions.length, 1);
+    const H = Math.max(160, rows * rowH + 40);
+    const colX = [20, 330, 700];
+    const colW = [150, 260, 110];
+    const yFor = (list, i) => 20 + (H - 40) * ((i + 0.5) / Math.max(list.length, 1));
+    const maxIn = Math.max(1, ...flowsIn.map(x => x.value));
+    const maxOut = Math.max(1, ...flowsOut.map(x => x.value));
+    const width = v => 1.5 + 9 * (v / Math.max(maxIn, maxOut));
+    const gIndex = new Map(guides.map((g, i) => [g.id, i]));
+    const rIndex = new Map(routes.map((r, i) => [r, i]));
+    const aIndex = new Map(actions.map((a, i) => [a, i]));
+    const path = (x1, y1, x2, y2) => `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
+    const links = [];
+    flowsIn.forEach(x => {
+      const ri = rIndex.get(x.source); const gi = gIndex.get(x.target);
+      if (ri === undefined || gi === undefined) return;
+      links.push(`<path class="pg-flow-link" d="${path(colX[0] + colW[0], yFor(routes, ri), colX[1], yFor(guides, gi))}" stroke-width="${width(x.value).toFixed(1)}"><title>${esc(`${x.source} → ${x.target}: ${x.value} cited`)}</title></path>`);
+    });
+    flowsOut.forEach(x => {
+      const gi = gIndex.get(x.source); const ai = aIndex.get(x.target);
+      if (gi === undefined || ai === undefined) return;
+      links.push(`<path class="pg-flow-link" d="${path(colX[1] + colW[1], yFor(guides, gi), colX[2], yFor(actions, ai))}" stroke-width="${width(x.value).toFixed(1)}"><title>${esc(`${x.source} → ${x.target}: ${x.value}`)}</title></path>`);
+    });
+    const node = (cls, x, y, w, label, count, id) => `<g class="pg-flow-node-g"${id ? ` data-node-id="${esc(id)}"` : ''}><rect class="pg-flow-node ${cls}${id ? ' is-clickable' : ''}" x="${x}" y="${(y - 9).toFixed(1)}" width="${w}" height="18" rx="5"></rect><text x="${x + 6}" y="${(y + 3.5).toFixed(1)}">${esc(label)}</text>${count !== undefined ? `<text class="pg-flow-count" x="${x + w - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${esc(count)}</text>` : ''}</g>`;
+    const nodes = [];
+    routes.forEach((r, i) => nodes.push(node('route', colX[0], yFor(routes, i), colW[0], r, flowsIn.filter(x => x.source === r).reduce((s, x) => s + x.value, 0))));
+    guides.forEach((g, i) => nodes.push(node('', colX[1], yFor(guides, i), colW[1], truncate(g.title || g.id, 30), `${g.cited}/${g.served}`, g.id)));
+    actions.forEach((a, i) => nodes.push(node(`action-${a}`, colX[2], yFor(actions, i), colW[2], a.toUpperCase(), flowsOut.filter(x => x.target === a).reduce((s, x) => s + x.value, 0))));
+    const heads = `<text x="${colX[0]}" y="10" class="pg-flow-count">route (cited)</text><text x="${colX[1]}" y="10" class="pg-flow-count">guideline (cited / served)</text><text x="${colX[2]}" y="10" class="pg-flow-count">action</text>`;
+    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Decision paths">${heads}${links.join('')}${nodes.join('')}</svg>`;
+    container.querySelectorAll('.pg-flow-node-g[data-node-id]').forEach(g => g.addEventListener('click', () => {
+      if (!pgOpenNode(g.dataset.nodeId)) toast(`${g.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
+  }
+
+  function renderPathQuality(container, rows) {
+    if (!rows.length) {
+      container.innerHTML = '<div class="pg-paths-empty">No guideline has a closed trade yet.</div>';
+      return;
+    }
+    const chips = list => (list || []).map(c => `<button type="button" class="pg-link-chip" data-node-id="${esc(c.id)}" title="${esc(c.id)}">${esc(truncate(c.title, 22))} ×${c.count}</button>`).join('');
+    container.innerHTML = `<table><thead><tr><th>guideline</th><th>cited</th><th>closed</th><th>win rate</th><th>P&amp;L</th><th>co-cited on wins</th><th>on losses</th></tr></thead><tbody>${rows.map(r => {
+      const wr = r.win_rate === null || r.win_rate === undefined ? '—' : pct(r.win_rate);
+      const pnl = Number(r.pnl || 0);
+      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(r.id)}" title="${esc(r.id)}">${esc(truncate(r.title, 30))}</button></td><td>${esc(r.cited)}<span class="pg-muted">/${esc(r.served)}</span></td><td>${esc(r.closed)}${r.closed ? ` <span class="pg-muted">(${r.wins}W/${r.losses}L)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(r.co_on_wins) || '<span class="pg-muted">—</span>'}</div></td><td><div class="pg-co">${chips(r.co_on_losses) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
+    }).join('')}</tbody></table>`;
+    container.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
+      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
+  }
+
   // ------------------------------------------------------------------ agent / version flow
   async function selectAgent(agent, { version = null, node = null, pulse = false } = {}) {
     if (!AGENT_TYPES.has(agent)) agent = AGENTS[0].agent_type;
@@ -2088,6 +2197,7 @@
     lsSet(LS_AGENT, agent);
     const data = await loadVersions(agent);
     await loadProposals(agent, { quiet: true });
+    loadPaths(agent);
     if (!data) { populateVersions(null); renderTimeline(); return; }
     if (!state.versions.length) {
       populateVersions(null);
@@ -2127,6 +2237,7 @@
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
     qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
+    qs('#pgPathsDays')?.addEventListener('change', () => loadPaths(state.agent, { quiet: false }));
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';

@@ -208,6 +208,7 @@ def test_dashboard_registers_policy_graph_routes(dashboard_server_module):
     assert "/api/policy-graph/versions" in paths
     assert "/api/policy-graph/rebuild" in paths
     assert "/api/policy-graph/proposals" in paths
+    assert "/api/policy-graph/paths" in paths
     assert "/api/policy-graph/proposals/<int:proposal_id>/apply" in paths
     assert "/api/policy-graph/proposals/<int:proposal_id>/reject" in paths
 

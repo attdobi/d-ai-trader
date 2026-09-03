@@ -1010,6 +1010,31 @@ def node_payload(engine, config_hash: str, agent_type: str, version, node_id: st
     })
 
 
+# ----------------------------------------------------------------------------- public: decision paths
+def paths_payload(engine, config_hash: str, agent_type: str, *, days: int, repo_root, is_margin_account: bool) -> dict:
+    """Path frequency / quality over the hit log, with guideline titles from the active version."""
+    _check_agent(agent_type)
+    from . import paths as _paths
+    ctx = _Ctx(engine, config_hash, repo_root, is_margin_account)
+    titles: dict = {}
+    try:
+        n = ctx.current_version(agent_type) or ctx.latest_version(agent_type)
+        if n is not None:
+            v = ctx.read_version(agent_type, n)
+            if v is not None:
+                titles = {i: (x.title or i) for i, x in v.nodes.items()}
+    except Exception:     # noqa: BLE001 — titles are cosmetic
+        titles = {}
+    try:
+        return _json_safe(_paths.path_report(engine, config_hash, agent_type, days=days, titles=titles))
+    except Exception as exc:     # noqa: BLE001 — the hit table may not exist yet
+        return {"agent_type": agent_type, "config_hash": config_hash, "days": days, "empty": True,
+                "frequency": {"routes": [], "guidelines": [], "actions": [], "flows_in": [], "flows_out": [],
+                              "cited_unserved": [], "served_never_cited": [], "served_never_cited_total": 0},
+                "quality": [], "runs": 0, "decisions_cited": 0, "closed_cited": 0, "win_rate": None,
+                "note": f"No path data yet ({type(exc).__name__}: the hit log is created on the trader's first cycle)."}
+
+
 # ----------------------------------------------------------------------------- public: diff
 def _diff_stats(lines: list) -> dict:
     added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))

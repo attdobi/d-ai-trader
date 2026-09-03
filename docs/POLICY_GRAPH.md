@@ -175,6 +175,17 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    badge with the 30-day count. `citations.backfill_hits_from_decisions` fills `unserved` rows
    for decisions made before the log existed.
 
+## Decision paths (bottom of the tab)
+
+`policy_graph/paths.py` + `GET /api/policy-graph/paths?agent=&days=30|90|365`. A decision's path is
+context → route that served a guideline → guideline cited → action → outcome. **Path frequency** is a
+three-column flow (route → guideline → action, weighted by cited decisions) plus the two gaps that
+matter: guidelines cited but never served (the graph query missed them) and guidelines served but
+never cited (dead weight in the prompt). **Path quality** is a per-guideline table: cited, closed
+trades whose buy reason cited it, win rate, P&L, and the guidelines most often co-cited on its
+winners and its losers. Both read the hit log, the outcomes' citation suffix and the stored
+decisions; the section shows an empty state until those accumulate.
+
 ## Rule style: ordered gates
 
 Since Feedback v9 (2026-09-03) every writer of Decider rules — the weekly feedback soul, the
