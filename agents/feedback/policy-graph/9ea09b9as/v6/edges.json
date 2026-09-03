@@ -1,0 +1,664 @@
+[
+ {
+  "source_node_id": "FA.code",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.code.base_instructions",
+  "target_node_id": "FA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.code.json_format",
+  "target_node_id": "FA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.code.system_base",
+  "target_node_id": "FA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.anti_hallucination",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.declared_kill_audit",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n1",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n10",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n11",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n12",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n2",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n3",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n4",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n5",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n6",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n7",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n8",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.n9",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.current_process_biases_audit.same_ticker_re_entry_guard",
+  "target_node_id": "FA.directives.current_process_biases_audit",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.directives.ground_truth",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory.log.2026_06_24",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[Catalyst freshness]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory.log.2026_06_25",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#position-state"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory.log.2026_06_25_2",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory.log.2026_08_04",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory.log.2026_08_21",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#summarizer"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_20",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.ticker.amd",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[AMD]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.ticker.nvda",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[NVDA]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.memory.log.2026_06_25",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#position-state"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.memory.log.2026_06_25_2",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#memory"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.memory.log.2026_08_04",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#anti-hallucination"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_24",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25",
+  "target_node_id": "FA.ticker.mu",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[MU]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25",
+  "target_node_id": "FA.memory.log.2026_06_25_2",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25",
+  "target_node_id": "FA.memory.log.2026_08_04",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25",
+  "target_node_id": "FA.memory.log.2026_08_21",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25_2",
+  "target_node_id": "FA.ticker.mu",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[MU]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25_2",
+  "target_node_id": "FA.memory.log.2026_08_04",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25_2",
+  "target_node_id": "FA.memory.log.2026_08_21",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "#risk"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_06_25_2",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_04",
+  "target_node_id": "FA.ticker.adbe",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[ADBE]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_04",
+  "target_node_id": "FA.ticker.tmo",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[TMO]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_04",
+  "target_node_id": "FA.ticker.zs",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[ZS]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_04",
+  "target_node_id": "FA.memory.log.2026_08_21",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[Evidence scope]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_04",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_21",
+  "target_node_id": "FA.ticker.ionq",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[IONQ]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_21",
+  "target_node_id": "FA.ticker.orcl",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "[[ORCL]]"
+ },
+ {
+  "source_node_id": "FA.memory.log.2026_08_21",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.runtime.inputs",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.battle_focus",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.core_philosophy",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.failure_pattern",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.identity",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.mission",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.operating_identity",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.principles",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.soul.review_style",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.template.system",
+  "target_node_id": "FA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "FA.template.system",
+  "target_node_id": "FA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "FA.template.system",
+  "target_node_id": "FA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "FA.template.system",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.template.user",
+  "target_node_id": "FA.code.base_instructions",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "user_prompt_head"
+ },
+ {
+  "source_node_id": "FA.template.user",
+  "target_node_id": "FA.code.json_format",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "FA.template.user",
+  "target_node_id": "FA.code.system_base",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "system_base"
+ },
+ {
+  "source_node_id": "FA.template.user",
+  "target_node_id": "FA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.9ea09b9as.v6",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "FA.template.user",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.adbe",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.amd",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.ionq",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.mu",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.nvda",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.orcl",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.tmo",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ },
+ {
+  "source_node_id": "FA.ticker.zs",
+  "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.9ea09b9as.v6"
+ }
+]

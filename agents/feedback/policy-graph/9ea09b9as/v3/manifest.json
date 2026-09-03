@@ -1,0 +1,129 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 3,
+ "root_id": "FA.root",
+ "prompt_version_id": 566,
+ "created_at": "2026-06-25T07:32:23.194801",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v3 Feedback (auto) · feedback#1236 · success 25.0% · 20 trades · 2026-06-25 14:30 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:25-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "fdfbebba47ba81d0879c30456c8249ed96329ce587ca58f5477548f70a8f65e5",
+  "user_prompt_template": "92f20ffdf360e8a0830ec615caf694ad17d4efdc812853c884aa687ff185ee6a",
+  "strategy_directives": "8bde8f398271e5fb4cfdb5701876a8d3591b37185b83a6d6b27a658d3d5a4808",
+  "soul": "c950235b7b6691468ec0a1bcd7f98d2d29aff6f7a4d9e4bfd3b3d7a428cae353",
+  "memory": "5460689cdfda9d2f9c88b62a7d6bce872b8f2713a3f680a78fb34845f63f027f"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.anti_hallucination",
+   "FA.directives.current_process_biases_audit",
+   "FA.directives.current_process_biases_audit.n1",
+   "FA.directives.current_process_biases_audit.n2",
+   "FA.directives.current_process_biases_audit.n3",
+   "FA.directives.current_process_biases_audit.n4",
+   "FA.directives.current_process_biases_audit.n5",
+   "FA.directives.current_process_biases_audit.n6",
+   "FA.directives.current_process_biases_audit.n7",
+   "FA.directives.current_process_biases_audit.n8",
+   "FA.directives.current_process_biases_audit.n9",
+   "FA.directives.current_process_biases_audit.n10"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.operating_identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.failure_pattern"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.log.2026_06_20",
+   "FA.memory.log.2026_06_24",
+   "FA.memory.log.2026_06_25"
+  ]
+ },
+ "node_count": 37,
+ "edge_count": 49,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 2,
+  "lineage_version": 3,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 3,
+  "changed": 9,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 2
+ },
+ "kind": "policy",
+ "history": []
+}

@@ -1,0 +1,738 @@
+[
+ {
+  "source_node_id": "DA.code",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.cash_disclosure",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.cash_playbook",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.confirmation_policy",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.considered_setups",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.crowd_fade",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.data_availability",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.deploy_policy",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.index_regime",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.json_fallback",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.justification_detail",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.lessons_header",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.quarantine_line",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.recency_provenance",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.recent_activity_header",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.code.watchlist_header",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.directives",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.directives.reminder",
+  "target_node_id": "DA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.1",
+  "target_node_id": "DA.ltm.7",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.ltm.1",
+  "target_node_id": "DA.memory.lessons.gap_chase",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.ltm.1",
+  "target_node_id": "DA.memory.log.2026_06_29_irdm",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.ltm.1",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.10",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.11",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.12",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.13",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.14",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.15",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.2",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.3",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.4",
+  "target_node_id": "DA.ltm.8",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#churn"
+ },
+ {
+  "source_node_id": "DA.ltm.4",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.5",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.6",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.7",
+  "target_node_id": "DA.ticker.irdm",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#IRDM"
+ },
+ {
+  "source_node_id": "DA.ltm.7",
+  "target_node_id": "DA.memory.lessons.gap_chase",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.ltm.7",
+  "target_node_id": "DA.memory.log.2026_06_29_irdm",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.ltm.7",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.8",
+  "target_node_id": "DA.ticker.intc",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#INTC"
+ },
+ {
+  "source_node_id": "DA.ltm.8",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ltm.9",
+  "target_node_id": "DA.ltm",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.lessons",
+  "target_node_id": "DA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.lessons.gap_chase",
+  "target_node_id": "DA.ticker.irdm",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "[[IRDM]]"
+ },
+ {
+  "source_node_id": "DA.memory.lessons.gap_chase",
+  "target_node_id": "DA.ltm.1",
+  "edge_type": "overlaps",
+  "confidence": 0.432,
+  "provenance": "derived:similarity",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.lessons.gap_chase",
+  "target_node_id": "DA.memory.log.2026_06_29_irdm",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#gap-chase"
+ },
+ {
+  "source_node_id": "DA.memory.lessons.gap_chase",
+  "target_node_id": "DA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.lessons.n2",
+  "target_node_id": "DA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.log",
+  "target_node_id": "DA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.log.2026_06_29_irdm",
+  "target_node_id": "DA.ticker.irdm",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "#IRDM"
+ },
+ {
+  "source_node_id": "DA.memory.log.2026_06_29_irdm",
+  "target_node_id": "DA.soul.core_philosophy",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "[[front-run-not-chase]]"
+ },
+ {
+  "source_node_id": "DA.memory.log.2026_06_29_irdm",
+  "target_node_id": "DA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.log.2026_08_20",
+  "target_node_id": "DA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.mistakes",
+  "target_node_id": "DA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.memory.patterns",
+  "target_node_id": "DA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.runtime.inputs",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.core_philosophy",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.decision_style",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.identity",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.mission",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.principles",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.soul.risk_management",
+  "target_node_id": "DA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.template.system",
+  "target_node_id": "DA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "DA.template.system",
+  "target_node_id": "DA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "DA.template.system",
+  "target_node_id": "DA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "DA.template.system",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.cash_disclosure",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.cash_playbook",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_template_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.confirmation_policy",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.considered_setups",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.crowd_fade",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_template_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.data_availability",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.deploy_policy",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.index_regime",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.json_fallback",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_template_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.justification_detail",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.lessons_header",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.quarantine_line",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.recency_provenance",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.recent_activity_header",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.watchlist_header",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.ltm",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.9ea09b9as.v17",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ticker.intc",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "DA.ticker.irdm",
+  "target_node_id": "DA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.9ea09b9as.v17"
+ }
+]

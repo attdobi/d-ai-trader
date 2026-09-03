@@ -1,0 +1,150 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 4,
+ "root_id": "DA.root",
+ "prompt_version_id": 559,
+ "created_at": "2026-06-20T09:05:36.792083",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v2 Decider (auto) · feedback#1234 · success 29.4% · 17 trades · 2026-06-20 16:03 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:22-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "ffc41d111bda76131b5d7080dd850583da7683a39a394818a69d82925808d44f",
+  "user_prompt_template": "22b8cf69abc15f26b1a19fb0ccf116841756e5104829b1b3195effb81c815753",
+  "strategy_directives": "145ca42301d35a0b865df7ddd2a1e232b5d2ca93eeca4dbe87c94c34ebfa5e81",
+  "soul": "5cce5b00c6ba852f636f48248ea9573a07bde49a1c7b3e6b99951c01c635d657",
+  "memory": "cdc15d21e21c41e70d575abab240a8e3adfae8eddb7c097adecd8e8af75f056a"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.reminder",
+   "DA.directives.ground_truth",
+   "DA.directives.core_rules",
+   "DA.directives.core_rules.n1",
+   "DA.directives.core_rules.n2",
+   "DA.directives.core_rules.n3",
+   "DA.directives.core_rules.n4",
+   "DA.directives.core_rules.n5",
+   "DA.directives.core_rules.n6",
+   "DA.directives.holding_triage",
+   "DA.directives.profit_harvesting",
+   "DA.directives.loss_containment",
+   "DA.directives.buy_selection",
+   "DA.directives.cash_discipline",
+   "DA.directives.style"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.identity",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management",
+   "DA.soul.per_agent_edge"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_18_synced_inventory",
+   "DA.memory.log.2026_06_20_catalyst_validity",
+   "DA.memory.log.2026_06_20_profit_harvesting",
+   "DA.memory.log.2026_06_20_ground_truth"
+  ]
+ },
+ "node_count": 64,
+ "edge_count": 95,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 3,
+  "lineage_version": 4,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 22,
+  "changed": 4,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [
+   "soul"
+  ],
+  "prev_version": 3
+ },
+ "kind": "policy",
+ "history": []
+}

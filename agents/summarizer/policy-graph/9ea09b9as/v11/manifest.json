@@ -1,0 +1,120 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "9ea09b9as",
+ "version": 11,
+ "root_id": "SA.root",
+ "prompt_version_id": 585,
+ "created_at": "2026-08-06T17:32:36.049801",
+ "created_by": "system",
+ "actor_kind": "weekly",
+ "description": "Strategy updated from feedback (ID: 1246)",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:25-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "fc3475e52b0a02a7478d6e0c8d07f3740108bad7186f268f6112614244024e42",
+  "user_prompt_template": "c36578f4abf447959f8f88d63d4e0ed288608cd17f8c58cccf8c0340309bfdfe",
+  "strategy_directives": "65a1136376ed7854f93503a007cdbf1536b804dc0c468141d8d41b8182c0caad",
+  "soul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "memory": "f88f15c82af8c15d14ef0071b2a2a051c2b863e194814b41954622291fca89a7"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": true,
+   "inherited": true,
+   "inherited_from": "agents/summarizer/SOUL.default.md",
+   "inherited_git_sha": "2849237f",
+   "inherited_resolution": "git-blob-at-created_at",
+   "inherited_sha256": "e8a34046eeaf7561ef798eb5c2f3f95407c0810c82fb06eb568fcb0f9bdd3d9d",
+   "inherited_order": [
+    "SA.soul",
+    "SA.soul.mission",
+    "SA.soul.principles",
+    "SA.soul.identity",
+    "SA.soul.core_philosophy",
+    "SA.soul.extraction_style"
+   ]
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.reminder"
+  ],
+  "soul": [],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.extraction_patterns",
+   "SA.memory.media_manipulation",
+   "SA.memory.log",
+   "SA.memory.log.2026_08_06"
+  ]
+ },
+ "node_count": 20,
+ "edge_count": 24,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "SA.code.feedback_suffix": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 10,
+  "lineage_version": 5,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 1,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 10
+ },
+ "kind": "reminder_only",
+ "history": []
+}

@@ -1,0 +1,160 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 0,
+ "root_id": "DA.root",
+ "prompt_version_id": 547,
+ "created_at": "2026-08-03T08:17:21.548000",
+ "created_by": "init_database",
+ "actor_kind": "seed",
+ "description": "DeciderAgent — profit-harvesting first, rotation second; enforces contrarian crowd-fade behavior and compact JSON output.",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:21-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "bded9112bf6bae7348ed826d7f871fb8cf58d150d16b2877747369838b3504ec",
+  "user_prompt_template": "e94d0b02224def5b9432ba6a60c7c6af9d509a29f6a63b978ca56331679f3930",
+  "strategy_directives": "5e7e6a38687349b420aa6b3431f2d37702e7cdb1ecacb2fb376d5682469ecd3d",
+  "soul": "f9e6570756eb342937800a43a8868b898b986161c1c895985b40c991e80ff0a9",
+  "memory": "098a478a0b10b40b9865cf39a7b3dc2fa748406ccd50377856ea033ef9e6b11f"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.ground_truth",
+   "DA.directives.primary_mission",
+   "DA.directives.primary_mission.n1",
+   "DA.directives.primary_mission.n2",
+   "DA.directives.primary_mission.n3",
+   "DA.directives.account_mode",
+   "DA.directives.holding_window",
+   "DA.directives.daily_pacing",
+   "DA.directives.hard_sell_rule",
+   "DA.directives.crowd_fade",
+   "DA.directives.cash_playbook",
+   "DA.directives.loser_management",
+   "DA.directives.hold_duration",
+   "DA.directives.reason_content"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.patterns",
+   "DA.memory.mistakes"
+  ]
+ },
+ "node_count": 59,
+ "edge_count": 83,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": false,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "bc8833565d3f",
+  "dir": "../_ltm/bc8833565d3f",
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   6,
+   5,
+   3,
+   13,
+   12,
+   11,
+   10,
+   9
+  ],
+  "injected_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   5,
+   3
+  ]
+ },
+ "lineage": {
+  "parent_version": null,
+  "lineage_version": 0,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 25,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": null
+ },
+ "kind": "seed",
+ "history": []
+}

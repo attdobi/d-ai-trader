@@ -1,0 +1,584 @@
+[
+ {
+  "source_node_id": "SA.code",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.code.feedback_suffix",
+  "target_node_id": "SA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives.anti_hallucination_requirements",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives.catalyst_validity_rules",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives.ground_truth",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives.reminder",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.directives.summarizer_personality",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.ticker.aal",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[AAL]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.ticker.nvda",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[NVDA]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.ticker.roku",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[ROKU]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.ticker.uso",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[USO]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.ticker.vwap",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[VWAP]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.ticker.aal",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[AAL]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.ticker.nvda",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[NVDA]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.ticker.roku",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[ROKU]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.ticker.uso",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[USO]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[price-confirmation]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.memory.log.2026_06_24_current_session_confirmation",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "#timing"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_media_watch",
+  "target_node_id": "SA.ticker.nvda",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[NVDA]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_media_watch",
+  "target_node_id": "SA.ticker.roku",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[ROKU]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_media_watch",
+  "target_node_id": "SA.ticker.uso",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[USO]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_media_watch",
+  "target_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "#media-watch"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_media_watch",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_synced_positions",
+  "target_node_id": "SA.memory.log.2026_06_24_inventory_cleanup",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:tag",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "#synced-positions"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_20_synced_positions",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_24_current_session_confirmation",
+  "target_node_id": "SA.ticker.vwap",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[VWAP]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_24_current_session_confirmation",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_24_inventory_cleanup",
+  "target_node_id": "SA.memory.log.2026_06_20_synced_positions",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[synced-positions]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_24_inventory_cleanup",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_24_portfolio_ground_truth",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_catalyst_taxonomy",
+  "target_node_id": "SA.ticker.vwap",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[VWAP]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_catalyst_taxonomy",
+  "target_node_id": "SA.memory.log.2026_06_18_stale_catalyst",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[price-confirmation]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_catalyst_taxonomy",
+  "target_node_id": "SA.memory.log.2026_06_20_catalyst_validity",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[catalyst-validity]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_catalyst_taxonomy",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "target_node_id": "SA.ticker.aal",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[AAL]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "target_node_id": "SA.ticker.nvda",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[NVDA]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "target_node_id": "SA.ticker.roku",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[ROKU]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "target_node_id": "SA.ticker.uso",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "[[USO]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_media_watch",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_06_25_synced_inventory",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.media_manipulation",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.runtime.inputs",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.core_philosophy",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.edge_definition",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.extraction_style",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.identity",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.mission",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.principles",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.soul.red_flags",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.code.feedback_suffix",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "system_tail"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v4",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.ticker.aal",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.ticker.nvda",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.ticker.roku",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.ticker.uso",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ },
+ {
+  "source_node_id": "SA.ticker.vwap",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v4"
+ }
+]

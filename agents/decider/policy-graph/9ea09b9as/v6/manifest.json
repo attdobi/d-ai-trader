@@ -1,0 +1,157 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 6,
+ "root_id": "DA.root",
+ "prompt_version_id": 565,
+ "created_at": "2026-06-25T07:32:00.037350",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v6 Decider (auto) · feedback#1236 · success 25.0% · 20 trades · 2026-06-25 14:30 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:22-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "53b3323146f9363ef8ae43ac7b08589b7fbd17391dbfbd52380f2b19045d84a9",
+  "user_prompt_template": "5c6e8e03c79dcdd760f24fa31cddf40f8e70cd15216df39a2938a4a38c1e6609",
+  "strategy_directives": "4776eba446c79bfb983ea942fc426ebab9a006e53444ab71f720177d861f2578",
+  "soul": "ca20f63df9da872ca7603f53b67e3315064ed0f46a3d8647564d0aa774579e99",
+  "memory": "b6b0767ae783d4134b168ca8c9b1b1c38c0d27a5dd27a2168024be8dcee9da72"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.reminder",
+   "DA.directives.ground_truth",
+   "DA.directives.core_rules",
+   "DA.directives.core_rules.n1",
+   "DA.directives.core_rules.n2",
+   "DA.directives.core_rules.n3",
+   "DA.directives.core_rules.n4",
+   "DA.directives.core_rules.n5",
+   "DA.directives.core_rules.n6",
+   "DA.directives.core_rules.n7",
+   "DA.directives.core_rules.n8",
+   "DA.directives.holding_triage",
+   "DA.directives.profit_harvesting",
+   "DA.directives.loss_containment",
+   "DA.directives.buy_selection",
+   "DA.directives.cash_discipline",
+   "DA.directives.style"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.identity",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management",
+   "DA.soul.per_agent_edge",
+   "DA.soul.evolution_focus"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_18_synced_inventory",
+   "DA.memory.log.2026_06_20_catalyst_validity",
+   "DA.memory.log.2026_06_20_profit_harvesting",
+   "DA.memory.log.2026_06_20_ground_truth",
+   "DA.memory.log.2026_06_24_synced_inventory",
+   "DA.memory.log.2026_06_24_loss_containment",
+   "DA.memory.log.2026_06_24_entry_filter",
+   "DA.memory.log.2026_06_25_synced_inventory",
+   "DA.memory.log.2026_06_25_entry_filter",
+   "DA.memory.log.2026_06_25_ground_truth"
+  ]
+ },
+ "node_count": 74,
+ "edge_count": 122,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 5,
+  "lineage_version": 6,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 5,
+  "changed": 8,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 5
+ },
+ "kind": "policy",
+ "history": []
+}

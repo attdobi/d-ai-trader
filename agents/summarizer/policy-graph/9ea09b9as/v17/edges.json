@@ -1,0 +1,291 @@
+[
+ {
+  "source_node_id": "SA.code",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.code.feedback_suffix",
+  "target_node_id": "SA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.directives",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.directives.catalyst_provenance",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.directives.decider_uses",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.directives.ground_truth",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.log",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_01_catalyst_provenance",
+  "target_node_id": "SA.ticker.amzn",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "[[AMZN]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_01_catalyst_provenance",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_02_edge",
+  "target_node_id": "SA.ticker.amzn",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "[[AMZN]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_02_edge",
+  "target_node_id": "SA.ticker.cvx",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "[[CVX]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_02_edge",
+  "target_node_id": "SA.ticker.mdb",
+  "edge_type": "cites",
+  "confidence": 1.0,
+  "provenance": "derived:ticker",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "[[MDB]]"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_02_edge",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.log.2026_09_02_pipeline",
+  "target_node_id": "SA.memory.log",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.media_manipulation",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.runtime.inputs",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul.core_philosophy",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul.extraction_style",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul.identity",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul.mission",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.soul.principles",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.code.feedback_suffix",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "system_tail"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v17",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.ticker.amzn",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.ticker.cvx",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ },
+ {
+  "source_node_id": "SA.ticker.mdb",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v17"
+ }
+]

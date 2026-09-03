@@ -1,0 +1,177 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 7,
+ "root_id": "DA.root",
+ "prompt_version_id": 568,
+ "created_at": "2026-06-25T08:46:19.738677",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v7 Decider (auto) · feedback#1237 · success 25.0% · 20 trades · 2026-06-25 15:42 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:22-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "8278f3223ef505398f4441f70a1a07e0346d3387a10c38eaa5d04bb31567fe4a",
+  "user_prompt_template": "9d54e1832691290cc8d792b13791f5cc7ebb2aa4e78c514e3edfdd3d7c5bed5a",
+  "strategy_directives": "2adae827c382d7a76b3e30389ec44110dffe61888637115abcbf037dc6f95e8d",
+  "soul": "3adc988c7bb217f5675f4d0889b1d16a119f70de9c15dde62bcf4bc6086850fb",
+  "memory": "452571630050c2d72a2d28fc5765e27bc0aef5e4e54abf615d5483fd2fa66dc7"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.reminder",
+   "DA.directives.ground_truth",
+   "DA.directives.core_rules",
+   "DA.directives.core_rules.n1",
+   "DA.directives.core_rules.n2",
+   "DA.directives.core_rules.n3",
+   "DA.directives.core_rules.n4",
+   "DA.directives.core_rules.n5",
+   "DA.directives.core_rules.n6",
+   "DA.directives.core_rules.n7",
+   "DA.directives.core_rules.n8",
+   "DA.directives.core_rules.n9",
+   "DA.directives.core_rules.n10",
+   "DA.directives.core_rules.n11",
+   "DA.directives.holding_triage",
+   "DA.directives.profit_harvesting",
+   "DA.directives.loss_containment",
+   "DA.directives.buy_selection",
+   "DA.directives.cash_discipline",
+   "DA.directives.style"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.identity",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management",
+   "DA.soul.per_agent_edge",
+   "DA.soul.evolution_focus"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_18_synced_inventory",
+   "DA.memory.log.2026_06_20_catalyst_validity",
+   "DA.memory.log.2026_06_20_profit_harvesting",
+   "DA.memory.log.2026_06_20_ground_truth",
+   "DA.memory.log.2026_06_24_synced_inventory",
+   "DA.memory.log.2026_06_24_loss_containment",
+   "DA.memory.log.2026_06_24_entry_filter",
+   "DA.memory.log.2026_06_25_synced_inventory",
+   "DA.memory.log.2026_06_25_entry_filter",
+   "DA.memory.log.2026_06_25_ground_truth",
+   "DA.memory.log.2026_06_25_lot_reconciliation",
+   "DA.memory.log.2026_06_25_missing_data"
+  ]
+ },
+ "node_count": 82,
+ "edge_count": 140,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 6,
+  "lineage_version": 7,
+  "activation": null,
+  "review": {
+   "review_id": 3,
+   "created_at": "2026-06-25T08:42:46.164499",
+   "from_version": 6,
+   "to_version": 7,
+   "critic_verdict": "approve",
+   "critic_confidence": 0.86,
+   "critic_auto": false,
+   "critic_reason": "The change is behaviorally meaningful and directly targets cited recent failure modes: duplicate lot/ticker conflicts, unconfirmed headline-driven entries, chase risk, and weak risk cleanup amid poor recent expectancy. It tightens execution discipline and entry confirmation without loosening risk constraints, making it plausibly beneficial for loss containment and win-rate improvement.",
+   "human_verdict": "approve",
+   "human_sections": null,
+   "human_agrees_critic": true,
+   "realized_winrate_delta": null,
+   "realized_pnl": null,
+   "outcome_measured_at": null
+  }
+ },
+ "delta_vs_prev": {
+  "added": 5,
+  "changed": 18,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 6
+ },
+ "kind": "policy",
+ "history": []
+}

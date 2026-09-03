@@ -1,0 +1,153 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "9ea09b9as",
+ "version": 14,
+ "root_id": "SA.root",
+ "prompt_version_id": 591,
+ "created_at": "2026-08-21T16:08:04.450972",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v14 Summarizer (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:48 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:25-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "562b1b44bec82cd2b4df2760ebeda99414a7ae4be24feb82c858ebd7eddf2d1d",
+  "user_prompt_template": "f62f2bea1c4dd50e693815c6f2bcbb8cd531ca2516ccd55c052aeb600db497a4",
+  "strategy_directives": "14e41a391a7954e16ac3467c80d216ce20cba0342bdb8009c5cab8167b0c7881",
+  "soul": "e8a34046eeaf7561ef798eb5c2f3f95407c0810c82fb06eb568fcb0f9bdd3d9d",
+  "memory": "833dbf0a061ba649cf301bf4436cd84225fe0849a594ebecbb2f8cbedd85cf99"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.ground_truth",
+   "SA.directives.position_lot_accounting",
+   "SA.directives.evidence_card_discipline"
+  ],
+  "soul": [
+   "SA.soul",
+   "SA.soul.mission",
+   "SA.soul.principles",
+   "SA.soul.identity",
+   "SA.soul.core_philosophy",
+   "SA.soul.extraction_style"
+  ],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.extraction_patterns",
+   "SA.memory.media_manipulation",
+   "SA.memory.log",
+   "SA.memory.log.2026_08_20",
+   "SA.memory.log.2026_08_21_technical_pullback",
+   "SA.memory.log.2026_08_21_portfolio_state"
+  ]
+ },
+ "node_count": 31,
+ "edge_count": 43,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "SA.code.feedback_suffix": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 13,
+  "lineage_version": 14,
+  "activation": {
+   "event_id": 5,
+   "created_at": "2026-08-21T16:08:04.450972",
+   "action": "apply_candidate",
+   "actor": "prompt_lab",
+   "from_version": 13,
+   "batch_id": "bd0bb6909ac340f59accc0502a921801",
+   "reason": "v14 Summarizer (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:48 UTC"
+  },
+  "review": {
+   "review_id": 13,
+   "created_at": "2026-08-21T15:48:26.398629",
+   "from_version": 13,
+   "to_version": 14,
+   "critic_verdict": "reject",
+   "critic_confidence": 0.9,
+   "critic_auto": false,
+   "critic_reason": "The proposed live-reversal requirement is not validated by the rows: major no-news winners TEAM (+37.1%) and SMCI (+7.1%) were entered on down days with no explicit reversal confirmation, while losses such as IONQ (-10.4%) and RKLB (-7.2%) had strong trend/RS inputs, so the evidence cannot show this extra gate would improve selection rather than exclude winners. GM’s matching loss records support cautious lot accounting, but that reporting control does not establish the bundled eligibility restriction’s expectancy benefit.",
+   "human_verdict": "approve",
+   "human_sections": {
+    "approved": [
+     "system_prompt",
+     "user_prompt_template",
+     "strategy_directives",
+     "soul",
+     "memory"
+    ],
+    "rejected": []
+   },
+   "human_agrees_critic": false,
+   "realized_winrate_delta": -0.2142857142857143,
+   "realized_pnl": -15.928005000000102,
+   "outcome_measured_at": "2026-08-27T17:32:09.406731"
+  }
+ },
+ "delta_vs_prev": {
+  "added": 5,
+  "changed": 2,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [
+   "soul"
+  ],
+  "prev_version": 13
+ },
+ "kind": "policy",
+ "history": []
+}

@@ -1,0 +1,201 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 18,
+ "root_id": "DA.root",
+ "prompt_version_id": 592,
+ "created_at": "2026-08-21T16:08:37.889784",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v18 Decider (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:48 UTC · partial: system_prompt+user_prompt_template+strategy_directives+soul",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:23-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "82528a74c8ee0a46a91bc578f5d92c34bdb0f3dd9b60acbad61994c20ecd4ff8",
+  "user_prompt_template": "7944c7133cd11f6f00557eb478eafcbd522855dd193b80343a81aadebc3e1196",
+  "strategy_directives": "046f21bcfaa8aad98e96d35d92559a6d0acfdf16f3868a392a26a4ce32121727",
+  "soul": "dff4d336dc1d2123df966f6ce6c60d756ff6058ce7bee6b1265b4ac0279fddbc",
+  "memory": "3b95f809337ce0638a2349bc450210507f5bbe3ebe52c3c05cf96d44d7e81c2b"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.ground_truth",
+   "DA.directives.current_evidence_backed_test",
+   "DA.directives.current_evidence_backed_test.n1",
+   "DA.directives.current_evidence_backed_test.n2",
+   "DA.directives.current_evidence_backed_test.n3",
+   "DA.directives.current_evidence_backed_test.n4",
+   "DA.directives.current_evidence_backed_test.n5",
+   "DA.directives.existing_execution_discipline"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.identity",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management",
+   "DA.soul.evidence_discipline"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.lessons.gap_chase",
+   "DA.memory.lessons.n2",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_29_irdm",
+   "DA.memory.log.2026_08_20"
+  ]
+ },
+ "node_count": 65,
+ "edge_count": 97,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "fa7fdaa88004",
+  "dir": "../_ltm/fa7fdaa88004",
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   6,
+   5,
+   3,
+   16,
+   15,
+   14,
+   13,
+   12,
+   11,
+   10,
+   9
+  ],
+  "injected_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   5,
+   3
+  ]
+ },
+ "lineage": {
+  "parent_version": 17,
+  "lineage_version": 18,
+  "activation": {
+   "event_id": 6,
+   "created_at": "2026-08-21T16:08:37.889784",
+   "action": "apply_candidate",
+   "actor": "prompt_lab",
+   "from_version": 17,
+   "batch_id": "2c79f9d16db54abb875e77fb87f67bc8",
+   "reason": "v18 Decider (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:48 UTC · partial: system_prompt+user_prompt_template+strategy_directives+soul"
+  },
+  "review": {
+   "review_id": 14,
+   "created_at": "2026-08-21T15:48:32.998593",
+   "from_version": 17,
+   "to_version": 18,
+   "critic_verdict": "reject",
+   "critic_confidence": 0.93,
+   "critic_auto": false,
+   "critic_reason": "The gate is behavioral but not validated as a separator: TEAM (+37.1%), SMCI (+7.1%), and NET (+8.9%) were profitable technical-dip entries without supplied support-hold/reclaim or current tape/sector confirmation, so the rule would likely reject demonstrated winners. IONQ (-10.4%) supports caution, but one adverse outcome versus repeated similarly documented pullback losses and wins does not establish that the proposed added fields improve expectancy.",
+   "human_verdict": "partial",
+   "human_sections": {
+    "approved": [
+     "system_prompt",
+     "user_prompt_template",
+     "strategy_directives",
+     "soul"
+    ],
+    "rejected": [
+     "memory"
+    ]
+   },
+   "human_agrees_critic": null,
+   "realized_winrate_delta": null,
+   "realized_pnl": null,
+   "outcome_measured_at": null
+  }
+ },
+ "delta_vs_prev": {
+  "added": 8,
+  "changed": 2,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [
+   "soul"
+  ],
+  "prev_version": 17
+ },
+ "kind": "policy",
+ "history": []
+}

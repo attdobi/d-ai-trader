@@ -1,0 +1,167 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 6,
+ "root_id": "FA.root",
+ "prompt_version_id": 593,
+ "created_at": "2026-08-21T16:09:02.083523",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v6 Feedback (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:47 UTC",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:25-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "996a2edd824778dc0266a4e8c6d06656b63f121ffa98ec9268c7eedc0f78b93e",
+  "user_prompt_template": "e1dd528e3ccf4f175a42fd16ecafd5f631df9a2690fde6651d5b6df290f17a96",
+  "strategy_directives": "2e6fb969d732d2849d5b7fea644a084349f8fa070f05039ff5e89eacac449fe1",
+  "soul": "af7579abdbbf4ce09458184e18cfeb936f9b2b173be8a87635714f2ffd96e0c2",
+  "memory": "c2dd75e94e9ee16e374fa17b61a9c03ac934f8a8f29bae7db454f7eb029ff491"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.anti_hallucination",
+   "FA.directives.current_process_biases_audit",
+   "FA.directives.current_process_biases_audit.n1",
+   "FA.directives.current_process_biases_audit.n2",
+   "FA.directives.current_process_biases_audit.n3",
+   "FA.directives.current_process_biases_audit.n4",
+   "FA.directives.current_process_biases_audit.n5",
+   "FA.directives.current_process_biases_audit.n6",
+   "FA.directives.current_process_biases_audit.n7",
+   "FA.directives.current_process_biases_audit.n8",
+   "FA.directives.current_process_biases_audit.n9",
+   "FA.directives.current_process_biases_audit.n10",
+   "FA.directives.current_process_biases_audit.n11",
+   "FA.directives.current_process_biases_audit.n12",
+   "FA.directives.current_process_biases_audit.declared_kill_audit",
+   "FA.directives.current_process_biases_audit.same_ticker_re_entry_guard"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.operating_identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.battle_focus",
+   "FA.soul.failure_pattern"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.log.2026_06_20",
+   "FA.memory.log.2026_06_24",
+   "FA.memory.log.2026_06_25",
+   "FA.memory.log.2026_06_25_2",
+   "FA.memory.log.2026_08_04",
+   "FA.memory.log.2026_08_21"
+  ]
+ },
+ "node_count": 50,
+ "edge_count": 79,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 5,
+  "lineage_version": 6,
+  "activation": {
+   "event_id": 7,
+   "created_at": "2026-08-21T16:09:02.083523",
+   "action": "apply_candidate",
+   "actor": "prompt_lab",
+   "from_version": 5,
+   "batch_id": "9c2d38a3e97f4354a7af57e86a6d90ab",
+   "reason": "v6 Feedback (auto) · feedback#1249 · success 62.2% · 45 trades · 2026-08-21 22:47 UTC"
+  },
+  "review": {
+   "review_id": 15,
+   "created_at": "2026-08-21T15:48:45.597857",
+   "from_version": 5,
+   "to_version": 6,
+   "critic_verdict": "reject",
+   "critic_confidence": 0.94,
+   "critic_auto": false,
+   "critic_reason": "ORCL (+5.4%, then -5.0% and -3.9%) and IONQ (+3.4%, +2.9%, then -10.4%) show mixed same-ticker exit sequences, but the rows do not establish re-entry timing or validate a two-session cutoff versus lot closures; the proposed quarantine could also exclude demonstrated IONQ repeat winners. The catalyst/support exception is likewise unvalidated as a separator, making this a rigid, small-sample parameterization rather than a grounded expectancy improvement.",
+   "human_verdict": "approve",
+   "human_sections": {
+    "approved": [
+     "system_prompt",
+     "strategy_directives",
+     "memory"
+    ],
+    "rejected": []
+   },
+   "human_agrees_critic": false,
+   "realized_winrate_delta": -0.2455357142857143,
+   "realized_pnl": -15.928005000000102,
+   "outcome_measured_at": "2026-08-27T17:32:09.406731"
+  }
+ },
+ "delta_vs_prev": {
+  "added": 2,
+  "changed": 1,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 5
+ },
+ "kind": "policy",
+ "history": []
+}

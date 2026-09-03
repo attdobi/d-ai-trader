@@ -1,0 +1,159 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 13,
+ "root_id": "DA.root",
+ "prompt_version_id": 580,
+ "created_at": "2026-07-30T17:31:50.543740",
+ "created_by": "system",
+ "actor_kind": "weekly",
+ "description": "Strategy updated from feedback (ID: 1243)",
+ "is_active": false,
+ "materialized_at": "2026-09-02T17:19:23-07:00",
+ "materialized_by": "backfill",
+ "pid": 31151,
+ "source_sha256": {
+  "system_prompt": "0a030fcd486540ea7dcf469d0109a2c5ac92e12e0819c7c08cddb5db31d708a4",
+  "user_prompt_template": "134351491acf722a2f475fd7dbbdecd867e93d2cff757682d7b137b206a79292",
+  "strategy_directives": "34974fda0b65cab1716dd89fbba94e1a187ae8de206066dd53e81f72acf6d3de",
+  "soul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "memory": "48cd0a0b8d080fad9e657271bcb2b104b2ba220ee059cc7584108c5e93575463"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": true,
+   "inherited": true,
+   "inherited_from": "agents/decider/SOUL.default.md",
+   "inherited_git_sha": "54a50e5e",
+   "inherited_resolution": "git-blob-at-created_at",
+   "inherited_sha256": "7803a04c56adce908da104c3a6654c6f019a984aba47d31defce687f515660fa",
+   "inherited_order": [
+    "DA.soul",
+    "DA.soul.mission",
+    "DA.soul.principles",
+    "DA.soul.identity",
+    "DA.soul.core_philosophy",
+    "DA.soul.decision_style",
+    "DA.soul.risk_management"
+   ]
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.reminder"
+  ],
+  "soul": [],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.lessons.gap_chase",
+   "DA.memory.lessons.n2",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_29_irdm",
+   "DA.memory.log.2026_07_30"
+  ]
+ },
+ "node_count": 53,
+ "edge_count": 85,
+ "code": {
+  "sha": "062f5ef0d69f",
+  "dir": "../_code/062f5ef0d69f",
+  "git_sha": "2cd93723",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "5ee96760bea7",
+  "dir": "../_ltm/5ee96760bea7",
+  "snapshot": "reconstructed",
+  "injected_limit": 14,
+  "row_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   6,
+   5,
+   3,
+   12,
+   11,
+   10,
+   9
+  ],
+  "injected_ids": [
+   4,
+   2,
+   1,
+   8,
+   7,
+   5,
+   3
+  ]
+ },
+ "lineage": {
+  "parent_version": 12,
+  "lineage_version": 7,
+  "activation": null,
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 1,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 12
+ },
+ "kind": "reminder_only",
+ "history": []
+}
