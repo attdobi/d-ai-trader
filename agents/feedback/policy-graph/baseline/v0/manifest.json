@@ -17,7 +17,7 @@
   "system_prompt": "bdc4eeedb30aafdeaf0ca77b2cef3364784dc85cf7023247dc5276d40232fece",
   "user_prompt_template": "d661219ef430e7187063968fa7e1e52f67c9dafb69ac11889220c80100e3402c",
   "strategy_directives": "25adfa26cb3788baa7992e0cd0c2c7a0ef79a32b4688c8e7d3884bee8161c495",
-  "soul": "360f9213cc8ef942a2ae0e87dd92f8c292270014b5a081fd7b085b3859e41c1b",
+  "soul": "bd39fad5bc6610161c7e5b73c3c510843fdcb316bbbdc7c1a46224c0ce52486f",
   "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
  },
  "fields": {
@@ -63,14 +63,15 @@
    "FA.soul.principles",
    "FA.soul.identity",
    "FA.soul.core_philosophy",
-   "FA.soul.review_style"
+   "FA.soul.review_style",
+   "FA.soul.rule_style"
   ],
   "memory": [
    "FA.memory"
   ]
  },
- "node_count": 16,
- "edge_count": 21,
+ "node_count": 17,
+ "edge_count": 22,
  "code": {
   "sha": "9ee0e6c1cfea",
   "dir": "../_code/9ee0e6c1cfea",
@@ -91,7 +92,7 @@
  },
  "lineage": null,
  "delta_vs_prev": {
-  "added": 10,
+  "added": 11,
   "changed": 0,
   "removed": 0,
   "renamed": 0,

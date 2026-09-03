@@ -1,0 +1,141 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 9,
+ "root_id": "FA.root",
+ "prompt_version_id": 608,
+ "created_at": "2026-09-02T21:49:51.269304",
+ "created_by": "claude_code",
+ "actor_kind": "claude_code",
+ "description": "v9 Feedback (claude_code 2026-09-03) · soul: Decider rules are written as ordered gates (one supplied-field condition per gate, action, fall-through) — directives/memory unchanged from v8",
+ "is_active": true,
+ "materialized_by": "dashboard",
+ "source_sha256": {
+  "system_prompt": "015f20b0ff6888a3597c00b33707ab76b9ca2bd8d50fd586a9ec71fca6aee307",
+  "user_prompt_template": "e1dd528e3ccf4f175a42fd16ecafd5f631df9a2690fde6651d5b6df290f17a96",
+  "strategy_directives": "f77d2868c4745c0ebd636a8481342a48c7df4989550809d19377a439721ae524",
+  "soul": "bd39fad5bc6610161c7e5b73c3c510843fdcb316bbbdc7c1a46224c0ce52486f",
+  "memory": "0e0d9bc5fd68ffb2a202061fd591ace9c382dae6890240dfbd1ae8f34b5729cc"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.anti_hallucination",
+   "FA.directives.audit_order",
+   "FA.directives.audit_order.n1",
+   "FA.directives.audit_order.regime",
+   "FA.directives.audit_order.entry_geometry",
+   "FA.directives.audit_order.re_entry",
+   "FA.directives.audit_order.payoff",
+   "FA.directives.audit_order.n6",
+   "FA.directives.audit_order.n7",
+   "FA.directives.audit_order.n8",
+   "FA.directives.audit_order.n9"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.rule_style"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.log.2026_06_20",
+   "FA.memory.log.2026_06_24",
+   "FA.memory.log.2026_06_25",
+   "FA.memory.log.2026_06_25_2",
+   "FA.memory.log.2026_08_04",
+   "FA.memory.log.2026_08_21",
+   "FA.memory.log.2026_09_01",
+   "FA.memory.log.2026_09_02_meta",
+   "FA.memory.log.2026_09_02_meta_2",
+   "FA.memory.log.2026_09_02_meta_3",
+   "FA.memory.log.2026_09_02_meta_4"
+  ]
+ },
+ "node_count": 51,
+ "edge_count": 97,
+ "code": {
+  "sha": "9ee0e6c1cfea",
+  "dir": "../_code/9ee0e6c1cfea",
+  "git_sha": "c279b3cf",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 8,
+  "lineage_version": 9,
+  "activation": {
+   "event_id": 18,
+   "created_at": "2026-09-02T21:49:51.269304",
+   "action": "save",
+   "actor": "claude_code",
+   "from_version": 8,
+   "batch_id": "dc5364c0c8c445a98b8cee97697e9edc",
+   "reason": "v9 Feedback (claude_code 2026-09-03) · soul: Decider rules are written as ordered gates (one supplied-field condition per gate, action, fall-through) — directives/memory unchanged from v8"
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 8
+ },
+ "kind": "policy",
+ "history": []
+}

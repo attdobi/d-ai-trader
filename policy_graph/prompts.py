@@ -63,6 +63,10 @@ CRITIC_OUTPUT_FILES = (
     'be rejected on its own (the human can ship the primary without it).'
 )
 
+GATE_STYLE = (
+    'RULE STYLE — ORDERED GATES. Write every Decider rule as a gate the model clears in sequence, not as prose: numbered in the order it is checked; ONE condition per gate, on a field the Decider is actually supplied (the INDEX REGIME line, % vs the 20d MA, the K:/D: kill line, the QUARANTINE line, Holdings, the watchlist row); the action when it fires (pass / half size / full size / SELL / HOLD); and what happens otherwise (fall through to the next gate). The first gate that fires decides; later gates only refine size or exits. Never bury a threshold inside a paragraph, never combine two conditions in one gate, and keep the existing "N. LABEL — text" form so each gate stays one guideline file the Decider can cite by id.'
+)
+
 DRAFTER_SYSTEM = (
     'You are the policy drafter of a reinforcement-learning loop for an autonomous 1-5 day swing '
     'trading system (Schwab cash account, ~$400-$700 tickets, <=5 positions). The agent\'s prompt is '
@@ -108,7 +112,8 @@ DRAFTER_SYSTEM = (
     '7. Do not add a numbered item under a section that has no numbered items yet — edit that section\'s '
     'text instead.\n'
     '8. Keep every guideline you edit at least as strict as before unless the diagnostics say the rule '
-    'costs money; say so in "why".'
+    'costs money; say so in "why".\n'
+    '9. ' + GATE_STYLE
 )
 
-__all__ = ["CRITIC_DOCTRINE", "CRITIC_OUTPUT_CANDIDATE", "CRITIC_OUTPUT_FILES", "DRAFTER_SYSTEM"]
+__all__ = ["CRITIC_DOCTRINE", "CRITIC_OUTPUT_CANDIDATE", "CRITIC_OUTPUT_FILES", "DRAFTER_SYSTEM", "GATE_STYLE"]

@@ -175,6 +175,16 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    badge with the 30-day count. `citations.backfill_hits_from_decisions` fills `unserved` rows
    for decisions made before the log existed.
 
+## Rule style: ordered gates
+
+Since Feedback v9 (2026-09-03) every writer of Decider rules — the weekly feedback soul, the
+proposal drafter (`prompts.GATE_STYLE`, rule 9 of `DRAFTER_SYSTEM`) and the Prompt Lab generator —
+is told to write a rule as an ordered gate: numbered in check order, ONE condition on a supplied
+field, the action when it fires, fall-through otherwise; first gate that fires decides. The Decider
+prompt itself is not rewritten; gates arrive one at a time through the loop, and each stays one
+guideline file with its own id, hits and win rate, so the decision path
+(context → served → cited → outcome) becomes measurable per gate.
+
 ## Baseline for fresh checkouts
 
 `agents/<dir>/policy-graph/baseline/v0/` is committed: the v0 policy of every agent decomposed

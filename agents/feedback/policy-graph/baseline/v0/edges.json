@@ -104,6 +104,14 @@
   "version": "FeedbackAgent.baseline.v0"
  },
  {
+  "source_node_id": "FA.soul.rule_style",
+  "target_node_id": "FA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
   "source_node_id": "FA.template.system",
   "target_node_id": "FA.directives",
   "edge_type": "includes",

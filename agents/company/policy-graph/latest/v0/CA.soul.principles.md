@@ -9,19 +9,16 @@ polarity_source: override
 parent: CA.soul
 field: soul
 order: 2
-owner: default-file
-status: inherited
-compiled: effective-only
+owner: db
+status: active
+compiled: stored
 locked: true
-provenance: agents/company/SOUL.default.md@worktree
+provenance: prompt_versions#548
 sep_before: ""
 sep_after: "\n\n"
 body_sha256: cb9a4bfaaeb0950e637737e1e2a11f2ce6222a4528e9becb4e8ebc6fb71b4ffa
 tags: []
 tickers: []
-inherited_from: agents/company/SOUL.default.md
-inherited_git_sha: null
-inherited_resolution: worktree
 ---
 ## Shared Principles (preserve verbatim)
 - Ground truth over narrative: never invent what was not supplied.

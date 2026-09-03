@@ -12,13 +12,13 @@
  "actor_kind": "seed",
  "description": "Extracts companies (rolled up to parent) and ticker symbols from summarizer output",
  "is_active": true,
- "materialized_by": "dashboard",
+ "materialized_by": "init_database",
  "source_sha256": {
   "system_prompt": "ff40a46f8ab2c57f89c7040b846f773af4f1277fffb61bce65a70dd3abd5f4ce",
   "user_prompt_template": "710de1d6bb083b8e4615990d6f564d2e5c77c69c1c73ad17fcfbbecfe5f1619b",
   "strategy_directives": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "soul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  "soul": "80ce6fad0b4ab24c7035c50dc43d6bf07e0051611b3eecbda57490f0f67cb00f",
+  "memory": "7a5504d5afdf4e8e346acda2bfb3794248c573fa46e4ddfafe28b8ffd7c1fd2d"
  },
  "fields": {
   "system_prompt": {
@@ -38,36 +38,13 @@
   },
   "soul": {
    "stored_null": false,
-   "stored_empty": true,
-   "inherited": true,
-   "inherited_from": "agents/company/SOUL.default.md",
-   "inherited_git_sha": null,
-   "inherited_resolution": "worktree",
-   "inherited_sha256": "80ce6fad0b4ab24c7035c50dc43d6bf07e0051611b3eecbda57490f0f67cb00f",
-   "inherited_order": [
-    "CA.soul",
-    "CA.soul.mission",
-    "CA.soul.principles",
-    "CA.soul.identity",
-    "CA.soul.style"
-   ]
+   "stored_empty": false,
+   "inherited": false
   },
   "memory": {
    "stored_null": false,
-   "stored_empty": true,
-   "inherited": true,
-   "inherited_from": "agents/company/MEMORY.default.md",
-   "inherited_git_sha": null,
-   "inherited_resolution": "worktree",
-   "inherited_sha256": "7a5504d5afdf4e8e346acda2bfb3794248c573fa46e4ddfafe28b8ffd7c1fd2d",
-   "inherited_order": [
-    "CA.memory",
-    "CA.memory.lessons",
-    "CA.memory.lessons.parent_rollup",
-    "CA.memory.lessons.no_guess",
-    "CA.memory.lessons.dedupe",
-    "CA.memory.log"
-   ]
+   "stored_empty": false,
+   "inherited": false
   }
  },
  "compile_order": {
@@ -80,15 +57,28 @@
   "strategy_directives": [
    "CA.directives"
   ],
-  "soul": [],
-  "memory": []
+  "soul": [
+   "CA.soul",
+   "CA.soul.mission",
+   "CA.soul.principles",
+   "CA.soul.identity",
+   "CA.soul.style"
+  ],
+  "memory": [
+   "CA.memory",
+   "CA.memory.lessons",
+   "CA.memory.lessons.parent_rollup",
+   "CA.memory.lessons.no_guess",
+   "CA.memory.lessons.dedupe",
+   "CA.memory.log"
+  ]
  },
  "node_count": 16,
  "edge_count": 18,
  "code": {
   "sha": "9ee0e6c1cfea",
   "dir": null,
-  "git_sha": "025ad140",
+  "git_sha": "c279b3cf",
   "fires": {}
  },
  "ltm": {
@@ -115,5 +105,19 @@
   "prev_version": null
  },
  "kind": "seed",
- "history": []
+ "history": [
+  {
+   "source_sha256": {
+    "system_prompt": "ff40a46f8ab2c57f89c7040b846f773af4f1277fffb61bce65a70dd3abd5f4ce",
+    "user_prompt_template": "710de1d6bb083b8e4615990d6f564d2e5c77c69c1c73ad17fcfbbecfe5f1619b",
+    "strategy_directives": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "soul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   },
+   "materialized_at": "2026-09-02T21:30:13-07:00",
+   "materialized_by": "dashboard",
+   "prior_dir": "../_prior/v0-d10580e2",
+   "archived_at": "2026-09-02T21:44:41-07:00"
+  }
+ ]
 }
