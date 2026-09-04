@@ -4267,6 +4267,15 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             'These must survive every regeneration.'
         )
 
+    # Citation contract — the Decider's template must keep the required "cited" key (policy graph
+    # attribution). The code-owned block re-states it every cycle, but a template that says
+    # "No extra keys" without naming "cited" makes the model drop it.
+    if agent_type == 'DeciderAgent' and '"cited"' not in user_prompt_template:
+        raise ValueError(
+            'Generated user_prompt_template dropped the required "cited" guideline-id list from the '
+            'decision JSON contract. Keep it (see GUIDELINE CITATIONS); regenerate.'
+        )
+
     description = _auto_generate_version_description(
         agent_type, current_prompt.version, feedback_summary
     )
@@ -4652,6 +4661,9 @@ def apply_prompt_evolution_candidate():
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
+        if agent_type == 'DeciderAgent' and '"cited"' not in user_prompt_template:
+            return jsonify({'error': ('the Decider user_prompt_template must keep the required "cited" guideline-id '
+                                      'list in its decision JSON contract (policy graph citations)')}), 400
 
         with engine.begin() as conn:
             version_row = conn.execute(text("""
