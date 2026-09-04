@@ -2664,6 +2664,7 @@ OUTPUT (STRICT)
     # cycle's regime, holdings, watchlist and quarantine, each tagged with its id and record.
     # Falls back to the flat stored text on any failure; the stored prompt row is untouched.
     _graph_served = None
+    _graph_index_text = ""
     try:
         if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
             _ctx_regime = str(((locals().get("_regime") or {}).get("label")) or "")
@@ -2677,7 +2678,7 @@ OUTPUT (STRICT)
                 holdings=[h.get("ticker") for h in stock_holdings], watchlist=_ctx_watch, quarantined=_ctx_quar,
                 news=_ctx_news, entities=_ctx_entities, trend=_ctx_trend)
             if _assembled is not None:
-                system_prompt, _graph_served = _assembled
+                system_prompt, _graph_served, _graph_index_text = _assembled
     except Exception as _asm_exc:
         print(f"⚠️  Graph assembly skipped (flat prompt kept): {_asm_exc}")
 
@@ -2779,18 +2780,20 @@ OUTPUT (STRICT)
         " position', never to your own recent buys."
     )
     prompt += (
-    "\n\nGUIDELINE CITATIONS (policy graph — record which guidelines drove each decision):"
-    " Every decision MAY carry one extra key \"cited\": a list of up to 4 guideline ids — the rule you"
-    " applied, the lesson you weighed, the code policy you followed. Ids appear as ⟨id⟩ after each"
-    " guideline in your system prompt (with its record: how often it was cited in the last 7/30/90 days"
-    " and the win rate of the trades it drove — weigh a rule by that record, not by its wording) and in"
-    " the GUIDELINE INDEX below when present. Cite ids exactly as printed; never invent one. The ids are"
-    " stored with the reason so every guideline's realized win rate can be measured on the Policy Graph"
-    " tab. Omit the key when no listed guideline applies."
+    "\n\nGUIDELINE CITATIONS (policy graph — REQUIRED on every decision):"
+    " Every decision MUST carry one extra key \"cited\": a list of 1 to 4 guideline ids taken from the"
+    " GUIDELINE INDEX below — first the gate that decided it (the rule you applied), then the lesson you"
+    " weighed or the code policy you followed. Ids also appear as ⟨id⟩ after each guideline in your system"
+    " prompt, with its record (how often it was cited in the last 7/30/90 days and the win rate of the trades"
+    " it drove — weigh a rule by that record, not by its wording). Cite ids exactly as printed; never invent"
+    " one. A decision without \"cited\" is incomplete: the ids are stored with the reason so every guideline's"
+    " realized win rate can be measured on the Policy Graph tab."
     )
-    _guideline_index_lines = "" if _graph_served else _guideline_index_text(prompt_version)
     if _graph_served:
-        _GUIDELINE_IDS_STASH[run_id] = {sel.node_id for sel in _graph_served}
+        _guideline_index_lines = _graph_index_text
+        _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _graph_index_text.splitlines()}
+    else:
+        _guideline_index_lines = _guideline_index_text(prompt_version)
     if _guideline_index_lines:
         prompt += "\n\nGUIDELINE INDEX (id — title):\n" + _guideline_index_lines
         _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
@@ -3208,7 +3211,11 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
                     routes=routes, context=ctx.summary())
     except Exception as _s_exc:
         print(f"⚠️  Could not log served guidelines: {_s_exc}")
-    return system_prompt, out.served
+    # the index the model cites from: every served guideline plus the code-owned blocks that fire
+    from policy_graph.citations import citable_nodes as _citable
+    served_ids = {sel.node_id for sel in out.served}
+    index_lines = [f"{i} — {t}" for i, t in _citable(_version) if i in served_ids or i.split(".")[1:2] == ["code"]]
+    return system_prompt, out.served, "\n".join(index_lines)
 
 
 def _guideline_index_text(prompt_version):

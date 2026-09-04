@@ -1,0 +1,127 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "9ea09b9as",
+ "version": 18,
+ "root_id": "SA.root",
+ "prompt_version_id": 609,
+ "created_at": "2026-09-03T17:32:56.562210",
+ "created_by": "system",
+ "actor_kind": "weekly",
+ "description": "Weekly feedback reminder appended (ID: 1252) — approved policy preserved",
+ "is_active": true,
+ "materialized_by": "dashboard",
+ "source_sha256": {
+  "system_prompt": "02b9426b755208d88b9e30c824d99b57b967e6f1b1bedab60f381308c438be92",
+  "user_prompt_template": "156be55624a3475624240cf5305d9a6f48c8f852b24e5194076858a634198d02",
+  "strategy_directives": "b7afb2256661430582276000eddccf708ea5732862af5107146f3d888171c1b9",
+  "soul": "e8a34046eeaf7561ef798eb5c2f3f95407c0810c82fb06eb568fcb0f9bdd3d9d",
+  "memory": "6c0bacc14f922a6cf3276476fae9af79100d112ccce9e7276c89ec5774570ff4"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.ground_truth",
+   "SA.directives.decider_uses",
+   "SA.directives.catalyst_provenance",
+   "SA.directives.reminder"
+  ],
+  "soul": [
+   "SA.soul",
+   "SA.soul.mission",
+   "SA.soul.principles",
+   "SA.soul.identity",
+   "SA.soul.core_philosophy",
+   "SA.soul.extraction_style"
+  ],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.extraction_patterns",
+   "SA.memory.media_manipulation",
+   "SA.memory.log",
+   "SA.memory.log.2026_09_02_pipeline",
+   "SA.memory.log.2026_09_02_edge",
+   "SA.memory.log.2026_09_01_catalyst_provenance",
+   "SA.memory.log.2026_09_03"
+  ]
+ },
+ "node_count": 29,
+ "edge_count": 37,
+ "code": {
+  "sha": "34ec242ab340",
+  "dir": "../_code/34ec242ab340",
+  "git_sha": "b48dc2b7",
+  "fires": {
+   "SA.code.feedback_suffix": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 17,
+  "lineage_version": 17,
+  "activation": {
+   "event_id": 19,
+   "created_at": "2026-09-03T17:32:56.562210",
+   "action": "save",
+   "actor": "system",
+   "from_version": 17,
+   "batch_id": "f532988d1f824463bf67f7351699862f",
+   "reason": "Weekly feedback reminder appended (ID: 1252) — approved policy preserved"
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 2,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 17
+ },
+ "kind": "reminder_only",
+ "history": []
+}

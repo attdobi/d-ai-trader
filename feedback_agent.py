@@ -809,7 +809,7 @@ class TradeOutcomeTracker:
             import traceback
             traceback.print_exc()
 
-    MAX_MEMORY_CHARS = 4000
+    MAX_MEMORY_CHARS = 9000      # standing sections are never compressed; see memory_compress.py
 
     def _next_memory_text(self, agent_type, new_lessons, config_hash):
         """The active memory plus a dated section of `new_lessons`, compressed to the limit —
@@ -830,16 +830,10 @@ class TradeOutcomeTracker:
 
     @classmethod
     def _append_memory_section(cls, current_memory, new_lessons):
-        """Pure: current memory + "## <today>\n<lessons>", compressed to MAX_MEMORY_CHARS."""
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        body = (new_lessons or "").strip()
-        if not body:
-            return (current_memory or "").strip()
-        updated_memory = f"{(current_memory or '').strip()}\n\n## {timestamp}\n{body}".strip()
-        if len(updated_memory) > cls.MAX_MEMORY_CHARS:
-            updated_memory = cls._compress_memory_static(updated_memory, cls.MAX_MEMORY_CHARS)
-        return updated_memory
+        """Pure: current memory + "## <today>\n<lessons>"; only old dated log entries are archived
+        when the text exceeds MAX_MEMORY_CHARS (memory_compress.append_dated_section)."""
+        from memory_compress import append_dated_section
+        return append_dated_section(current_memory, new_lessons, max_chars=cls.MAX_MEMORY_CHARS)
 
     def _update_agent_memory(self, agent_type, new_lessons, config_hash, rules=None, write_prompt_row=True):
         """Record lessons in decider_memory and, unless `write_prompt_row` is False (the weekly
@@ -878,7 +872,14 @@ class TradeOutcomeTracker:
 
     @staticmethod
     def _compress_memory_static(memory_text, max_chars):
-        """Keep header + most recent entries that fit within limit."""
+        """Archive the oldest dated log entries only (memory_compress.compress_memory)."""
+        from memory_compress import compress_memory
+        return compress_memory(memory_text, max_chars)
+
+    @staticmethod
+    def _compress_memory_legacy(memory_text, max_chars):
+        """Pre-2026-09-04 behaviour (kept for reference): header + most recent sections that fit —
+        it archived the standing Lessons / Patterns / Mistakes sections. Not called."""
         lines = memory_text.split("\n")
 
         # Find sections (## headers)
