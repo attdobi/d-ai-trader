@@ -37,6 +37,19 @@ def test_normalize_ids_filters_and_caps():
     assert C.normalize_ids("DA.x, DA.y DA.z") == ["DA.x", "DA.y", "DA.z"]
     assert C.normalize_ids(["DA.x", "DA.y"], known={"DA.y"}) == ["DA.y"]
     assert C.normalize_ids(None) == []
+    # decorations the model may copy from the prompt
+    assert C.normalize_ids(["⟨DA.directives.strategy.priced_kill⟩", "<DA.soul.mission>", "`DA.a`", "(DA.b)"]) == \
+        ["DA.directives.strategy.priced_kill", "DA.soul.mission", "DA.a", "DA.b"]
+    assert C.normalize_ids("⟨DA.x · cited 7d/30d/90d: 1/2/3⟩, DA.y — TITLE") == ["DA.x", "DA.y"]
+    assert C.normalize_ids("DA.x DA.y") == ["DA.x", "DA.y"]
+
+
+def test_fold_keeps_raw_when_nothing_valid():
+    d = [{"action": "buy", "ticker": "AAA", "reason": "r", "cited": ["nonsense"]},
+         {"action": "hold", "ticker": "BBB", "reason": "r", "cited": ["DA.not.served"]}]
+    assert C.fold_into_decisions(d, known={"DA.x"}) == []
+    assert d[0]["cited_raw"] == ["nonsense"] and d[0]["cited_dropped"] == "not valid guideline ids"
+    assert d[1]["cited_dropped"] == "not in the served index" and "cited" not in d[1]
 
 
 def test_fold_into_decisions_moves_cited_into_reason():

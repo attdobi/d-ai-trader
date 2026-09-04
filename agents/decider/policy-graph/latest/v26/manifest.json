@@ -1,0 +1,201 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 26,
+ "root_id": "DA.root",
+ "prompt_version_id": 612,
+ "created_at": "2026-09-04T10:59:37.565996",
+ "created_by": "claude_code",
+ "actor_kind": "claude_code",
+ "description": "v26 Decider (claude_code 2026-09-04) · user template only: \"cited\" is REQUIRED on every decision (1-4 bare ids from the GUIDELINE INDEX) — directives/soul/memory unchanged from v25",
+ "is_active": true,
+ "materialized_by": "dashboard",
+ "source_sha256": {
+  "system_prompt": "887697ae00d55d87f559d25cf4c7f63c4b83fbc065ed8b1edd8c6e6d6e3a6c70",
+  "user_prompt_template": "b7c4b63db2d4f256390e1674ec91c8599b82ae3a90660bb8542fa6f01b8822d2",
+  "strategy_directives": "4ef0861312c5cf1d85de55e1109a1f7e02074712d3ab8ad953329879f82fc89d",
+  "soul": "9ec079d91ebf1bf8d652d8de1183a1d57257673c712c9d168cb0d4d3bd455ec0",
+  "memory": "7841bdb4b9f2b6594ee4a84d109ce360e14971f255a570b135ef7522c8654d83"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.ground_truth",
+   "DA.directives.strategy",
+   "DA.directives.strategy.regime_gate",
+   "DA.directives.strategy.extension_cap",
+   "DA.directives.strategy.priced_kill",
+   "DA.directives.strategy.re_entry_quarantine",
+   "DA.directives.strategy.correlation",
+   "DA.directives.strategy.harvest",
+   "DA.directives.strategy.n7",
+   "DA.directives.strategy.n8",
+   "DA.directives.reminder"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.identity",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.lessons.gap_chase",
+   "DA.memory.lessons.extension_chase",
+   "DA.memory.lessons.regime",
+   "DA.memory.lessons.priced_kill",
+   "DA.memory.lessons.reentry_quarantine",
+   "DA.memory.lessons.n6",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.mistakes.unexecutable_gate",
+   "DA.memory.log",
+   "DA.memory.log.2026_06_29_irdm",
+   "DA.memory.log.2026_09_02_regime",
+   "DA.memory.log.2026_09_01_kill_geometry",
+   "DA.memory.log.2026_09_01_technical_pullback",
+   "DA.memory.log.2026_09_03"
+  ]
+ },
+ "node_count": 101,
+ "edge_count": 193,
+ "code": {
+  "sha": "34ec242ab340",
+  "dir": "../_code/34ec242ab340",
+  "git_sha": "5f5ef9a8",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.guideline_citations": true,
+   "DA.code.json_fallback": false
+  }
+ },
+ "ltm": {
+  "sha": "6e7db54047fb",
+  "dir": "../_ltm/6e7db54047fb",
+  "snapshot": "live",
+  "injected_limit": 14,
+  "row_ids": [
+   21,
+   20,
+   19,
+   18,
+   4,
+   2,
+   1,
+   22,
+   23,
+   8,
+   7,
+   6,
+   5,
+   3,
+   27,
+   26,
+   25,
+   24,
+   17,
+   16,
+   15,
+   14,
+   13,
+   12,
+   11,
+   10,
+   9
+  ],
+  "injected_ids": [
+   21,
+   20,
+   19,
+   18,
+   4,
+   2,
+   1,
+   22,
+   23,
+   8,
+   7,
+   5,
+   3,
+   27
+  ]
+ },
+ "lineage": {
+  "parent_version": 25,
+  "lineage_version": 26,
+  "activation": {
+   "event_id": 22,
+   "created_at": "2026-09-04T10:59:37.565996",
+   "action": "save",
+   "actor": "claude_code",
+   "from_version": 25,
+   "batch_id": "20aa2f6ac44e48a6875a6fee92931c50",
+   "reason": "v26 Decider (claude_code 2026-09-04) · user template only: \"cited\" is REQUIRED on every decision (1-4 bare ids from the GUIDELINE INDEX) — directives/soul/memory unchanged from v25"
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 0,
+  "changed": 1,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 25
+ },
+ "kind": "policy",
+ "history": []
+}

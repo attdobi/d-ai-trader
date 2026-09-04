@@ -58,11 +58,18 @@ def normalize_ids(raw, known: Optional[Iterable] = None) -> list:
     if raw is None:
         return []
     if isinstance(raw, str):
-        raw = re.split(r"[,\s]+", raw)
+        raw = re.split(r"[,;\n]+", raw)
+    tokens: list = []
+    for item in raw:
+        s = str(item or "").strip()
+        if "—" in s or "·" in s:         # "DA.x — title" / "⟨DA.x · cited …⟩" copied from the prompt: the id is the first token
+            s = s.split()[0]
+        tokens.extend(s.split())
     known_set = set(known) if known is not None else None
     out: list = []
-    for item in raw:
-        s = str(item or "").strip().strip("[]\"'`")
+    for tok in tokens:
+        # models copy ids with the decorations they were shown: ⟨id⟩, <id>, `id`, "id", [id], (id)
+        s = tok.strip("[]\"'`⟨⟩<>()*.,;")
         if not s:
             continue
         head, _, tail = s.partition(".")
@@ -87,8 +94,13 @@ def fold_into_decisions(decisions, known: Optional[Iterable] = None) -> list:
         raw = d.pop("cited", None)
         if raw is None:
             raw = d.pop("cites", None)
+        if raw is None:
+            raw = d.pop("guidelines", None)
         ids = normalize_ids(raw, known)
         if not ids:
+            if raw not in (None, "", [], {}):
+                d["cited_raw"] = raw            # visible in the stored decision: what the model sent and why it was dropped
+                d["cited_dropped"] = ("not in the served index" if known is not None and normalize_ids(raw) else "not valid guideline ids")
             continue
         d["reason"] = append_cites(d.get("reason") or "", ids)
         used.extend(i for i in ids if i not in used)

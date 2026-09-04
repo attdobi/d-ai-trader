@@ -1,10 +1,10 @@
 {
  "config_hash": "9ea09b9as",
- "version": 25,
- "prompt_version_id": 611,
+ "version": 26,
+ "prompt_version_id": 612,
  "source_sha256": {
   "system_prompt": "887697ae00d55d87f559d25cf4c7f63c4b83fbc065ed8b1edd8c6e6d6e3a6c70",
-  "user_prompt_template": "6906d15ffdf9fc87498e06b86cc48c1d49b76bfd777d7fed6dc3b6f1604eaf3d",
+  "user_prompt_template": "b7c4b63db2d4f256390e1674ec91c8599b82ae3a90660bb8542fa6f01b8822d2",
   "strategy_directives": "4ef0861312c5cf1d85de55e1109a1f7e02074712d3ab8ad953329879f82fc89d",
   "soul": "9ec079d91ebf1bf8d652d8de1183a1d57257673c712c9d168cb0d4d3bd455ec0",
   "memory": "7841bdb4b9f2b6594ee4a84d109ce360e14971f255a570b135ef7522c8654d83"
