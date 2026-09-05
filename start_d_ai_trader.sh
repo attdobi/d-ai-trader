@@ -40,6 +40,8 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                           • 60  - Every hour (active monitoring)
                           • 15  - Every 15 minutes (legacy intraday testing)
   -H, --config-hash     Force a specific configuration hash for this run
+  -b, --bind            Dashboard bind address (default: 0.0.0.0 = reachable from the local
+                        network at http://<this-mac's-IP>:PORT; use 127.0.0.1 for local-only)
   -s, --policy-seed     Where a NEW config's v0 policy comes from (default: default)
                           • default - the code defaults (agents/*/policy-graph/baseline/v0)
                           • latest  - the shipped active policy graph
@@ -64,6 +66,7 @@ TRADING_MODE="${TRADING_MODE:-simulation}"
 CADENCE_MINUTES=180
 CONFIG_HASH_OVERRIDE=""
 POLICY_SEED="${DAI_POLICY_SEED:-default}"
+BIND_HOST="${DAI_BIND_HOST:-0.0.0.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -75,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     -P|--prompt-profile) PROMPT_PROFILE="$2"; shift 2;;
     -H|--config-hash) CONFIG_HASH_OVERRIDE="$2"; shift 2;;
     -s|--policy-seed) POLICY_SEED="$2"; shift 2;;
+    -b|--bind) BIND_HOST="$2"; shift 2;;
     --help|-h) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -166,6 +170,7 @@ export DAI_GPT_MODEL="${MODEL}"
 export DAI_PROMPT_VERSION="${PROMPT_VERSION}"
 export DAI_PROMPT_PROFILE="${PROMPT_PROFILE}"
 export DAI_POLICY_SEED="${POLICY_SEED}"
+export DAI_BIND_HOST="${BIND_HOST}"
 export TRADING_MODE="${TRADING_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE_MINUTES}"
 if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then

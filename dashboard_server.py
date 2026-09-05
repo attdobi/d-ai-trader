@@ -4838,5 +4838,12 @@ def schwab_dashboard():
 
 if __name__ == "__main__":
     port = int(os.environ.get('DAI_PORT', 8080))
-    print(f"🚀 Starting dashboard server on port {port} (trading_mode={get_trading_mode()})")
-    app.run(debug=True, port=port)
+    # DAI_BIND_HOST=0.0.0.0 (default) listens on every interface so other machines on the local
+    # network can open the dashboard (http://<this-mac's-LAN-IP>:PORT); set 127.0.0.1 to keep it
+    # local-only. The dashboard has no login, so only bind wide on a network you trust. The
+    # Werkzeug interactive debugger is disabled when not bound to loopback (the reloader stays on).
+    host = (os.environ.get('DAI_BIND_HOST') or '0.0.0.0').strip()
+    loopback = host in ('127.0.0.1', 'localhost', '::1')
+    print(f"🚀 Starting dashboard server on {host}:{port} (trading_mode={get_trading_mode()})"
+          + ("" if loopback else " — reachable from the local network; no login, trust your LAN"))
+    app.run(host=host, port=port, debug=True, use_debugger=loopback, use_reloader=True)

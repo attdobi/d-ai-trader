@@ -475,6 +475,9 @@ DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
   -t, --trading-mode MODE    simulation | live (default: simulation)
   -c, --cadence MINUTES      180 (default) | 60 | 30 | 15
   -H, --config-hash HASH     Force a specific configuration hash for this run
+  -b, --bind HOST            Dashboard bind address (default 0.0.0.0: reachable from your LAN at
+                             http://<this-mac's-IP>:PORT; 127.0.0.1 = this machine only). No login —
+                             bind wide only on a network you trust.
   -s, --policy-seed SEED     default | latest — where a NEW config's v0 policy comes from
                              (default: the code defaults; latest: the shipped active
                              policy graph in agents/*/policy-graph/latest). First seed only.
