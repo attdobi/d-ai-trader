@@ -136,6 +136,18 @@
               </div>
             </details>
           {% endif %}
+          {% set nc = decision.get('news_context') %}
+          {% if nc %}
+            <div class="news-context" title="The summarizer headline(s) that mentioned this ticker this cycle — or, if none, where the candidate came from">
+              {% if nc.get('snippets') %}
+                {% for sn in nc.get('snippets') %}
+                  <div>📰 <span class="news-agent">{{ sn.get('agent', '')|replace('Agent_', '') }}:</span> “{{ sn.get('text') }}”</div>
+                {% endfor %}
+              {% else %}
+                <div>📰 No summarizer headline mentioned {{ ticker }} this cycle — source: <em>{{ nc.get('source') }}</em></div>
+              {% endif %}
+            </div>
+          {% endif %}
           {% set sz = decision.get('sizing') %}
           {% if sz and sz.get('available_usd') %}
             <span class="sizing-note" title="How the order was sized: the model's allocation vs the settled cash the guardrails allowed">
@@ -234,6 +246,8 @@ a.chip { text-decoration: none; }
 .exec-cash_hold { background: #eef1f4; color: #475569; }
 .exec-unconfirmed { background: rgba(120,140,170,0.18); color: #9bb0cc; }
 .sizing-note { display:block; margin-top:4px; color:#7a8a9a; font-size:0.8em; }
+.news-context { margin-top:5px; color:#9bb0cc; font-size:0.82em; line-height:1.4; }
+.news-context .news-agent { color:#7f8ca6; }
 .est-tag { color: #9aa3ad; font-style: italic; font-size: 0.85em; }
 .amt-none { color: #b42318; font-size: 0.9em; }
 .decision-cost { display:block; margin-top:3px; color:#7a8a9a; font-size:0.8em; font-family: ui-monospace, Menlo, monospace; }

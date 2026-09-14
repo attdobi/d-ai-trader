@@ -2730,6 +2730,7 @@ OUTPUT (STRICT)
     # extended movers). Tickers exited within the last 2 sessions are QUARANTINED — removed
     # from the candidates and named in the block — because same-ticker re-entry within 3 days
     # was the largest measured leak (Jul-Sep 2026). Best-effort — never breaks the decider.
+    _contra = []  # also feeds each decision's news_context ("where did this candidate come from")
     try:
         from contrarian_screener import get_contrarian_candidates, format_contrarian_watchlist
         _quarantined = recently_exited_tickers(config_hash)
@@ -3105,6 +3106,19 @@ OUTPUT (STRICT)
         _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response)
     except Exception as _hit_exc:
         print(f"⚠️  Could not log guideline hits: {_hit_exc}")
+
+    # Which summarizer headline (if any) mentioned each ticker this cycle — or, when none
+    # did, where the candidate came from (contrarian screen / existing holding). Stored on
+    # the decision so the Trades tab can show the trigger instead of leaving it to the
+    # reader to guess (a CMG buy with no news mention looked like a hallucination; it was
+    # a screen candidate).
+    try:
+        from shared.news_context import attach_news_context as _attach_news
+        _n_hit = _attach_news(ai_response, parsed_summaries, company_entities=company_entities,
+                              contrarian=_contra, holdings=current_ticker_set)
+        print(f"📰 News context attached: {_n_hit} decision(s) matched a summarizer headline")
+    except Exception as _news_exc:
+        print(f"⚠️  Could not attach news context: {_news_exc}")
 
     # If market is closed, modify decisions to show they're deferred
     if not market_open:

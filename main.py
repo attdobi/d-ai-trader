@@ -54,7 +54,7 @@ URLS = [
     ("Agent_Yahoo_Finance", "https://finance.yahoo.com/topic/stock-market-news/"),  # ✅ News-focused topic page (homepage 500s as of 2026-06)
     ("Agent_StockAnalysis_Gainers", "https://stockanalysis.com/markets/gainers/"),  # ⭐ Day trading movers — replaces MarketBeat (404'd 2026-06)
     ("Agent_Fox_Business", "https://www.foxbusiness.com"),            # ✅ Reliable, good content
-    ("Agent_AP_Business", "https://apnews.com/business"),             # Clean, simple, AP trusted
+    ("Agent_NPR_Business", "https://www.npr.org/sections/business/"),  # replaces AP (Cloudflare bot challenge since 2026-09); renders clean headless
     ("Agent_BBC_Business", "https://www.bbc.com/business"),           # International news
     ("Agent_CNBC", "https://www.cnbc.com")                            # ⭐ Great content but can crash driver initially
     # Order matters: Simple sites first warm up driver, complex sites later

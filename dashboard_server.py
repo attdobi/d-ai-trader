@@ -1483,6 +1483,7 @@ def trade_decisions():
                             'order_id': decision.get('order_id'),
                             'execution_error': decision.get('execution_error'),
                             'sizing': decision.get('sizing'),
+                            'news_context': decision.get('news_context'),
                         }
                         # A BUY/SELL is either FILLED (broker confirmation persisted on the
                         # decision), NOT EXECUTED (an explicit rejection/skip), or UNCONFIRMED
