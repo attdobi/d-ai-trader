@@ -107,6 +107,95 @@ def fold_into_decisions(decisions, known: Optional[Iterable] = None) -> list:
     return used
 
 
+# ----------------------------------------------------------------------------- enforcement (repair pass)
+# "REQUIRED" in the prompt is not enforcement: roughly half of the model-authored decisions came
+# back without `cited`, and the code-synthesized CASH hold never had a slot for one. The trader
+# runs ONE repair call per cycle for whatever is still uncited; these helpers are the pure parts.
+
+AUTO_HOLD_PREFIX = "Auto HOLD "  # code-authored placeholder rows the model never reasoned about
+
+
+def uncited_decisions(decisions) -> list:
+    """The buy/sell/hold decision dicts whose reason carries no valid ` [cites: …]` suffix."""
+    out = []
+    for d in decisions or []:
+        if not isinstance(d, dict):
+            continue
+        if (d.get("action") or "").lower() not in ("buy", "sell", "hold"):
+            continue
+        if parse_cites(d.get("reason")):
+            continue
+        out.append(d)
+    return out
+
+
+def repair_prompt(decisions, index_text: str) -> str:
+    """Follow-up prompt: cite (from the index the model was already shown) for each listed decision."""
+    lines = []
+    for d in decisions:
+        reason = strip_cites(d.get("reason") or "")
+        lines.append(f"- {str(d.get('ticker') or '').upper()} / {(d.get('action') or '').upper()}: {reason}")
+    return (
+        "You just produced the trade decisions below without the REQUIRED \"cited\" guideline ids. "
+        "For EACH decision, pick 1 to 4 ids from the GUIDELINE INDEX that the reason actually applied — "
+        "the deciding gate first, then the lesson or code policy weighed. Copy ids exactly as printed; "
+        "never invent one. Do not change or re-judge any decision.\n\n"
+        "Return ONLY this JSON object (no commentary):\n"
+        "{\"citations\": {\"<TICKER>\": [\"<guideline id>\", ...], ...}}\n\n"
+        "DECISIONS:\n" + "\n".join(lines) +
+        "\n\nGUIDELINE INDEX (id — title):\n" + (index_text or "")
+    )
+
+
+def parse_repair_response(resp) -> dict:
+    """{TICKER: raw ids} from whatever shape the model returned (dict with 'citations', a bare
+    ticker map, or a list of {ticker, cited}). Anything unparseable → {}."""
+    if isinstance(resp, str):
+        try:
+            import json as _json
+            resp = _json.loads(resp)
+        except Exception:
+            return {}
+    if isinstance(resp, dict) and isinstance(resp.get("citations"), dict):
+        resp = resp["citations"]
+    out = {}
+    if isinstance(resp, dict):
+        for k, v in resp.items():
+            if isinstance(k, str) and k.strip() and k != "error":
+                out[k.strip().upper()] = v
+    elif isinstance(resp, list):
+        for item in resp:
+            if isinstance(item, dict) and item.get("ticker"):
+                out[str(item["ticker"]).strip().upper()] = item.get("cited") or item.get("cites") or item.get("guidelines")
+    return out
+
+
+def apply_citation_repairs(decisions, repairs: dict, known=None, *, fallback: Optional[dict] = None) -> list:
+    """Fold `repairs` ({TICKER: ids}) into each still-uncited decision (in place). A decision the
+    model gave nothing valid for takes `fallback[TICKER]` (e.g. the code-owned block that
+    synthesized the row) when those ids are known; otherwise it is stamped `cited_dropped` so the
+    gap is visible in the stored decision. Returns the ids used."""
+    used: list = []
+    for d in uncited_decisions(decisions):
+        if str(d.get("reason") or "").startswith(AUTO_HOLD_PREFIX):
+            continue  # code-authored placeholder: never attributed to a guideline (caller stamps it)
+        tk = str(d.get("ticker") or "").upper()
+        ids = normalize_ids((repairs or {}).get(tk), known)
+        source = "repair"
+        if not ids and fallback and fallback.get(tk):
+            ids = normalize_ids(fallback[tk], known)
+            source = "fallback"
+        if not ids:
+            d["cited_dropped"] = "no valid guideline ids after repair pass"
+            continue
+        d["reason"] = append_cites(d.get("reason") or "", ids)
+        d.pop("cited_raw", None)
+        d.pop("cited_dropped", None)
+        d["cited_via"] = source
+        used.extend(i for i in ids if i not in used)
+    return used
+
+
 # ----------------------------------------------------------------------------- what the Decider sees
 def citable_nodes(version: Version) -> list:
     """[(id, title)] of the guidelines a decision may cite: stored / inherited guidelines of the

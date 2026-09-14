@@ -2974,19 +2974,17 @@ OUTPUT (STRICT)
 
     # Fold the optional "cited" guideline ids into each reason (" [cites: DA.…]") so the citation
     # travels with the reason into trade_decisions, holdings and trade_outcomes.
+    # Hits are recorded once, AFTER the repair pass below (which also covers the synthesized
+    # CASH hold and any decision the model returned without a valid `cited` list).
+    _known_ids = None
     try:
         from policy_graph.citations import fold_into_decisions as _fold_cites
         _known_ids = _GUIDELINE_IDS_STASH.pop(run_id, None)
         _used_ids = _fold_cites(ai_response, _known_ids)
         if _used_ids:
             print(f"📎 Guidelines cited this cycle: {', '.join(_used_ids)}")
-            try:
-                from policy_graph.citations import record_cited as _record_cited
-                _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response)
-            except Exception as _hit_exc:
-                print(f"⚠️  Could not log guideline hits: {_hit_exc}")
     except Exception as _cite_exc:
-        print(f"⚠️  Could not record guideline citations: {_cite_exc}")
+        print(f"⚠️  Could not fold guideline citations: {_cite_exc}")
 
     # Guarantee a decision exists for every current holding
     existing_decisions = {}
@@ -3054,6 +3052,15 @@ OUTPUT (STRICT)
             "reason": cash_hold_reason,
             "execution_status": "cash_hold",
         })
+
+    # Enforce citations: one repair call for whatever is still uncited (model omissions, invalid
+    # ids, the CASH hold), then log served/cited hits for the policy graph exactly once.
+    _repair_missing_citations(ai_response, _known_ids, _guideline_index_lines, run_id)
+    try:
+        from policy_graph.citations import record_cited as _record_cited
+        _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response)
+    except Exception as _hit_exc:
+        print(f"⚠️  Could not log guideline hits: {_hit_exc}")
 
     # If market is closed, modify decisions to show they're deferred
     if not market_open:
@@ -3175,6 +3182,54 @@ _CONSIDERED_STASH = {}
 # Per-run set of citable guideline ids (from the policy graph of the active prompt version), so the
 # "cited" ids the model returns are validated before they are folded into each reason.
 _GUIDELINE_IDS_STASH = {}
+
+# Code-owned guideline that synthesizes the CASH hold row from the model's cash_reason — the
+# honest citation when the model cannot supply one for that row.
+_CASH_HOLD_FALLBACK_CITES = ["DA.code.cash_disclosure"]
+
+
+def _repair_missing_citations(decisions, known_ids, index_text, run_id):
+    """Citations are REQUIRED on every decision but a prompt rule is not enforcement: about half
+    the model-authored decisions came back without `cited`, and the CASH hold row (built from
+    cash_reason) never had a slot for one — so half the policy graph's outcomes were unattributed.
+
+    One cheap follow-up call per cycle asks the model to pick ids from the index it was already
+    shown for each still-uncited decision; decisions themselves are never changed. Code-authored
+    auto-HOLD placeholders are not sent (the model never reasoned about them) and are stamped
+    instead. Anything still uncited afterwards is stamped `cited_dropped` so the gap is visible."""
+    from policy_graph.citations import (AUTO_HOLD_PREFIX, apply_citation_repairs,
+                                        parse_repair_response, repair_prompt, uncited_decisions)
+    try:
+        missing = uncited_decisions(decisions)
+        auto = [d for d in missing if str(d.get("reason") or "").startswith(AUTO_HOLD_PREFIX)]
+        for d in auto:
+            d["cited_dropped"] = "code-authored auto HOLD (model omitted the position)"
+        missing = [d for d in missing if d not in auto]
+        if not missing:
+            return
+        tickers = [str(d.get("ticker") or "").upper() for d in missing]
+        if not index_text:
+            for d in missing:
+                d["cited_dropped"] = "no guideline index served this cycle"
+            print(f"⚠️  {len(missing)} decision(s) uncited and no guideline index to repair from: {', '.join(tickers)}")
+            return
+        print(f"📎 Citation repair pass for {len(missing)} uncited decision(s): {', '.join(tickers)}")
+        resp = prompt_manager.ask_openai(
+            repair_prompt(missing, index_text),
+            "You are the DeciderAgent's citation auditor. Attribute each trade decision to the guideline ids "
+            "it applied, using only ids from the provided index. Output strict JSON.",
+            agent_name="DeciderAgent",
+        )
+        repairs = parse_repair_response(resp)
+        used = apply_citation_repairs(decisions, repairs, known_ids,
+                                      fallback={"CASH": _CASH_HOLD_FALLBACK_CITES})
+        still = [str(d.get("ticker") or "").upper() for d in uncited_decisions(decisions)
+                 if not str(d.get("reason") or "").startswith(AUTO_HOLD_PREFIX)]
+        print(f"📎 Citation repair: {len(used)} id(s) attached" + (f"; STILL uncited: {', '.join(still)}" if still else ""))
+    except Exception as exc:
+        print(f"⚠️  Citation repair pass failed: {exc}")
+        for d in uncited_decisions(decisions):
+            d.setdefault("cited_dropped", f"repair pass failed: {exc}")
 
 
 _HEADLINE_TICKER_RE = re.compile(r"\[([A-Z]{1,5})\]")

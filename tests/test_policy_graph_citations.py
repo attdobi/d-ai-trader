@@ -122,3 +122,59 @@ def test_citation_health_joins_decisions_and_closed_trades(db):
     assert soul["decisions"] == 1 and soul["closed"] == 1 and soul["win_rate"] == 1.0
     none = C.citation_health(db, "h", "DA.memory.lessons.regime")
     assert none["decisions"] == 0 and none["closed"] == 0 and none["win_rate"] is None
+
+
+# ----------------------------------------------------------------------------- enforcement (repair pass)
+def test_uncited_decisions_skips_non_trades_and_cited():
+    ds = [
+        {"action": "buy", "ticker": "AAPL", "reason": "x [cites: DA.directives.strategy.priced_kill]"},
+        {"action": "sell", "ticker": "TSLA", "reason": "no suffix"},
+        {"action": "hold", "ticker": "CASH", "reason": "cash reason", "execution_status": "cash_hold"},
+        {"kind": "considered_audit", "considered": []},
+        "garbage",
+    ]
+    assert [d["ticker"] for d in C.uncited_decisions(ds)] == ["TSLA", "CASH"]
+
+
+def test_repair_prompt_lists_decisions_and_index():
+    p = C.repair_prompt([{"action": "sell", "ticker": "tsla", "reason": "harvest +3% [cites: DA.x]"}],
+                        "DA.directives.strategy.harvest — HARVEST")
+    assert "- TSLA / SELL: harvest +3%" in p          # existing (invalid) suffix stripped
+    assert "DA.directives.strategy.harvest — HARVEST" in p
+    assert '{"citations"' in p
+
+
+def test_parse_repair_response_shapes():
+    assert C.parse_repair_response({"citations": {"tsla": ["DA.a"]}}) == {"TSLA": ["DA.a"]}
+    assert C.parse_repair_response({"TSLA": "DA.a, DA.b"}) == {"TSLA": "DA.a, DA.b"}
+    assert C.parse_repair_response([{"ticker": "cash", "cited": ["DA.c"]}]) == {"CASH": ["DA.c"]}
+    assert C.parse_repair_response('{"citations": {"X": ["DA.z"]}}') == {"X": ["DA.z"]}
+    assert C.parse_repair_response({"error": "boom"}) == {}
+    assert C.parse_repair_response("not json") == {}
+
+
+def test_apply_citation_repairs_repair_fallback_and_dropped():
+    known = {"DA.directives.strategy.harvest", "DA.code.cash_disclosure"}
+    ds = [
+        {"action": "buy", "ticker": "AAPL", "reason": "already [cites: DA.directives.strategy.harvest]"},
+        {"action": "sell", "ticker": "TSLA", "reason": "harvest", "cited_raw": ["bogus"], "cited_dropped": "x"},
+        {"action": "hold", "ticker": "CASH", "reason": "no edge", "execution_status": "cash_hold"},
+        {"action": "hold", "ticker": "NVDA", "reason": "hold it"},
+        {"action": "hold", "ticker": "AMD", "reason": C.AUTO_HOLD_PREFIX + "AMD: AI omitted this position",
+         "cited_dropped": "code-authored auto HOLD"},
+    ]
+    used = C.apply_citation_repairs(
+        ds,
+        {"TSLA": ["⟨DA.directives.strategy.harvest⟩", "DA.not.served"], "NVDA": ["DA.not.served"],
+         "AMD": ["DA.directives.strategy.harvest"]},
+        known,
+        fallback={"CASH": ["DA.code.cash_disclosure"]},
+    )
+    assert used == ["DA.directives.strategy.harvest", "DA.code.cash_disclosure"]
+    assert ds[0]["reason"].count("[cites:") == 1                       # untouched
+    assert C.parse_cites(ds[1]["reason"]) == ["DA.directives.strategy.harvest"]
+    assert "cited_raw" not in ds[1] and ds[1]["cited_via"] == "repair"
+    assert C.parse_cites(ds[2]["reason"]) == ["DA.code.cash_disclosure"] and ds[2]["cited_via"] == "fallback"
+    assert C.parse_cites(ds[3]["reason"]) == [] and "no valid guideline ids" in ds[3]["cited_dropped"]
+    # auto-HOLD placeholders are never attributed, even if the model offers ids; caller's stamp survives
+    assert C.parse_cites(ds[4]["reason"]) == [] and ds[4]["cited_dropped"] == "code-authored auto HOLD"
