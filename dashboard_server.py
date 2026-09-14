@@ -1506,12 +1506,17 @@ def trade_decisions():
                             if not _filled and not _rejected:
                                 _tk = cleaned_decision.get('ticker')
                                 _h = hold_map.get(_tk)
+                                # These are INFERENCES from the local ledger, not broker
+                                # confirmations — flagged so the badge can say so. The
+                                # ledger can be wrong (a sell that failed at the broker but
+                                # was booked locally looked exactly like a fill here).
                                 if _act == 'buy' and _h and _h[0] > 0:
                                     # Position exists → the BUY filled; the broker confirmation lagged.
                                     cleaned_decision['executed_shares'] = _h[0]
                                     cleaned_decision['executed_price'] = _h[1]
                                     cleaned_decision['executed_amount'] = round(_h[0] * _h[1], 2)
                                     cleaned_decision['execution_status'] = 'filled'
+                                    cleaned_decision['fill_inferred'] = True
                                 elif _act == 'sell' and _tk not in hold_map:
                                     # Position is gone → the SELL filled. Record it (the exact fill
                                     # price is stamped by the broker confirmation once available).
@@ -1522,6 +1527,7 @@ def trade_decisions():
                                         cleaned_decision['executed_amount'] = round(float(_amt), 2)
                                         cleaned_decision['executed_price'] = round(float(_amt) / float(_sh), 2)
                                         cleaned_decision['execution_status'] = 'filled'
+                                        cleaned_decision['fill_inferred'] = True
                                     else:
                                         continue
                                 else:

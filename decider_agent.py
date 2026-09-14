@@ -1405,6 +1405,7 @@ def execute_real_world_trade(decision):
         print("   ⛔ ALL TRADE EXECUTION DISABLED FOR SAFETY")
         print(f"   Decision would be: {decision.get('action', 'N/A').upper()} {decision.get('ticker', 'N/A')} ${decision.get('amount_usd', 0)}")
         print("   To enable trades: Remove DAI_SCHWAB_READONLY flag")
+        _mark_not_executed(decision, 'not_executed', 'Schwab read-only mode active')
         return False
 
     # SAFETY LAYER 2: Trading mode check
@@ -1415,6 +1416,7 @@ def execute_real_world_trade(decision):
     # SAFETY LAYER 3: Market hours check
     if not is_market_open():
         print(f"⛔ Cannot execute real trade - market is closed")
+        _mark_not_executed(decision, 'market_closed', 'Market closed at execution time')
         return False
 
     try:
@@ -1444,10 +1446,16 @@ def execute_real_world_trade(decision):
                 result = trading_interface.execute_sell_order(ticker, holding['shares'])
             else:
                 print(f"⚠️  Cannot sell {ticker} - no shares found in holdings")
+                _mark_not_executed(decision, 'failed', 'No shares found in local holdings')
                 return False
 
         if not result:
-            print("❌ REAL TRADE FAILED: No response from trading interface")
+            # Typical cause: Schwab client not authenticated (expired refresh
+            # token) — the trading interface returns nothing rather than an
+            # order result. Must be stamped, or the caller/dashboard can't
+            # tell this apart from a fill whose confirmation lagged.
+            print("❌ REAL TRADE FAILED: No response from trading interface (Schwab auth/token?)")
+            _mark_not_executed(decision, 'failed', 'No response from trading interface — Schwab auth/token likely invalid')
             return False
 
         if result.get('success'):
@@ -1484,14 +1492,26 @@ def execute_real_world_trade(decision):
             return False
 
     except ImportError:
-        print("⚠️  Trading interface not available for real-world trading")
-        print("🔄 Falling back to simulation mode for this trade")
-        return True
+        # We only get here in real_world mode (simulation returned above), so
+        # "fall back to simulation" would book a trade the broker never saw.
+        print("⚠️  Trading interface not available for real-world trading — treating as NOT executed")
+        _mark_not_executed(decision, 'failed', 'Trading interface unavailable (import error)')
+        return False
     except Exception as e:
         print(f"❌ Real trade execution error: {e}")
         import traceback
         traceback.print_exc()
+        _mark_not_executed(decision, 'error', f'Execution error: {e}')
         return False
+
+
+def _mark_not_executed(decision, status, error):
+    """Stamp a non-fill on the decision so every downstream consumer (sell/buy
+    bookkeeping, trade_decisions persistence, the Trades tab) sees an explicit
+    failure instead of an absence of information."""
+    decision['execution_status'] = status
+    decision['execution_error'] = error
+
 
 def update_holdings(decisions, skip_live_execution=False, run_id=None):
     # Use Pacific time as naive timestamp (database stores as-is, dashboard formats correctly)
@@ -1866,7 +1886,28 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 if live_execution_enabled:
                     live_success = execute_real_world_trade(decision)
                     if not live_success:
-                        print(f"⚠️  Real sell execution failed for {ticker}, continuing with simulation bookkeeping")
+                        # Mirror the buy-path guard: a sell that did not execute at
+                        # the broker must NOT be booked locally. The old
+                        # "continue with simulation bookkeeping" path recorded a
+                        # phantom trade_outcome, deactivated the holding, and
+                        # credited cash for shares still sitting in the account
+                        # (TEAM, 2026-09-14, expired Schwab token).
+                        status = decision.get('execution_status') or 'failed'
+                        decision['execution_status'] = status
+                        err = decision.get('execution_error') or 'real sell order did not execute'
+                        decision['execution_error'] = err
+                        print(f"⛔ {ticker}: real sell did not execute (status={status}: {err}) — "
+                              f"skipping outcome record and holdings update; position stays as-is.")
+                        skipped_decisions.append({
+                            "action": "sell",
+                            "ticker": ticker,
+                            "amount_usd": amount,
+                            "reason": f"Real sell {status} — not executed (Original: {reason})",
+                            "execution_status": status,
+                            "execution_error": err,
+                            "order_id": decision.get('order_id'),
+                        })
+                        continue
 
                 shares = float(holding.shares)
                 purchase_price = float(holding.purchase_price)

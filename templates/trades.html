@@ -71,7 +71,7 @@
           {% if action == 'buy' %}📈{% elif action == 'sell' %}📉{% elif action == 'hold' %}⏸{% elif 'market' in action or 'closed' in action %}⛔{% endif %}
           {{ decision.get('action', 'N/A') }}
           {% if exec_status and (action in ['buy', 'sell'] or exec_status|lower == 'cash_hold') %}
-            <span class="exec-badge exec-{{ exec_status|lower }}">{{ 'cash hold' if exec_status|lower == 'cash_hold' else exec_status }}</span>
+            <span class="exec-badge exec-{{ exec_status|lower }}"{% if decision.get('fill_inferred') %} title="No broker confirmation on record — fill inferred from the local ledger"{% endif %}>{{ 'cash hold' if exec_status|lower == 'cash_hold' else exec_status }}{% if decision.get('fill_inferred') %} · inferred{% endif %}</span>
           {% endif %}
         </td>
         {% set es_lower = exec_status|lower %}
