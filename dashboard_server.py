@@ -1501,7 +1501,8 @@ def trade_decisions():
                             _st = (cleaned_decision.get('execution_status') or '').lower()
                             _filled = cleaned_decision.get('executed_amount') is not None
                             _rejected = (_st in ('rejected', 'canceled', 'cancelled', 'expired',
-                                                 'failed', 'error', 'not_executed', 'capped', 'not_filled')
+                                                 'failed', 'error', 'not_executed', 'capped', 'not_filled',
+                                                 'skipped')
                                          or 'market' in _st or 'closed' in _st)
                             if not _filled and not _rejected:
                                 _tk = cleaned_decision.get('ticker')

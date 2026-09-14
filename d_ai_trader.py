@@ -424,7 +424,9 @@ class DAITraderOrchestrator:
             if decisions:
                 validated_decisions = decider.store_trade_decisions(decisions, target_run_id)
                 if validated_decisions:
-                    decider.update_holdings(validated_decisions)
+                    # run_id is what lets execution outcomes (fills, rejections, local
+                    # guardrail skips) be written back onto the stored decision row.
+                    decider.update_holdings(validated_decisions, run_id=target_run_id)
                 else:
                     logger.warning("⚠️  All decisions were rejected; nothing to execute.")
                 decider.record_portfolio_snapshot()

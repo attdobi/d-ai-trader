@@ -1437,7 +1437,13 @@ def execute_real_world_trade(decision):
         print(f"   Amount: ${amount_usd}")
 
         if action == 'buy':
-            result = trading_interface.execute_buy_order(ticker, amount_usd)
+            # Pass the sized share count: process_buy_decisions already floored
+            # amount ÷ price, and amount_usd is that exact cost, so re-deriving the
+            # count from a fresh quote loses a share on any uptick/cent rounding.
+            sized = decision.get('shares_override') or decision.get('shares')
+            result = trading_interface.execute_buy_order(
+                ticker, amount_usd, shares=int(sized) if sized else None
+            )
         elif action == 'sell':
             # For sell orders, we need to determine shares from holdings
             current_holdings = fetch_holdings()
@@ -1779,6 +1785,29 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
 
     _sync_live_positions("final")
 
+    # Local guardrail skips (price unavailable, market closed, settled-funds buffer,
+    # budget, invalid ticker, …) only ever landed in `skipped_decisions` — printed to a
+    # stdout nobody captures — while the stored decision stayed status-less and the
+    # Trades tab hid it as "unresolved". Reconcile: stamp every skipped buy/sell that
+    # has no execution status yet so the reason survives on the decision row.
+    _skip_reasons = {}
+    for _s in skipped_decisions:
+        if not isinstance(_s, dict):
+            continue
+        _act = str(_s.get("action") or "").lower()
+        if _act not in ("buy", "sell"):
+            continue
+        _skip_reasons.setdefault((str(_s.get("ticker") or "").upper(), _act), str(_s.get("reason") or ""))
+    for _, _norm in decisions_with_idx:
+        if not isinstance(_norm, dict) or _norm.get("execution_status"):
+            continue
+        _key = (str(_norm.get("ticker") or "").upper(), str(_norm.get("action") or "").lower())
+        _why = _skip_reasons.get(_key)
+        if _why is None:
+            continue
+        _norm["execution_status"] = "market_closed" if "MARKET CLOSED" in _why else "not_executed"
+        _norm["execution_error"] = _why.split(" (Original:")[0].strip()
+
     # Persist actual execution outcomes back onto the stored decision row so the
     # dashboard shows what really filled (order_id, executed shares/price/amount,
     # or a rejected/working status) instead of the pre-trade estimate.
@@ -2108,6 +2137,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             decision.setdefault("amount_usd_requested", amount)
             decision["amount_usd"] = actual_spent
             decision["amount_usd_executed"] = actual_spent
+            decision["shares_override"] = int(shares)  # the sized count the live order must use
 
             # Execute real-world trade if enabled. In live mode, if the order
             # did NOT actually fill (rejected / still working / error), DO NOT
@@ -3600,11 +3630,11 @@ if __name__ == "__main__":
         except ImportError:
             # Fallback to original method if trading_interface is not available
             print("⚠️  Trading interface not available, using simulation only")
-            update_holdings(validated_decisions)
+            update_holdings(validated_decisions, run_id=run_id)
         except Exception as e:
             print(f"❌ Error in trading interface: {e}")
             print("🔄 Falling back to simulation mode")
-            update_holdings(validated_decisions)
+            update_holdings(validated_decisions, run_id=run_id)
 
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]

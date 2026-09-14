@@ -289,9 +289,13 @@ class TradingInterface:
             payload.setdefault("error", payload.get("reason", "Order not executed"))
         return payload
 
-    def execute_buy_order(self, ticker: str, amount_usd: float, reason: Optional[str] = None) -> Dict[str, Any]:
+    def execute_buy_order(self, ticker: str, amount_usd: float, reason: Optional[str] = None,
+                          shares: Optional[int] = None) -> Dict[str, Any]:
         """
         Place a market buy order using USD allocation (legacy helper for decider_agent).
+        Pass `shares` when the caller already sized the order: re-deriving the count from
+        amount ÷ a fresh quote silently dropped a share on any uptick or cent rounding —
+        for one-share buys that meant `int(0.99…) == 0` and no order at all.
         """
         decision = {
             "action": "buy",
@@ -299,6 +303,8 @@ class TradingInterface:
             "amount_usd": amount_usd,
             "reason": reason or "",
         }
+        if shares is not None:
+            decision["shares_override"] = int(shares)
         return self._wrap_live_result(self._execute_schwab_order(decision))
 
     def execute_sell_order(self, ticker: str, shares: float, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -370,12 +376,18 @@ class TradingInterface:
                         "execution_type": "live",
                         "decision": decision
                     }
-                # Calculate number of shares to buy
-                shares = int(amount_usd / current_price)
-                if shares == 0:
+                # Use the caller's sized share count when given (the decider already floored
+                # amount ÷ price once); only legacy amount-only callers re-derive it here.
+                shares_override = decision.get("shares_override")
+                if shares_override is not None:
+                    shares = int(shares_override)
+                else:
+                    shares = int(amount_usd / current_price)
+                if shares <= 0:
                     return {
                         "status": "skipped",
-                        "reason": "Insufficient funds for 1 share",
+                        "reason": (f"Insufficient funds for 1 share (allocated ${amount_usd:.2f}, "
+                                   f"quote ${current_price:.2f})"),
                         "execution_type": "live",
                         "decision": decision
                     }
