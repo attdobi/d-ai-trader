@@ -1467,7 +1467,10 @@ def execute_real_world_trade(decision):
         if result.get('success'):
             # Record the ACTUAL fill on the decision (not the pre-trade estimate),
             # so the dashboard shows what really executed.
-            filled_qty = result.get('filled_quantity')
+            # Some success payloads omit filled_quantity/executed_amount; fall back to
+            # the sized count so a confirmed fill always persists shares + amount.
+            filled_qty = (result.get('filled_quantity') or result.get('shares')
+                          or decision.get('shares_override') or decision.get('shares'))
             fill_price = result.get('price')
             fill_amount = result.get('executed_amount')
             if fill_amount is None and filled_qty and fill_price:
@@ -1836,7 +1839,7 @@ def _persist_execution_outcomes(decisions, run_id, config_hash):
         outcomes[key] = {
             k: d.get(k) for k in (
                 'execution_status', 'order_id', 'executed_shares',
-                'executed_price', 'executed_amount', 'execution_error',
+                'executed_price', 'executed_amount', 'execution_error', 'sizing',
             ) if d.get(k) is not None
         }
     if not outcomes:
@@ -2138,6 +2141,17 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             decision["amount_usd"] = actual_spent
             decision["amount_usd_executed"] = actual_spent
             decision["shares_override"] = int(shares)  # the sized count the live order must use
+            # Record HOW the order was sized so the Trades tab can show the fraction of
+            # available funds deployed and what bound it (the model's own allocation vs
+            # the settled-funds guardrail). The model's rationale for the size lives in
+            # its reason text; this is the mechanical side.
+            decision["sizing"] = {
+                "requested_usd": round(amount, 2),
+                "executed_usd": actual_spent,
+                "available_usd": round(available_cash, 2),
+                "shares": int(shares),
+                "bound_by": "model allocation" if shares == requested_shares else "settled-funds guardrail",
+            }
 
             # Execute real-world trade if enabled. In live mode, if the order
             # did NOT actually fill (rejected / still working / error), DO NOT

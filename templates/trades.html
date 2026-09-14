@@ -71,7 +71,9 @@
           {% if action == 'buy' %}📈{% elif action == 'sell' %}📉{% elif action == 'hold' %}⏸{% elif 'market' in action or 'closed' in action %}⛔{% endif %}
           {{ decision.get('action', 'N/A') }}
           {% if exec_status and (action in ['buy', 'sell'] or exec_status|lower == 'cash_hold') %}
-            <span class="exec-badge exec-{{ exec_status|lower }}"{% if decision.get('fill_inferred') %} title="No broker confirmation on record — fill inferred from the local ledger"{% endif %}>{{ 'cash hold' if exec_status|lower == 'cash_hold' else exec_status }}{% if decision.get('fill_inferred') %} · inferred{% endif %}</span>
+            <span class="exec-badge exec-{{ exec_status|lower }}"{% if decision.get('execution_error') %} title="{{ decision.get('execution_error') }}"{% endif %}>{{ 'cash hold' if exec_status|lower == 'cash_hold' else exec_status }}</span>
+          {% elif decision.get('unconfirmed') and action in ['buy', 'sell'] %}
+            <span class="exec-badge exec-unconfirmed" title="No broker confirmation or rejection on record for this decision">unconfirmed</span>
           {% endif %}
         </td>
         {% set es_lower = exec_status|lower %}
@@ -133,6 +135,14 @@
                 {% endfor %}
               </div>
             </details>
+          {% endif %}
+          {% set sz = decision.get('sizing') %}
+          {% if sz and sz.get('available_usd') %}
+            <span class="sizing-note" title="How the order was sized: the model's allocation vs the settled cash the guardrails allowed">
+              Sized ${{ '%.2f'|format(sz.get('executed_usd') or 0) }} of ${{ '%.2f'|format(sz.get('available_usd')) }} available
+              ({{ '%.0f'|format(100 * (sz.get('executed_usd') or 0) / sz.get('available_usd')) }}%)
+              · {{ sz.get('bound_by') }}{% if sz.get('requested_usd') and sz.get('requested_usd') != sz.get('executed_usd') %} · model asked ${{ '%.0f'|format(sz.get('requested_usd')) }}{% endif %}
+            </span>
           {% endif %}
         </td>
         <td>
@@ -222,6 +232,8 @@ a.chip { text-decoration: none; }
 .exec-rejected, .exec-error, .exec-failed { background: #ffebe9; color: #b42318; }
 .exec-working, .exec-not_filled { background: #fff4e5; color: #8a5300; }
 .exec-cash_hold { background: #eef1f4; color: #475569; }
+.exec-unconfirmed { background: rgba(120,140,170,0.18); color: #9bb0cc; }
+.sizing-note { display:block; margin-top:4px; color:#7a8a9a; font-size:0.8em; }
 .est-tag { color: #9aa3ad; font-style: italic; font-size: 0.85em; }
 .amt-none { color: #b42318; font-size: 0.9em; }
 .decision-cost { display:block; margin-top:3px; color:#7a8a9a; font-size:0.8em; font-family: ui-monospace, Menlo, monospace; }

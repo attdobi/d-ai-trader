@@ -1429,16 +1429,6 @@ def trade_decisions():
         """), {**params, "limit": TRADES_RUNS_PER_PAGE,
                "offset": (page - 1) * TRADES_RUNS_PER_PAGE}).fetchall()
         
-        # Active holdings — used to resolve a filled order whose broker confirmation
-        # glitched (the position exists, so the buy really filled), and to gate out
-        # trades that are not yet confirmed or rejected.
-        hold_map = {}
-        for hr in conn.execute(text("""
-            SELECT ticker, shares, purchase_price FROM holdings
-            WHERE config_hash = :ch AND is_active = TRUE AND ticker != 'CASH'
-        """), {"ch": config_hash}).fetchall():
-            hold_map[hr.ticker] = (float(hr.shares or 0), float(hr.purchase_price or 0))
-
         def _prepare_trade_run(row):
             trade_dict = dict(row._mapping)
 
@@ -1492,47 +1482,31 @@ def trade_decisions():
                             'executed_amount': decision.get('executed_amount'),
                             'order_id': decision.get('order_id'),
                             'execution_error': decision.get('execution_error'),
+                            'sizing': decision.get('sizing'),
                         }
-                        # Only surface a BUY/SELL once it is RESOLVED — a real fill (prices
-                        # gathered) or a noted rejection. Never an estimate. Unconfirmed legs
-                        # are held back until they resolve so the tab shows only reality.
+                        # A BUY/SELL is either FILLED (broker confirmation persisted on the
+                        # decision), NOT EXECUTED (an explicit rejection/skip), or UNCONFIRMED
+                        # (nothing on record). No inference from the local ledger — it was
+                        # wrong in both directions (a failed sell booked locally read as a
+                        # fill; a skipped buy read as filled once a later buy created the
+                        # position). Unconfirmed rows stay visible but are never counted.
                         _act = (cleaned_decision.get('action') or '').lower()
                         if _act in ('buy', 'sell'):
                             _st = (cleaned_decision.get('execution_status') or '').lower()
-                            _filled = cleaned_decision.get('executed_amount') is not None
+                            _filled = (_st == 'filled') or cleaned_decision.get('executed_amount') is not None
                             _rejected = (_st in ('rejected', 'canceled', 'cancelled', 'expired',
                                                  'failed', 'error', 'not_executed', 'capped', 'not_filled',
                                                  'skipped')
                                          or 'market' in _st or 'closed' in _st)
+                            if _filled and cleaned_decision.get('executed_amount') is None:
+                                # fill confirmed by status; derive the missing amount for display
+                                _sh = cleaned_decision.get('executed_shares') or cleaned_decision.get('shares')
+                                _px = cleaned_decision.get('executed_price')
+                                if _sh and _px:
+                                    cleaned_decision['executed_shares'] = float(_sh)
+                                    cleaned_decision['executed_amount'] = round(float(_sh) * float(_px), 2)
                             if not _filled and not _rejected:
-                                _tk = cleaned_decision.get('ticker')
-                                _h = hold_map.get(_tk)
-                                # These are INFERENCES from the local ledger, not broker
-                                # confirmations — flagged so the badge can say so. The
-                                # ledger can be wrong (a sell that failed at the broker but
-                                # was booked locally looked exactly like a fill here).
-                                if _act == 'buy' and _h and _h[0] > 0:
-                                    # Position exists → the BUY filled; the broker confirmation lagged.
-                                    cleaned_decision['executed_shares'] = _h[0]
-                                    cleaned_decision['executed_price'] = _h[1]
-                                    cleaned_decision['executed_amount'] = round(_h[0] * _h[1], 2)
-                                    cleaned_decision['execution_status'] = 'filled'
-                                    cleaned_decision['fill_inferred'] = True
-                                elif _act == 'sell' and _tk not in hold_map:
-                                    # Position is gone → the SELL filled. Record it (the exact fill
-                                    # price is stamped by the broker confirmation once available).
-                                    _sh = cleaned_decision.get('shares') or 0
-                                    _amt = cleaned_decision.get('amount_usd') or cleaned_decision.get('total_value') or 0
-                                    if _sh and _amt:
-                                        cleaned_decision['executed_shares'] = float(_sh)
-                                        cleaned_decision['executed_amount'] = round(float(_amt), 2)
-                                        cleaned_decision['executed_price'] = round(float(_amt) / float(_sh), 2)
-                                        cleaned_decision['execution_status'] = 'filled'
-                                        cleaned_decision['fill_inferred'] = True
-                                    else:
-                                        continue
-                                else:
-                                    continue  # not yet confirmed/rejected — do not write it as a trade
+                                cleaned_decision['unconfirmed'] = True
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
                         # If decision is a string, try to parse it
@@ -1589,7 +1563,7 @@ def trade_decisions():
         for _r in today_rows:
             for _d in _prepare_trade_run(_r).get('data') or []:
                 _exec = (_d.get('execution_status') or '').lower()
-                if any(s in _exec for s in _failed_substrings):
+                if any(s in _exec for s in _failed_substrings) or _d.get('unconfirmed'):
                     continue
                 _a = (_d.get('action') or '').lower()
                 if 'buy' in _a:

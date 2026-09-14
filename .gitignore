@@ -85,3 +85,6 @@ agents/*/policy-graph/**/*.part
 agents/*/policy-graph/*
 !agents/*/policy-graph/baseline/
 !agents/*/policy-graph/latest/
+
+# local data backups written by reconcile_execution_status.py
+backups/
