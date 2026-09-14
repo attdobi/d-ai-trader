@@ -1,6 +1,6 @@
 ---
 id: DA.code.confirmation_policy
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: DeciderAgent
 title: "CONFIRMATION POLICY"
 node_type: code
@@ -8,7 +8,7 @@ polarity: gate
 polarity_source: override
 parent: DA.code
 field: null
-order: 13
+order: 14
 owner: code
 status: read-only
 compiled: never
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_agent.py
 source_symbol: "ask_decision_agent:prompt+=#6"
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: user_prompt_tail

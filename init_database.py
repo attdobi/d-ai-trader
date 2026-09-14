@@ -1090,6 +1090,16 @@ def initialize_database() -> None:
             ON model_transitions(config_hash)
         """))
 
+        # Scheduled binary events (event_calendar.py): the Decider's per-cycle event-risk snapshot
+        # (feeds the Event Risk Landscape chart) and the yfinance earnings-date cache.
+        from event_calendar import DDL_EARNINGS_POSTGRES as _EARNINGS_DDL, DDL_SNAPSHOTS_POSTGRES as _EVENT_SNAP_DDL
+        ensure_table(conn, stats, "earnings_calendar", _EARNINGS_DDL)
+        ensure_table(conn, stats, "event_risk_snapshots", _EVENT_SNAP_DDL)
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_event_risk_snapshots_cfg
+            ON event_risk_snapshots (config_hash, session_date)
+        """))
+
         # 7a) Migrate feedback_analyzer → FeedbackAgent (one-time cleanup)
         fa_count = conn.execute(text(
             "SELECT count(*) FROM prompt_versions WHERE agent_type = 'feedback_analyzer'"

@@ -272,6 +272,19 @@
         <h4>Configuration Hash</h4>
         <p class="config-value hash">{{ current_config.config_hash }}</p>
       </div>
+      <div class="config-card" id="eventRiskCard" title="{{ event_risk.allowance if event_risk else '' }}">
+        <h4>Event Risk</h4>
+        {% if event_risk %}
+        <p class="config-value">{{ event_risk.score }}/100 <span style="font-size:0.62em; color:#9bb0cc;">{{ event_risk.level }}</span></p>
+        <p class="config-subtitle" style="font-size: 0.75em; color: #7f8ca6; margin-top: 4px;">
+          {{ event_risk.line }} · <a href="/feedback#eventRisk" style="color:#42c9ff;">risk vs time →</a><br>
+          <span style="color:#5f6d86;">{{ event_risk.as_of }}</span>
+        </p>
+        {% else %}
+        <p class="config-value">n/a</p>
+        <p class="config-subtitle" style="font-size: 0.75em; color: #7f8ca6; margin-top: 4px;">event calendar unavailable</p>
+        {% endif %}
+      </div>
     </div>
   </div>
 

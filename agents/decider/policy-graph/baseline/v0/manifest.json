@@ -97,11 +97,11 @@
    "DA.memory.log.2026_09_02_regime"
   ]
  },
- "node_count": 69,
- "edge_count": 120,
+ "node_count": 70,
+ "edge_count": 122,
  "code": {
-  "sha": "34ec242ab340",
-  "dir": "../_code/34ec242ab340",
+  "sha": "de675e8bfea8",
+  "dir": "../_code/de675e8bfea8",
   "git_sha": "baseline",
   "fires": {
    "DA.code.crowd_fade": false,
@@ -109,6 +109,7 @@
    "DA.code.index_regime": true,
    "DA.code.watchlist_header": true,
    "DA.code.quarantine_line": true,
+   "DA.code.event_calendar": true,
    "DA.code.lessons_header": true,
    "DA.code.recent_activity_header": true,
    "DA.code.cash_disclosure": true,

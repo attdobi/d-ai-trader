@@ -1,6 +1,6 @@
 ---
 id: FA.code.base_instructions
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: FeedbackAgent
 title: "Feedback base instructions (code)"
 node_type: code
@@ -16,12 +16,12 @@ locked: true
 provenance: feedback_agent.py:_generate_ai_feedback
 sep_before: ""
 sep_after: ""
-body_sha256: bffbbc1e6967af1067d1e35cfcc7f69c3d9dba0b1ff9cf19a9e99b674f5f1931
+body_sha256: 81e1619839580e73a0ed1b1ec9780884daf9e5909314403e226852a9c44d3c4e
 tags: []
 tickers: []
 source_file: feedback_agent.py
 source_symbol: _generate_ai_feedback:FEEDBACK_BASE_INSTRUCTIONS
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: user_prompt_head
@@ -37,3 +37,4 @@ METHOD (in this order — do not skip a step):
 6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
 7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
 8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.
+9. EVENT RISK: the diagnostics score entries made inside a macro window (FOMC within 2 sessions, CPI/jobs next session), campaigns held through an FOMC decision, and the share of cycles where a Summarizer named a dated event the Decider never acknowledged. If in-window entries lose or acknowledgment is below 80%, the rule is an EVENT GATE clause with the number attached — the Decider is supplied an EVENT CALENDAR block (today's date, sessions to the next FOMC/CPI/jobs report, next earnings date per holding and watchlist name).

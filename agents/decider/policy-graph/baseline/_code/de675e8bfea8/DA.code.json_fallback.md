@@ -1,6 +1,6 @@
 ---
 id: DA.code.json_fallback
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: DeciderAgent
 title: "JSON output fallback"
 node_type: code
@@ -8,7 +8,7 @@ polarity: structure
 polarity_source: override
 parent: DA.code
 field: null
-order: 16
+order: 17
 owner: code
 status: inactive
 compiled: never
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_agent.py
 source_symbol: "ask_decision_agent:user_prompt_template+="
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: "'JSON' not in user_prompt_template.upper()"
 fires: false
 position: user_template_tail

@@ -1075,7 +1075,8 @@ METHOD (in this order — do not skip a step):
 5. PAYOFF: state the breakeven win rate implied by avg win / avg loss and whether the current win rate clears it. If winners are capped by the +3% harvest rule, say what that implies for the required stop distance.
 6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
 7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
-8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.'''
+8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.
+9. EVENT RISK: the diagnostics score entries made inside a macro window (FOMC within 2 sessions, CPI/jobs next session), campaigns held through an FOMC decision, and the share of cycles where a Summarizer named a dated event the Decider never acknowledged. If in-window entries lose or acknowledgment is below 80%, the rule is an EVENT GATE clause with the number attached — the Decider is supplied an EVENT CALENDAR block (today's date, sessions to the next FOMC/CPI/jobs report, next earnings date per holding and watchlist name).'''
 
         # MODIFIABLE COMPONENTS (updated based on context data)
         critic_lessons_block = ""
@@ -1110,7 +1111,7 @@ Return ONLY valid JSON in this EXACT format:
     "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
     "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
     "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
-    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … — one clause per rule, ≤ 900 characters total, no narrative",
+    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … | EVENT: … — one clause per rule, ≤ 900 characters total, no narrative",
     "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
     "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
     "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],
@@ -1147,7 +1148,7 @@ Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 cha
 
 CRITICAL INSTRUCTIONS:
 1. COMPUTED DIAGNOSTICS outrank the trade sample and outrank prior feedback. Cite them by number.
-2. Order of analysis: regime, entry geometry, re-entry, payoff — then rules.
+2. Order of analysis: regime, entry geometry, re-entry, payoff, event windows — then rules.
 3. One primary change per agent with a falsification metric. No hedging language ("consider", "prospectively test", "not an automatic rejection"): a rule is a rule until falsified.
 4. Every gate must be executable from the supplied fields.
 5. decider_feedback ≤ 900 characters, summarizer_feedback ≤ 600 characters, rules ≤ 220 characters each — they are injected into live prompts.

@@ -80,6 +80,14 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
+  "source_node_id": "DA.code.event_calendar",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
   "source_node_id": "DA.code.guideline_citations",
   "target_node_id": "DA.code",
   "edge_type": "subtype_of",
@@ -811,6 +819,15 @@
   "provenance": "derived:assembly",
   "version": "DeciderAgent.baseline.v0",
   "via": "user_prompt_tail"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.event_calendar",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "user_prompt_dynamic"
  },
  {
   "source_node_id": "DA.template.user",

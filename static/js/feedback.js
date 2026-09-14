@@ -566,6 +566,254 @@ function setupBenchRangeButtons() {
   });
 }
 
+// --- Event Risk Landscape (regime + scheduled binary events) ------------------
+// Regime bands, event verticals and fill markers share the palette of the benchmark chart.
+const EVENT_INK = {
+  score: '#ff7a59',
+  projection: '#9bb0cc',
+  regime: {
+    'RISK-ON': 'rgba(41,214,151,0.10)', 'MIXED': 'rgba(242,163,94,0.13)',
+    'RISK-OFF': 'rgba(255,99,132,0.16)', 'UNKNOWN': 'rgba(155,176,204,0.06)',
+  },
+  event: { fomc: '#ff6384', cpi: '#f2a35e', jobs: '#f2a35e', other: '#b28dff', earnings: '#42c9ff' },
+  buy: '#29d697', sellWin: '#29d697', sellLoss: '#ff6384',
+};
+let eventRiskChart = null;
+
+// Background: one band per plotted session coloured by its regime, plus the today divider.
+const eventBandsPlugin = {
+  id: 'eventBands',
+  beforeDatasetsDraw(chart) {
+    const rows = chart.$eventRows;
+    if (!rows || !rows.length) return;
+    const { ctx, chartArea, scales } = chart;
+    const px = i => scales.x.getPixelForValue(i);
+    ctx.save();
+    for (let i = 0; i < rows.length; i++) {
+      const x0 = i === 0 ? chartArea.left : (px(i - 1) + px(i)) / 2;
+      const x1 = i === rows.length - 1 ? chartArea.right : (px(i) + px(i + 1)) / 2;
+      ctx.fillStyle = EVENT_INK.regime[rows[i].regime] || EVENT_INK.regime.UNKNOWN;
+      ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+    }
+    const t = chart.$eventTodayIndex;
+    if (t != null && t < rows.length - 1) {
+      const x = (px(t) + px(t + 1)) / 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.setLineDash([2, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = TREND_INK.label;
+      ctx.font = '600 10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      ctx.fillText('today ▸ projected', x - 4, chartArea.bottom - 2);
+    }
+    ctx.restore();
+  }
+};
+
+// Foreground: a vertical per scheduled event with its label (FOMC solid, prints dashed).
+const eventMarkersPlugin = {
+  id: 'eventMarkers',
+  afterDatasetsDraw(chart) {
+    const events = chart.$eventMarkers;
+    const labels = chart.data.labels;
+    if (!events || !events.length) return;
+    const { ctx, chartArea, scales } = chart;
+    ctx.save();
+    ctx.font = '600 10px Inter, system-ui, sans-serif';
+    ctx.textBaseline = 'top';
+    let lastX = -1e9, row = 0;
+    for (const e of events) {
+      const idx = labels.indexOf(e.date);
+      if (idx === -1) continue;
+      const x = scales.x.getPixelForValue(idx);
+      const color = EVENT_INK.event[e.kind] || '#9bb0cc';
+      ctx.strokeStyle = color;
+      ctx.setLineDash(e.kind === 'fomc' ? [] : [4, 4]);
+      ctx.lineWidth = e.kind === 'fomc' ? 1.5 : 1;
+      ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke();
+      ctx.setLineDash([]);
+      row = (x - lastX < 52) ? (row + 1) % 3 : 0;
+      lastX = x;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'left';
+      ctx.fillText(e.label, Math.min(x + 4, chartArea.right - 44), chartArea.top + 2 + row * 12);
+    }
+    ctx.restore();
+  }
+};
+
+function eventLevelClass(level) {
+  return level === 'LOW' ? ' pos' : (level === 'HIGH' || level === 'EXTREME') ? ' neg' : '';
+}
+
+function renderEventStats(live, payload) {
+  const el = document.getElementById('eventStats');
+  if (!el) return;
+  const m = live.macro || {};
+  const whenOf = s => {
+    if (!s || s.sessions_to == null) return 'not in calendar';
+    if (s.sessions_to === 0) return `today ${s.release_et}${s.phase ? ` (${s.phase})` : ''}`;
+    return `${s.next} · in ${s.sessions_to} session${s.sessions_to === 1 ? '' : 's'}`;
+  };
+  const nextPrint = [m.cpi, m.jobs].filter(s => s && s.sessions_to != null).sort((a, b) => a.sessions_to - b.sessions_to)[0];
+  const reporting = (live.holdings_earnings || []).filter(h => h.flag);
+  const chip = (k, v, sub, cls) =>
+    `<div class="bench-chip"><div class="k">${k}</div><div class="v${cls || ''}">${v}</div>` + (sub ? `<div class="s">${sub}</div>` : '') + `</div>`;
+  el.innerHTML = [
+    chip('Event risk now', `${live.risk_score}/100`, `${live.risk_level} · regime ${live.regime || 'n/a'}`, eventLevelClass(live.risk_level)),
+    chip('Macro window', live.macro_window ? 'YES' : 'no', live.macro_window ? live.macro_reason : 'no FOMC within 2 sessions, no print next session', live.macro_window ? ' neg' : ' pos'),
+    chip('Next FOMC', m.fomc && m.fomc.next ? m.fomc.next : '—', whenOf(m.fomc), ''),
+    chip('Next print', nextPrint ? nextPrint.label : '—', whenOf(nextPrint), ''),
+    chip('Holdings reporting', reporting.length ? reporting.map(h => `${h.ticker} ${h.date}`).join(', ') : 'none ≤5 sessions',
+         reporting.length ? 'inside the hold window' : `${(live.holdings_earnings || []).length} holding(s) checked`, reporting.length ? ' neg' : ' pos'),
+    chip('Allowance', live.macro_window ? '≤1 half-size, D ≤2%' : 'regime rules', (live.allowance || {}).buys || '', ''),
+  ].join('');
+}
+
+async function loadEventRiskChart(days = 90) {
+  const canvas = document.getElementById('eventRiskChart');
+  if (!canvas) return;
+  let payload;
+  try {
+    payload = await fetchJSON(`/api/feedback/event-risk?days=${days}`);
+  } catch (e) {
+    console.error('Error loading event risk data:', e);
+    return;
+  }
+  const foot = document.getElementById('eventFootnote');
+  if (payload?.error) {
+    if (foot) foot.textContent = `Event risk landscape unavailable: ${payload.error}`;
+    return;
+  }
+  const history = payload.series || [];
+  const projection = payload.projection || [];
+  const rows = history.concat(projection);
+  const labels = rows.map(r => r.date);
+  const todayIndex = history.length - 1;
+  if (payload.live) renderEventStats(payload.live, payload);
+
+  const scoreHist = rows.map((r, i) => (i <= todayIndex ? r.score : null));
+  const scoreProj = rows.map((r, i) => (i >= todayIndex ? r.score : null));
+  const byDate = new Map(rows.map((r, i) => [r.date, i]));
+  const buys = new Array(rows.length).fill(null);
+  const sellWins = new Array(rows.length).fill(null);
+  const sellLosses = new Array(rows.length).fill(null);
+  const tradeNotes = new Map();
+  for (const t of payload.trades || []) {
+    const i = byDate.get(t.date);
+    if (i == null) continue;
+    const y = rows[i].score;
+    if (t.action === 'buy') buys[i] = y;
+    else if ((t.pct ?? 0) >= 0) sellWins[i] = y;
+    else sellLosses[i] = y;
+    const note = t.action === 'buy' ? `▲ ${t.ticker}` : `▼ ${t.ticker} ${fmtPct(t.pct)}`;
+    tradeNotes.set(t.date, (tradeNotes.get(t.date) || []).concat(note));
+  }
+  const eventsByDate = new Map();
+  for (const e of payload.events || []) eventsByDate.set(e.date, (eventsByDate.get(e.date) || []).concat(e.label));
+
+  const marker = (label, data, color, rotation) => ({
+    label, data, showLine: false, pointStyle: 'triangle', rotation, pointRadius: 6, pointHoverRadius: 8,
+    pointBackgroundColor: color, pointBorderColor: '#121c33', pointBorderWidth: 1, borderColor: color,
+  });
+  const datasets = [
+    {
+      label: 'Event risk', data: scoreHist, borderColor: EVENT_INK.score,
+      backgroundColor: trendRgba(EVENT_INK.score, 0.12), borderWidth: 2.5, fill: true, tension: 0.15,
+      pointRadius: 0, pointHoverRadius: 5, pointBackgroundColor: EVENT_INK.score, pointBorderColor: '#121c33',
+    },
+    {
+      label: 'Projected', data: scoreProj, borderColor: EVENT_INK.projection, borderDash: [3, 4],
+      borderWidth: 1.5, fill: false, tension: 0.15, pointRadius: 0, pointHoverRadius: 4,
+      pointBackgroundColor: EVENT_INK.projection, pointBorderColor: '#121c33', spanGaps: false,
+    },
+    marker('Buy fill', buys, EVENT_INK.buy, 0),
+    marker('Sell (win)', sellWins, EVENT_INK.sellWin, 180),
+    marker('Sell (loss)', sellLosses, EVENT_INK.sellLoss, 180),
+  ];
+
+  if (eventRiskChart) eventRiskChart.destroy();
+  eventRiskChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      layout: { padding: { right: 62, top: 6 } },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: TREND_INK.axis },
+          ticks: { color: TREND_INK.muted, font: { size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
+        },
+        y: {
+          min: 0, max: 100,
+          border: { display: false },
+          grid: { color: c => (c.tick.value === 50 ? TREND_INK.gridStrong : TREND_INK.grid) },
+          ticks: { color: TREND_INK.muted, font: { size: 11 }, stepSize: 25 },
+          afterFit: axis => { axis.width = 58; },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color: TREND_INK.text, usePointStyle: true, boxWidth: 24, font: { size: 11 },
+                    filter: item => item.text !== 'Projected' },
+        },
+        tooltip: {
+          backgroundColor: TREND_INK.tooltipBg, borderColor: TREND_INK.tooltipBorder,
+          borderWidth: 1, titleColor: '#dfe8f7', bodyColor: TREND_INK.text, padding: 10, usePointStyle: true,
+          filter: item => item.datasetIndex === 0 || (item.datasetIndex === 1 && item.dataIndex > todayIndex),
+          callbacks: {
+            title: items => {
+              const r = rows[items[0].dataIndex];
+              return `${r.date} · ${r.regime}${items[0].dataIndex > todayIndex ? ' (projected)' : r.recorded ? ' (recorded by the Decider)' : ''}`;
+            },
+            label: item => ` risk ${item.parsed.y}/100 · ${rows[item.dataIndex].level}${rows[item.dataIndex].macro_window ? ' · MACRO WINDOW' : ''}`,
+            afterBody: items => {
+              const d = rows[items[0].dataIndex].date;
+              const lines = [];
+              if (eventsByDate.has(d)) lines.push('events: ' + eventsByDate.get(d).join(', '));
+              if (tradeNotes.has(d)) lines.push(tradeNotes.get(d).join('  '));
+              return lines;
+            },
+          },
+        },
+      },
+    },
+    plugins: [eventBandsPlugin, eventMarkersPlugin],
+  });
+  eventRiskChart.$eventRows = rows;
+  eventRiskChart.$eventTodayIndex = todayIndex;
+  eventRiskChart.$eventMarkers = payload.events || [];
+  eventRiskChart.draw();
+
+  if (foot) {
+    const rec = payload.snapshots_recorded || 0;
+    foot.textContent = [
+      'Score = regime base + FOMC proximity (35 / 30 / 20 points at 0 / 1 / 2 sessions, 8 at 3, 10 the session after) ' +
+      '+ CPI / jobs (12 the session before, 6 day-of) + earnings (20 per holding reporting ≤2 sessions, 8 within 5; capped)',
+      rec ? `${rec} Decider snapshot${rec === 1 ? '' : 's'} recorded in window; other days reconstructed from benchmark regimes + the calendars`
+          : 'no Decider snapshots yet — the curve is reconstructed from benchmark regimes + the calendars until the next cycle runs',
+      'FOMC dates from federalreserve.gov (2026–2027), CPI and jobs dates from bls.gov (2026), earnings dates from yfinance',
+    ].join(' · ');
+  }
+}
+
+function setupEventRangeButtons() {
+  const wrap = document.getElementById('eventRangeButtons');
+  if (!wrap) return;
+  wrap.querySelectorAll('.trend-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      wrap.querySelectorAll('.trend-range-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadEventRiskChart(parseInt(btn.dataset.days, 10) || 90);
+    });
+  });
+}
+
 async function loadFeedbackHistory() {
   const el = document.getElementById('feedbackHistory');
   try {
@@ -720,6 +968,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTrendRangeButtons();
   setupBenchRangeButtons();
   loadBenchmarkChart(90); // fetched once per range click, not on the 10s poll
+  setupEventRangeButtons();
+  loadEventRiskChart(90);
   const resetBtn = document.getElementById('resetPromptsBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', resetPromptsToBaseline);

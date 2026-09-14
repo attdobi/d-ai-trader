@@ -226,6 +226,31 @@
   <div class="chart-canvas-box bench-panel"><canvas id="benchmarkChart"></canvas></div>
   <div id="benchFootnote" class="bench-footnote"></div>
 </div>
+
+<div class="chart-container" id="eventRisk">
+  <div class="trend-header">
+    <div>
+      <h2 style="margin:0;">Event Risk Landscape</h2>
+      <div class="trend-subtitle">
+        How much scheduled, binary risk sits in front of the book each session: the regime base
+        (RISK-ON 10 · MIXED 30 · RISK-OFF 55) plus the proximity of the next FOMC decision and the
+        CPI / jobs prints, plus any holding that reports inside the 1–5 day hold window. Shaded bands
+        are the regime, verticals are the events, triangles are fills (▲ buy, ▼ sell, on the risk
+        they were taken at). The dotted tail projects the calendar forward at today's regime. The
+        Decider reads the same numbers in its EVENT CALENDAR block; the EVENT GATE decides what each
+        window allows for buying, holding and selling.
+      </div>
+    </div>
+    <div id="eventRangeButtons">
+      <button type="button" class="trend-range-btn" data-days="30">30d</button>
+      <button type="button" class="trend-range-btn active" data-days="90">90d</button>
+      <button type="button" class="trend-range-btn" data-days="365">1y</button>
+    </div>
+  </div>
+  <div id="eventStats" class="bench-stats"></div>
+  <div class="chart-canvas-box bench-panel"><canvas id="eventRiskChart"></canvas></div>
+  <div id="eventFootnote" class="bench-footnote"></div>
+</div>
 <style>
 .trend-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .trend-subtitle { color: #7f8ca6; font-size: 0.8em; margin: 4px 0 2px; max-width: 660px; line-height: 1.45; }

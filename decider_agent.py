@@ -2745,6 +2745,28 @@ OUTPUT (STRICT)
     except Exception as _contra_exc:
         print(f"⚠️  Contrarian screen skipped: {_contra_exc}")
 
+    # Scheduled binary events (event_calendar.py): today's date, sessions to the next FOMC / CPI /
+    # jobs report, the earnings date of every holding and watchlist name, one event-risk score and
+    # the allowance the EVENT GATE implies. Audit 2026-09-14: the Summarizers flagged the Sep 16
+    # FOMC in 8 of 36 summaries that day and 0 of 96 decisions in 30 days acknowledged any
+    # scheduled event — the prompt carried no date and no earnings dates, so the signal was
+    # produced and discarded. Best-effort — never breaks the decider; snapshot feeds the dashboard.
+    _event_ctx = None
+    try:
+        from event_calendar import build_event_context, record_snapshot
+        _event_ctx = build_event_context(
+            holdings=[(h.get("ticker") if hasattr(h, "get") else h["ticker"]) for h in stock_holdings],
+            watchlist=[c.get("ticker") for c in _contra if isinstance(c, dict)],
+            regime=((locals().get("_regime") or {}).get("label")), engine=engine)
+        if _event_ctx and _event_ctx.get("block"):
+            prompt += "\n\n" + _event_ctx["block"]
+            print(f"📅 Event calendar: score {_event_ctx['risk_score']}/100 ({_event_ctx['risk_level']}) | macro window: "
+                  + (f"YES — {_event_ctx['macro_reason']}" if _event_ctx["macro_window"] else "no")
+                  + f" | holdings reporting ≤2 sessions: {_event_ctx['allowance']['holdings_reporting_within_2']}")
+            record_snapshot(engine, config_hash, run_id, _event_ctx)
+    except Exception as _event_exc:
+        print(f"⚠️  Event calendar skipped: {_event_exc}")
+
     # Graph-driven assembly (DAI_GRAPH_ASSEMBLY, default on): rebuild the soul / directives /
     # memory the model reads from the policy graph — guidelines selected and ordered by this
     # cycle's regime, holdings, watchlist and quarantine, each tagged with its id and record.

@@ -1323,9 +1323,38 @@ def dashboard():
         except Exception:
             model_history = []
 
+        # Event-risk read for the configuration card: the Decider's latest snapshot supplies the
+        # regime; the calendar distances are refreshed live; no earnings lookups here (cache only).
+        event_risk = None
+        try:
+            import event_calendar as _ec
+            _snap = _ec.latest_snapshot(engine, config_hash)
+            _tickers = []
+            for _h in holdings or []:
+                _tk = _h.get("ticker") if hasattr(_h, "get") else getattr(_h, "ticker", None)
+                if _tk and _tk != "CASH":
+                    _tickers.append(_tk)
+            _live = _ec.build_event_context(holdings=_tickers, watchlist=[], regime=(_snap or {}).get("regime"),
+                                            lookup_earnings=False, engine=engine)
+            if _live:
+                _f = (_live.get("macro") or {}).get("fomc") or {}
+                _st = _f.get("sessions_to")
+                _when = "n/a" if _st is None else ("today" if _st == 0 else f"in {_st} session{'s' if _st != 1 else ''}")
+                event_risk = {
+                    "score": _live["risk_score"], "level": _live["risk_level"],
+                    "line": (f"FOMC {_f.get('next') or 'n/a'} ({_when}) · macro window "
+                             f"{'YES' if _live['macro_window'] else 'no'} · regime {_live.get('regime') or 'n/a'}"),
+                    "allowance": (_live.get("allowance") or {}).get("buys", ""),
+                    "as_of": (f"decider snapshot {str(_snap.get('session_date'))} {str(_snap.get('as_of'))[11:16]}"
+                              if _snap else "calendar only — no decider snapshot yet"),
+                }
+        except Exception as _ev_exc:
+            print(f"⚠️  Event risk card skipped: {_ev_exc}")
+
         return render_template(
             "dashboard.html",
             active_tab="dashboard",
+            event_risk=event_risk,
             holdings=holdings,
             total_value=total_portfolio_value,
             cash_balance=cash_balance,
@@ -2158,6 +2187,30 @@ def get_feedback_benchmarks():
         payload = benchmark_tracker.get_benchmark_performance(
             engine, get_current_config_hash(), days=days
         )
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/feedback/event-risk')
+def get_feedback_event_risk():
+    """Event Risk Landscape: regime + scheduled binary events (FOMC / CPI / jobs / holdings' earnings)
+    as one 0-100 score per session — recorded by the Decider's cycles where available, reconstructed
+    from benchmark regimes + the calendars otherwise, and projected forward at today's regime."""
+    try:
+        days_param = request.args.get('days', '90')
+        days = 3650 if days_param == 'all' else max(7, min(int(days_param), 3650))
+        import event_calendar
+        from feedback_diagnostics import _benchmark_regimes, _regime_on
+        config_hash = get_current_config_hash()
+        with engine.connect() as conn:
+            regimes = _benchmark_regimes(conn)
+            held = [r[0] for r in conn.execute(text("""
+                SELECT DISTINCT ticker FROM holdings
+                WHERE config_hash = :h AND ticker IS NOT NULL AND ticker != 'CASH' AND COALESCE(shares, 0) > 0
+            """), {"h": config_hash}).fetchall()]
+        payload = event_calendar.event_risk_payload(
+            engine, config_hash, days, lambda d: _regime_on(regimes, d), holdings=held)
         return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

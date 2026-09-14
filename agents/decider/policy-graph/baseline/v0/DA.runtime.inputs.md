@@ -16,7 +16,7 @@ locked: true
 provenance: generated
 sep_before: ""
 sep_after: ""
-body_sha256: fa4249af9456ae7db9440e43c3dd3332bddf8cba648429876cf5ba6cb1863002
+body_sha256: b14072af712dd5ec0efc403cdf27ce3a8fa3f6f9fde1e90e308c59dd96092930
 tags: []
 tickers: []
 ---
@@ -46,6 +46,7 @@ Blocks supplied by decider_agent.ask_decision_agent every cycle:
 - Holdings with K:/D: kill prices (RunContext / Schwab sync)
 - INDEX REGIME line (contrarian_screener.format_index_regime)
 - CONTRARIAN WATCHLIST rows (contrarian_screener.format_contrarian_watchlist)
+- EVENT CALENDAR block (event_calendar.format_event_calendar: today's date, sessions to the next FOMC / CPI / jobs report, earnings dates of holdings and watchlist names, event-risk score)
 - QUARANTINE tickers (recently exited names)
 - # LESSONS rows (decider_memory.format_long_term_memory, weight/recency ranked)
 - # RECENT ACTIVITY (decider_memory.build_working_memory)

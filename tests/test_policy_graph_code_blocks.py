@@ -87,6 +87,11 @@ def extract_from_source() -> list:
                 and str(n.args[0].left.value).startswith("# QUARANTINE")):
             found["quarantine_line"] = n.args[0].left.value
 
+    # event_calendar: the module-level header constant of the EVENT CALENDAR block
+    for n in ast.walk(_parse("event_calendar.py")):
+        if _assign_target(n) == "EVENT_CALENDAR_HEADER":
+            found["event_calendar_header"] = _render(n.value)
+
     # decider_memory
     mem = _parse("decider_memory.py")
     for n in ast.walk(_func(mem, "format_long_term_memory")):
@@ -115,6 +120,7 @@ def extract_from_source() -> list:
         ("DA.code.index_regime", found["index_regime"]),
         ("DA.code.watchlist_header", found["watchlist_header"]),
         ("DA.code.quarantine_line", found["quarantine_line"]),
+        ("DA.code.event_calendar", found["event_calendar_header"]),
         ("DA.code.lessons_header", found["lessons_header"]),
         ("DA.code.recent_activity_header", found["recent_activity_header"]),
         ("DA.code.cash_disclosure", prompt_adds[0]),
@@ -145,7 +151,7 @@ def test_code_blocks_match_source_verbatim():
 
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 20
+    assert len(ids) == len(set(ids)) == 21
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title
@@ -155,10 +161,12 @@ def test_code_blocks_metadata_is_well_formed():
         assert b.id.split(".", 1)[1] in POLARITY_OVERRIDES, f"{b.id} needs a polarity override in model.py"
     assert re.fullmatch(r"[0-9a-f]{12}", CODE_SHA)
     assert set(CONSTRAINS) == {"DA.code.index_regime", "DA.code.watchlist_header", "DA.code.quarantine_line",
-                               "DA.code.deploy_policy", "DA.code.confirmation_policy"}
+                               "DA.code.event_calendar", "DA.code.deploy_policy", "DA.code.confirmation_policy"}
     assert CONSTRAINS["DA.code.confirmation_policy"] == ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill"]
     assert CONSTRAINS["DA.code.index_regime"] == ["regime_gate"]
     assert CONSTRAINS["DA.code.quarantine_line"] == ["re_entry_quarantine"]
+    assert CONSTRAINS["DA.code.event_calendar"] == ["event_gate"]
+    assert BLOCKS_BY_ID["DA.code.event_calendar"].position == "user_prompt_dynamic"
 
 
 def test_fstring_fields_are_left_as_placeholders():

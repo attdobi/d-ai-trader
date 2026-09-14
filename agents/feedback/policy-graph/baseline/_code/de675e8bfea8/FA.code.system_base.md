@@ -1,6 +1,6 @@
 ---
 id: FA.code.system_base
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: FeedbackAgent
 title: "Feedback system prompt (code)"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: feedback_agent.py
 source_symbol: _generate_ai_feedback:FEEDBACK_SYSTEM_BASE
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: system_base

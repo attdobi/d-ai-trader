@@ -124,7 +124,7 @@ STOPWORDS = {"the", "a", "an", "and", "of", "for", "to", "in", "on", "with"}
 
 # ----------------------------------------------------------------------------- polarity
 POLARITY_OVERRIDES = {
-    "ground_truth": "gate", "strategy": "mixed", "regime_gate": "gate", "extension_cap": "gate",
+    "ground_truth": "gate", "strategy": "mixed", "regime_gate": "gate", "event_gate": "gate", "extension_cap": "gate",
     "priced_kill": "gate", "re_entry_quarantine": "gate", "reentry_quarantine": "gate", "correlation": "gate",
     "harvest": "action", "reminder": "caution", "mission": "principle", "principles": "principle",
     "identity": "principle", "core_philosophy": "principle", "decision_style": "principle",
@@ -135,6 +135,7 @@ POLARITY_OVERRIDES = {
     "code.guideline_citations": "structure",
     "code.justification_detail": "structure", "code.considered_setups": "structure", "code.cash_playbook": "caution",
     "code.index_regime": "gate", "code.watchlist_header": "action", "code.quarantine_line": "gate",
+    "code.event_calendar": "gate",
     "code.lessons_header": "structure", "code.recent_activity_header": "structure", "code.json_fallback": "structure",
     "code.feedback_suffix": "structure", "code.system_base": "structure", "code.base_instructions": "structure",
     "code.json_format": "structure", "ltm": "evidence", "runtime": "structure",

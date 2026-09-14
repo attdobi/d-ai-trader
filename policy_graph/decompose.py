@@ -582,6 +582,8 @@ def _runtime_inputs_body(agent_type: str, fields: dict) -> str:
         lines.append("- Holdings with K:/D: kill prices (RunContext / Schwab sync)")
         lines.append("- INDEX REGIME line (contrarian_screener.format_index_regime)")
         lines.append("- CONTRARIAN WATCHLIST rows (contrarian_screener.format_contrarian_watchlist)")
+        lines.append("- EVENT CALENDAR block (event_calendar.format_event_calendar: today's date, sessions to the next "
+                     "FOMC / CPI / jobs report, earnings dates of holdings and watchlist names, event-risk score)")
         lines.append("- QUARANTINE tickers (recently exited names)")
         lines.append("- # LESSONS rows (decider_memory.format_long_term_memory, weight/recency ranked)")
         lines.append("- # RECENT ACTIVITY (decider_memory.build_working_memory)")

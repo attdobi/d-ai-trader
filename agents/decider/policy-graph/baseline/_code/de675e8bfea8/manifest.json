@@ -1,14 +1,15 @@
 {
- "code_sha": "34ec242ab340",
+ "code_sha": "de675e8bfea8",
  "git_sha": "baseline",
  "kind": "code",
- "sha": "34ec242ab340",
+ "sha": "de675e8bfea8",
  "node_ids": [
   "DA.code.crowd_fade",
   "DA.code.cash_playbook",
   "DA.code.index_regime",
   "DA.code.watchlist_header",
   "DA.code.quarantine_line",
+  "DA.code.event_calendar",
   "DA.code.lessons_header",
   "DA.code.recent_activity_header",
   "DA.code.cash_disclosure",

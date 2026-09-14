@@ -1,6 +1,6 @@
 ---
 id: DA.code.index_regime
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: DeciderAgent
 title: "# DEPLOYMENT RULE BY REGIME"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: contrarian_screener.py
 source_symbol: format_index_regime
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: user_prompt_dynamic

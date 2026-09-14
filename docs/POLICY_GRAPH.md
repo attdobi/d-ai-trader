@@ -52,10 +52,14 @@ the live trader untouched: the runtime still reads `prompt_versions`; the graph 
 - **Inherited defaults** (owner `default-file`, hollow nodes): when a row's soul/memory column is
   empty the runtime falls back to `agents/<dir>/SOUL.default.md` / `MEMORY.default.md`; the graph shows
   the git blob as of the row's `created_at`, labelled as inherited, never claiming the database held it.
-- **Code-owned blocks** (owner `code`, dashed orange ring): the seven paragraphs `decider_agent.py`
+- **Code-owned blocks** (owner `code`, dashed orange ring): the eight paragraphs `decider_agent.py`
   appends every cycle, the CROWD-FADE / CASH PLAYBOOK conditionals, the screener's INDEX REGIME and
-  WATCHLIST headers, the LESSONS header. These are verbatim copies guarded by an `ast` drift test
-  (`tests/test_policy_graph_code_blocks.py`) so a code edit fails one test, never the read path.
+  WATCHLIST headers, the event calendar's EVENT CALENDAR header, the LESSONS header. These are
+  verbatim copies guarded by an `ast` drift test (`tests/test_policy_graph_code_blocks.py`) so a code
+  edit fails one test, never the read path. A per-cycle data block (the regime line, the watchlist
+  rows, the event calendar's dates and score) is never policy: only its constant header is a node,
+  and the `constrains` edge points at the rule that consumes it (`DA.code.event_calendar →
+  DA.directives.strategy.event_gate`).
 - **Long-term memory rows** (owner `decider_memory`, dotted): the `decider_memory` table rows the
   Decider retrieves each cycle, snapshotted per version.
 - **Edges**: `subtype_of` (hierarchy), `includes` (runtime assembly), `related_to` (`[[wiki-links]]`
@@ -195,6 +199,35 @@ field, the action when it fires, fall-through otherwise; first gate that fires d
 prompt itself is not rewritten; gates arrive one at a time through the loop, and each stays one
 guideline file with its own id, hits and win rate, so the decision path
 (context → served → cited → outcome) becomes measurable per gate.
+
+## Scheduled events: the EVENT CALENDAR block and the EVENT GATE (2026-09-14)
+
+An audit on 2026-09-14 found the Summarizers naming the Sep 16 FOMC decision in 8 of 36 summaries
+(in the insights paragraph the Decider reads) while 0 of 96 Decider outputs in 30 days mentioned the
+Fed, a macro print or an earnings date: the regime gate is purely technical, the prompt carried no
+date, and no holding or candidate carried its earnings date (MDB −15.2% on 2026-09-02 was an
+earnings gap through a "20d break" kill). The fix follows the INDEX REGIME pattern exactly:
+
+- **Data block, code-owned** — `event_calendar.py` builds an `EVENT CALENDAR` block every cycle:
+  today's date and ET time, sessions to the next FOMC decision (2:00 pm ET) / CPI / jobs report
+  (8:30 am ET) with a MACRO WINDOW flag (FOMC within 2 sessions, print next session), the next
+  earnings date of every holding and watchlist name (yfinance, cached in `earnings_calendar`), an
+  event-risk score 0–100 and the allowance the gate implies. Only the header is a graph node
+  (`DA.code.event_calendar`, `constrains` → the gate); the dates are per-cycle data. Each cycle is
+  recorded in `event_risk_snapshots`, which the Feedback tab renders as the Event Risk Landscape.
+- **Rule, in the graph** — `DA.directives.strategy.event_gate` (proposal applied by the operator,
+  critic verdict on record) plus a Risk-Management soul bullet and lesson `#event-risk`, all
+  carrying the same thresholds: inside a macro window at most one half-size BUY with D ≤2% and the
+  event named in the reason; a candidate reporting inside 5 sessions is rejected; a holding
+  reporting within 2 sessions is sold or trimmed before the print. Falsified if 20 in-window
+  entries beat the 20 nearest out-of-window entries.
+- **Measurement, in the loop** — `feedback_diagnostics` scores macro-window entries, campaigns held
+  through an FOMC decision, and the share of cycles where a Summarizer named a dated event the
+  Decider never acknowledged; the Feedback soul (v10) audits event windows after payoff, and the
+  Summarizer (v20) names Fed/FOMC, CPI/jobs, earnings and geopolitical shocks with dates.
+
+`apply_event_risk_policy.py` is the one-off that applied the three prompt-side changes (dry-run
+first; idempotent).
 
 ## Baseline for fresh checkouts
 

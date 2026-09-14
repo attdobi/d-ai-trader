@@ -333,6 +333,9 @@ One trading cycle, left to right — every LLM agent has its own soul / directiv
   Market trends API (yfinance, no LLM)       → momentum recap for those tickers + holdings
         │
         ▼
+  Event calendar (FOMC · CPI · jobs · earnings, no LLM) → EVENT CALENDAR block: today's date, sessions to each
+        │                                      print, earnings dates of holdings + watchlist, event-risk score 0–100
+        ▼
   Policy graph query (deterministic, no LLM) → the Decider's guidelines, selected & ordered by
         │                                      regime · holdings · contrarian watchlist · quarantine ·
         │                                      news tickers · extracted entities · trend tickers;
@@ -394,6 +397,9 @@ One trading cycle, left to right — every LLM agent has its own soul / directiv
 | `d_ai_trader.py` | Main orchestrator + scheduler |
 | `main.py` | News scraping & screenshot analysis |
 | `decider_agent.py` | Trading decision engine; also hosts the company-extraction agent call and the market-trends recap |
+| `contrarian_screener.py` | Non-extended front-run candidates + the INDEX REGIME line (yfinance, no LLM) |
+| `event_calendar.py` | FOMC / CPI / jobs calendars, NYSE sessions, earnings dates, event-risk score → the EVENT CALENDAR block, per-cycle snapshots, the Event Risk Landscape series |
+| `feedback_diagnostics.py` | Population-level trade diagnostics for the feedback loop (regime, extension, re-entry, kill kind, event windows, acknowledgment rate) |
 | `policy_graph/` | Guideline knowledge graph: decomposition, proposals, citations, the decision-time graph query |
 | `decision_validator.py` | Financial guardrails — prevents hallucinated trades |
 | `feedback_agent.py` | Post-close performance analysis |
@@ -461,6 +467,12 @@ SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
 # Optional
 DAI_PROMPT_PROFILE=standard  # standard | gpt-pro
 DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
+
+# Scheduled events (event_calendar.py — the EVENT CALENDAR block and the Event Risk Landscape)
+DAI_EVENT_CALENDAR_ENABLED=1 # 0 = no block, no snapshots
+DAI_EVENT_CALENDAR_FILE=     # optional JSON adding dates: {"fomc": [], "cpi": [], "jobs": [], "holidays": [], "other": [{"date": "", "label": ""}]}
+DAI_EARNINGS_LOOKUP=1        # yfinance earnings dates for holdings + watchlist names (0 = cached dates only)
+DAI_EARNINGS_CACHE_HOURS=12
 ```
 
 ### CLI Options
@@ -512,6 +524,7 @@ The strategy is not a claim about returns — it's the **initial policy** the RL
 - Short-swing horizon: 1–5 day holds, catalyst-driven entries
 - Capital rotation: exit on thesis-break, redeploy into fresher setups
 - Cash is a position: hold it when no setup clears the bar
+- Event gate (2026-09-14): scheduled binary events gap through any kill. Inside a macro window (FOMC decision within 2 sessions, CPI / jobs print next session) at most one half-size entry with the kill ≤2% away, event named in the reason; no entry in a name that reports earnings inside the 5-session hold window; sell or trim a holding that reports within 2 sessions. The Decider reads the dates from a code-built `EVENT CALENDAR` block (`event_calendar.py`), the same way it reads the `INDEX REGIME` line.
 
 ### Default exit thresholds
 
@@ -568,10 +581,10 @@ Sources rot. Sites add paywalls, Cloudflare challenges, or just start returning 
 
 **Tabs:**
 
-- **Dashboard** — Portfolio value, cash balance, P&L, interactive charts. Schwab card shows settled vs raw cash, funds-available components, margin indicator.
+- **Dashboard** — Portfolio value, cash balance, P&L, interactive charts. Schwab card shows settled vs raw cash, funds-available components, margin indicator. The configuration panel carries an **Event Risk** card (score, next FOMC, macro-window flag) from the Decider's latest snapshot.
 - **Trades** — All decisions with timestamps, tickers (linked to Yahoo Finance with chart popups), config-specific filtering.
 - **Summaries** — Latest news analysis from all 6 sources, timestamped PT.
-- **Feedback** — Win rate, average profit, trade outcomes, AI learning insights.
+- **Feedback** — Win rate, average profit, trade outcomes, AI learning insights, System vs Market (TWR against SPY / DJIA / NASDAQ / VTI) and the **Event Risk Landscape**: the event-risk score per session (regime base + FOMC / CPI / jobs proximity + holdings' earnings) with regime bands, event verticals, fills marked on the risk they were taken at, and the calendar projected forward.
 - **Schwab** — Live account balance, holdings, buying power, real-time sync.
 - **Prompt Lab** — Interactive prompt evolution and testing.
 

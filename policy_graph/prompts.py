@@ -64,7 +64,7 @@ CRITIC_OUTPUT_FILES = (
 )
 
 GATE_STYLE = (
-    'RULE STYLE — ORDERED GATES. Write every Decider rule as a gate the model clears in sequence, not as prose: numbered in the order it is checked; ONE condition per gate, on a field the Decider is actually supplied (the INDEX REGIME line, % vs the 20d MA, the K:/D: kill line, the QUARANTINE line, Holdings, the watchlist row); the action when it fires (pass / half size / full size / SELL / HOLD); and what happens otherwise (fall through to the next gate). The first gate that fires decides; later gates only refine size or exits. Never bury a threshold inside a paragraph, never combine two conditions in one gate, and keep the existing "N. LABEL — text" form so each gate stays one guideline file the Decider can cite by id.'
+    'RULE STYLE — ORDERED GATES. Write every Decider rule as a gate the model clears in sequence, not as prose: numbered in the order it is checked; ONE condition per gate, on a field the Decider is actually supplied (the INDEX REGIME line, % vs the 20d MA, the K:/D: kill line, the QUARANTINE line, the EVENT CALENDAR block — sessions to FOMC / CPI / jobs, earnings dates — Holdings, the watchlist row); the action when it fires (pass / half size / full size / SELL / HOLD); and what happens otherwise (fall through to the next gate). The first gate that fires decides; later gates only refine size or exits. Never bury a threshold inside a paragraph, never combine two conditions in one gate, and keep the existing "N. LABEL — text" form so each gate stays one guideline file the Decider can cite by id.'
 )
 
 DRAFTER_SYSTEM = (

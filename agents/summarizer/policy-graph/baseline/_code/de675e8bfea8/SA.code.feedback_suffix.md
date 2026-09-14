@@ -1,6 +1,6 @@
 ---
 id: SA.code.feedback_suffix
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: SummarizerAgent
 title: "PERFORMANCE FEEDBACK"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: main.py
 source_symbol: get_openai_summary:feedback_context
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: system_tail

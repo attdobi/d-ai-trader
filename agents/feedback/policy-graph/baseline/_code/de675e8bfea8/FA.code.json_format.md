@@ -1,6 +1,6 @@
 ---
 id: FA.code.json_format
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: FeedbackAgent
 title: "Feedback JSON format (code)"
 node_type: code
@@ -16,12 +16,12 @@ locked: true
 provenance: feedback_agent.py:_generate_ai_feedback
 sep_before: ""
 sep_after: ""
-body_sha256: 7a1d216c4420b7c594fe3a8e448de1fa8ea1e1ec4f4e49e78b36ebeda2d99d06
+body_sha256: dc7feb8ad9a2578799845b76f7610da994aa91307ec9e9ccccac79f344e332e0
 tags: []
 tickers: []
 source_file: feedback_agent.py
 source_symbol: _generate_ai_feedback:FEEDBACK_JSON_FORMAT
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: null
 fires: true
 position: user_prompt_tail
@@ -33,7 +33,7 @@ Return ONLY valid JSON in this EXACT format:
     "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
     "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
     "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
-    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … — one clause per rule, ≤ 900 characters total, no narrative",
+    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … | EVENT: … — one clause per rule, ≤ 900 characters total, no narrative",
     "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
     "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
     "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],

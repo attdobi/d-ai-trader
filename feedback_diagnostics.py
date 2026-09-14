@@ -38,9 +38,12 @@ SUPPLIED_DECIDER_FIELDS = (
     "% from 20d high, % vs 20d MA, rel-vol, EXTENDED tag, suggested 3% kill price. "
     "INDEX REGIME line: SPY and QQQ vs their 20d MA and 5d return, momentum-leader cohort health, label RISK-ON/MIXED/RISK-OFF. "
     "QUARANTINE line: tickers exited within the last 2 sessions. "
+    "EVENT CALENDAR block: today's date and ET time, sessions to the next FOMC decision / CPI / jobs report with a MACRO "
+    "WINDOW flag (FOMC within 2 sessions, CPI/jobs next session), the next earnings date and sessions-to of every holding "
+    "and watchlist name, an event-risk score 0-100, and the allowance the EVENT GATE implies. "
     "Summaries: 3 headlines + one insights paragraph per news source. Feedback Snapshot (latest decider_feedback). "
     "LESSONS (long-term memory rows) and RECENT ACTIVITY (own last cycles). "
-    "NOT supplied: VWAP, opening range, sector-ETF trends, breadth, options flow, earnings dates, order book."
+    "NOT supplied: VWAP, opening range, sector-ETF trends, breadth, options flow, order book, earnings timing (BMO/AMC)."
 )
 
 _EXT_PATTERNS = (
@@ -76,6 +79,65 @@ def _kill_kind(reason):
     if re.search(r"20\s*-?\s*d", r, re.I):
         return "20d-only"
     return "none"
+
+
+# --- scheduled events (event_calendar) --------------------------------------
+# A Summarizer "named a dated event" when its text carries a scheduled-event phrase; the Decider
+# "acknowledged" it when any reason / cash_reason / considered line mentions the event class.
+EVENT_MENTION_RE = re.compile(
+    r"\b(?:fomc|fed(?:eral\s+reserve)?(?:'s)?\s+(?:decision|meeting|rate|policy|announcement|cut|hike|chair|minutes|day)|"
+    r"rate[- ](?:decision|hike|cut|path)|interest[- ]rates?|cpi\b|consumer[- ]price|jobs\s+report|payrolls?|nonfarm|"
+    r"pce\b|earnings\s+(?:date|report|release|call|due|on\s|this\s+week|next\s+week|after\s+the\s+close|before\s+the\s+open|risk|gap)|"
+    r"reports?\s+(?:earnings|results|q[1-4]\b|fiscal))", re.I)
+EVENT_ACK_RE = re.compile(
+    r"\b(?:fomc|fed\b|federal\s+reserve|rate\s+(?:decision|hike|cut)|cpi\b|jobs\s+report|payrolls?|nonfarm|pce\b|earnings|"
+    r"macro\s+window|event\s+window|event\s+calendar|binary\s+event|scheduled\s+event)", re.I)
+
+
+def summaries_name_event(text_):
+    return bool(EVENT_MENTION_RE.search(text_ or ""))
+
+
+def decision_acknowledges_event(text_):
+    return bool(EVENT_ACK_RE.search(text_ or ""))
+
+
+def _event_acknowledgment(conn, config_hash, cutoff):
+    """Per decider cycle: did a Summarizer name a scheduled event, and did the decision text mention it?"""
+    try:
+        rows = conn.execute(text("""
+            SELECT d.id, CAST(d.data AS TEXT) AS decision,
+                   (SELECT string_agg(CAST(s.data AS TEXT), ' ') FROM summaries s WHERE s.run_id = d.run_id) AS summaries
+            FROM trade_decisions d
+            WHERE d.config_hash = :h AND d.timestamp >= :cutoff
+        """), {"h": config_hash, "cutoff": cutoff}).fetchall()
+    except Exception:
+        return {"cycles": 0, "flagged": 0, "acknowledged": 0, "rate_pct": None}
+    flagged = acked = 0
+    for r in rows:
+        if summaries_name_event(r.summaries):
+            flagged += 1
+            if decision_acknowledges_event(r.decision):
+                acked += 1
+    return {"cycles": len(rows), "flagged": flagged, "acknowledged": acked,
+            "rate_pct": round(100.0 * acked / flagged, 0) if flagged else None}
+
+
+def _event_windows(trades):
+    """Tag each campaign with the macro-window context of its entry and whether it sat through an FOMC decision."""
+    try:
+        import event_calendar as ec
+    except Exception:
+        return
+    fomc = ec.fomc_dates()
+    prints = sorted(set(ec.cpi_dates()) | set(ec.jobs_dates()))
+    for t in trades:
+        e, s = t["entry_date"], t["sell_date"]
+        nf = next((d for d in fomc if d >= e), None)
+        np_ = next((d for d in prints if d >= e), None)
+        t["fomc_window_entry"] = nf is not None and ec.sessions_between(e, nf) <= ec.FOMC_WINDOW_SESSIONS
+        t["print_window_entry"] = np_ is not None and ec.sessions_between(e, np_) <= ec.PRINT_WINDOW_SESSIONS
+        t["held_through_fomc"] = any(e < d <= s for d in fomc)
 
 
 def _benchmark_regimes(conn):
@@ -165,6 +227,7 @@ def compute_trade_diagnostics(config_hash, days_back=30, reentry_days=3):
             ORDER BY sell_timestamp
         """), {"h": config_hash, "cutoff": cutoff}).fetchall()
         regimes = _benchmark_regimes(conn)
+        ack = _event_acknowledgment(conn, config_hash, cutoff)
 
     synced_usd, synced_n = 0.0, 0
     seen, trades = {}, []
@@ -238,6 +301,20 @@ def compute_trade_diagnostics(config_hash, days_back=30, reentry_days=3):
     diag["regime_split"] = {k: _stats(v) for k, v in by_reg.items()}
     diag["current_regime"] = _regime_on(regimes, datetime.utcnow().date())
 
+    # --- scheduled-event windows (FOMC / CPI / jobs from event_calendar) ------------
+    _event_windows(trades)
+    in_win = [t for t in trades if t.get("fomc_window_entry") or t.get("print_window_entry")]
+    out_win = [t for t in trades if not (t.get("fomc_window_entry") or t.get("print_window_entry"))]
+    through = [t for t in trades if t.get("held_through_fomc")]
+    diag["event_risk"] = {
+        "definition": "macro-window entry = FOMC decision within 2 sessions of entry or CPI/jobs print next session; entry date = sell date - hold days",
+        "macro_window_entries": _stats(in_win),
+        "other_entries": _stats(out_win),
+        "held_through_fomc": _stats(through),
+        "window_list": [(t["ticker"], str(t["sell_date"]), round(t["pct"], 1)) for t in in_win][:8],
+        "acknowledgment": ack,
+    }
+
     # --- entry extension above the 20d MA ------------------------------------
     def _ext_bucket(e):
         if e is None:
@@ -303,6 +380,12 @@ def compute_trade_diagnostics(config_hash, days_back=30, reentry_days=3):
     if tail:
         s = _stats(tail)
         leaks.append(("loss tail <= -5%", s["sum_usd"], s["n"]))
+    if in_win:
+        s = _stats(in_win)
+        leaks.append(("entries inside a macro event window (FOMC <=2 sessions / CPI-jobs next session)", s["sum_usd"], s["n"]))
+    if through:
+        s = _stats(through)
+        leaks.append(("campaigns held through an FOMC decision", s["sum_usd"], s["n"]))
     leaks.sort(key=lambda x: x[1])
     diag["ranked_leaks_usd"] = [{"leak": a, "sum_usd": b, "n": c} for a, b, c in leaks if b < 0]
     return diag
@@ -331,6 +414,15 @@ def format_diagnostics(diag):
         f"- Re-entry ({diag['reentry']['definition']}): RE-ENTRIES {_fmt_stats(diag['reentry']['reentries'])} vs SPACED {_fmt_stats(diag['reentry']['spaced_entries'])}; list {diag['reentry']['reentry_list'][:8]}",
         "- Kill kind at entry: " + " | ".join(f"{k}: {_fmt_stats(v)} (avg loser {v.get('avg_loser_pct')}%)" for k, v in sorted(diag['kill_kind'].items())),
     ]
+    ev = diag.get("event_risk") or {}
+    if ev:
+        ack = ev.get("acknowledgment") or {}
+        rate = f" ({ack['rate_pct']:.0f}%)" if ack.get("rate_pct") is not None else ""
+        lines.append(
+            f"- Event risk ({ev['definition']}): MACRO-WINDOW ENTRIES {_fmt_stats(ev['macro_window_entries'])} vs OTHER "
+            f"{_fmt_stats(ev['other_entries'])} | held through an FOMC decision {_fmt_stats(ev['held_through_fomc'])} | "
+            f"Summarizers named a dated event in {ack.get('flagged', 0)}/{ack.get('cycles', 0)} decider cycles, the Decider "
+            f"acknowledged it in {ack.get('acknowledged', 0)}{rate}")
     if diag.get("ranked_leaks_usd"):
         lines.append("- RANKED LEAKS ($): " + "; ".join(f"{l['leak']} = ${l['sum_usd']:+.0f} over {l['n']}" for l in diag["ranked_leaks_usd"][:5]))
     return "\n".join(lines)

@@ -1,6 +1,6 @@
 ---
 id: DA.code.cash_playbook
-version: code@34ec242ab340
+version: code@de675e8bfea8
 agent: DeciderAgent
 title: "⏳ CASH ACCOUNT PLAYBOOK (1-5 TRADING DAYS)"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_agent.py
 source_symbol: ask_decision_agent:cash_horizon_block
-code_sha: 34ec242ab340
+code_sha: de675e8bfea8
 condition: "not IS_MARGIN_ACCOUNT and '⏳ CASH ACCOUNT PLAYBOOK' not in user_prompt_template"
 fires: true
 position: user_template_tail

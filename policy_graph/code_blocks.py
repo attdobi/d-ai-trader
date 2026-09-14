@@ -1,7 +1,7 @@
 """Code-owned prompt blocks — VERBATIM copies of prompt text that lives in Python source.
 
 The trader assembles part of every prompt from string literals in decider_agent.py,
-contrarian_screener.py, decider_memory.py, main.py and feedback_agent.py. Those strings are
+contrarian_screener.py, event_calendar.py, decider_memory.py, main.py and feedback_agent.py. Those strings are
 not stored in prompt_versions, so the graph carries read-only copies of them here
 (owner "code", compiled "never"). Nothing in this module imports the trader; the copies are
 guarded by tests/test_policy_graph_code_blocks.py, which parses the source files with `ast`
@@ -183,6 +183,14 @@ _WATCHLIST_HEADER = "\n".join([
 # format_contrarian_watchlist: the QUARANTINE line prefix (tickers are appended per cycle)
 _QUARANTINE_LINE = "# QUARANTINE (exited within the last 2 sessions — NO re-entry this cycle, whatever the setup): "
 
+# ----------------------------------------------------------------------------- event_calendar.py
+# format_event_calendar: the constant header line of the EVENT CALENDAR block (the date, FOMC / CPI /
+# jobs distances, earnings dates and the allowance lines are per-cycle data)
+_EVENT_CALENDAR_HEADER = (
+    "# EVENT CALENDAR (scheduled binary events — read this right after the INDEX REGIME line; the EVENT GATE in "
+    "your strategy directives decides what each window allows, and it never relaxes an earlier gate)"
+)
+
 # ----------------------------------------------------------------------------- decider_memory.py
 _LESSONS_HEADER = "# LESSONS (long-term memory — hard rules earned from P&L; OBEY them):"
 _RECENT_ACTIVITY_HEADER = ("# RECENT ACTIVITY (short-term working memory — your last few cycles; do NOT repeat "
@@ -206,7 +214,8 @@ METHOD (in this order — do not skip a step):
 5. PAYOFF: state the breakeven win rate implied by avg win / avg loss and whether the current win rate clears it. If winners are capped by the +3% harvest rule, say what that implies for the required stop distance.
 6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
 7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
-8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.'''
+8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.
+9. EVENT RISK: the diagnostics score entries made inside a macro window (FOMC within 2 sessions, CPI/jobs next session), campaigns held through an FOMC decision, and the share of cycles where a Summarizer named a dated event the Decider never acknowledged. If in-window entries lose or acknowledgment is below 80%, the rule is an EVENT GATE clause with the number attached — the Decider is supplied an EVENT CALENDAR block (today's date, sessions to the next FOMC/CPI/jobs report, next earnings date per holding and watchlist name).'''
 
 _FA_JSON_FORMAT = '''
 🚨 CRITICAL JSON REQUIREMENT:
@@ -215,7 +224,7 @@ Return ONLY valid JSON in this EXACT format:
     "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
     "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
     "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
-    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … — one clause per rule, ≤ 900 characters total, no narrative",
+    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … | EVENT: … — one clause per rule, ≤ 900 characters total, no narrative",
     "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
     "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
     "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],
@@ -253,6 +262,8 @@ CODE_BLOCKS: list = [
               "contrarian_screener.py", "format_contrarian_watchlist", None, "user_prompt_dynamic", ["extension_cap"]),
     CodeBlock("DA.code.quarantine_line", "# QUARANTINE", _QUARANTINE_LINE,
               "contrarian_screener.py", "format_contrarian_watchlist", None, "user_prompt_dynamic", ["re_entry_quarantine"]),
+    CodeBlock("DA.code.event_calendar", "# EVENT CALENDAR", _EVENT_CALENDAR_HEADER,
+              "event_calendar.py", "format_event_calendar", None, "user_prompt_dynamic", ["event_gate"]),
     CodeBlock("DA.code.lessons_header", "# LESSONS", _LESSONS_HEADER,
               "decider_memory.py", "format_long_term_memory", None, "user_prompt_dynamic", []),
     CodeBlock("DA.code.recent_activity_header", "# RECENT ACTIVITY", _RECENT_ACTIVITY_HEADER,
