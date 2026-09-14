@@ -30,7 +30,8 @@ from config import engine
 
 PT = pytz.timezone("US/Pacific")
 WINDOW_BEFORE = timedelta(minutes=3)   # decisions are stored just before orders go out
-WINDOW_AFTER = timedelta(minutes=25)   # …and the cycle's execution stage takes a few minutes
+WINDOW_AFTER = timedelta(minutes=15)   # …and the cycle's execution stage takes a few minutes
+                                       # (median observed offset 4 s; keep well under the 2h cadence)
 CONFIRMED_STATUSES = {"filled"}
 NOT_SENT_STATUSES = {"market_closed"}
 
@@ -104,11 +105,28 @@ def reconcile(config_hash, days, apply):
             WHERE config_hash = :h AND timestamp >= :since ORDER BY timestamp
         """), {"h": config_hash, "since": since}).fetchall()
 
-    stats = {"filled": 0, "rejected": 0, "not_executed": 0, "left_alone": 0}
+    stats = {"filled": 0, "rejected": 0, "not_executed": 0, "left_alone": 0, "enriched": 0}
     updates = []
     offsets = []  # seconds from decision storage to order entry, for matched orders
+    by_id = {o["id"]: o for o in orders}
+    parsed = []
     for row in rows:
         data = row.data if isinstance(row.data, list) else json.loads(row.data)
+        parsed.append((row, data))
+
+    def _live_confirmed(d):
+        """A fill the trader itself persisted (broker order_id), not one this script stamped —
+        such rows are trusted and their order is consumed BEFORE matching, so a nearby
+        unexecuted decision for the same ticker can't claim the same order."""
+        st = str(d.get("execution_status") or "").lower()
+        return st in CONFIRMED_STATUSES and d.get("order_id") and d.get("execution_source") != "broker_reconcile"
+
+    for _, data in parsed:
+        for d in data:
+            if isinstance(d, dict) and _live_confirmed(d) and str(d.get("order_id")) in by_id:
+                by_id[str(d.get("order_id"))]["used"] = True
+
+    for row, data in parsed:
         when = to_utc(row.timestamp)
         changed = False
         for d in data:
@@ -118,9 +136,26 @@ def reconcile(config_hash, days, apply):
             if action not in ("buy", "sell"):
                 continue
             st = str(d.get("execution_status") or "").lower()
-            if (st in CONFIRMED_STATUSES and d.get("order_id")) or st in NOT_SENT_STATUSES:
+            if _live_confirmed(d):
+                o = by_id.get(str(d.get("order_id")))
+                if o is not None and d.get("executed_amount") is None and o["amount"]:
+                    d["executed_shares"] = o["filled_qty"]
+                    d["executed_amount"] = o["amount"]
+                    d.setdefault("executed_price", round(o["avg_price"], 4) if o["avg_price"] else None)
+                    stats["enriched"] += 1
+                    changed = True
                 stats["left_alone"] += 1
                 continue
+            if st in NOT_SENT_STATUSES:
+                stats["left_alone"] += 1
+                continue
+            if d.get("execution_source") == "broker_reconcile":
+                # re-evaluate from scratch: a rerun must be able to correct an earlier match
+                for k in ("execution_status", "order_id", "executed_shares", "executed_price",
+                          "executed_amount", "execution_error", "execution_source"):
+                    d.pop(k, None)
+                st = ""
+                changed = True
             symbol = str(d.get("ticker") or "").upper()
             o = nearest_order(orders, symbol, action, when)
             if o is not None:
@@ -159,7 +194,8 @@ def reconcile(config_hash, days, apply):
             updates.append((row.id, data))
 
     print(f"decisions → filled {stats['filled']}, rejected {stats['rejected']}, "
-          f"not_executed {stats['not_executed']}, left alone {stats['left_alone']}; rows to update: {len(updates)}")
+          f"not_executed {stats['not_executed']}, left alone {stats['left_alone']} "
+          f"(enriched {stats['enriched']}); rows to update: {len(updates)}")
     if offsets:
         offsets.sort()
         print(f"matched-order offsets (decision stored → order entered): min {offsets[0]:.0f}s, "
