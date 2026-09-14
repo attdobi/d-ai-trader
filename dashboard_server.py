@@ -1549,8 +1549,6 @@ def trade_decisions():
         # Today's executed buy/sell counts for the summary bar — server-side and
         # page-independent (was derived from whichever rows the client had).
         today_buys = today_sells = 0
-        _failed_substrings = ('rejected', 'working', 'error', 'failed',
-                              'not_filled', 'market', 'closed')
         today_rows = conn.execute(text("""
             SELECT * FROM trade_decisions
             WHERE config_hash = :config_hash
@@ -1562,8 +1560,10 @@ def trade_decisions():
                "today_pt": datetime.now(pacific_tz).date()}).fetchall()
         for _r in today_rows:
             for _d in _prepare_trade_run(_r).get('data') or []:
-                _exec = (_d.get('execution_status') or '').lower()
-                if any(s in _exec for s in _failed_substrings) or _d.get('unconfirmed'):
+                # Every decision now carries an explicit execution status (live
+                # persistence + broker reconciliation), so only confirmed fills count —
+                # substring exclusion lists missed statuses like not_executed/skipped.
+                if (_d.get('execution_status') or '').lower() != 'filled':
                     continue
                 _a = (_d.get('action') or '').lower()
                 if 'buy' in _a:
