@@ -265,7 +265,7 @@
 .pg-node text { font-size: 11px; fill: var(--text); pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; transition: opacity .14s ease; }
 .pg-node.leaf-node text { opacity: .78; }
 .pg-node.is-inert { opacity: .45; }
-.pg-node.is-hidden { opacity: .08; }
+.pg-node.is-hidden, .pg-link.is-hidden { display: none; }
 .pg-node.dimmed, .pg-link.dimmed { opacity: .18; }
 .pg-node.selected circle { stroke-width: 5px; filter: drop-shadow(0 0 12px rgba(66,201,255,.55)); }
 .pg-node.selected text { opacity: 1; font-weight: 800; }
