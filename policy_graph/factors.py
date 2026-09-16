@@ -254,7 +254,7 @@ def factor_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *,
         wins = sum(1 for c in rows if (c["gain_pct"] or 0) > 0)
         return {"closed": n, "wins": wins, "losses": n - wins, "win_rate": (wins / n) if n else None,
                 "pnl": round(sum(c["gain_amount"] for c in rows), 2),
-                "recent": [{"ticker": c["ticker"], "gain_pct": round(float(c["gain_pct"] or 0), 2), "at": iso(c["at"])}
+                "recent": [{"ticker": c["ticker"], "gain_pct": round(float(c["gain_pct"] or 0) * 100.0, 2), "at": iso(c["at"])}
                            for c in sorted(rows, key=lambda c: c["at"], reverse=True)[:5]]}
 
     kind_rank = {"regime": 0, "fomc": 1, "cpi": 2, "jobs": 3, "other": 4, "earnings": 5}

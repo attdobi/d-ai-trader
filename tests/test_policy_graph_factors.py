@@ -121,6 +121,7 @@ def test_factor_report_flows_and_quality(db):
     assert {"source": EG, "target": "buy", "value": 1} in rep["flows_out"]
     # closed trades: TSLA entered on r1 (FOMC window, RISK-OFF) lost; AAA entered on r4 (RISK-ON) won; OLD outside window
     assert fomc["closed"] == 1 and fomc["losses"] == 1 and fomc["pnl"] == -8.0 and fomc["recent"][0]["ticker"] == "TSLA"
+    assert fomc["recent"][0]["gain_pct"] == -200.0       # trade_outcomes stores a fraction; the panel shows percent
     assert off["closed"] == 1 and by["regime.risk_on"]["closed"] == 1 and by["regime.risk_on"]["win_rate"] == 1.0
     earn = by["earnings.tsla.2026_09_17"]
     assert earn["cycles"] == 1 and earn["held"] and earn["flag"] == "reports_within_2" and earn["closed"] == 0
