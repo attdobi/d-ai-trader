@@ -136,7 +136,7 @@
     <div class="pg-change-head">
       <div>
         <h2>Decision paths</h2>
-        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed — and, below, what the world put in front of it (regime, FOMC / CPI / jobs windows, earnings dates) on each of those cycles.</p>
+        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed. Switch the left column to see the same decisions by what the market put in front of the Decider (regime, FOMC / CPI / jobs windows, earnings dates).</p>
       </div>
       <label class="pg-check">Window
         <select id="pgPathsDays" class="pe-select pg-select" aria-label="Path window">
@@ -149,11 +149,14 @@
     <p id="pgPathsSummary" class="pg-muted"></p>
     <div class="pg-paths-grid">
       <div>
-        <h3 class="pg-paths-h">Path frequency <span class="pg-muted">route → guideline → action, by cited decisions</span></h3>
+        <h3 class="pg-paths-h">Path frequency <span class="pg-muted" id="pgPathsFlowSub">route → guideline → action, by cited decisions</span>
+          <span id="pgPathsSource" class="pg-paths-source" role="group" aria-label="Left column of the flow">
+            <button type="button" class="pg-chip-filter is-active" data-source="route" title="What pulled each guideline into the prompt (the graph query's routes)">by route</button>
+            <button type="button" class="pg-chip-filter" data-source="factor" title="What the market put in front of the Decider on those cycles (regime, FOMC / CPI / jobs windows, earnings dates)">by world factor</button>
+          </span>
+        </h3>
         <div id="pgPathsFlow" class="pg-paths-flow"></div>
         <div id="pgPathsGaps" class="pg-paths-gaps"></div>
-        <h3 class="pg-paths-h">World factors <span class="pg-muted">what was in front of the Decider → guideline cited while it was active → action</span></h3>
-        <div id="pgPathsFactors" class="pg-paths-flow"></div>
       </div>
       <div>
         <h3 class="pg-paths-h">Path quality <span class="pg-muted">per guideline, over the closed trades it drove</span></h3>
@@ -485,6 +488,8 @@
 .pg-paths-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 8px; }
 .pg-paths-h { margin: 0 0 8px; font-size: 14px; }
 .pg-paths-h .pg-muted { font-weight: 400; font-size: 12px; margin-left: 6px; }
+.pg-paths-source { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
+.pg-paths-source .pg-chip-filter { padding: 2px 9px; font-size: 11px; }
 .pg-paths-flow { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: var(--surface); min-height: 160px; overflow: auto; }
 .pg-paths-flow svg { width: 100%; height: auto; display: block; }
 .pg-paths-flow .pg-flow-node { fill: rgba(125,176,255,.18); stroke: rgba(125,176,255,.55); }

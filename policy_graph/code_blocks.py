@@ -281,7 +281,7 @@ CODE_BLOCKS: list = [
               "decider_agent.py", f"{_DA_ASK}:prompt+=#5", None, "user_prompt_tail", ["regime_gate"]),
     CodeBlock("DA.code.confirmation_policy", "CONFIRMATION POLICY", _CONFIRMATION_POLICY,
               "decider_agent.py", f"{_DA_ASK}:prompt+=#6", None, "user_prompt_tail",
-              ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill"]),
+              ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill", "kill_breach"]),
     CodeBlock("DA.code.recency_provenance", "RECENCY & PROVENANCE", _RECENCY_PROVENANCE,
               "decider_agent.py", f"{_DA_ASK}:prompt+=#7", None, "user_prompt_tail", []),
     CodeBlock("DA.code.guideline_citations", "GUIDELINE CITATIONS", _GUIDELINE_CITATIONS,

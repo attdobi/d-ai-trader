@@ -545,6 +545,32 @@ CREATE TABLE IF NOT EXISTS policy_graph_runs (
 DDL_RUNS_SQLITE = DDL_RUNS_POSTGRES.replace("id SERIAL PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
 
 
+def backfill_code_served(engine, config_hash: str, code_ids_for_version, agent_type: str = "DeciderAgent") -> int:
+    """The code-owned blocks were in every prompt by construction, but until 2026-09-16 the trader recorded
+    only graph-assembled guidelines as served — so the paths called the most-cited code text "cited but
+    not served". Insert the missing served rows (route "code") for every logged run that has none.
+    `code_ids_for_version(prompt_version) -> [code node ids that fired]`. Returns rows inserted."""
+    with engine.connect() as conn:
+        runs = conn.execute(text("""
+            SELECT r.run_id, r.decided_at, r.prompt_version FROM policy_graph_runs r
+            WHERE r.config_hash = :h AND r.agent_type = :a AND r.run_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM policy_graph_hits x
+                              WHERE x.config_hash = :h AND x.run_id = r.run_id AND x.route = 'code')
+        """), {"h": config_hash, "a": agent_type}).fetchall()
+    rows = []
+    for run_id, at, version in runs:
+        for cid in code_ids_for_version(version) or []:
+            rows.append({"h": config_hash, "a": agent_type, "v": version, "r": run_id, "t": at, "n": cid, "route": "code"})
+    if not rows:
+        return 0
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO policy_graph_hits (config_hash, agent_type, prompt_version, run_id, decided_at, node_id, route, served, cited)
+            VALUES (:h, :a, :v, :r, :t, :n, :route, :served, :cited)
+        """), [dict(r, served=True, cited=False) for r in rows])
+    return len(rows)
+
+
 def ensure_runs_schema(engine) -> None:
     dialect = getattr(getattr(engine, "dialect", None), "name", "") or ""
     with engine.begin() as conn:
@@ -634,6 +660,6 @@ def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> 
 
 
 __all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "ensure_runs_schema", "record_run", "run_stats", "last_run_served",
-           "DDL_RUNS_POSTGRES", "record_served", "record_cited", "hit_counts",
+           "DDL_RUNS_POSTGRES", "record_served", "record_cited", "hit_counts", "backfill_code_served",
            "hit_map", "health_for_prompt", "backfill_hits_from_decisions", "DDL_HITS_POSTGRES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
            "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health"]

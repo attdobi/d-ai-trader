@@ -162,7 +162,7 @@ def test_code_blocks_metadata_is_well_formed():
     assert re.fullmatch(r"[0-9a-f]{12}", CODE_SHA)
     assert set(CONSTRAINS) == {"DA.code.index_regime", "DA.code.watchlist_header", "DA.code.quarantine_line",
                                "DA.code.event_calendar", "DA.code.deploy_policy", "DA.code.confirmation_policy"}
-    assert CONSTRAINS["DA.code.confirmation_policy"] == ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill"]
+    assert CONSTRAINS["DA.code.confirmation_policy"] == ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill", "kill_breach"]
     assert CONSTRAINS["DA.code.index_regime"] == ["regime_gate"]
     assert CONSTRAINS["DA.code.quarantine_line"] == ["re_entry_quarantine"]
     assert CONSTRAINS["DA.code.event_calendar"] == ["event_gate", "earnings_candidate", "earnings_holding"]

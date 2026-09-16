@@ -95,6 +95,7 @@
     layers: new Set(['policy']),      // policy | scaffold | context (what the graph shows)
     fields: new Set(),                // optional narrowing of the policy layer: strategy_directives | soul | memory
     lastRun: false,                   // dim what the Decider did not read on its latest cycle
+    pathsSource: 'route',             // the flow's left column: 'route' (graph query) or 'factor' (world events)
     showRefs: false,
     highlightChanges: true,
     nodeCache: new Map(),
@@ -2258,7 +2259,7 @@
     }
     const wr = data.win_rate !== null && data.win_rate !== undefined ? ` · win rate ${pct(data.win_rate)}` : '';
     summary.textContent = `${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${wr} · since ${fmtDateOnly(data.since)}`;
-    renderPathFlow(flow, f);
+    renderPathFlowFor(flow, data);
     const bits = [];
     if ((f.cited_unserved || []).length) {
       bits.push(`<div><strong>Cited but not served</strong> (the graph query missed them): ${f.cited_unserved.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))} ×${g.cited}</button>`).join(' ')}</div>`);
@@ -2269,31 +2270,48 @@
     gaps.innerHTML = bits.join('');
     gaps.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => pgOpenNode(btn.dataset.nodeId)));
     renderPathQuality(quality, data.quality || []);
-    renderFactorPaths(data.factors);
+    renderFactorQuality(data.factors);
   }
 
-  // World factors → guideline cited while active → action, plus per-factor quality.
-  function renderFactorPaths(fr) {
-    const flow = qs('#pgPathsFactors');
+  // The one flow: left column by route (what pulled the guideline into the prompt) or by world factor
+  // (what the market put in front of the Decider); middle and right columns are the same guidelines and actions.
+  function renderPathFlowFor(flow, data) {
+    const f = data.frequency || {};
+    const fr = data.factors;
+    const hasFactors = fr && !fr.empty && (fr.factors || []).length;
+    document.querySelectorAll('#pgPathsSource [data-source]').forEach(btn => {
+      const on = state.pathsSource === btn.dataset.source;
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (btn.dataset.source === 'factor') btn.disabled = !hasFactors;
+    });
+    const sub = qs('#pgPathsFlowSub');
+    if (state.pathsSource === 'factor' && hasFactors) {
+      const labelOf = new Map(fr.factors.map(x => [x.key, x.label]));
+      const citedOf = new Map();
+      (fr.flows_in || []).forEach(x => citedOf.set(x.target, (citedOf.get(x.target) || 0) + x.value));
+      const guides = (fr.guidelines || []).slice(0, 14).map(g => ({ id: g.id, title: g.title, cited: citedOf.get(g.id) || 0 }));
+      const keep = new Set(guides.map(g => g.id));
+      renderPathFlow(flow, {
+        routes: fr.factors.map(x => x.label), guidelines: guides, actions: fr.actions || [],
+        flows_in: (fr.flows_in || []).filter(x => keep.has(x.target)).map(x => ({ ...x, source: labelOf.get(x.source) || x.source })),
+        flows_out: (fr.flows_out || []).filter(x => keep.has(x.source)),
+      }, { leftHead: 'world factor (cited decisions while active)', guideHead: 'guideline (cited under a factor)', leftWidth: 210 });
+      if (sub) sub.textContent = 'world factor → guideline cited while it was active → action · a decision counts once per factor active on its cycle';
+    } else {
+      renderPathFlow(flow, f);
+      if (sub) sub.textContent = 'route → guideline → action, by cited decisions';
+    }
+  }
+
+  // Per-factor quality: cycles active, decisions by action, closed trades entered under it.
+  function renderFactorQuality(fr) {
     const table = qs('#pgFactorsQuality');
-    if (!flow || !table) return;
+    if (!table) return;
     if (!fr || fr.empty || !(fr.factors || []).length) {
-      flow.innerHTML = `<div class="pg-paths-empty">${esc(fr?.note || 'No world factors in this window yet.')}</div>`;
-      table.innerHTML = '';
+      table.innerHTML = `<div class="pg-paths-empty">${esc(fr?.note || 'No world factors in this window yet.')}</div>`;
       return;
     }
-    const labelOf = new Map(fr.factors.map(f => [f.key, f.label]));
-    const citedOf = new Map();
-    (fr.flows_in || []).forEach(x => citedOf.set(x.target, (citedOf.get(x.target) || 0) + x.value));
-    const guides = (fr.guidelines || []).slice(0, 14).map(g => ({ id: g.id, title: g.title, cited: citedOf.get(g.id) || 0 }));
-    const keep = new Set(guides.map(g => g.id));
-    renderPathFlow(flow, {
-      routes: fr.factors.map(f => f.label),
-      guidelines: guides,
-      actions: fr.actions || [],
-      flows_in: (fr.flows_in || []).filter(x => keep.has(x.target)).map(x => ({ ...x, source: labelOf.get(x.source) || x.source })),
-      flows_out: (fr.flows_out || []).filter(x => keep.has(x.source)),
-    }, { leftHead: 'world factor (cited decisions while active)', guideHead: 'guideline (cited under a factor)', leftWidth: 210 });
     const chips = list => (list || []).slice(0, 3).map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}" title="${esc(g.id)}">${esc(truncate(g.title, 22))} ×${g.count}</button>`).join('');
     table.innerHTML = `<table><thead><tr><th>factor</th><th>cycles</th><th>decisions</th><th>closed</th><th>win rate</th><th>P&amp;L</th><th>guidelines cited</th></tr></thead><tbody>${fr.factors.map(f => {
       const acts = Object.entries(f.actions || {}).sort((a, b) => b[1] - a[1]).map(([a, n]) => `${n} ${a[0].toUpperCase()}`).join(' ');
@@ -2438,6 +2456,10 @@
     document.querySelectorAll('#pgFieldFilter [data-layer]').forEach(btn => btn.addEventListener('click', () => toggleLayer(btn.dataset.layer)));
     document.querySelectorAll('#pgFieldFilter [data-field]').forEach(btn => btn.addEventListener('click', () => toggleField(btn.dataset.field)));
     qs('#pgLastRun')?.addEventListener('change', event => { state.lastRun = Boolean(event.target.checked); applyFilters(); });
+    document.querySelectorAll('#pgPathsSource [data-source]').forEach(btn => btn.addEventListener('click', () => {
+      state.pathsSource = btn.dataset.source === 'factor' ? 'factor' : 'route';
+      if (state.paths) renderPaths(state.paths);
+    }));
     qs('#pgPanelClear')?.addEventListener('click', () => applySelection(null));
     const kicker = qs('#pgNodeId');
     const copyId = async () => {

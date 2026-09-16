@@ -312,6 +312,15 @@ This closes the loop the event gate opened: the event calendar puts the FOMC dec
 Decider, the EVENT GATE consumes it, the decision cites the gate, and the factor node shows the
 outcome of every decision made under that event.
 
+## Short form for reuse
+
+`docs/POLICY_GRAPH_AND_ROUTING.docx` (and its Markdown source `docs/POLICY_GRAPH_AND_ROUTING.md`) is the
+five-page explainer of the graph, the layers, how learnings enter, how the Decider reads it and what to
+port to RUSH. The plain-gate pass of 2026-09-16 (`apply_plain_gates.py`, proposals #8–#15, maintenance
+v41) rewrote gates 1–8 in the plain shape, gave gates 7 and 8 labels (DAY CHASE, CANDIDATES) and moved the
+binding exit out of PRICED KILL into KILL BREACH (gate 12); the critic rejected every step as cosmetic,
+which is what they were, and caught three wording drifts that v41 restored.
+
 ## Baseline for fresh checkouts
 
 `agents/<dir>/policy-graph/baseline/v0/` is committed: the v0 policy of every agent decomposed
