@@ -165,7 +165,7 @@ def test_code_blocks_metadata_is_well_formed():
     assert CONSTRAINS["DA.code.confirmation_policy"] == ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill"]
     assert CONSTRAINS["DA.code.index_regime"] == ["regime_gate"]
     assert CONSTRAINS["DA.code.quarantine_line"] == ["re_entry_quarantine"]
-    assert CONSTRAINS["DA.code.event_calendar"] == ["event_gate"]
+    assert CONSTRAINS["DA.code.event_calendar"] == ["event_gate", "earnings_candidate", "earnings_holding"]
     assert BLOCKS_BY_ID["DA.code.event_calendar"].position == "user_prompt_dynamic"
 
 

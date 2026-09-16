@@ -92,7 +92,9 @@
     prevPayload: null,
     selected: null,
     layer: 'effective',
-    filters: new Set(['all']),
+    layers: new Set(['policy']),      // policy | scaffold | context (what the graph shows)
+    fields: new Set(),                // optional narrowing of the policy layer: strategy_directives | soul | memory
+    lastRun: false,                   // dim what the Decider did not read on its latest cycle
     showRefs: false,
     highlightChanges: true,
     nodeCache: new Map(),
@@ -263,6 +265,81 @@
     if (h.cited_90d) parts.push(`${h.cited_90d} in 90d`);
     if (h.cited_1y) parts.push(`${h.cited_1y} in 1y`);
     return parts.length ? `cited ${parts.join(' · ')}` : '';
+  }
+
+  const LAYER_LABEL = { policy: 'Policy', scaffold: 'Prompt scaffold', context: 'Cycle context' };
+  function layerOf(node) {
+    if (node.layer) return node.layer;
+    if ((node.owner === 'db' || node.owner === 'default-file') && ['strategy_directives', 'soul', 'memory'].includes(node.field)) return 'policy';
+    if (['ltm', 'factor', 'ticker', 'concept'].includes(node.node_type) || node.owner === 'world' || node.owner === 'decider_memory') return 'context';
+    return 'scaffold';
+  }
+  function kindOf(node) {
+    if (node.kind) return node.kind;
+    const t = String(node.node_type || '');
+    if (t === 'rule') return node.field === 'strategy_directives' ? 'gate' : 'rule';
+    if (t === 'entry') return 'diary entry';
+    if (t === 'reminder') return 'weekly reminder';
+    if (t === 'code') return 'code-owned prompt text';
+    if (t === 'ltm') return 'memory row';
+    if (t === 'factor') return 'world factor';
+    return t;
+  }
+  function tokensOf(chars) { return `${(Number(chars || 0) / 4000).toFixed(1)}k tokens`; }
+
+  // One sentence that says what a node is to the Decider — the first row of the details panel.
+  function whatSentence(node, payload) {
+    const layer = layerOf(node);
+    const kind = kindOf(node);
+    const field = FIELD_LABEL[node.field] || node.field;
+    const h = node.hits || {};
+    const lr = payload?.last_run;
+    let read = '';
+    if (lr && lr.served && layer === 'policy' && node.node_type !== 'field') {
+      read = node.id in lr.served ? ` · <span class="pg-read">read last cycle via ${esc(lr.served[node.id])}</span>` : ' · <span class="pg-unread">not read last cycle</span>';
+    }
+    if (layer === 'policy') {
+      const record = Number.isFinite(Number(h.served_90d)) && (h.served_90d || h.cited_90d) ? ` · served ${h.served_90d}× / cited ${h.cited_90d || 0}× in 90d` : '';
+      return `<strong>Policy</strong> · ${esc(kind)}${field ? ` in ${esc(field)}` : ''} — compiled into the Decider's system prompt${record}${read}`;
+    }
+    if (layer === 'scaffold') {
+      if (node.owner === 'code') return `<strong>Prompt scaffold</strong> · ${esc(kind)} — appended by the code every cycle; fixed by the repository, citable, not editable by the loop${lr && lr.served && node.id in lr.served ? ' · <span class="pg-read">read last cycle</span>' : ''}`;
+      return `<strong>Prompt scaffold</strong> · ${esc(kind)} — fixed structure of the prompt, not policy`;
+    }
+    if (node.owner === 'world') return `<strong>Cycle context</strong> · ${esc(kind)} — what the market put in front of the Decider; rebuilt from the run log`;
+    if (node.owner === 'decider_memory') return `<strong>Cycle context</strong> · ${esc(kind)} — injected when relevant to the cycle; not part of the policy version${lr && lr.served && node.id in lr.served ? ' · <span class="pg-read">read last cycle</span>' : ''}`;
+    return `<strong>Cycle context</strong> · ${esc(kind)}`;
+  }
+
+  // Plain reading of a gate / lesson: label, then one sentence per line with the numbers emphasised.
+  const NUM_RE = /(\$\d[\d,]*(?:\.\d+)?|[+−-]?\d+(?:\.\d+)?\s?%|\b\d+(?:\.\d+)?[x×]\b|\bK:[^;\s]+|\bD\s?[≤<>=]+\s?\d+(?:\.\d+)?%?|\b\d+(?:\.\d+)?\b(?=\s?(?:sessions?|days?|trades?|cycles?|hours?|pm\b|am\b|new BUYs?|characters|holdings?|candidates?|entries|of\b)))/g;
+  function emphasiseNumbers(escaped) {
+    return escaped.replace(NUM_RE, '<b>$1</b>');
+  }
+  function plainLines(body) {
+    const out = [];
+    String(body || '').replace(/\r\n?/g, '\n').split('\n').forEach(line => {
+      let t = line.trim();
+      if (!t) return;
+      t = t.replace(/^-\s+/, '').replace(/^\*\*(.+?)\*\*\s*/, '$1 ').replace(/^(\d+)\.\s+/, '');
+      t.split(/(?<=[.;])\s+(?=[A-Z"“(\[]|IF\b|THEN\b)/).forEach(sent => { const x = sent.trim(); if (x) out.push(x); });
+    });
+    return out;
+  }
+  function renderGuidelineBody(node) {
+    const type = String(node.node_type || '');
+    const body = String(node.body || '');
+    if (!['rule', 'lesson', 'reminder'].includes(type) || !body.trim()) return renderMarkdown(body, node);
+    let label = '';
+    const rule = /^(\d+)\.\s+([A-Z][A-Z0-9 /&\-–]{2,40}?)\s(?:—|–|-|:)\s/.exec(body.trim());
+    const lesson = /^-\s\*\*(.+?)\*\*/.exec(body.trim());
+    if (rule) label = `Gate ${rule[1]} · ${rule[2]}`;
+    else if (lesson) label = lesson[1].replace(/^#/, '#');
+    else if (type === 'reminder') label = 'Weekly reminder';
+    const lines = plainLines(body);
+    const items = lines.map(l => `<li>${emphasiseNumbers(esc(l))}</li>`).join('');
+    return `<div class="pg-plain-wrap">${label ? `<div class="pg-plain-label">${esc(label)}</div>` : ''}<ol class="pg-plain">${items}</ol>` +
+      `<details class="pg-plain-original"><summary>Original text</summary>${renderMarkdown(body, node)}</details></div>`;
   }
 
   function nodeLabel(node) {
@@ -662,6 +739,13 @@
       notes.push(`${inForce} · ${window_}`);
     }
     state.versionNotes.forEach(n => notes.push(String(n)));
+    const lr = state.payload?.last_run;
+    if (lr && lr.served) {
+      const policyIds = new Set((state.payload.nodes || []).filter(n => layerOf(n) === 'policy' && n.node_type !== 'field').map(n => n.id));
+      const readPolicy = Object.keys(lr.served).filter(id => policyIds.has(id)).length;
+      const routes = Object.entries(lr.routes || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${v}`).join(' · ');
+      notes.push(`Last cycle (v${lr.prompt_version ?? '?'} ${fmtPT(lr.decided_at)}): the Decider read ${readPolicy} of ${policyIds.size} policy guidelines (${lr.dropped || 0} not shown) plus the code-owned scaffold${lr.cited && lr.cited.length ? `; it cited ${lr.cited.length}` : ''} · ${Number(lr.chars_served || 0).toLocaleString()} chars ≈ ${tokensOf(lr.chars_served)}${routes ? ` · routes: ${routes}` : ''} — tick "Dim what the Decider did not read" to see it on the graph`);
+    }
     const t = state.trim;
     if (t && t.latest) {
       const l = t.latest;
@@ -690,8 +774,9 @@
     bits.push(`v${version}`);
     bits.push(fmtPT(p?.created_at || v?.created_at));
     bits.push(`by ${actorLabel(p?.actor_kind || v?.actor_kind, p?.created_by || v?.created_by)}`);
-    const count = p?.stats?.nodes ?? v?.node_count;
-    if (Number.isFinite(Number(count))) bits.push(plural(Number(count), 'guideline'));
+    const L = p?.layers;
+    if (L) bits.push(`${L.policy || 0} policy guidelines · ${L.scaffold || 0} scaffold · ${L.context || 0} context`);
+    else { const count = p?.stats?.nodes ?? v?.node_count; if (Number.isFinite(Number(count))) bits.push(plural(Number(count), 'guideline')); }
     const delta = p?.stats || v?.delta_vs_prev || {};
     const hasPrev = (p && p.previous_version !== null && p.previous_version !== undefined) || (v && v.parent_version !== null && v.parent_version !== undefined);
     if (hasPrev) {
@@ -946,7 +1031,7 @@
 
     const link = viewport.append('g').attr('class', 'pg-links')
       .selectAll('line').data(links).join('line')
-      .attr('class', edge => `pg-link ${linkClass(edge)}${edge.proposed ? ' proposed' : ''}`);
+      .attr('class', edge => `pg-link ${linkClass(edge)} k-${edge.edge_kind || 'related'}${edge.proposed ? ' proposed' : ''}`);
     link.append('title').text(edge => `${EDGE_KIND_LABEL[edge.kind] || edge.kind}${edge.via ? ` via ${edge.via}` : ''}${edge.confidence !== null && edge.confidence !== undefined && edge.kind === 'overlaps' ? ` · ${Math.round(Number(edge.confidence) * 100)} % similar` : ''}`);
 
     const node = viewport.append('g').attr('class', 'pg-nodes')
@@ -1020,6 +1105,7 @@
 
     view.nodes = node; view.links = link; view.simulation = simulation;
     applyChangeClasses();
+    applyFilters();
 
     if (state.pendingPulse) {
       const { added, changed } = state.pendingPulse;
@@ -1086,50 +1172,51 @@
     const nodes = payload.nodes || [];
     const present = new Set();
     nodes.forEach(n => {
-      if (n.id === payload.root_id || n.node_type === 'root') present.add('root');
-      else if (n.owner === 'code') present.add('code');
-      else if (n.owner === 'decider_memory') present.add('ltm');
-      else if (n.owner === 'world') present.add('world');
-      else if (n.node_type === 'template') present.add('template');
-      else if (isRef(n)) present.add('ref');
-      else present.add(String(n.polarity || 'mixed'));
+      const layer = layerOf(n);
+      present.add(layer);
+      if (layer === 'policy') present.add(`pol:${n.polarity || 'mixed'}`);
+      if (n.owner === 'code') present.add('code');
+      if (n.node_type === 'template') present.add('template');
+      if (n.owner === 'decider_memory') present.add('ltm');
+      if (n.owner === 'world') present.add('world');
+      if (isRef(n)) present.add('ref');
       if (n.owner === 'default-file') present.add('inherited');
       if (n.ghost) present.add('proposed');
     });
-    const rows = [
-      ['root', 'root', COLORS.root, ''],
-      ['gate', 'hard gate', COLORS.gate, ''],
-      ['action', 'action', COLORS.action, ''],
-      ['caution', 'caution', COLORS.caution, ''],
-      ['principle', 'identity / principle', COLORS.principle, ''],
-      ['evidence', 'evidence & lessons', COLORS.evidence, ''],
-      ['mixed', 'mixed', COLORS.mixed, ''],
-      ['structure', 'structure', COLORS.structure, ''],
-      ['template', 'template text', COLORS.structure, ''],
-      ['inherited', 'inherited from default file', COLORS.principle, 'hollow'],
-      ['code', 'code-owned (read-only)', COLORS.code_ring, 'dashed'],
-      ['ltm', 'long-term memory row (read-only)', COLORS.evidence, 'dotted'],
-      ['world', 'world event / market factor (rebuilt from the run log)', WORLD_COLOR, 'dotted'],
-      ['ref', 'reference (ticker / concept)', COLORS.ref, ''],
-      ['proposed', 'proposed change awaiting your review', COLORS.action, 'ghost']
-    ].filter(([key]) => present.has(key))
-      .map(([, label, color, mod]) => `<span><i class="${mod}" style="color:${color};background:${mod === 'hollow' ? 'var(--surface)' : color}"></i>${esc(label)}</span>`);
-    const kinds = new Set((payload.edges || []).map(e => edgeType(e)));
+    const dot = (color, mod) => `<i class="${mod || ''}" style="color:${color};background:${mod === 'hollow' ? 'var(--surface)' : color}"></i>`;
+    const groups = [];
+    if (present.has('policy')) {
+      const pol = [['gate', 'hard gate', COLORS.gate], ['action', 'action', COLORS.action], ['caution', 'caution', COLORS.caution],
+        ['principle', 'identity / principle', COLORS.principle], ['evidence', 'evidence & lessons', COLORS.evidence],
+        ['mixed', 'mixed', COLORS.mixed], ['structure', 'structure', COLORS.structure]]
+        .filter(([k]) => present.has(`pol:${k}`)).map(([, label, color]) => `<span>${dot(color)}${esc(label)}</span>`);
+      if (present.has('inherited')) pol.push(`<span>${dot(COLORS.principle, 'hollow')}inherited from the default file</span>`);
+      if (present.has('proposed')) pol.push(`<span>${dot(COLORS.action, 'ghost')}proposed change awaiting your review</span>`);
+      groups.push(`<div class="pg-legend-group"><strong>Policy</strong> <span class="pg-muted">— the .md guidelines compiled into the Decider's prompt, coloured by what they do:</span> ${pol.join(' ')}</div>`);
+    }
+    if (present.has('scaffold')) {
+      const sc = [];
+      if (present.has('template') || true) sc.push(`<span>${dot(COLORS.structure)}root, templates, runtime inputs</span>`);
+      if (present.has('code')) sc.push(`<span>${dot(COLORS.code_ring, 'dashed')}code-owned prompt text (fixed by the repository)</span>`);
+      groups.push(`<div class="pg-legend-group"><strong>Prompt scaffold</strong> <span class="pg-muted">— the fixed prompt around the policy:</span> ${sc.join(' ')}</div>`);
+    }
+    if (present.has('context')) {
+      const cx = [];
+      if (present.has('ltm')) cx.push(`<span>${dot(COLORS.evidence, 'dotted')}memory row (injected when relevant)</span>`);
+      if (present.has('world')) cx.push(`<span>${dot(WORLD_COLOR, 'dotted')}world event / market factor (from the run log)</span>`);
+      if (present.has('ref')) cx.push(`<span>${dot(COLORS.ref)}ticker reference</span>`);
+      groups.push(`<div class="pg-legend-group"><strong>Cycle context</strong> <span class="pg-muted">— what the Decider sees per cycle, not policy:</span> ${cx.join(' ')}</div>`);
+    }
+    const kinds = new Set((payload.edges || []).map(e => e.edge_kind || ({ subtype_of: 'part_of', includes: 'feeds', constrains: 'feeds', enforced_by: 'feeds', triggers: 'feeds' }[edgeType(e)] || 'related')));
     const edgeRows = [
-      ['subtype_of', 'part of'],
-      ['includes', 'assembled into the prompt'],
-      ['related_to', 'related (link or shared tag)'],
-      ['cites', 'cites a ticker'],
-      ['overlaps', 'overlaps with code or memory row'],
-      ['constrains', 'code constrains this rule'],
-      ['enforced_by', 'enforced by code'],
-      ['triggers', 'world factor → the guideline it triggers (via = how often the Decider cited it while active)']
-    ].filter(([kind]) => kinds.has(kind))
-      .map(([kind, label]) => `<span><i class="pg-legend-line ${kind}"></i>${esc(label)}</span>`);
-    legend.innerHTML = rows.concat(edgeRows).join('');
+      ['part_of', 'part of'],
+      ['feeds', 'feeds the Decider: prompt assembly, code block → rule, world factor → rule'],
+      ['related', 'related: link, shared tag, overlap, ticker'],
+    ].filter(([k]) => kinds.has(k)).map(([k, label]) => `<span><i class="pg-legend-line ${k}"></i>${esc(label)}</span>`);
+    if (edgeRows.length) groups.push(`<div class="pg-legend-group"><strong>Edges</strong> ${edgeRows.join(' ')}</div>`);
+    legend.innerHTML = groups.join('');
   }
 
-  // ------------------------------------------------------------------ removed chips
   function renderRemoved(payload) {
     const box = qs('#pgRemoved');
     if (!box) return;
@@ -1150,43 +1237,46 @@
     });
   }
 
-  // ------------------------------------------------------------------ filters
-  function nodeMatchesFilter(node, filters) {
-    if (filters.has('all')) return true;
+  // ------------------------------------------------------------------ filters (layers)
+  function nodeMatchesFilter(node) {
     if (node.id === rootId()) return true;
-    if (filters.has('code') && node.owner === 'code') return true;
-    if (filters.has('ltm') && (node.owner === 'decider_memory' || node.node_type === 'ltm')) return true;
-    if (filters.has('factors') && node.owner === 'world') return true;
-    if (filters.has('system') && node.field === 'system_prompt') return true;
-    if (filters.has('user') && node.field === 'user_prompt_template') return true;
-    if (filters.has('directives') && node.field === 'strategy_directives') return true;
-    if (filters.has('soul') && node.field === 'soul') return true;
-    if (filters.has('memory') && node.field === 'memory' && node.owner !== 'decider_memory') return true;
-    return false;
+    const layer = layerOf(node);
+    if (!state.layers.has(layer)) return false;
+    if (layer === 'policy' && state.fields.size && node.node_type !== 'field' && !state.fields.has(node.field)) return false;
+    return true;
   }
 
   function applyFilters() {
-    document.querySelectorAll('#pgFieldFilter .pg-chip-filter').forEach(btn => {
-      const on = state.filters.has(btn.dataset.filter);
+    document.querySelectorAll('#pgFieldFilter [data-layer]').forEach(btn => {
+      const on = state.layers.has(btn.dataset.layer);
       btn.classList.toggle('is-active', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+    document.querySelectorAll('#pgFieldFilter [data-field]').forEach(btn => {
+      const on = state.fields.has(btn.dataset.field);
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.disabled = !state.layers.has('policy');
+    });
+    const lrBox = qs('#pgLastRun');
+    if (lrBox) lrBox.checked = Boolean(state.lastRun);
     if (!view.nodes) return;
     const visible = new Set();
-    view.nodes.each(d => { if (nodeMatchesFilter(d, state.filters)) visible.add(d.id); });
+    view.nodes.each(d => { if (nodeMatchesFilter(d)) visible.add(d.id); });
     view.nodes.classed('is-hidden', d => !visible.has(d.id));
     view.links.classed('is-hidden', d => !(visible.has(d.sourceId) && visible.has(d.targetId)));
+    const lr = state.lastRun && state.payload && state.payload.last_run && state.payload.last_run.served;
+    view.nodes.classed('is-unread', d => Boolean(lr) && d.id !== rootId() && d.node_type !== 'field' && d.node_type !== 'template'
+      && (layerOf(d) === 'policy' || d.owner === 'code' || d.owner === 'decider_memory') && !(d.id in lr));
   }
 
-  function toggleFilter(key) {
-    if (key === 'all') {
-      state.filters = new Set(['all']);
-    } else {
-      state.filters.delete('all');
-      if (state.filters.has(key)) state.filters.delete(key);
-      else state.filters.add(key);
-      if (!state.filters.size) state.filters = new Set(['all']);
-    }
+  function toggleLayer(key) {
+    if (state.layers.has(key)) state.layers.delete(key); else state.layers.add(key);
+    if (!state.layers.size) state.layers = new Set(['policy']);
+    applyFilters();
+  }
+  function toggleField(key) {
+    if (state.fields.has(key)) state.fields.delete(key); else state.fields.add(key);
     applyFilters();
   }
 
@@ -1225,7 +1315,7 @@
 
   // ------------------------------------------------------------------ details panel
   function typeSentence(node) {
-    const type = String(node.node_type || 'guideline');
+    const type = kindOf(node) || String(node.node_type || 'guideline');
     const pol = POLARITY_LABEL[node.polarity] || node.polarity || 'mixed';
     const src = node.polarity_source === 'authored' ? 'authored' : 'derived';
     return `${type} · ${pol} (${src})`;
@@ -1372,6 +1462,7 @@
       : '';
     crumbs.querySelectorAll('.pg-crumb').forEach(btn => btn.addEventListener('click', () => applySelection(btn.dataset.nodeId)));
 
+    fillMeta('#pgNodeWhat', whatSentence(node, payload));
     fillMeta('#pgNodeType', esc(typeSentence(node)));
     if (node.parent) {
       const parentNode = (payload.nodes || []).find(n => n.id === node.parent);
@@ -1387,7 +1478,7 @@
     fillMeta('#pgNodeChange', esc(changeSentence(node, payload, null)));
 
     qs('#pgNodeHealth').innerHTML = '<p class="pg-muted">Loading history…</p>';
-    qs('#pgNodeMarkdown').innerHTML = renderMarkdown(node.body, node);
+    qs('#pgNodeMarkdown').innerHTML = renderGuidelineBody(node);
     qs('#pgNodeMarkdown').querySelectorAll('a[data-pg-node]').forEach(a => {
       a.addEventListener('click', event => { event.preventDefault(); applySelection(a.dataset.pgNode); });
     });
@@ -2344,9 +2435,9 @@
       loadGraph(state.agent, state.version, { keepSelection: true });
     });
     qs('#pgFit')?.addEventListener('click', resetZoom);
-    document.querySelectorAll('#pgFieldFilter .pg-chip-filter').forEach(btn => {
-      btn.addEventListener('click', () => toggleFilter(btn.dataset.filter));
-    });
+    document.querySelectorAll('#pgFieldFilter [data-layer]').forEach(btn => btn.addEventListener('click', () => toggleLayer(btn.dataset.layer)));
+    document.querySelectorAll('#pgFieldFilter [data-field]').forEach(btn => btn.addEventListener('click', () => toggleField(btn.dataset.field)));
+    qs('#pgLastRun')?.addEventListener('change', event => { state.lastRun = Boolean(event.target.checked); applyFilters(); });
     qs('#pgPanelClear')?.addEventListener('click', () => applySelection(null));
     const kicker = qs('#pgNodeId');
     const copyId = async () => {

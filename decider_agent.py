@@ -2797,9 +2797,20 @@ OUTPUT (STRICT)
         from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
         _mem_cfg = get_current_config_hash()
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
-        _lt = format_long_term_memory(get_relevant_memories(_mem_cfg, tickers=_mem_tks))
+        _mem_rows = get_relevant_memories(_mem_cfg, tickers=_mem_tks)
+        _lt = format_long_term_memory(_mem_rows)
         if _lt:
             prompt += "\n\n" + _lt
+            # the injected rows are graph nodes (DA.ltm.<row id>): record them as served (route "ltm")
+            try:
+                if _graph_served is not None and prompt_version is not None:
+                    from policy_graph.assembly import Selected as _LtmSel
+                    from policy_graph.citations import record_served as _record_ltm
+                    _ltm_sel = [_LtmSel(f"DA.ltm.{m['id']}", "ltm", "") for m in _mem_rows if isinstance(m, dict) and m.get("id")]
+                    if _ltm_sel:
+                        _record_ltm(engine, _mem_cfg, "DeciderAgent", int(prompt_version), run_id, _ltm_sel)
+            except Exception as _ltm_exc:
+                print(f"⚠️  Could not log served memory rows: {_ltm_exc}")
         _wm = build_working_memory(_mem_cfg)
         if _wm:
             prompt += "\n\n" + _wm
@@ -3374,13 +3385,20 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     if out.memory:
         system_prompt = f"{system_prompt}\n\n## LESSONS FROM EXPERIENCE\n{out.memory}"
     routes = out.routes
+    # The code-owned blocks are appended to the prompt by this file every cycle; record them as served
+    # (route "code") so the hit log and the Decision paths stop calling them "cited but not served".
+    from policy_graph.assembly import Selected as _Selected
+    _fires = (_version.manifest.get("code") or {}).get("fires") or {}
+    _code_served = [_Selected(cid, "code", "") for cid, ok in sorted(_fires.items()) if ok]
+    if _code_served:
+        routes = dict(routes, code=len(_code_served))
     _ratio = (out.chars_served / out.chars_full * 100) if out.chars_full else 0
     print(f"🕸️  Graph assembly v{prompt_version}: {len(out.served)} guidelines served "
           f"({', '.join(f'{k} {v}' for k, v in sorted(routes.items()))}), {len(out.dropped)} not shown; "
           f"{out.chars_served:,} of {out.chars_full:,} chars ({_ratio:.0f}%) · context {ctx.summary()} · "
           f"health={'yes' if health else 'none yet'}")
     try:
-        _record_served(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, out.served)
+        _record_served(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, list(out.served) + _code_served)
         from policy_graph.citations import record_run as _record_run
         _record_run(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, served=len(out.served),
                     dropped=len(out.dropped), chars_full=out.chars_full, chars_served=out.chars_served,

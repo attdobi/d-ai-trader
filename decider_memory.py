@@ -81,7 +81,7 @@ def get_relevant_memories(config_hash, tickers=None, limit=None):
     try:
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT content, kind, ticker, weight FROM decider_memory
+                SELECT id, content, kind, ticker, weight FROM decider_memory
                 WHERE config_hash = :c AND active = TRUE
                 ORDER BY (CASE WHEN ticker = ANY(:tks) THEN 1 ELSE 0 END) DESC,
                          weight DESC, created_at DESC

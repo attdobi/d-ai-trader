@@ -430,3 +430,22 @@ def test_one_in_progress_proposal_per_agent_and_stale_expiry(env):
 def test_start_draft_needs_llm(env):
     with pytest.raises(P.NotConfigured):
         P.start_draft(env["engine"], CFG, "DeciderAgent", llm=None, context_fn=None, background=False, **env["common"])
+
+
+def test_two_adds_under_one_section_keep_their_order(env):
+    """A patch that adds two rules under the same section must compile them in patch order (v31 landed
+    them as 9, 11, 10 before the temporary id was parented)."""
+    version = v21(env)
+    raw = [
+        {"id": "DA.directives.strategy.aaa_first", "action": "add", "parent": "DA.directives.strategy", "title": "AAA",
+         "body": "10. AAA FIRST — IF x THEN y. Falsified if z.", "primary": True, "what": "a", "why": "b",
+         "expected_effect": "c", "falsified_if": "20 trades"},
+        {"id": "DA.directives.strategy.bbb_second", "action": "add", "parent": "DA.directives.strategy", "title": "BBB",
+         "body": "11. BBB SECOND — IF p THEN q. Falsified if r.", "primary": False, "what": "a", "why": "b",
+         "expected_effect": "c"},
+    ]
+    files, new_fields = P.prepare("DeciderAgent", CFG, version, raw, is_margin_account=False)
+    sd = new_fields["strategy_directives"]
+    assert sd.index("10. AAA FIRST") < sd.index("11. BBB SECOND")
+    assert [c.id for c in files] == ["DA.directives.strategy.aaa_first", "DA.directives.strategy.bbb_second"]
+

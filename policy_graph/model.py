@@ -44,6 +44,65 @@ EDGE_TYPES = (
     "triggers",
 )
 
+# ----------------------------------------------------------------------------- layers (2026-09-16)
+# Three coarse layers so the tab can show what IS the Decider's policy and what merely surrounds it:
+#   policy    the guideline text compiled into the prompt (strategy directives, soul, memory — the .md files)
+#   scaffold  the fixed prompt around it: root, the two templates, code-owned blocks, runtime inputs
+#   context   per-cycle inputs: memory rows, world events / market factors, ticker references
+LAYERS = ("policy", "scaffold", "context")
+EDGE_KINDS = {
+    "subtype_of": "part_of",
+    "includes": "feeds", "constrains": "feeds", "enforced_by": "feeds", "triggers": "feeds",
+    "related_to": "related", "overlaps": "related", "cites": "related", "clarifies": "related",
+    "exception_to": "related", "boundary_with": "related", "confused_with": "related",
+    "example_of": "related", "negative_example_of": "related",
+}
+
+
+def layer_of(node) -> str:
+    segs = str(node.id).split(".")
+    seg1 = segs[1] if len(segs) > 1 else ""
+    if node.owner in ("db", "default-file") and node.field in COMPILED_FIELDS:
+        return "policy"
+    if node.node_type in ("ltm", "factor", "ticker", "concept") or seg1 in ("ltm", "factor"):
+        return "context"
+    return "scaffold"
+
+
+def kind_of(node) -> str:
+    """Plain-language kind for the panel and the legend."""
+    t = node.node_type
+    if t == "root":
+        return "policy version"
+    if t == "template":
+        return "prompt template"
+    if t == "field":
+        return "policy file"
+    if t == "code":
+        return "code-owned prompt text" if node.parent and str(node.id).split(".")[1:2] == ["code"] and str(node.id).count(".") > 1 else "code-owned blocks"
+    if t == "data":
+        return "runtime inputs"
+    if t == "ltm":
+        return "memory row"
+    if t == "factor":
+        return "world factor" if str(node.id).count(".") > 1 else "world factors"
+    if t in ("ticker", "concept"):
+        return "reference"
+    if t == "rule":
+        return "gate" if node.field == "strategy_directives" else "rule"
+    if t == "entry":
+        return "diary entry"
+    if t == "reminder":
+        return "weekly reminder"
+    if t == "section" and str(node.id).split(".")[1:2] == ["ltm"]:
+        return "memory rows"
+    return t
+
+
+def edge_kind(edge_type: str) -> str:
+    return EDGE_KINDS.get(str(edge_type or ""), "related")
+
+
 ID_RE = re.compile(r"^(DA|SA|FA|CA)(\.[a-z0-9_]+)+$")
 VERSION_DIR_RE = re.compile(r"^v(\d+)$")
 

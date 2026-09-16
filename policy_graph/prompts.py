@@ -29,7 +29,9 @@ CRITIC_DOCTRINE = (
     '(e) it does not widen risk (wider stops, more size, more slots, re-entry exceptions) without a '
     'diagnostic that supports it;\n'
     '(f) it preserves the Holdings ground-truth / anti-hallucination rules and the verbatim Mission '
-    'and Shared Principles.\n\n'
+    'and Shared Principles;\n'
+    '(g) it is written in plain words: one condition, one action, the number inside the sentence, at most '
+    '240 characters per gate — reject a gate a first-time reader could not execute, and say which clause to cut.\n\n'
     'REJECT — and name the specific fix — when: it bundles 3+ behavioral changes (put the ONE to ship '
     'first in ship_first); it contradicts the diagnostics (e.g. softens a re-entry quarantine while '
     're-entries are a ranked leak); it is cosmetic; it gates on unsupplied data (list them in '
@@ -64,7 +66,16 @@ CRITIC_OUTPUT_FILES = (
 )
 
 GATE_STYLE = (
-    'RULE STYLE — ORDERED GATES. Write every Decider rule as a gate the model clears in sequence, not as prose: numbered in the order it is checked; ONE condition per gate, on a field the Decider is actually supplied (the INDEX REGIME line, % vs the 20d MA, the K:/D: kill line, the QUARANTINE line, the EVENT CALENDAR block — sessions to FOMC / CPI / jobs, earnings dates — Holdings, the watchlist row); the action when it fires (pass / half size / full size / SELL / HOLD); and what happens otherwise (fall through to the next gate). The first gate that fires decides; later gates only refine size or exits. Never bury a threshold inside a paragraph, never combine two conditions in one gate, and keep the existing "N. LABEL — text" form so each gate stays one guideline file the Decider can cite by id.'
+    'RULE STYLE — PLAIN GATES. Write every Decider rule as a gate a first-time reader can execute, in this exact shape: '
+    '"N. LABEL — IF <one condition on a field the Decider is supplied, with its number> THEN <one action: pass / half size / '
+    'full size / SELL / HOLD>. Otherwise next gate. Falsified if <which number over how many trades proves it wrong>." '
+    'Supplied fields: the INDEX REGIME line, the EVENT CALENDAR block (sessions to FOMC / CPI / jobs, earnings dates), '
+    '% vs the 20d MA, the K:/D: kill line, the QUARANTINE line, Holdings, the watchlist row. One condition per gate, at most '
+    '240 characters, the number inside the sentence, no parentheses, no abbreviation the Decider is not supplied '
+    '(K:/D:, RS20, RSI, 20d MA, VWAP are supplied). The first gate that fires decides; later gates only refine size or '
+    'exits. Keep the "N. LABEL — text" form so each gate stays one guideline file the Decider cites by id; a lesson is one '
+    'bullet "- **#tag — one sentence.** one or two plain sentences." Never bury a threshold in a paragraph and never '
+    'combine two conditions in one gate — split them into two gates instead.'
 )
 
 DRAFTER_SYSTEM = (
@@ -113,7 +124,10 @@ DRAFTER_SYSTEM = (
     'text instead.\n'
     '8. Keep every guideline you edit at least as strict as before unless the diagnostics say the rule '
     'costs money; say so in "why".\n'
-    '9. ' + GATE_STYLE
+    '9. ' + GATE_STYLE + '\n'
+    '10. PLAIN WORDS: the reader of a gate is a model that sees it for the first time every cycle. Name the field you '
+    'test, the number, and the action; drop everything else. A rule the style_warnings flag (too long, parenthetical, '
+    'two conditions, no falsification metric) will be rejected.'
 )
 
 __all__ = ["CRITIC_DOCTRINE", "CRITIC_OUTPUT_CANDIDATE", "CRITIC_OUTPUT_FILES", "DRAFTER_SYSTEM", "GATE_STYLE"]

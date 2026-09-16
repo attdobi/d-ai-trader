@@ -27,6 +27,7 @@ from .decompose import sha256_text
 from .edges import derive_edges, resolve_link
 from .model import (
     AGENT_DIR, AGENT_LABEL, AGENT_PREFIX, FIELDS, ID_RE, RowMeta, Version, actor_kind, version_stamp,
+    layer_of, kind_of, edge_kind,
 )
 
 ATTRIBUTION_NOTE = ("No decision has cited this guideline yet — the Decider records cited guideline ids in "
@@ -765,6 +766,7 @@ def _node_dict(n, *, prefix: str, by_id: dict, change=None, renamed_from=None, f
         status = "read-only" if fires else "inactive"
     return _json_safe({
         "id": n.id, "title": n.title, "node_type": n.node_type, "polarity": n.polarity,
+        "layer": layer_of(n), "kind": kind_of(n),
         "polarity_source": n.polarity_source, "parent": n.parent, "field": n.field, "depth": n.depth,
         "owner": n.owner, "status": status, "compiled": n.compiled, "locked": bool(n.locked),
         "provenance": n.provenance, "order": n.order, "tags": list(n.tags), "tickers": list(n.tickers),
@@ -851,8 +853,8 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
         d["hits"] = hits.get(i)
         node_list.append(d)
     edge_list = [{
-        "source": e.source, "target": e.target, "edge_type": e.edge_type, "provenance": e.provenance,
-        "via": e.via, "confidence": e.confidence,
+        "source": e.source, "target": e.target, "edge_type": e.edge_type, "edge_kind": edge_kind(e.edge_type),
+        "provenance": e.provenance, "via": e.via, "confidence": e.confidence,
         "synthetic": (nodes[e.source].node_type in ("ticker", "concept") or nodes[e.target].node_type in ("ticker", "concept")),
     } for e in edges]
 
@@ -869,12 +871,25 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
                 d = _node_dict(x, prefix=prefix, by_id=by_id)
                 d["hits"] = None
                 node_list.append(d)
-            edge_list.extend({"source": e.source, "target": e.target, "edge_type": e.edge_type, "provenance": e.provenance,
-                              "via": e.via, "confidence": e.confidence, "synthetic": True} for e in fedges)
+            edge_list.extend({"source": e.source, "target": e.target, "edge_type": e.edge_type, "edge_kind": edge_kind(e.edge_type),
+                              "provenance": e.provenance, "via": e.via, "confidence": e.confidence, "synthetic": True}
+                             for e in fedges)
             factors_meta = {"days": rep["days"], "count": len(rep["factors"]), "cycles": rep["runs"],
                             "runs_with_snapshot": rep["runs_with_snapshot"], "edges": len(fedges), "note": rep.get("note")}
         except Exception as exc:     # noqa: BLE001 — the world layer is informational, never blocks the graph
             factors_meta = {"error": f"{type(exc).__name__}: {exc}"}
+
+    # what the Decider actually read on its latest cycle (served ids + routes) — the routing made visible
+    last_run = None
+    if agent_type == "DeciderAgent":
+        try:
+            from . import citations as _cit
+            last_run = _cit.last_run_served(engine, config_hash, agent_type)
+        except Exception:     # noqa: BLE001 — the run log may not exist yet
+            last_run = None
+    layer_counts = {"policy": 0, "scaffold": 0, "context": 0}
+    for d in node_list:
+        layer_counts[d.get("layer") or "scaffold"] = layer_counts.get(d.get("layer") or "scaffold", 0) + 1
 
     removed = []
     if vd is not None and prev is not None:
@@ -907,6 +922,7 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
         "previous_version": prev_n, "next_version": (min(higher) if higher else None),
         "available_versions": available, "layer": layer, "refs": bool(refs),
         "nodes": node_list, "edges": edge_list, "removed_nodes": removed, "stats": stats, "factors": factors_meta,
+        "layers": layer_counts, "last_run": last_run,
         "code": {"sha": code_m.get("sha"), "git_sha": code_m.get("git_sha"), "fires": fires_map},
         "ltm": {"sha": ltm_m.get("sha"), "snapshot": ltm_m.get("snapshot"),
                 "count": len([x for x in cur.nodes.values() if x.node_type == "ltm" and x.parent == f"{prefix}.ltm"]),

@@ -564,6 +564,38 @@ def record_run(engine, config_hash: str, agent_type: str, prompt_version, run_id
                "routes": json.dumps(routes or {}, sort_keys=True), "ctx": json.dumps(context or {}, sort_keys=True)})
 
 
+def last_run_served(engine, config_hash: str, agent_type: str = "DeciderAgent") -> Optional[dict]:
+    """What the Decider actually read on its latest cycle: the run row plus {node_id: route} of every
+    guideline recorded as served and the ids it cited. None when no run is logged yet."""
+    with engine.connect() as conn:
+        run = conn.execute(text("""
+            SELECT run_id, decided_at, prompt_version, served, dropped, chars_full, chars_served, routes, context
+            FROM policy_graph_runs WHERE config_hash = :h AND agent_type = :a ORDER BY id DESC LIMIT 1
+        """), {"h": config_hash, "a": agent_type}).fetchone()
+        if run is None or not run[0]:
+            return None
+        rows = conn.execute(text("""
+            SELECT node_id, route, served, cited FROM policy_graph_hits
+            WHERE config_hash = :h AND agent_type = :a AND run_id = :r
+        """), {"h": config_hash, "a": agent_type, "r": run[0]}).fetchall()
+    from .health import iso
+    served = {}
+    cited = set()
+    for nid, route, s, c in rows:
+        if s:
+            served.setdefault(nid, route or "?")
+        if c:
+            cited.add(nid)
+    def _j(v):
+        try:
+            return json.loads(v) if v else {}
+        except ValueError:
+            return {}
+    return {"run_id": run[0], "decided_at": iso(run[1]), "prompt_version": run[2], "served_count": run[3],
+            "dropped": run[4], "chars_full": run[5], "chars_served": run[6], "routes": _j(run[7]), "context": _j(run[8]),
+            "served": served, "cited": sorted(cited)}
+
+
 def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> Optional[dict]:
     """Trim statistics over the last `limit` runs: the latest run plus averages — how much of the
     full guideline text the graph query served."""
@@ -601,7 +633,7 @@ def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> 
     }
 
 
-__all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "ensure_runs_schema", "record_run", "run_stats",
+__all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "ensure_runs_schema", "record_run", "run_stats", "last_run_served",
            "DDL_RUNS_POSTGRES", "record_served", "record_cited", "hit_counts",
            "hit_map", "health_for_prompt", "backfill_hits_from_decisions", "DDL_HITS_POSTGRES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
            "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health"]

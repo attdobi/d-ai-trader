@@ -238,6 +238,40 @@ def derive_kind(change: FileChange) -> str:
     return "minor"
 
 
+# ----------------------------------------------------------------------------- style lint (plain gates)
+MAX_GATE_CHARS = 300          # GATE_STYLE asks for ≤ 240; warn above 300 so a long label line still passes
+_IF_RE = re.compile(r"\bIF\b")          # the gate shape writes the condition in capitals; "Falsified if" is not one
+_FALSIFIED_RE = re.compile(r"falsified if", re.I)
+
+
+def style_check(files: list) -> list:
+    """[{id, warning}] for gates / lessons that a first-time reader could not execute: too long, more than
+    one condition, parenthetical asides, a primary rule without a falsification metric. Advisory — the
+    critic sees it, the human sees it, nothing is blocked."""
+    out = []
+    for c in files:
+        if c.action == "remove" or not (c.body or "").strip():
+            continue
+        body = c.body.strip()
+        is_rule = bool(re.match(r"^\d+\. ", body))
+        is_lesson = body.startswith("- **#")
+        if not (is_rule or is_lesson):
+            continue
+        what = "gate" if is_rule else "lesson"
+        n = len(body)
+        if n > MAX_GATE_CHARS:
+            out.append({"id": c.id, "warning": f"{what} is {n} characters; plain gates stay under 240"})
+        conds = len(_IF_RE.findall(body))
+        if is_rule and conds > 1:
+            out.append({"id": c.id, "warning": f"{what} tests {conds} conditions; one condition per gate — split it"})
+        parens = body.count("(")
+        if parens > 1:
+            out.append({"id": c.id, "warning": f"{what} has {parens} parenthetical asides; move the numbers into the sentence"})
+        if is_rule and c.primary and not _FALSIFIED_RE.search(body):
+            out.append({"id": c.id, "warning": "primary gate has no 'Falsified if …' metric in its text"})
+    return out
+
+
 # ----------------------------------------------------------------------------- validation
 def normalize_files(raw_files, version: Version) -> list:
     """LLM/JSON → [FileChange] with structural checks against `version` (ids, locks, parents, count)."""
@@ -345,7 +379,8 @@ def apply_patch(version: Version, files: list) -> tuple:
                 raise ProposalError(f"add: parent {ch.parent} is not in the {f} text")
             end = _subtree_end(ids, ch.parent)
             prev = seq[end]
-            new_row = [f"__add__{len(seq)}", "", ch.body, prev[3]]     # the new item takes the old tail
+            # the temporary id sits under the parent so a second add lands AFTER this one, not before it
+            new_row = [f"{ch.parent}.__add__{len(seq)}", "", ch.body, prev[3]]     # the new item takes the old tail
             prev[3] = _sibling_sep(version, ch.parent, ids)               # ... and sits after a sibling separator
             seq.insert(end + 1, new_row)
         new_fields[f] = "".join(row[1] + row[2] + row[3] for row in seq)
@@ -566,6 +601,7 @@ def _public(row: dict, applies: Optional[dict] = None) -> dict:
         "created_by": row.get("created_by"), "focus": row.get("focus"), "model": row.get("model"),
         "base_version": row["base_version"], "base_prompt_version_id": row.get("base_prompt_version_id"),
         "reasoning": patch.get("reasoning") or "",
+        "style": patch.get("style") or [],
         "files": [{**f, "critic": per_file.get(f.get("id"))} for f in files],
         "primary_id": next((f.get("id") for f in files if f.get("primary")), None),
         "critic": {k: v for k, v in critic.items() if k != "files"} if critic else None,
@@ -670,6 +706,7 @@ def critic_input(agent_type: str, version: Version, files: list, reasoning: str,
                    "expected_effect": c.expected_effect, "falsified_if": c.falsified_if,
                    "diff": c.diff, "new_body": (c.body if c.action != "remove" else None)} for c in files],
         "change_summary": summarize(files),
+        "style_warnings": style_check(files),
     }
     payload.update(context or {})
     return payload
@@ -797,7 +834,7 @@ def run_pipeline(engine, proposal_id: int, *, repo_root, is_margin_account: bool
         if files is None:
             _update(engine, proposal_id, status="failed", error=f"the drafter's patch did not validate: {last_error}")
             return load(engine, proposal_id)
-        patch = {"reasoning": reasoning, "files": [c.to_dict() for c in files]}
+        patch = {"reasoning": reasoning, "files": [c.to_dict() for c in files], "style": style_check(files)}
         _update(engine, proposal_id, status="critiquing", patch=patch, model=model)
         critic = run_critic(llm, agent_type, version, files, reasoning, context)
         review_id = _record_review(engine, config_hash, agent_type, base, files, critic)
@@ -974,5 +1011,5 @@ def apply_proposal(engine, proposal_id: int, approved_ids: list, *, repo_root, i
 __all__ = [
     "ProposalError", "ProposalConflict", "NotConfigured", "FileChange", "ensure_schema", "list_proposals",
     "get_proposal", "start_draft", "run_pipeline", "apply_proposal", "reject_proposal", "prepare", "apply_patch",
-    "verify_patch", "normalize_files", "derive_kind", "parse_llm_json", "field_order", "MAX_FILES",
+    "verify_patch", "normalize_files", "derive_kind", "parse_llm_json", "field_order", "MAX_FILES", "style_check",
 ]

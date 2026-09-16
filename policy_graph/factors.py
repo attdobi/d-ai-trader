@@ -44,7 +44,7 @@ _EVENT_RULES = ["event_gate", "event_risk", "risk_management", "event_calendar"]
 FACTOR_RULES = {
     "regime": ["regime_gate", "regime", "index_regime", "deploy_policy", "harvest", "extension_cap"],
     "fomc": _EVENT_RULES, "cpi": _EVENT_RULES, "jobs": _EVENT_RULES, "other": _EVENT_RULES,
-    "earnings": ["event_gate", "event_risk", "event_calendar"],
+    "earnings": ["earnings_candidate", "earnings_holding", "event_gate", "event_risk", "event_calendar"],
 }
 KIND_LABEL = {"regime": "market regime", "fomc": "FOMC decision", "cpi": "CPI print", "jobs": "jobs report",
               "other": "scheduled event", "earnings": "earnings date"}

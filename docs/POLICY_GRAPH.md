@@ -69,6 +69,56 @@ the live trader untouched: the runtime still reads `prompt_versions`; the graph 
 Polarity colours: hard gate (red), action (green), caution (yellow), identity/principle (purple),
 evidence/lessons (cyan), structure (grey).
 
+## Reading the graph: three layers (2026-09-16)
+
+The graph mixes things that are the policy with things that merely surround it, so every node now
+carries a **layer** and the tab shows one layer at a time (chips at the top of the graph):
+
+| Layer | What it is | Node types | Editable by the loop |
+|---|---|---|---|
+| **Policy** (default view) | the `.md` guidelines compiled into the Decider's prompt: strategy directives (numbered **gates**), soul (identity), memory (lessons, patterns, mistakes, diary entries, the weekly reminder) | field, section, rule, lesson, entry, reminder, identity, note | yes — proposals, weekly loop |
+| **Prompt scaffold** | the fixed prompt around the policy: the root, the two templates, the code-owned paragraphs the trader appends, the runtime-inputs note | root, template, code, data | no — code and templates |
+| **Cycle context** | what the Decider sees per cycle, never policy: long-term memory rows, world events and market factors, ticker references | ltm, factor, ticker, concept | no — rebuilt per read |
+
+Edges collapse to three kinds on the tab: **part of** (hierarchy), **feeds** (prompt assembly,
+code block → rule, world factor → rule) and **related** (links, tags, overlaps, tickers).
+
+The details panel opens with one line saying what the node is to the Decider ("Policy · gate in
+strategy directives — compiled into the system prompt · served 46× / cited 20× in 90d · read last
+cycle via core"), and a gate or lesson is shown as **plain lines** — the label, then one sentence per
+line with the numbers emphasised — with the original text one click away.
+
+### What the Decider actually reads (the routing, measured)
+
+`policy_graph/assembly.py` is deterministic and trims very little: every numbered gate, every lesson,
+every soul section and the weekly reminder are served on every cycle (`core`, `identity`,
+`reminder`); only dated diary entries are routed by regime word, ticker (holdings, watchlist,
+headlines, entities, trends), quarantine, recency (30 days) or a shared tag, and older ones are
+dropped. On Decider v28 that is 38–39 guidelines served and 0–1 dropped per cycle, 17.9k chars of
+policy (~4.5k tokens; the served text is slightly larger because of the ⟨id · record⟩ tags). The
+tab's version note now states this per cycle ("Last cycle: the Decider read 35 of 36 policy
+guidelines … routes core 21 · identity 6 …") and "Dim what the Decider did not read last cycle"
+greys out everything the latest cycle did not serve, straight from the hit log. Code-owned blocks
+and injected memory rows are recorded as served too (routes `code`, `ltm`), so the Decision paths
+no longer list them as "cited but not served".
+
+The policy is small enough to serve whole; the measured problem is not prompt size but dead weight:
+in the 46 cycles to 2026-09-16 sixteen policy guidelines were served every cycle and cited never.
+That is the signal the loop should prune on. A routing agent (a model choosing which guidelines to
+show) would add cost, latency and non-determinism to select among ~36 guidelines that already fit;
+revisit only if the diary or per-ticker playbooks grow past what the prompt can carry.
+
+### Plain gates
+
+Since 2026-09-16 every writer of Decider rules is told the same shape (`prompts.GATE_STYLE`, the
+drafter's rule 10, the critic's clause (g), Feedback soul v11): *"N. LABEL — IF <one condition on a
+supplied field, with its number> THEN <one action>. Otherwise next gate. Falsified if <metric>."*,
+at most 240 characters, one condition per gate, no parentheticals. `proposals.style_check` flags
+long, multi-condition, parenthetical or unfalsified gates as advisory warnings on the proposal
+(the critic and the human both see them). The EVENT GATE (767 chars, three conditions) was split into
+EVENT GATE / EARNINGS CANDIDATE / EARNINGS HOLDING as the worked example; the older gates are next
+for a one-at-a-time plain-language pass.
+
 ## Using it
 
 - Tab: `/policy-graph`. Agent switcher, version select + Prev/Next, timeline strip with actor
