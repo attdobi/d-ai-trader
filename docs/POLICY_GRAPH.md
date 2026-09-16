@@ -229,6 +229,39 @@ earnings gap through a "20d break" kill). The fix follows the INDEX REGIME patte
 `apply_event_risk_policy.py` is the one-off that applied the three prompt-side changes (dry-run
 first; idempotent).
 
+## Phase 4 — the world layer: events and market factors as nodes (2026-09-16)
+
+The graph now shows what the world put in front of the Decider, not only what the policy said.
+A **factor** is a market regime, a scheduled binary event inside its window (an FOMC decision, a CPI
+or jobs print, an operator-added event) or a holding / candidate whose earnings date falls inside
+the hold window. `policy_graph/factors.py` rebuilds them from the run log on every read — they are
+never policy text and never touch the materialized version directories, so the same-bytes contract
+is untouched:
+
+- **Nodes** (`node_type` `factor`, owner `world`, dotted white ring, top-left lane; chip "Factors"):
+  `DA.factor` (group) → `DA.factor.regime.risk_off`, `DA.factor.fomc.2026_09_16`,
+  `DA.factor.cpi.2026_09_11`, `DA.factor.jobs.2026_09_04`, `DA.factor.other.<slug>.<date>`,
+  `DA.factor.earnings.tsla.2026_10_21`. Sources: `policy_graph_runs` (the regime each cycle read),
+  the event calendar (macro windows reconstructed from each cycle's date and ET time, so past cycles
+  get them too), `event_risk_snapshots` (the earnings flags the trader actually served), the hit log
+  and `trade_outcomes`.
+- **Edges** `triggers` (factor → guideline): an authored map by kind (`FACTOR_RULES`: regime → REGIME
+  GATE, `#regime`, the INDEX REGIME and DEPLOY POLICY code blocks, HARVEST, EXTENSION CAP; events and
+  earnings → EVENT GATE, `#event-risk`, Risk Management, the EVENT CALENDAR header), plus guidelines
+  whose body names the regime or the ticker, plus the guidelines the Decider actually cited while the
+  factor was active (`derived:cited`, confidence = share of that factor's cited decisions; an authored
+  edge keeps its provenance and learns the count as `via`).
+- **Paths**: the Decision paths card gains a second flow, *world factor → guideline cited while it
+  was active → action*, and a Factor quality table: cycles active, decisions by action, closed trades
+  entered under the factor (a trade is matched to the cycle of its cited BUY), win rate and P&L.
+  Clicking a factor opens its node: what it is, when it was active, what the Decider did, which rules
+  consume it, how the trades closed.
+- **Window**: the paths window selector (30 / 90 / 365 days) also sets the factor window on the graph.
+
+This closes the loop the event gate opened: the event calendar puts the FOMC decision in front of the
+Decider, the EVENT GATE consumes it, the decision cites the gate, and the factor node shows the
+outcome of every decision made under that event.
+
 ## Baseline for fresh checkouts
 
 `agents/<dir>/policy-graph/baseline/v0/` is committed: the v0 policy of every agent decomposed

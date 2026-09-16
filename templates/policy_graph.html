@@ -76,6 +76,7 @@
             <button type="button" class="pg-chip-filter" data-filter="memory">Memory</button>
             <button type="button" class="pg-chip-filter" data-filter="code">Code</button>
             <button type="button" class="pg-chip-filter" data-filter="ltm">Memory rows</button>
+            <button type="button" class="pg-chip-filter" data-filter="factors" title="World events &amp; market factors: regime, FOMC / CPI / jobs windows, earnings dates — rebuilt from the run log">Factors</button>
           </div>
           <button type="button" id="pgFit" class="pe-btn secondary pg-btn-small" title="Reset zoom and pan">Reset zoom</button>
         </div>
@@ -134,7 +135,7 @@
     <div class="pg-change-head">
       <div>
         <h2>Decision paths</h2>
-        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed.</p>
+        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed — and, below, what the world put in front of it (regime, FOMC / CPI / jobs windows, earnings dates) on each of those cycles.</p>
       </div>
       <label class="pg-check">Window
         <select id="pgPathsDays" class="pe-select pg-select" aria-label="Path window">
@@ -150,10 +151,14 @@
         <h3 class="pg-paths-h">Path frequency <span class="pg-muted">route → guideline → action, by cited decisions</span></h3>
         <div id="pgPathsFlow" class="pg-paths-flow"></div>
         <div id="pgPathsGaps" class="pg-paths-gaps"></div>
+        <h3 class="pg-paths-h">World factors <span class="pg-muted">what was in front of the Decider → guideline cited while it was active → action</span></h3>
+        <div id="pgPathsFactors" class="pg-paths-flow"></div>
       </div>
       <div>
         <h3 class="pg-paths-h">Path quality <span class="pg-muted">per guideline, over the closed trades it drove</span></h3>
         <div id="pgPathsQuality" class="pg-paths-quality"></div>
+        <h3 class="pg-paths-h">Factor quality <span class="pg-muted">per world factor, over the trades entered while it was active</span></h3>
+        <div id="pgFactorsQuality" class="pg-paths-quality"></div>
       </div>
     </div>
   </section>
@@ -278,6 +283,7 @@
 .pg-link.cites { stroke: rgba(77,208,225,.55); stroke-dasharray: 1 3; stroke-width: 1px; }
 .pg-link.overlaps { stroke: rgba(255,111,145,.72); stroke-dasharray: 6 3; stroke-width: 2px; }
 .pg-link.constrains, .pg-link.enforced_by { stroke: rgba(41,214,151,.7); stroke-dasharray: 6 3; stroke-width: 1.6px; }
+.pg-link.triggers { stroke: rgba(242,244,248,.5); stroke-dasharray: 2 3; stroke-width: 1.4px; }
 .pg-link.ancestor-edge { stroke: #7db0ff; stroke-width: 2.6px; opacity: 1; }
 .pg-link.descendant-edge { stroke: rgba(41,214,151,.7); stroke-width: 2px; opacity: 1; }
 .pg-link.hover-trace { stroke: #dce8ff; stroke-width: 2.4px; opacity: 1; }
@@ -296,6 +302,7 @@
 .pg-legend .pg-legend-line.cites { border-top-color: rgba(77,208,225,.8); border-top-style: dotted; }
 .pg-legend .pg-legend-line.overlaps { border-top-color: rgba(255,111,145,.85); border-top-style: dashed; }
 .pg-legend .pg-legend-line.constrains, .pg-legend .pg-legend-line.enforced_by { border-top-color: rgba(41,214,151,.85); border-top-style: dashed; }
+.pg-legend .pg-legend-line.triggers { border-top-color: rgba(242,244,248,.8); border-top-style: dotted; }
 
 /* removed chips */
 .pg-removed { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--muted); }

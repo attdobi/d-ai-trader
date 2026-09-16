@@ -35,6 +35,9 @@
     { agent_type: 'CompanyExtractionAgent', label: 'Company', prefix: 'CA' }
   ];
   const AGENT_TYPES = new Set(AGENTS.map(a => a.agent_type));
+  // World events & market factors (owner 'world'): read-time nodes rebuilt from the run log, never files.
+  const WORLD_COLOR = '#f2f4f8';
+  const FACTOR_KIND_LABEL = { regime: 'market regime', fomc: 'FOMC decision', cpi: 'CPI print', jobs: 'jobs report', other: 'scheduled event', earnings: 'earnings date' };
 
   const ACTOR_LABEL = {
     seed: 'seed',
@@ -67,6 +70,7 @@
     overlaps: 'overlaps',
     constrains: 'constrains',
     enforced_by: 'enforced by',
+    triggers: 'triggers',
     exception_to: 'exception to',
     boundary_with: 'boundary with',
     confused_with: 'confused with',
@@ -74,8 +78,8 @@
     example_of: 'example of',
     negative_example_of: 'negative example of'
   };
-  const LINK_DISTANCE = { subtype_of: 90, includes: 60, related_to: 140, cites: 110, overlaps: 160, constrains: 160, enforced_by: 160 };
-  const LINK_STRENGTH = { subtype_of: 0.7, includes: 0.5, related_to: 0.15, cites: 0.1, overlaps: 0.15, constrains: 0.15, enforced_by: 0.15 };
+  const LINK_DISTANCE = { subtype_of: 90, includes: 60, related_to: 140, cites: 110, overlaps: 160, constrains: 160, enforced_by: 160, triggers: 150 };
+  const LINK_STRENGTH = { subtype_of: 0.7, includes: 0.5, related_to: 0.15, cites: 0.1, overlaps: 0.15, constrains: 0.15, enforced_by: 0.15, triggers: 0.12 };
 
   const state = {
     agent: null,
@@ -269,6 +273,7 @@
   function nodeColor(node) {
     if (node.id === rootId() || String(node.node_type).toLowerCase() === 'root') return COLORS.root;
     if (isRef(node)) return COLORS.ref;
+    if (node.owner === 'world') return WORLD_COLOR;
     const polarity = String(node.polarity || '').toLowerCase();
     return COLORS[polarity] || COLORS.mixed;
   }
@@ -276,6 +281,7 @@
   function nodeDash(node) {
     if (node.owner === 'code') return '4 2';
     if (node.owner === 'decider_memory') return '1 3';
+    if (node.owner === 'world') return '2 2';
     return null;
   }
   function nodeFill(node) {
@@ -773,6 +779,8 @@
     if (version !== null && version !== undefined && version !== '') params.set('version', String(version));
     params.set('layer', state.layer);
     if (state.showRefs) params.set('refs', '1');
+    params.set('factors', '1');
+    params.set('factor_days', String(Number(qs('#pgPathsDays')?.value || 90)));
     return `${API}/graph?${params.toString()}`;
   }
 
@@ -887,6 +895,7 @@
 
   function laneX(node) {
     const field = node.field || '';
+    if (node.owner === 'world') return WIDTH * 0.12;
     if (node.owner === 'code' || node.owner === 'decider_memory' || node.owner === 'runtime') return WIDTH / 2;
     if (field === 'system_prompt' || field === 'user_prompt_template') return WIDTH * 0.18;
     if (field === 'strategy_directives') return WIDTH / 2;
@@ -895,6 +904,7 @@
   }
 
   function laneY(node) {
+    if (node.owner === 'world') return 70;
     if (node.owner === 'code' || node.owner === 'decider_memory' || node.owner === 'runtime') return HEIGHT - 70;
     return 60 + depthOf(node) * 95;
   }
@@ -958,6 +968,10 @@
       .attr('class', 'pg-owner-ring')
       .attr('r', d => nodeRadius(d, allNodes) + 3)
       .attr('fill', 'none').attr('stroke', COLORS.code_ring).attr('stroke-width', 1.2).attr('opacity', 0.85);
+    node.filter(d => d.owner === 'world').append('circle')
+      .attr('class', 'pg-owner-ring')
+      .attr('r', d => nodeRadius(d, allNodes) + 3)
+      .attr('fill', 'none').attr('stroke', WORLD_COLOR).attr('stroke-width', 1).attr('stroke-dasharray', '1 2').attr('opacity', 0.7);
     node.append('circle').attr('class', 'pg-core')
       .attr('r', d => nodeRadius(d, allNodes))
       .attr('fill', d => nodeFill(d))
@@ -1075,6 +1089,7 @@
       if (n.id === payload.root_id || n.node_type === 'root') present.add('root');
       else if (n.owner === 'code') present.add('code');
       else if (n.owner === 'decider_memory') present.add('ltm');
+      else if (n.owner === 'world') present.add('world');
       else if (n.node_type === 'template') present.add('template');
       else if (isRef(n)) present.add('ref');
       else present.add(String(n.polarity || 'mixed'));
@@ -1094,6 +1109,7 @@
       ['inherited', 'inherited from default file', COLORS.principle, 'hollow'],
       ['code', 'code-owned (read-only)', COLORS.code_ring, 'dashed'],
       ['ltm', 'long-term memory row (read-only)', COLORS.evidence, 'dotted'],
+      ['world', 'world event / market factor (rebuilt from the run log)', WORLD_COLOR, 'dotted'],
       ['ref', 'reference (ticker / concept)', COLORS.ref, ''],
       ['proposed', 'proposed change awaiting your review', COLORS.action, 'ghost']
     ].filter(([key]) => present.has(key))
@@ -1106,7 +1122,8 @@
       ['cites', 'cites a ticker'],
       ['overlaps', 'overlaps with code or memory row'],
       ['constrains', 'code constrains this rule'],
-      ['enforced_by', 'enforced by code']
+      ['enforced_by', 'enforced by code'],
+      ['triggers', 'world factor → the guideline it triggers (via = how often the Decider cited it while active)']
     ].filter(([kind]) => kinds.has(kind))
       .map(([kind, label]) => `<span><i class="pg-legend-line ${kind}"></i>${esc(label)}</span>`);
     legend.innerHTML = rows.concat(edgeRows).join('');
@@ -1139,6 +1156,7 @@
     if (node.id === rootId()) return true;
     if (filters.has('code') && node.owner === 'code') return true;
     if (filters.has('ltm') && (node.owner === 'decider_memory' || node.node_type === 'ltm')) return true;
+    if (filters.has('factors') && node.owner === 'world') return true;
     if (filters.has('system') && node.field === 'system_prompt') return true;
     if (filters.has('user') && node.field === 'user_prompt_template') return true;
     if (filters.has('directives') && node.field === 'strategy_directives') return true;
@@ -1388,6 +1406,8 @@
     const fileUrl = `${API}/file?agent=${encodeURIComponent(payload.agent_type)}&version=${encodeURIComponent(payload.version)}&id=${encodeURIComponent(node.id)}`;
     qs('#pgNodeFile').innerHTML = node.owner === 'proposal'
       ? 'Not a file yet — it becomes one when the proposal is applied.'
+      : node.owner === 'world'
+      ? 'Not a file — rebuilt on every read from policy_graph_runs (regime), the event calendar (windows), event_risk_snapshots (earnings flags), the hit log and trade_outcomes.'
       : `Source file: <a href="${esc(fileUrl)}" target="_blank" rel="noopener"><code>${esc(`${filesBase}${node.id}.md`)}</code></a>`;
 
     renderNodeProposal(node);
@@ -1432,6 +1452,7 @@
       }
     }
     if (state.selected !== node.id || state.payload !== payload) return;
+    if (detail.factor) { renderFactorHealth(node, detail); qs('#pgNodeOverlaps').innerHTML = ''; return; }
     renderHealth(node, detail, payload);
     fillMeta('#pgNodeChange', esc(changeSentence(node, payload, detail)));
     const details = qs('#pgNodeDiff');
@@ -1452,6 +1473,39 @@
     } else {
       box.innerHTML = '';
     }
+  }
+
+  // World event / market factor: what happened while it was in front of the Decider.
+  function renderFactorHealth(node, detail) {
+    const box = qs('#pgNodeHealth');
+    const f = detail.factor || {};
+    const chip = (id, label) => `<button type="button" class="pg-link-chip" data-node-id="${esc(id)}" title="${esc(id)}">${esc(truncate(label || id, 26))}</button>`;
+    if (f.node_kind === 'group') {
+      box.innerHTML = `<h4>World layer</h4><div>${esc(`${plural(f.count || 0, 'factor')} across ${plural(f.cycles || 0, 'cycle')} in the last ${f.days || 90} days`)}</div>` +
+        `<div class="pg-muted">${esc(f.runs_with_snapshot ? `${f.runs_with_snapshot} of those cycles carry a recorded EVENT CALENDAR snapshot (earnings flags); the rest are reconstructed from the calendar.` : 'No cycle has recorded an EVENT CALENDAR snapshot yet — macro windows are reconstructed from the calendar; earnings factors appear once the trader restarts with the event calendar.')}</div>`;
+      return;
+    }
+    const acts = Object.entries(f.actions || {}).sort((a, b) => b[1] - a[1]).map(([a, n]) => `${n} ${a}`).join(' · ');
+    const bits = [`${FACTOR_KIND_LABEL[f.kind] || f.kind}`, `active in ${plural(f.cycles || 0, 'cycle')}`];
+    if (f.first) bits.push(`${fmtShortDate(f.first)} → ${fmtShortDate(f.last)}`);
+    let quality = '';
+    if (f.closed) {
+      const pnl = Number(f.pnl || 0);
+      const recent = (f.recent || []).map(r => `${r.ticker} ${Number(r.gain_pct) >= 0 ? '+' : ''}${Number(r.gain_pct).toFixed(1)}%`).join(' · ');
+      quality = `<div class="pg-cites"><strong>${plural(f.closed, 'closed trade')} entered under it</strong> · win rate ${esc(pct(f.win_rate))} (${f.wins}W/${f.losses}L) · P&amp;L ${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
+    } else {
+      quality = '<div class="pg-muted">No closed trade was entered while this factor was active (entries are matched to the cycle of their cited BUY).</div>';
+    }
+    const guides = (f.guidelines || []).slice(0, 8).map(g => chip(g.id, `${g.title} ×${g.count}`)).join('');
+    const triggers = (detail.triggers || []).filter(t => t.provenance !== 'derived:cited').map(t => chip(t.id, t.title)).join('');
+    box.innerHTML = `<h4>While it was active</h4><div>${esc(bits.join(' · '))}</div>` +
+      `<div><strong>Decisions:</strong> ${esc(acts || 'none cited')}${f.tickers && f.tickers.length ? ` <span class="pg-muted">(${esc(f.tickers.join(', '))})</span>` : ''}</div>` +
+      (guides ? `<div><strong>Guidelines cited:</strong> <span class="pg-link-chips">${guides}</span></div>` : '') +
+      (triggers ? `<div><strong>Rules that consume it:</strong> <span class="pg-link-chips">${triggers}</span></div>` : '') +
+      quality;
+    box.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
+      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
   }
 
   function renderHealth(node, detail, payload) {
@@ -2124,10 +2178,46 @@
     gaps.innerHTML = bits.join('');
     gaps.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => pgOpenNode(btn.dataset.nodeId)));
     renderPathQuality(quality, data.quality || []);
+    renderFactorPaths(data.factors);
+  }
+
+  // World factors → guideline cited while active → action, plus per-factor quality.
+  function renderFactorPaths(fr) {
+    const flow = qs('#pgPathsFactors');
+    const table = qs('#pgFactorsQuality');
+    if (!flow || !table) return;
+    if (!fr || fr.empty || !(fr.factors || []).length) {
+      flow.innerHTML = `<div class="pg-paths-empty">${esc(fr?.note || 'No world factors in this window yet.')}</div>`;
+      table.innerHTML = '';
+      return;
+    }
+    const labelOf = new Map(fr.factors.map(f => [f.key, f.label]));
+    const citedOf = new Map();
+    (fr.flows_in || []).forEach(x => citedOf.set(x.target, (citedOf.get(x.target) || 0) + x.value));
+    const guides = (fr.guidelines || []).slice(0, 14).map(g => ({ id: g.id, title: g.title, cited: citedOf.get(g.id) || 0 }));
+    const keep = new Set(guides.map(g => g.id));
+    renderPathFlow(flow, {
+      routes: fr.factors.map(f => f.label),
+      guidelines: guides,
+      actions: fr.actions || [],
+      flows_in: (fr.flows_in || []).filter(x => keep.has(x.target)).map(x => ({ ...x, source: labelOf.get(x.source) || x.source })),
+      flows_out: (fr.flows_out || []).filter(x => keep.has(x.source)),
+    }, { leftHead: 'world factor (cited decisions while active)', guideHead: 'guideline (cited under a factor)', leftWidth: 210 });
+    const chips = list => (list || []).slice(0, 3).map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}" title="${esc(g.id)}">${esc(truncate(g.title, 22))} ×${g.count}</button>`).join('');
+    table.innerHTML = `<table><thead><tr><th>factor</th><th>cycles</th><th>decisions</th><th>closed</th><th>win rate</th><th>P&amp;L</th><th>guidelines cited</th></tr></thead><tbody>${fr.factors.map(f => {
+      const acts = Object.entries(f.actions || {}).sort((a, b) => b[1] - a[1]).map(([a, n]) => `${n} ${a[0].toUpperCase()}`).join(' ');
+      const wr = f.win_rate === null || f.win_rate === undefined ? '—' : pct(f.win_rate);
+      const pnl = Number(f.pnl || 0);
+      const nodeId = `${(state.payload && state.payload.prefix) || 'DA'}.factor.${f.key}`;
+      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(nodeId)}" title="${esc(nodeId)}">${esc(truncate(f.label, 30))}</button><div class="pg-muted">${esc(FACTOR_KIND_LABEL[f.kind] || f.kind)}</div></td><td>${esc(f.cycles)}</td><td>${esc(acts || '—')}</td><td>${esc(f.closed)}${f.closed ? ` <span class="pg-muted">(${f.wins}W/${f.losses}L)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(f.guidelines) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
+    }).join('')}</tbody></table>`;
+    table.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
+      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
   }
 
   // Three-column flow drawn by hand (no d3-sankey): routes | guidelines | actions.
-  function renderPathFlow(container, f) {
+  function renderPathFlow(container, f, opts = {}) {
     const routes = f.routes || [];
     const guides = f.guidelines || [];
     const actions = f.actions || [];
@@ -2137,8 +2227,9 @@
     const rowH = 24;
     const rows = Math.max(routes.length, guides.length, actions.length, 1);
     const H = Math.max(160, rows * rowH + 40);
-    const colX = [20, 330, 700];
-    const colW = [150, 260, 110];
+    const leftW = opts.leftWidth || 150;
+    const colX = [20, 180 + leftW, 700];
+    const colW = [leftW, 260, 110];
     const yFor = (list, i) => 20 + (H - 40) * ((i + 0.5) / Math.max(list.length, 1));
     const maxIn = Math.max(1, ...flowsIn.map(x => x.value));
     const maxOut = Math.max(1, ...flowsOut.map(x => x.value));
@@ -2161,9 +2252,9 @@
     const node = (cls, x, y, w, label, count, id) => `<g class="pg-flow-node-g"${id ? ` data-node-id="${esc(id)}"` : ''}><rect class="pg-flow-node ${cls}${id ? ' is-clickable' : ''}" x="${x}" y="${(y - 9).toFixed(1)}" width="${w}" height="18" rx="5"></rect><text x="${x + 6}" y="${(y + 3.5).toFixed(1)}">${esc(label)}</text>${count !== undefined ? `<text class="pg-flow-count" x="${x + w - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${esc(count)}</text>` : ''}</g>`;
     const nodes = [];
     routes.forEach((r, i) => nodes.push(node('route', colX[0], yFor(routes, i), colW[0], r, flowsIn.filter(x => x.source === r).reduce((s, x) => s + x.value, 0))));
-    guides.forEach((g, i) => nodes.push(node('', colX[1], yFor(guides, i), colW[1], truncate(g.title || g.id, 30), `${g.cited}/${g.served}`, g.id)));
+    guides.forEach((g, i) => nodes.push(node('', colX[1], yFor(guides, i), colW[1], truncate(g.title || g.id, 30), g.served === undefined ? `${g.cited}` : `${g.cited}/${g.served}`, g.id)));
     actions.forEach((a, i) => nodes.push(node(`action-${a}`, colX[2], yFor(actions, i), colW[2], a.toUpperCase(), flowsOut.filter(x => x.target === a).reduce((s, x) => s + x.value, 0))));
-    const heads = `<text x="${colX[0]}" y="10" class="pg-flow-count">route (cited)</text><text x="${colX[1]}" y="10" class="pg-flow-count">guideline (cited / served)</text><text x="${colX[2]}" y="10" class="pg-flow-count">action</text>`;
+    const heads = `<text x="${colX[0]}" y="10" class="pg-flow-count">${esc(opts.leftHead || 'route (cited)')}</text><text x="${colX[1]}" y="10" class="pg-flow-count">${esc(opts.guideHead || 'guideline (cited / served)')}</text><text x="${colX[2]}" y="10" class="pg-flow-count">action</text>`;
     container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Decision paths">${heads}${links.join('')}${nodes.join('')}</svg>`;
     container.querySelectorAll('.pg-flow-node-g[data-node-id]').forEach(g => g.addEventListener('click', () => {
       if (!pgOpenNode(g.dataset.nodeId)) toast(`${g.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
@@ -2237,7 +2328,7 @@
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
     qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
-    qs('#pgPathsDays')?.addEventListener('change', () => loadPaths(state.agent, { quiet: false }));
+    qs('#pgPathsDays')?.addEventListener('change', () => { loadPaths(state.agent, { quiet: false }); state.nodeCache.clear(); loadGraph(state.agent, state.version, { keepSelection: true }); });
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';

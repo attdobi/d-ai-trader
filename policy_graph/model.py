@@ -29,10 +29,10 @@ TEMPLATE_NODE_ID = {"system_prompt": "template.system", "user_prompt_template": 
 
 # ----------------------------------------------------------------------------- enums
 NODE_TYPES = ("root", "template", "field", "section", "rule", "lesson", "entry", "reminder",
-              "identity", "note", "code", "data", "ltm", "ticker", "concept")
+              "identity", "note", "code", "data", "ltm", "ticker", "concept", "factor")
 POLARITIES = ("gate", "action", "caution", "principle", "evidence", "structure", "mixed")
 POLARITY_SOURCES = ("override", "heuristic", "authored")
-OWNERS = ("db", "default-file", "code", "decider_memory", "runtime", "generated")
+OWNERS = ("db", "default-file", "code", "decider_memory", "runtime", "generated", "world")
 STATUSES = ("active", "inherited", "inert", "read-only", "generated", "inactive")
 COMPILED = ("stored", "effective-only", "never")
 EDGE_TYPES = (
@@ -40,6 +40,8 @@ EDGE_TYPES = (
     "subtype_of", "exception_to", "boundary_with", "confused_with", "clarifies", "example_of", "negative_example_of",
     # trading additions
     "includes", "related_to", "cites", "overlaps", "constrains", "enforced_by",
+    # world events / market factors → the guidelines that consume them (read-time, never materialized)
+    "triggers",
 )
 
 ID_RE = re.compile(r"^(DA|SA|FA|CA)(\.[a-z0-9_]+)+$")
@@ -56,6 +58,7 @@ COLORS = {
     "evidence": "#4dd0e1",
     "mixed": "#9aa7c7",
     "code_ring": "#ff9f43",
+    "world": "#f2f4f8",
 }
 
 # ----------------------------------------------------------------------------- heading aliases

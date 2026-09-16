@@ -141,7 +141,11 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             version = _version_arg()
             layer = (request.args.get("layer") or "effective").strip().lower()
             refs = _bool(request.args.get("refs"))
-            return jsonify(service.graph_payload(engine, config_hash, agent, version, layer=layer, refs=refs, **common))
+            factors = _bool(request.args.get("factors"), True)
+            raw_days = request.args.get("factor_days")
+            factor_days = int(raw_days) if raw_days and _VERSION_RE.match(str(raw_days)) else 90
+            return jsonify(service.graph_payload(engine, config_hash, agent, version, layer=layer, refs=refs,
+                                                 factors=factors, factor_days=max(7, min(factor_days, 3650)), **common))
         return _run(go)
 
     @app.route("/api/policy-graph/node", methods=["GET"])
@@ -152,7 +156,10 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             agent = _agent_arg()
             version = _version_arg()
             node_id = _id_arg()
-            return jsonify(service.node_payload(engine, config_hash, agent, version, node_id, **common))
+            raw_days = request.args.get("factor_days")
+            factor_days = int(raw_days) if raw_days and _VERSION_RE.match(str(raw_days)) else 90
+            return jsonify(service.node_payload(engine, config_hash, agent, version, node_id,
+                                                factor_days=max(7, min(factor_days, 3650)), **common))
         return _run(go)
 
     @app.route("/api/policy-graph/diff", methods=["GET"])

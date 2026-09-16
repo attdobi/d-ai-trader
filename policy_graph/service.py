@@ -793,7 +793,8 @@ def _api_links(agent_type: str, version: int, config_hash: str) -> dict:
 
 
 def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, repo_root, is_margin_account: bool,
-                  layer: str = "effective", refs: bool = False, materialized_by: str = "dashboard") -> dict:
+                  layer: str = "effective", refs: bool = False, materialized_by: str = "dashboard",
+                  factors: bool = False, factor_days: int = 90) -> dict:
     _check_agent(agent_type)
     if layer not in LAYERS:
         raise BadRequest(f"layer must be one of {LAYERS}")
@@ -855,6 +856,26 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
         "synthetic": (nodes[e.source].node_type in ("ticker", "concept") or nodes[e.target].node_type in ("ticker", "concept")),
     } for e in edges]
 
+    # World events & market factors (Phase 4): read-time nodes rebuilt from the run log, never materialized.
+    factors_meta = None
+    if factors and agent_type == "DeciderAgent" and layer == "effective":
+        try:
+            from . import factors as _factors
+            titles = {i: x.title for i, x in cur.nodes.items()}
+            rep = _factors.factor_report(engine, config_hash, agent_type, days=int(factor_days), titles=titles)
+            fnodes, fedges = _factors.factor_nodes(rep, cur.nodes, agent_type)
+            by_id = {**nodes, **{x.id: x for x in fnodes}}
+            for x in fnodes:
+                d = _node_dict(x, prefix=prefix, by_id=by_id)
+                d["hits"] = None
+                node_list.append(d)
+            edge_list.extend({"source": e.source, "target": e.target, "edge_type": e.edge_type, "provenance": e.provenance,
+                              "via": e.via, "confidence": e.confidence, "synthetic": True} for e in fedges)
+            factors_meta = {"days": rep["days"], "count": len(rep["factors"]), "cycles": rep["runs"],
+                            "runs_with_snapshot": rep["runs_with_snapshot"], "edges": len(fedges), "note": rep.get("note")}
+        except Exception as exc:     # noqa: BLE001 — the world layer is informational, never blocks the graph
+            factors_meta = {"error": f"{type(exc).__name__}: {exc}"}
+
     removed = []
     if vd is not None and prev is not None:
         for i in getattr(vd, "removed", []) or []:
@@ -885,7 +906,7 @@ def graph_payload(engine, config_hash: str, agent_type: str, version=None, *, re
         "is_active": row["is_active"], "current": ctx.current_version(agent_type),
         "previous_version": prev_n, "next_version": (min(higher) if higher else None),
         "available_versions": available, "layer": layer, "refs": bool(refs),
-        "nodes": node_list, "edges": edge_list, "removed_nodes": removed, "stats": stats,
+        "nodes": node_list, "edges": edge_list, "removed_nodes": removed, "stats": stats, "factors": factors_meta,
         "code": {"sha": code_m.get("sha"), "git_sha": code_m.get("git_sha"), "fires": fires_map},
         "ltm": {"sha": ltm_m.get("sha"), "snapshot": ltm_m.get("snapshot"),
                 "count": len([x for x in cur.nodes.values() if x.node_type == "ltm" and x.parent == f"{prefix}.ltm"]),
@@ -922,8 +943,32 @@ def _prev_node(vd, prev: Optional[Version], node_id: str):
     return None, None
 
 
+def _factor_node_payload(engine, config_hash: str, agent_type: str, cur, node_id: str, *, n: int, row: dict,
+                         days: int = 90) -> dict:
+    """Details for a world-events / market-factor node: rebuilt from the run log, no history or diff."""
+    from . import factors as _factors
+    titles = {i: x.title for i, x in cur.nodes.items()}
+    rep = _factors.factor_report(engine, config_hash, agent_type, days=int(days), titles=titles)
+    fnodes, fedges = _factors.factor_nodes(rep, cur.nodes, agent_type)
+    by_id = {**cur.nodes, **{x.id: x for x in fnodes}}
+    node = by_id.get(node_id)
+    if node is None or node.owner != "world":
+        raise NotFound(f"{node_id} is not an active factor in the last {int(days)} days")
+    prefix = AGENT_PREFIX[agent_type]
+    triggers = [{"id": e.target, "title": titles.get(e.target, e.target), "provenance": e.provenance,
+                 "confidence": e.confidence, "via": e.via} for e in fedges if e.source == node_id]
+    return _json_safe({
+        "agent_type": agent_type, "version": n, "prompt_version_id": row["id"],
+        "node": _node_dict(node, prefix=prefix, by_id=by_id),
+        "factor": _factors.factor_payload_for_node(rep, node_id, agent_type), "triggers": triggers,
+        "window_days": int(days), "citations": None, "hits": None, "previous": None, "diff_vs_previous": None,
+        "history": [], "first_seen": None, "present_in": None, "changed_in": [], "version_count": None,
+        "version_outcome": None, "overlaps": [], "attribution_note": None, "ltm_note": None,
+    })
+
+
 def node_payload(engine, config_hash: str, agent_type: str, version, node_id: str, *, repo_root, is_margin_account: bool,
-                 materialized_by: str = "dashboard") -> dict:
+                 materialized_by: str = "dashboard", factor_days: int = 90) -> dict:
     _check_agent(agent_type)
     if not node_id or not ID_RE.match(node_id):
         raise BadRequest(f"invalid node id {node_id!r}")
@@ -932,10 +977,12 @@ def node_payload(engine, config_hash: str, agent_type: str, version, node_id: st
     row = ctx.row(agent_type, n)
     rows = ctx.rows(agent_type)
     cur, _action, _busy = _ensure_and_read(ctx, agent_type, n, materialized_by=materialized_by)
+    prefix = AGENT_PREFIX[agent_type]
+    if node_id == f"{prefix}.factor" or node_id.startswith(f"{prefix}.factor."):
+        return _factor_node_payload(engine, config_hash, agent_type, cur, node_id, n=n, row=row, days=factor_days)
     if node_id not in cur.nodes:
         raise NotFound(f"node {node_id} not in {agent_type} v{n}")
     node = cur.nodes[node_id]
-    prefix = AGENT_PREFIX[agent_type]
     prev_n = _parent_version(rows, n)
     prev = ctx.read_version(agent_type, prev_n) if prev_n is not None else None
     vd = _safe_diff(prev, cur)
@@ -1026,7 +1073,14 @@ def paths_payload(engine, config_hash: str, agent_type: str, *, days: int, repo_
     except Exception:     # noqa: BLE001 — titles are cosmetic
         titles = {}
     try:
-        return _json_safe(_paths.path_report(engine, config_hash, agent_type, days=days, titles=titles))
+        report = _paths.path_report(engine, config_hash, agent_type, days=days, titles=titles)
+        if agent_type == "DeciderAgent":
+            try:      # world events & market factors → guideline cited → action (Phase 4)
+                from . import factors as _factors
+                report["factors"] = _factors.factor_report(engine, config_hash, agent_type, days=days, titles=titles)
+            except Exception as exc:     # noqa: BLE001 — informational
+                report["factors"] = {"empty": True, "note": f"factors unavailable ({type(exc).__name__}: {exc})"}
+        return _json_safe(report)
     except Exception as exc:     # noqa: BLE001 — the hit table may not exist yet
         return {"agent_type": agent_type, "config_hash": config_hash, "days": days, "empty": True,
                 "frequency": {"routes": [], "guidelines": [], "actions": [], "flows_in": [], "flows_out": [],
