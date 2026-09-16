@@ -82,3 +82,25 @@ def test_empty_window(db):
     rep = P.path_report(db, "h", days=30, now=NOW + timedelta(days=100))
     assert rep["empty"] and "No cited decisions" in rep["note"] and rep["quality"] == []
     assert P.path_report(db, "h", days=7, now=NOW)["days"] == 90        # unknown window falls back to 90
+
+
+def test_cited_route_comes_from_the_served_rows_of_that_cycle(db):
+    """A code block cited on a cycle is 'unserved' only until that cycle has a served row for it (the trader
+    started logging code blocks, and backfill_code_served fills history)."""
+    CODE = "DA.code.recency_provenance"
+    at = NOW - timedelta(days=2)
+    C.record_cited(db, "h", "DeciderAgent", 23, "r9", [{"action": "hold", "ticker": "AAA", "reason": f"k [cites: {CODE}]"}], decided_at=at)
+    rep = P.path_report(db, "h", days=90, now=NOW)
+    assert {"source": "unserved", "target": CODE, "value": 1} in rep["frequency"]["flows_in"]
+    assert any(g["id"] == CODE for g in rep["frequency"]["cited_unserved"])
+    C.ensure_runs_schema(db)
+    with db.begin() as conn:
+        conn.execute(text("INSERT INTO policy_graph_runs (config_hash, agent_type, prompt_version, run_id, decided_at, served, dropped, "
+                          "chars_full, chars_served, routes, context) VALUES ('h', 'DeciderAgent', 23, 'r9', :t, 1, 0, 1, 1, '{}', '{}')"), {"t": at})
+    n = C.backfill_code_served(db, "h", lambda v: [CODE])
+    assert n == 1
+    rep = P.path_report(db, "h", days=90, now=NOW)
+    assert {"source": "code", "target": CODE, "value": 1} in rep["frequency"]["flows_in"]
+    assert not any(g["id"] == CODE for g in rep["frequency"]["cited_unserved"])
+    assert not any(g["id"].startswith("DA.code.") for g in rep["frequency"]["served_never_cited"])
+

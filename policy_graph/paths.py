@@ -106,12 +106,19 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
     cited_by: dict = {}
     route_node: dict = {}
     node_action: dict = {}
+    # the route a guideline reached the prompt by, per cycle — from the served rows of that cycle, not from the
+    # route stamped on the cited row at citation time (code blocks were cited long before they were logged as served)
+    served_route: dict = {}
+    for h in hits:
+        if h["served"] and h["run_id"]:
+            served_route.setdefault((h["run_id"], h["node_id"]), h["route"])
     for h in hits:
         if h["served"]:
             served_by[h["node_id"]] = served_by.get(h["node_id"], 0) + 1
         if h["cited"]:
+            route = served_route.get((h["run_id"], h["node_id"]), "unserved")
             cited_by[h["node_id"]] = cited_by.get(h["node_id"], 0) + 1
-            route_node[(h["route"], h["node_id"])] = route_node.get((h["route"], h["node_id"]), 0) + 1
+            route_node[(route, h["node_id"])] = route_node.get((route, h["node_id"]), 0) + 1
             if h["action"]:
                 node_action[(h["node_id"], h["action"])] = node_action.get((h["node_id"], h["action"]), 0) + 1
 
@@ -122,9 +129,10 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
     routes = sorted({f["source"] for f in flows_in})
     actions = sorted({f["target"] for f in flows_out})
 
-    unserved = sorted((n for n in cited_by if any(h["node_id"] == n and h["route"] == "unserved" for h in hits)),
-                      key=lambda n: -cited_by[n])
-    dead = sorted((n for n in served_by if not cited_by.get(n)), key=lambda n: (-served_by[n], n))
+    unserved = sorted((n for n in cited_by if route_node.get(("unserved", n))), key=lambda n: -cited_by[n])
+    # dead weight = policy text the loop could prune; code-owned blocks are fixed by the repository
+    dead = sorted((n for n in served_by if not cited_by.get(n) and n.split(".")[1:2] != ["code"]),
+                  key=lambda n: (-served_by[n], n))
 
     # quality
     wins_by: dict = {}
