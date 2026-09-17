@@ -38,6 +38,7 @@ from config import (
     DAILY_BUY_CAP,
     MIN_ENTRY_SPACING_MIN,
     REENTRY_COOLDOWN_MIN,
+    MIN_CASH_BUFFER,
 )
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
@@ -55,7 +56,7 @@ try:
 except (TypeError, ValueError):
     MAX_TRADES = 5
 MAX_FUNDS = 10000
-MIN_BUFFER = 100  # Must always have at least this much left
+MIN_BUFFER = float(MIN_CASH_BUFFER)  # the .env MIN_CASH_BUFFER, the same buffer the Schwab client enforces at order time
 from order_sizing import whole_share_allocation  # whole-share round-up for sub-share tickets
 MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 TYPICAL_BUY_LOW = float(_os.getenv("DAI_TYPICAL_BUY_LOW", "2000"))
