@@ -56,6 +56,7 @@ except (TypeError, ValueError):
     MAX_TRADES = 5
 MAX_FUNDS = 10000
 MIN_BUFFER = 100  # Must always have at least this much left
+from order_sizing import whole_share_allocation  # whole-share round-up for sub-share tickets
 MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 TYPICAL_BUY_LOW = float(_os.getenv("DAI_TYPICAL_BUY_LOW", "2000"))
 TYPICAL_BUY_HIGH = float(_os.getenv("DAI_TYPICAL_BUY_HIGH", "3500"))
@@ -2082,16 +2083,22 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
 
             from math import floor
-            requested_shares = floor(amount / price)
+            # Whole shares only. A sub-share allocation rounds up to exactly one share when that
+            # share fits the MAX rail and the settled funds behind the buffer (order_sizing.py);
+            # the sizing record below names what bound the ticket.
+            _ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT, min_buffer=MIN_BUFFER)
+            requested_shares = _ws.shares
             if requested_shares == 0:
-                print(f"Skipping buy for {ticker} due to insufficient funds for 1 share (need ${price:.2f}, have ${amount:.2f}).")
+                print(f"Skipping buy for {ticker}: {_ws.note}.")
                 skipped_decisions.append({
                     "action": "buy",
                     "ticker": ticker,
                     "amount_usd": amount,
-                    "reason": f"Insufficient funds for 1 share (need ${price:.2f}, allocated ${amount:.2f}) - no trade executed (Original: {reason})"
+                    "reason": f"{_ws.note[0].upper()}{_ws.note[1:]} - no trade executed (Original: {reason})"
                 })
                 continue
+            if _ws.bound_by == "one-share minimum":
+                print(f"⬆️ {ticker}: {_ws.note}.")
 
             buffer_safe_cash = max(available_cash - MIN_BUFFER, 0.0)
             max_affordable_shares = floor(buffer_safe_cash / price) if price > 0 else 0
@@ -2150,7 +2157,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 "executed_usd": actual_spent,
                 "available_usd": round(available_cash, 2),
                 "shares": int(shares),
-                "bound_by": "model allocation" if shares == requested_shares else "settled-funds guardrail",
+                "bound_by": ("settled-funds guardrail" if shares < requested_shares else _ws.bound_by),
             }
 
             # Execute real-world trade if enabled. In live mode, if the order
