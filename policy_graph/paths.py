@@ -13,6 +13,11 @@ Two views over one window (days):
 Inputs: policy_graph_hits (served / cited per run), trade_outcomes (buy reasons carry
 ` [cites: …]`), trade_decisions (co-citation within one decision). stdlib + sqlalchemy.text;
 config_hash explicit; never imports config.
+
+Rejections (the Decider's "considered" setups it passed on, logged with action 'reject') are
+citations: they feed the frequency view as a 'reject' action column and keep the guideline that
+decided them out of "served but never cited". They are never trades — win rate, P&L and
+`decisions_cited` read trade_outcomes / trade_decisions decisions only.
 """
 from __future__ import annotations
 
@@ -102,6 +107,7 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
     decisions = _decision_cites(engine, config_hash, since)
 
     runs = {h["run_id"] for h in hits if h["run_id"]}
+    rejections = {(h["run_id"], h["ticker"]) for h in hits if h["cited"] and h["action"] == "reject"}
     served_by: dict = {}
     cited_by: dict = {}
     route_node: dict = {}
@@ -179,7 +185,7 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
     total_wins = sum(1 for c in closed if (c["gain_pct"] or 0) > 0)
     return {
         "agent_type": agent_type, "config_hash": config_hash, "days": days, "since": iso(since), "now": iso(now),
-        "runs": len(runs), "decisions_cited": len(decisions), "closed_cited": total_closed,
+        "runs": len(runs), "decisions_cited": len(decisions), "rejections_cited": len(rejections), "closed_cited": total_closed,
         "win_rate": (total_wins / total_closed) if total_closed else None,
         "frequency": {
             "routes": routes, "guidelines": [{"id": n, "title": titles.get(n, n), "cited": cited_by[n], "served": served_by.get(n, 0)} for n in top],

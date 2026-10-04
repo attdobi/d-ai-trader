@@ -1635,8 +1635,8 @@
       const routes = Object.entries(hw.routes || {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(' · ');
       cites += `<table class="pg-hits"><thead><tr><th>hits</th><th>7d</th><th>30d</th><th>90d</th><th>1y</th></tr></thead><tbody><tr><td class="pg-muted">cited / served</td>${cells}</tr></tbody><caption>${esc(routes ? `reached the prompt via: ${routes}` : 'served = shown to the Decider that cycle; cited = named in a decision')}</caption></table>`;
     }
-    if (c && (c.decisions || c.closed)) {
-      const acts = Object.entries(c.by_action || {}).map(([a, n]) => `${n} ${a}`).join(', ');
+    if (c && (c.decisions || c.closed || c.rejections)) {
+      const acts = Object.entries(c.by_action || {}).map(([a, n]) => `${n} ${a}`).concat(c.rejections ? [`${c.rejections} rejected setup${c.rejections === 1 ? '' : 's'}`] : []).join(', ');
       const wr = c.win_rate !== null && c.win_rate !== undefined ? pct(c.win_rate) : '—';
       const pnl = Number.isFinite(Number(c.pnl)) ? `${Number(c.pnl) >= 0 ? '+' : '−'}$${Math.abs(Number(c.pnl)).toFixed(0)}` : '—';
       const avg = c.avg_gain_pct !== null && c.avg_gain_pct !== undefined ? `${Number(c.avg_gain_pct) >= 0 ? '+' : ''}${Number(c.avg_gain_pct).toFixed(2)}%` : '—';
@@ -2278,7 +2278,7 @@
       return;
     }
     const wr = data.win_rate !== null && data.win_rate !== undefined ? ` · win rate ${pct(data.win_rate)}` : '';
-    summary.textContent = `${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${wr} · since ${fmtDateOnly(data.since)}`;
+    summary.textContent = `${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')}${data.rejections_cited ? ` · ${plural(data.rejections_cited, 'cited rejection')}` : ''} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${wr} · since ${fmtDateOnly(data.since)}`;
     renderPathFlowFor(flow, data);
     const bits = [];
     if ((f.cited_unserved || []).length) {

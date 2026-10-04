@@ -13,7 +13,7 @@ Public API:
     ensure_table()
     add_memory(config_hash, content, kind=, tags=, ticker=, source=, weight=)
     get_relevant_memories(config_hash, tickers=None, limit=None) -> list[dict]
-    format_long_term_memory(memories) -> str            # prompt block
+    format_long_term_memory(memories, cite_tag=None) -> str   # prompt block (cite_tag: row -> ' ⟨DA.ltm.<id>⟩')
     build_working_memory(config_hash, recent_cycles=6) -> str   # prompt block
 """
 import os
@@ -93,14 +93,25 @@ def get_relevant_memories(config_hash, tickers=None, limit=None):
         return []
 
 
-def format_long_term_memory(memories):
+def format_long_term_memory(memories, cite_tag=None):
+    """The LESSONS block. `cite_tag(row) -> str` appends each row's citation tag (the trader passes
+    ` ⟨DA.ltm.<id> · record⟩`, the same rendering the policy graph gives every other guideline) so the
+    rows are citable; a failing tag renders the plain line."""
     if not memories:
         return ""
     lines = ["# LESSONS (long-term memory — hard rules earned from P&L; OBEY them):"]
     for m in memories:
         tk = f" ({m['ticker']})" if m.get("ticker") else ""
         kind = (m.get("kind") or "lesson")
-        lines.append(f"- [{kind}]{tk} {m['content']}")
+        content, tag = m['content'], ""
+        if cite_tag is not None:
+            try:
+                tag = cite_tag(m) or ""
+            except Exception:
+                tag = ""
+            if tag:
+                content = str(content).rstrip()
+        lines.append(f"- [{kind}]{tk} {content}{tag}")
     return "\n".join(lines)
 
 

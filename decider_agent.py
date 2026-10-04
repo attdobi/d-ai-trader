@@ -31,6 +31,7 @@ from config import (
     session,
     openai,
     get_agent_model,
+    get_reasoning_params,
     get_current_config_hash,
     get_trading_mode,
     IS_MARGIN_ACCOUNT,
@@ -2820,34 +2821,58 @@ OUTPUT (STRICT)
     # Falls back to the flat stored text on any failure; the stored prompt row is untouched.
     _graph_served = None
     _graph_index_text = ""
+    # what the model reads this cycle, for the decider_inputs replay row: the three policy fields as
+    # rendered (the flat stored text unless the graph assembly below replaces them) and the context lists
+    _policy_rendered = {"soul": locals().get("soul") or "", "directives": locals().get("strategy") or "",
+                        "memory": locals().get("memory") or ""}
+    _ctx_lists = None
     try:
+        _ctx_lists = {
+            "regime": str(((locals().get("_regime") or {}).get("label")) or ""),
+            "holdings": [h.get("ticker") for h in stock_holdings],
+            "watchlist": [c.get("ticker") for c in (locals().get("_contra") or []) if isinstance(c, dict)],
+            "quarantined": sorted(locals().get("_quarantined") or []),
+            "news": _tickers_in_summaries(parsed_summaries),
+            "entities": [clean_ticker_symbol(e.get("symbol")) for e in (company_entities or []) if isinstance(e, dict)],
+            "trend": [(d.get("symbol") or d.get("ticker")) for d in (momentum_data or []) if isinstance(d, dict)],
+        }
         if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
-            _ctx_regime = str(((locals().get("_regime") or {}).get("label")) or "")
-            _ctx_watch = [c.get("ticker") for c in (locals().get("_contra") or []) if isinstance(c, dict)]
-            _ctx_quar = sorted(locals().get("_quarantined") or [])
-            _ctx_news = _tickers_in_summaries(parsed_summaries)
-            _ctx_entities = [clean_ticker_symbol(e.get("symbol")) for e in (company_entities or []) if isinstance(e, dict)]
-            _ctx_trend = [(d.get("symbol") or d.get("ticker")) for d in (momentum_data or []) if isinstance(d, dict)]
-            _assembled = _graph_assemble_system_prompt(
-                prompt_data, prompt_version, run_id, regime=_ctx_regime,
-                holdings=[h.get("ticker") for h in stock_holdings], watchlist=_ctx_watch, quarantined=_ctx_quar,
-                news=_ctx_news, entities=_ctx_entities, trend=_ctx_trend)
+            _assembled = _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, **_ctx_lists)
             if _assembled is not None:
-                system_prompt, _graph_served, _graph_index_text = _assembled
+                system_prompt, _graph_served, _graph_index_text, _graph_rendered = _assembled
+                _policy_rendered = _graph_rendered
     except Exception as _asm_exc:
         print(f"⚠️  Graph assembly skipped (flat prompt kept): {_asm_exc}")
 
     # Decider memory: long-term structured lessons (retrieved by relevance) + short-term
     # working memory (the decider's own recent activity). Both best-effort — a memory
     # failure must never break the decision path.
+    # The injected rows are guideline nodes (DA.ltm.<row id>): each is rendered with its ⟨id · record⟩
+    # tag and listed in the GUIDELINE INDEX below so the Decider can cite it like any other rule.
+    _ltm_injected = []
     try:
         from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
         _mem_cfg = get_current_config_hash()
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
         _mem_rows = get_relevant_memories(_mem_cfg, tickers=_mem_tks)
-        _lt = format_long_term_memory(_mem_rows)
+        _ltm_tag = None
+        try:
+            from policy_graph.assembly import health_tag as _ltm_health_tag
+            _ltm_health = {}
+            if _mem_rows:
+                try:
+                    from policy_graph.citations import health_for_prompt as _ltm_health_for
+                    _ltm_health = _ltm_health_for(engine, _mem_cfg, [f"DA.ltm.{m['id']}" for m in _mem_rows
+                                                                      if isinstance(m, dict) and m.get("id")])
+                except Exception as _lh_exc:
+                    print(f"⚠️  Memory-row health unavailable: {_lh_exc}")
+            _ltm_tag = lambda m: _ltm_health_tag(f"DA.ltm.{int(m['id'])}", _ltm_health) if m.get("id") else ""
+        except Exception as _lt_exc:
+            print(f"⚠️  Memory rows rendered without citation tags: {_lt_exc}")
+        _lt = format_long_term_memory(_mem_rows, cite_tag=_ltm_tag)
         if _lt:
             prompt += "\n\n" + _lt
+            _ltm_injected = [m for m in _mem_rows if isinstance(m, dict) and m.get("id")]
             # the injected rows are graph nodes (DA.ltm.<row id>): record them as served (route "ltm")
             try:
                 if _graph_served is not None and prompt_version is not None:
@@ -2887,7 +2912,10 @@ OUTPUT (STRICT)
         " (your R1..Rk ranked names plus any you seriously rejected). Each element MUST be"
         " {\"ticker\":\"SYM\", \"signals\":\"day/mo %chg, RS vs SPY, RSI, 20d-MA/range position, volume — concrete numbers\","
         " \"verdict\":\"buy\"|\"sell\"|\"hold\"|\"watch\"|\"reject\", \"why\":\"one specific, auditable sentence; for rejects/sells name the exact disqualifier"
-        " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\"}."
+        " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\","
+        " \"cited\":[\"<guideline id>\"]}. \"cited\" is REQUIRED on every \"reject\" and \"watch\" element: the 1-2 guideline ids"
+        " from the GUIDELINE INDEX below that decided the rejection, the deciding gate first, copied exactly as printed —"
+        " a rejection is a decision too, and each guideline's rejections are counted on the Policy Graph tab."
         " This is the FULL audit of WHY you did what you did (holds/sells + buys) — never leave it empty while you hold positions or have settled funds."
     )
     prompt += (
@@ -2950,16 +2978,26 @@ OUTPUT (STRICT)
     " Every decision MUST carry one extra key \"cited\": a list of 1 to 4 guideline ids taken from the"
     " GUIDELINE INDEX below — first the gate that decided it (the rule you applied), then the lesson you"
     " weighed or the code policy you followed. Ids also appear as ⟨id⟩ after each guideline in your system"
-    " prompt, with its record (how often it was cited in the last 7/30/90 days and the win rate of the trades"
+    " prompt and after each LESSONS row (DA.ltm.<n>), with its record (how often it was cited in the last 7/30/90 days and the win rate of the trades"
     " it drove — weigh a rule by that record, not by its wording). Cite ids exactly as printed; never invent"
     " one. A decision without \"cited\" is incomplete: the ids are stored with the reason so every guideline's"
     " realized win rate can be measured on the Policy Graph tab."
     )
     if _graph_served:
         _guideline_index_lines = _graph_index_text
-        _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _graph_index_text.splitlines()}
     else:
         _guideline_index_lines = _guideline_index_text(prompt_version)
+    # the long-term memory rows injected above join the index (served this cycle → citable and accepted by
+    # validation and the repair pass) — only next to a real index: alone they would turn every other
+    # guideline id into "not in the served index"
+    if _guideline_index_lines and _ltm_injected:
+        try:
+            from policy_graph.citations import ltm_index_lines as _ltm_index_lines
+            _ltm_lines = _ltm_index_lines(_ltm_injected)
+            if _ltm_lines:
+                _guideline_index_lines = _guideline_index_lines.rstrip("\n") + "\n" + "\n".join(_ltm_lines)
+        except Exception as _li_exc:
+            print(f"⚠️  Memory rows left out of the guideline index: {_li_exc}")
     if _guideline_index_lines:
         prompt += "\n\nGUIDELINE INDEX (id — title):\n" + _guideline_index_lines
         _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
@@ -3011,11 +3049,17 @@ OUTPUT (STRICT)
     # Get AI decision regardless of market status
     cash_hold_reason = None
     considered_setups = []
+    # Replay row (decider_inputs): the exact prompts, policy fields, context and memory rows of this call,
+    # written before the call and completed with the raw reply after it. Best effort — never blocks.
+    _input_id = _log_decider_input(
+        config_hash, run_id, prompt_version, system_prompt=system_prompt, user_prompt=prompt,
+        policy=_policy_rendered, context=_ctx_lists, ltm_ids=_ltm_injected)
     ai_response = prompt_manager.ask_openai(
         prompt,
         system_prompt,
         agent_name="DeciderAgent"
     )
+    _log_decider_reply(_input_id, ai_response)
     print(f"🗒️ Parsed Decider response ({type(ai_response).__name__}): {ai_response}")
 
     # Ensure response is always a list
@@ -3110,6 +3154,16 @@ OUTPUT (STRICT)
             print(f"📎 Guidelines cited this cycle: {', '.join(_used_ids)}")
     except Exception as _cite_exc:
         print(f"⚠️  Could not fold guideline citations: {_cite_exc}")
+    # The "considered" rejections carry their own `cited` list (validated against the same served index,
+    # kept on the element). An uncited rejection is accepted as is: no repair call is made for them.
+    try:
+        from policy_graph.citations import fold_considered as _fold_considered
+        _cons_counts = _fold_considered(considered_setups, _known_ids)
+        if _cons_counts["rejections"]:
+            print(f"📎 Considered rejections: {_cons_counts['cited']} cited, {_cons_counts['uncited']} without "
+                  f"\"cited\" (accepted — no repair call)")
+    except Exception as _cons_exc:
+        print(f"⚠️  Could not fold considered-setup citations: {_cons_exc}")
 
     # Guarantee a decision exists for every current holding
     existing_decisions = {}
@@ -3180,10 +3234,12 @@ OUTPUT (STRICT)
 
     # Enforce citations: one repair call for whatever is still uncited (model omissions, invalid
     # ids, the CASH hold), then log served/cited hits for the policy graph exactly once.
-    _repair_missing_citations(ai_response, _known_ids, _guideline_index_lines, run_id)
+    _repair_missing_citations(ai_response, _known_ids, _guideline_index_lines, run_id,
+                              prompt_version=prompt_version, config_hash=config_hash)
     try:
         from policy_graph.citations import record_cited as _record_cited
-        _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response)
+        _record_cited(engine, get_current_config_hash(), "DeciderAgent", prompt_version, run_id, ai_response,
+                      considered=considered_setups)
     except Exception as _hit_exc:
         print(f"⚠️  Could not log guideline hits: {_hit_exc}")
 
@@ -3326,7 +3382,55 @@ _GUIDELINE_IDS_STASH = {}
 _CASH_HOLD_FALLBACK_CITES = ["DA.code.cash_disclosure"]
 
 
-def _repair_missing_citations(decisions, known_ids, index_text, run_id):
+def _log_decider_input(config_hash, run_id, prompt_version, *, system_prompt, user_prompt, policy=None,
+                       context=None, ltm_ids=None, call_kind="decide"):
+    """Write the decider_inputs replay row for a Decider call about to be made; returns its id, or
+    None on any failure (one log line — the call itself never depends on it)."""
+    try:
+        from policy_graph.inputs import ensure_schema as _ensure_inputs, record_input as _record_input
+        model = effort = None
+        try:
+            model = get_agent_model("DeciderAgent")
+            effort = (get_reasoning_params("DeciderAgent", model) or {}).get("reasoning_effort")
+        except Exception:
+            pass
+        _ensure_inputs(engine)
+        return _record_input(engine, config_hash or get_current_config_hash(), run_id=run_id,
+                             prompt_version=prompt_version, system_prompt=system_prompt, user_prompt=user_prompt,
+                             policy=policy, context=context, ltm_ids=ltm_ids, model=model,
+                             reasoning_effort=effort, call_kind=call_kind)
+    except Exception as exc:
+        print(f"⚠️  decider_inputs row not written ({call_kind}): {exc}")
+        return None
+
+
+def _log_decider_reply(input_id, reply):
+    """Complete a decider_inputs row with the raw completion text (and the model / reasoning effort /
+    prompts exactly as the client sent them, when it reports them). Best effort."""
+    if input_id is None:
+        return
+    try:
+        from policy_graph.inputs import record_reply as _record_reply
+        last = None
+        try:
+            _last_fn = getattr(prompt_manager, "last_reply", None)
+            last = _last_fn() if callable(_last_fn) else None
+        except Exception:
+            last = None
+        if isinstance(last, dict) and last.get("content") is not None:
+            # what actually went out: the model (a fallback may have answered), its reasoning effort (None
+            # on a non-reasoning model) and the prompts as sent
+            sent = {k: last.get(k) for k in ("model", "system_prompt", "user_prompt") if last.get(k) is not None}
+            if "reasoning_effort" in last:
+                sent["reasoning_effort"] = last.get("reasoning_effort")
+            _record_reply(engine, input_id, last.get("content"), **sent)
+        else:      # no completion text (API error / client without last_reply): keep what the trader received
+            _record_reply(engine, input_id, reply)
+    except Exception as exc:
+        print(f"⚠️  decider_inputs reply not written: {exc}")
+
+
+def _repair_missing_citations(decisions, known_ids, index_text, run_id, *, prompt_version=None, config_hash=None):
     """Citations are REQUIRED on every decision but a prompt rule is not enforcement: about half
     the model-authored decisions came back without `cited`, and the CASH hold row (built from
     cash_reason) never had a slot for one — so half the policy graph's outcomes were unattributed.
@@ -3334,7 +3438,9 @@ def _repair_missing_citations(decisions, known_ids, index_text, run_id):
     One cheap follow-up call per cycle asks the model to pick ids from the index it was already
     shown for each still-uncited decision; decisions themselves are never changed. Code-authored
     auto-HOLD placeholders are not sent (the model never reasoned about them) and are stamped
-    instead. Anything still uncited afterwards is stamped `cited_dropped` so the gap is visible."""
+    instead. Anything still uncited afterwards is stamped `cited_dropped` so the gap is visible.
+    The "considered" rejections are never sent here (no extra call for them). The call is logged in
+    decider_inputs as call_kind 'citation_repair'."""
     from policy_graph.citations import (AUTO_HOLD_PREFIX, apply_citation_repairs,
                                         parse_repair_response, repair_prompt, uncited_decisions)
     try:
@@ -3352,12 +3458,13 @@ def _repair_missing_citations(decisions, known_ids, index_text, run_id):
             print(f"⚠️  {len(missing)} decision(s) uncited and no guideline index to repair from: {', '.join(tickers)}")
             return
         print(f"📎 Citation repair pass for {len(missing)} uncited decision(s): {', '.join(tickers)}")
-        resp = prompt_manager.ask_openai(
-            repair_prompt(missing, index_text),
-            "You are the DeciderAgent's citation auditor. Attribute each trade decision to the guideline ids "
-            "it applied, using only ids from the provided index. Output strict JSON.",
-            agent_name="DeciderAgent",
-        )
+        _repair_user = repair_prompt(missing, index_text)
+        _repair_system = ("You are the DeciderAgent's citation auditor. Attribute each trade decision to the guideline ids "
+                          "it applied, using only ids from the provided index. Output strict JSON.")
+        _repair_input_id = _log_decider_input(config_hash, run_id, prompt_version, system_prompt=_repair_system,
+                                              user_prompt=_repair_user, call_kind="citation_repair")
+        resp = prompt_manager.ask_openai(_repair_user, _repair_system, agent_name="DeciderAgent")
+        _log_decider_reply(_repair_input_id, resp)
         repairs = parse_repair_response(resp)
         used = apply_citation_repairs(decisions, repairs, known_ids,
                                       fallback={"CASH": _CASH_HOLD_FALLBACK_CITES})
@@ -3396,8 +3503,9 @@ def _tickers_in_summaries(parsed_summaries):
 
 def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,
                                   news=(), entities=(), trend=()):
-    """(system_prompt, served) built from the policy graph of the active version, or None when the
-    graph is unavailable. Records the served guidelines (with routes) in policy_graph_hits."""
+    """(system_prompt, served, index_text, rendered) built from the policy graph of the active version,
+    or None when the graph is unavailable; `rendered` = {"soul", "directives", "memory"} as the model
+    reads them this cycle. Records the served guidelines (with routes) in policy_graph_hits."""
     from pathlib import Path as _Path
     from policy_graph import service as _pg_service
     from policy_graph.assembly import Context as _Ctx, assemble as _assemble
@@ -3456,7 +3564,8 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     from policy_graph.citations import citable_nodes as _citable
     served_ids = {sel.node_id for sel in out.served}
     index_lines = [f"{i} — {t}" for i, t in _citable(_version) if i in served_ids or i.split(".")[1:2] == ["code"]]
-    return system_prompt, out.served, "\n".join(index_lines)
+    rendered = {"soul": out.soul, "directives": out.strategy_directives, "memory": out.memory}
+    return system_prompt, out.served, "\n".join(index_lines), rendered
 
 
 def _guideline_index_text(prompt_version):
