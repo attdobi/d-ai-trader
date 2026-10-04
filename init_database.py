@@ -109,6 +109,46 @@ def ensure_constraint(conn, stats: InitStats, constraint_name: str, alter_sql: s
         print(f"   ⚠️  Could not add constraint {constraint_name}: {exc}")
 
 
+# Tables whose config_hash column still carried the legacy DEFAULT 'default'. Every writer passes
+# config_hash explicitly; with the default in place, a writer that forgot it would silently file its
+# rows under a config named 'default' instead of failing on NOT NULL.
+LEGACY_CONFIG_HASH_DEFAULT_TABLES = ("holdings", "summaries", "trade_decisions")
+
+
+def drop_legacy_config_hash_defaults(conn, tables=LEGACY_CONFIG_HASH_DEFAULT_TABLES) -> list:
+    """Idempotent: DROP DEFAULT on <table>.config_hash while that default is still the literal
+    'default'. Postgres only — SQLite cannot alter a column default, so it is skipped there.
+    Data is untouched. Each table runs in its own savepoint, so a failure is logged and never
+    aborts the surrounding init transaction. Returns the tables changed."""
+    dialect = getattr(getattr(conn, "dialect", None), "name", "") or ""
+    if dialect != "postgresql":
+        return []
+    changed = []
+    for table in tables:
+        try:
+            with conn.begin_nested():
+                current = conn.execute(
+                    text(
+                        """
+                        SELECT column_default
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = :table_name
+                          AND column_name = 'config_hash'
+                        """
+                    ),
+                    {"table_name": table},
+                ).scalar()
+                if current is None or "'default'" not in str(current):
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN config_hash DROP DEFAULT"))
+            changed.append(table)
+            print(f"   ✅ Dropped legacy 'default' column default: {table}.config_hash")
+        except Exception as exc:
+            print(f"   ⚠️  Could not drop the 'default' column default on {table}.config_hash: {exc}")
+    return changed
+
+
 def migrate_legacy_feedback_agent_checks(conn) -> None:
     """Expand legacy CHECK constraints that only allow feedback_analyzer."""
     rows = conn.execute(text(
@@ -618,6 +658,10 @@ def initialize_database() -> None:
             "run_id",
             "ALTER TABLE trade_decisions ADD COLUMN IF NOT EXISTS run_id TEXT",
         )
+
+        # Hygiene: the pre-config-hash schema left DEFAULT 'default' on config_hash
+        # (archive/scripts/fix_constraints_only.py was written to drop it but never ran).
+        drop_legacy_config_hash_defaults(conn)
 
         ensure_table(
             conn,

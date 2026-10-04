@@ -280,6 +280,9 @@
           {{ event_risk.line }} · <a href="/feedback#eventRisk" style="color:#42c9ff;">risk vs time →</a><br>
           <span style="color:#5f6d86;">{{ event_risk.as_of }}</span>
         </p>
+        {% if event_risk.calendar_gap %}
+        <p class="config-subtitle event-calendar-gap" style="font-size: 0.75em; color: #fadb5f; margin-top: 4px;">⚠ {{ event_risk.calendar_gap }}</p>
+        {% endif %}
         {% else %}
         <p class="config-value">n/a</p>
         <p class="config-subtitle" style="font-size: 0.75em; color: #7f8ca6; margin-top: 4px;">event calendar unavailable</p>

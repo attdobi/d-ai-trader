@@ -16,9 +16,11 @@ except Exception:
 D-AI-Trader Unified Automation System
 
 This script orchestrates the entire trading system with SEQUENTIAL execution:
-- STEP 1: Summarizer agents run hourly (8:25am-5:25pm ET weekdays, 3pm ET weekends)
-- STEP 2: Decider agent runs immediately after Step 1 (during market hours only) using fresh summaries
-- STEP 3: Feedback agent runs once daily after market close (4:30pm ET)
+- STEP 1: Summarizer agents run at the 9:30am ET bell, then every DAI_CADENCE_MINUTES (default 180,
+  -c on the launcher) until 5:25pm ET on weekdays
+- STEP 2: Decider agent runs immediately after Step 1 using the fresh summaries; after the 4:00pm ET
+  close its decisions are recorded as MARKET CLOSED, not executed
+- STEP 3: Feedback agent runs weekly, Thursday 8:30pm ET (prompt-version outcome backfill right after)
 
 This ensures decider always uses the most recent summaries, not stale data.
 """
@@ -465,7 +467,7 @@ class DAITraderOrchestrator:
             return False
     
     def run_feedback_agent(self):
-        """Run the feedback agent for daily analysis across all active config hashes"""
+        """Run the weekly feedback analysis across all active config hashes"""
         run_id = f"feedback_{datetime.now().strftime('%Y%m%dT%H%M%S')}"
         logger.info(f"Starting feedback agent run for all configs: {run_id}")
         
@@ -613,6 +615,17 @@ class DAITraderOrchestrator:
             import traceback
             logger.error(traceback.format_exc())
 
+    def sync_policy_graph_latest(self, materialized_by="weekly"):
+        """Safety net: agents/<dir>/policy-graph/latest/ follows every agent's ACTIVE version of
+        this trader's config. Activations refresh it right after they commit; this pass also
+        catches in-place memory edits and the weekly loop's other-config passes. Best effort —
+        never breaks the caller."""
+        try:
+            from prompt_manager import refresh_latest_policy_graph
+            refresh_latest_policy_graph(get_current_config_hash(), materialized_by=materialized_by)
+        except Exception as e:
+            logger.warning(f"⚠️  Policy graph latest/ sync skipped: {e}")
+
     def scheduled_feedback_job(self):
         """Scheduled job for feedback agent + prompt-version outcome backfill"""
         try:
@@ -622,6 +635,7 @@ class DAITraderOrchestrator:
                 # Right after feedback: measure outcomes of any versions whose
                 # windows have matured since last week (feeds the critic scorecard).
                 self.run_outcome_backfill()
+                self.sync_policy_graph_latest("weekly")
                 logger.info("✅ Scheduled feedback job completed successfully")
             else:
                 logger.info("Skipping feedback job - outside of scheduled time")
@@ -813,6 +827,7 @@ class DAITraderOrchestrator:
     def run(self):
         """Main run loop"""
         logger.info("Starting D-AI-Trader automation system")
+        self.sync_policy_graph_latest("startup")
         self.setup_schedule()
         
         # Get cadence for display
@@ -857,15 +872,15 @@ class DAITraderOrchestrator:
         logger.info("   9:30:05 AM ET (6:30 AM PT) - Execute opening trades (5 sec after bell)")
         logger.info("")
         logger.info(f"📈 INTRADAY TRADING CYCLE:")
-        logger.info(f"   Every {cadence_minutes} minutes from 9:35 AM - 4:00 PM ET")
+        logger.info(f"   Every {cadence_minutes} minutes after the 9:30 AM ET bell, until 5:25 PM ET (weekdays)")
         if cadence_minutes <= 15:
             cycles_per_day = int(390 / cadence_minutes) + 1  # +1 for opening bell
             logger.info(f"   ⚡ AGGRESSIVE MODE: Up to {cycles_per_day} trades/day!")
         logger.info("")
-        logger.info("📊 END OF DAY:")
-        logger.info("   4:30 PM ET - Performance feedback & strategy refinement")
+        logger.info("📊 WEEKLY:")
+        logger.info("   Thursday 8:30 PM ET - Performance feedback & strategy refinement")
         logger.info("")
-        logger.info("⛔ AFTER HOURS:")
+        logger.info("⛔ AFTER HOURS (4:00 PM - 5:25 PM ET):")
         logger.info("   Decisions recorded but marked 'MARKET CLOSED' (no execution)")
         logger.info("")
         logger.info("="*60)

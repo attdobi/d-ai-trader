@@ -23,7 +23,9 @@ A new config's v0 is seeded from one of the two tracked folders: `DAI_POLICY_SEE
 compiles `latest/` into the v0 row (`policy_graph/seed.py`; rows carry `created_by = seed_latest`
 so later startups never re-sync them to the defaults). The choice applies only while the config
 has no prompt rows. Git tracks only `baseline/` and `latest/` (`.gitignore`); `latest/` is refreshed whenever the
-active row is materialized (`store.sync_latest`, volatile manifest keys scrubbed) so the repo
+active row is materialized (`store.sync_latest`, volatile manifest keys scrubbed) — every Decider cycle, and
+for every agent right after an activation commits, at trader startup and after the Thursday job
+(`service.sync_active_latest` via `prompt_manager.refresh_latest_policy_graph`) — so the repo
 always carries the current policy as a graph without the per-version churn. Push the per-config
 history deliberately if you ever want it (`git add -f agents/*/policy-graph/<hash>`).
 

@@ -16,6 +16,8 @@ Nothing here is imported by `dashboard_server.py`, `d_ai_trader.py`, `init_datab
 | `docs/march-2026/` | The March 2026 refactor plan, split plan, backlog, handoff and the X1/X2 work logs, plus the `d-ai-trader-refactor/` notes | Planning notes for work that has shipped |
 | `legacy/` | `prompts/` (the gpt-pro and standard prompt profiles), `tests/test_prompt_loading.py`, the July 2025 copies from `backups/`, and the October 2025 template backup | No code reads `DAI_PROMPT_PROFILE` any more, so the profiles and their tests were dead. Those were the 9 tests that had been failing and deselected. |
 
+`scripts/fix_constraints_only.py` joined them later the same day. Its `DROP DEFAULT` on `config_hash` had never been applied, so `init_database.py` now runs it as an idempotent migration on every start (`holdings`, `summaries` and `trade_decisions`, Postgres only).
+
 ## Running something from here
 
 Scripts here import modules from the repo root, so run them from the root with the root on the path:
@@ -33,5 +35,4 @@ These looked unused to one review but stay at the root as hand-run operator tool
 - `check_order_status.py`, `effective_funds_probe.py` and `verify_schwab_token.py`, which are read-only Schwab diagnostics.
 - `reconcile_execution_status.py`, which reconciles decisions against 60 days of Schwab orders. It writes its rollback copies to `backups/`.
 - `start_schwab_live_view.sh` with `run_schwab_streaming.py` and `schwab_streaming.py`, the read-only dashboard launcher.
-- `fix_constraints_only.py`. Its `DROP DEFAULT` on `config_hash` was never applied, so the old `'default'` column default is still on `holdings`, `summaries` and `trade_decisions`.
 - `backfill_version_outcomes.py`, which the Thursday feedback job imports.

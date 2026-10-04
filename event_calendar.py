@@ -26,11 +26,14 @@ The thresholds the score encodes mirror the EVENT GATE guideline in the Decider'
 Calendars: FOMC 2026–2027 (federalreserve.gov), CPI and Employment Situation 2026 (bls.gov), NYSE
 holidays 2026–2027. `DAI_EVENT_CALENDAR_FILE` may point to a JSON file that adds dates:
 {"fomc": [...], "cpi": [...], "jobs": [...], "holidays": [...], "other": [{"date": "...", "label": "..."}]}.
+When the next 45 days run past the last known CPI or jobs date, `calendar_coverage` adds a CALENDAR GAP
+line to the block, the dashboard payload and the log (once a day) — it never invents dates.
 
 Public API:
     build_event_context(holdings, watchlist, regime=None, now_et=None, lookup_earnings=True, engine=None) -> dict
     format_event_calendar(ctx) -> str                  # prompt-ready block ('' when disabled)
     macro_statuses(today, now_time=None) -> dict       # FOMC / CPI / jobs status for any date
+    calendar_coverage(today, horizon_days=45) -> dict  # CPI / jobs calendar gap warning (or None)
     score_event_risk(regime, statuses, holdings_earnings) -> (score, level, parts)
     ensure_tables(engine) / record_snapshot(engine, config_hash, run_id, ctx) / latest_snapshot(engine, config_hash)
     event_risk_payload(engine, config_hash, days, regime_for, holdings) -> dict   # dashboard series
@@ -250,6 +253,39 @@ def macro_statuses(today: date, now_time: Optional[dtime] = None) -> dict:
             continue
         out["other"].append(_status("OTHER", label, [d], today, now_time, PRINT_RELEASE_ET, PRINT_WINDOW_SESSIONS))
     return out
+
+
+# ----------------------------------------------------------------------------- coverage
+COVERAGE_HORIZON_DAYS = 45        # warn this far ahead of the last known monthly print
+_COVERAGE_KINDS = (("cpi", "CPI", cpi_dates), ("jobs", "jobs", jobs_dates))
+_GAP_LOGGED = {"day": None}
+
+
+def calendar_coverage(today: date, horizon_days: int = COVERAGE_HORIZON_DAYS) -> dict:
+    """Do the CPI / jobs calendars (built-in + DAI_EVENT_CALENDAR_FILE) reach `horizon_days` ahead?
+    BLS publishes the next year's schedule late in the year, so the built-in tables run out; past
+    the last known date a print reads as not_in_calendar. This only reports the gap — it never
+    invents a date. {'horizon_end', 'gaps': [{kind, label, last}], 'warning': str | None}."""
+    horizon_end = today + timedelta(days=int(horizon_days))
+    gaps = []
+    for kind, label, source in _COVERAGE_KINDS:
+        ds = source()
+        last = ds[-1] if ds else None
+        if last is None or last < horizon_end:
+            gaps.append({"kind": kind, "label": label, "last": _iso(last)})
+    warning = None
+    if gaps:
+        lasts = [g["last"] for g in gaps if g["last"]]
+        after = f" after {max(lasts)}" if lasts else ""
+        warning = (f"CALENDAR GAP: no {' or '.join(g['label'] for g in gaps)} dates{after} — add them via "
+                   f"DAI_EVENT_CALENDAR_FILE")
+    return {"horizon_end": horizon_end.isoformat(), "gaps": gaps, "warning": warning}
+
+
+def _log_gap_once(today: date, coverage: dict) -> None:
+    if coverage.get("warning") and _GAP_LOGGED["day"] != today:
+        _GAP_LOGGED["day"] = today
+        logger.warning("event calendar: %s", coverage["warning"])
 
 
 def macro_window(statuses: dict) -> tuple:
@@ -526,6 +562,12 @@ def build_event_context(holdings=None, watchlist=None, regime: Optional[str] = N
     hold_rows = _earnings_rows(holdings or [], today, engine, lookup_earnings, seen)
     watch_rows = _earnings_rows(watchlist or [], today, engine, lookup_earnings, seen)
     score, level, parts = score_event_risk(regime, statuses, hold_rows)
+    try:
+        coverage = calendar_coverage(today)
+        _log_gap_once(today, coverage)
+    except Exception as exc:     # noqa: BLE001 — the check is advisory; the block stays as it was
+        logger.info("calendar coverage check failed: %s", exc)
+        coverage = {"horizon_end": None, "gaps": [], "warning": None}
     ctx = {
         "today": today.isoformat(), "weekday": today.strftime("%a"), "time_et": now_et.strftime("%H:%M"),
         "session_state": session_state(now_et), "regime": (regime or "").upper() or None,
@@ -533,6 +575,7 @@ def build_event_context(holdings=None, watchlist=None, regime: Optional[str] = N
         "holdings_earnings": hold_rows, "watchlist_earnings": watch_rows,
         "risk_score": score, "risk_level": level, "score_parts": parts,
         "allowance": _allowance(regime, in_window, reason, hold_rows),
+        "calendar_gap": coverage,
     }
     ctx["block"] = format_event_calendar(ctx)
     return ctx
@@ -597,6 +640,9 @@ def format_event_calendar(ctx: Optional[dict]) -> str:
         f"# ALLOWANCE THIS CYCLE: {ctx.get('regime') or 'regime n/a'}; new BUYs → {allow.get('buys', '')}; "
         f"holdings reporting within 2 sessions: {allow.get('holdings_reporting_within_2', 'none')}",
     ]
+    gap = (ctx.get("calendar_gap") or {}).get("warning")
+    if gap:     # right under MACRO: past the last known date a print reads not_in_calendar
+        lines.insert(3, f"# {gap} (not_in_calendar = date unknown, not no print)")
     return "\n".join(lines)
 
 
@@ -792,6 +838,7 @@ def event_risk_payload(engine, config_hash: str, days: int, regime_for: Callable
         "series": series, "projection": projection, "events": events,
         "trades": _trades_in_window(engine, config_hash, start),
         "live": {k: v for k, v in (live or {}).items() if k not in ("block",)},
+        "calendar_gap": (live or {}).get("calendar_gap") or calendar_coverage(today),
         "snapshots_recorded": sum(v["n"] for v in snaps.values()),
         "score_legend": {"regime_base": REGIME_BASE, "fomc": FOMC_POINTS, "print": PRINT_POINTS,
                          "earnings": EARNINGS_POINTS, "levels": [n for _, n in LEVELS]},

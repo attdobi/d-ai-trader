@@ -248,6 +248,7 @@
     </div>
   </div>
   <div id="eventStats" class="bench-stats"></div>
+  <div id="eventCalendarGap" class="event-calendar-gap" role="note" hidden></div>
   <div class="chart-canvas-box bench-panel"><canvas id="eventRiskChart"></canvas></div>
   <div id="eventFootnote" class="bench-footnote"></div>
 </div>
@@ -281,6 +282,11 @@
 .bench-chip .v.pos { color: #29d697; }
 .bench-chip .v.neg { color: #ff5f73; }
 .bench-footnote { color: #7f8ca6; font-size: 0.75em; margin-top: 8px; line-height: 1.5; }
+.event-calendar-gap {
+  margin: 0 0 8px; padding: 6px 10px; border-left: 2px solid #fadb5f; border-radius: 0 8px 8px 0;
+  background: rgba(250,219,95,0.07); color: #f2d67a; font-size: 0.8em; line-height: 1.45;
+}
+.event-calendar-gap[hidden] { display: none; }
 </style>
 {% endblock %}
 

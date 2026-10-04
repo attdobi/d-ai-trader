@@ -460,6 +460,29 @@ def ensure_materialized(engine, config_hash: str, agent_type: str, version: int,
     return _ensure(ctx, agent_type, row, materialized_by=materialized_by, force=force)
 
 
+def sync_active_latest(engine, config_hash: str, *, repo_root, is_margin_account: bool, agent_types=None,
+                       materialized_by: str = "activation") -> dict:
+    """Materialize each agent's ACTIVE version so `agents/<dir>/policy-graph/latest/` follows activation
+    (the Decider re-materializes itself every cycle; the other agents only on a tab read). Returns
+    {agent_type: latest-result | None (no active row) | "error: …"} — one agent's failure never stops
+    the others. Run it after the activating transaction commits: it reads the rows through `engine`, so
+    inside an open transaction it would still see the previously active version."""
+    ctx = _Ctx(engine, config_hash, repo_root, is_margin_account)
+    out = {}
+    for agent_type in (agent_types or list(AGENT_PREFIX)):
+        try:
+            _check_agent(agent_type)
+            active = ctx.current_version(agent_type)
+            if active is None:
+                out[agent_type] = None
+                continue
+            res = _ensure(ctx, agent_type, ctx.row(agent_type, active), materialized_by=materialized_by)
+            out[agent_type] = res.get("latest")
+        except Exception as exc:      # noqa: BLE001 — best effort, reported per agent
+            out[agent_type] = f"error: {type(exc).__name__}: {exc}"
+    return out
+
+
 def plan_action(ctx_or_engine, config_hash: str, agent_type: str, version: int, *, repo_root=None,
                 is_margin_account: bool = False) -> str:
     """What materialize would do, without writing: created | unchanged | replaced | rebuilt."""
@@ -1258,6 +1281,7 @@ def rebuild(engine, config_hash: str, agent_type="all", version="all", *, repo_r
 
 __all__ = [
     "NotFound", "BadRequest", "list_agents", "list_versions", "load_row", "ensure_materialized", "plan_action",
+    "sync_active_latest",
     "graph_payload", "node_payload", "diff_payload", "compiled_text", "bundle_text", "node_file", "rebuild",
     "ltm_rows", "activation_events", "reviews", "lineage_for", "row_sha256", "ATTRIBUTION_NOTE",
 ]

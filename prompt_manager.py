@@ -279,6 +279,41 @@ def _record_activation_event(conn, *, batch_id, config_hash, agent_type,
     })
 
 
+def refresh_latest_policy_graph(config_hash=None, agent_types=None, *, materialized_by="activation"):
+    """Best-effort: materialize each agent's ACTIVE version so the git-tracked
+    agents/<dir>/policy-graph/latest/ follows activation (the Decider
+    re-materializes itself every cycle; the other agents used to lag until
+    someone opened the Policy Graph tab).
+
+    Call it AFTER the activating transaction commits — never inside it: the
+    materialization reads rows through its own connection, so inside an open
+    transaction it would still see the previously active version. Never raises;
+    one log line when something was written or failed.
+    """
+    try:
+        from pathlib import Path
+        import config as _config
+        from policy_graph import service as _pg_service
+        from policy_graph.model import AGENT_PREFIX as _PG_AGENTS
+        cfg = config_hash or _config.get_current_config_hash()
+        agents = None
+        if agent_types:      # only agents the policy graph knows; a stray agent_type is not an error
+            agents = [a for a in dict.fromkeys(_canonical_agent_type(a) for a in agent_types) if a in _PG_AGENTS]
+            if not agents:
+                return {}
+        result = _pg_service.sync_active_latest(
+            engine, cfg, repo_root=Path(__file__).resolve().parent,
+            is_margin_account=bool(getattr(_config, "IS_MARGIN_ACCOUNT", False)),
+            agent_types=agents, materialized_by=materialized_by)
+        notes = [f"{a}: {r}" for a, r in result.items() if r and r != "unchanged"]
+        if notes:
+            print(f"🕸️  Policy graph latest/ ({materialized_by}): {'; '.join(notes)}")
+        return result
+    except Exception as exc:
+        print(f"⚠️ Policy graph latest/ refresh skipped: {exc}")
+        return {}
+
+
 def set_active_prompt_version(conn, agent_type, config_hash, version, *,
                               action, actor="system", reason=None, batch_id=None):
     """The single write path for switching which prompt version is active.
@@ -288,6 +323,10 @@ def set_active_prompt_version(conn, agent_type, config_hash, version, *,
     prompt_activation_events so it can be audited and undone. Related
     changes (e.g. one reset click covering several agents) should share a
     batch_id so undo reverts them together.
+
+    Runs inside the caller's transaction, so it cannot refresh the policy
+    graph itself: once that transaction commits, the caller runs
+    refresh_latest_policy_graph(config_hash, [agent_type]).
 
     Returns {"agent_type", "from_version", "to_version", "changed", "batch_id"}.
     Raises ValueError if the target version row doesn't exist.
@@ -352,7 +391,11 @@ def undo_last_prompt_activation(config_hash, *, actor="dashboard", conn=None):
     """
     if conn is None:
         with engine.begin() as _conn:
-            return undo_last_prompt_activation(config_hash, actor=actor, conn=_conn)
+            result = undo_last_prompt_activation(config_hash, actor=actor, conn=_conn)
+        changed = [r["agent_type"] for r in (result.get("reverted") or []) if r.get("changed")]
+        if changed:     # committed — now latest/ can follow
+            refresh_latest_policy_graph(config_hash, changed, materialized_by="undo")
+        return result
 
     last = conn.execute(text("""
         SELECT batch_id, action
@@ -509,4 +552,8 @@ def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, d
             conn, agent_type, config_hash, target_version,
             action="save", actor=created_by, reason=description,
         )
-        return prompt_id
+
+    # Committed: let agents/<dir>/policy-graph/latest/ follow the new active
+    # version (an overwrite of the same version number counts too — its bytes moved).
+    refresh_latest_policy_graph(config_hash, [agent_type], materialized_by="save")
+    return prompt_id

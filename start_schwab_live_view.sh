@@ -108,7 +108,6 @@ export DAI_SCHWAB_LIVE_VIEW=1
 export DAI_SCHWAB_READONLY=1
 export DAI_DISABLE_AUTOMATION=1
 export DAI_GPT_MODEL="${DAI_GPT_MODEL:-gpt-4o}"
-export DAI_DISABLE_UC="${DAI_DISABLE_UC:-1}"
 export CURRENT_CONFIG_HASH="${CURRENT_CONFIG_HASH:-SCHWAB_LIVE_VIEW}"
 # Ensure trading mode is lower-case for downstream imports
 export TRADING_MODE="$(echo "${TRADING_MODE}" | tr '[:upper:]' '[:lower:]')"

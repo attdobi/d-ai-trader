@@ -975,48 +975,41 @@ class TradeOutcomeTracker:
     def _get_prompt_review_lessons(self, limit=8):
         """Recent prompt-change reviews as compact lesson lines: the critic's
         verdict/objection and the human's RLHF response (agree/override), plus
-        realized outcome when measured. Empty string when none exist."""
+        realized outcome when measured. Empty string when none exist.
+
+        Balanced window (shared/review_window.py): up to 5 newest human-labeled
+        rows + up to 3 newest unlabeled genuine critic verdicts, filled to
+        `limit` by recency, newest-first — human-first ordering let labeled rows
+        fill every slot, so an unclicked critic verdict never reached this
+        prompt. Outage rows (confidence 0, non-auto) carry no judgment and are
+        dropped; heuristic auto-verdicts stay, labeled as such."""
         try:
+            from shared.review_window import fetch_review_window
             config_hash = get_current_config_hash()
             with engine.connect() as conn:
-                # Human-labeled rows first so unreviewed batches can't evict
-                # the RLHF signal; drop outage rows (confidence 0, non-auto) —
-                # they carry no judgment at all.
-                rows = conn.execute(text("""
-                    SELECT created_at::date AS review_date, agent_type, from_version,
-                           critic_verdict, COALESCE(critic_auto, FALSE) AS critic_auto,
-                           ROUND(critic_confidence::numeric, 2) AS conf,
-                           LEFT(COALESCE(critic_reason, ''), 250) AS critic_reason,
-                           human_verdict, human_agrees_critic, human_sections,
-                           realized_winrate_delta
-                    FROM prompt_change_reviews
-                    WHERE config_hash = :h
-                      AND (COALESCE(critic_confidence, 0) > 0
-                           OR COALESCE(critic_auto, FALSE))
-                    ORDER BY (human_verdict IS NOT NULL) DESC, created_at DESC
-                    LIMIT :lim
-                """), {"h": config_hash, "lim": int(limit)}).fetchall()
+                rows = fetch_review_window(conn, config_hash, reason_chars=250, limit=limit)
             lines = []
             for r in rows:
-                human = r.human_verdict or "pending"
-                if r.human_verdict == "partial" and r.human_sections:
-                    shipped = ", ".join((r.human_sections or {}).get("approved", []))
+                human = r["human_verdict"] or "pending"
+                if r["human_verdict"] == "partial" and r["human_sections"]:
+                    sections = r["human_sections"] if isinstance(r["human_sections"], dict) else {}
+                    shipped = ", ".join(sections.get("approved", []))
                     human = f"partial (shipped only: {shipped or 'none'})"
-                elif r.human_agrees_critic is True:
+                elif r["human_agrees_critic"] is True:
                     human += " (agreed with critic)"
-                elif r.human_agrees_critic is False:
+                elif r["human_agrees_critic"] is False:
                     human += " (OVERRODE critic)"
-                verdict = r.critic_verdict
-                if r.critic_auto:
+                verdict = r["critic_verdict"]
+                if r["critic_auto"]:
                     verdict = f"auto-{verdict} (heuristic, no LLM judgment)"
                 else:
-                    verdict = f"{verdict}({r.conf})"
+                    verdict = f"{verdict}({r['critic_confidence']})"
                 outcome = ""
-                if r.realized_winrate_delta is not None:
-                    outcome = f" realized_winrate_delta={float(r.realized_winrate_delta):+.3f}"
+                if r["realized_winrate_delta"] is not None:
+                    outcome = f" realized_winrate_delta={float(r['realized_winrate_delta']):+.3f}"
                 lines.append(
-                    f"- {r.review_date} {r.agent_type} v{r.from_version}: "
-                    f"critic={verdict} human={human}{outcome} — {r.critic_reason}"
+                    f"- {r['review_date']} {r['agent_type']} v{r['from_version']}: "
+                    f"critic={verdict} human={human}{outcome} — {r['critic_reason']}"
                 )
             return "\n".join(lines)
         except Exception as exc:

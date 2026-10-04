@@ -40,6 +40,7 @@ from prompt_manager import (
     set_active_prompt_version,
     undo_last_prompt_activation,
     get_prompt_activation_history,
+    refresh_latest_policy_graph,
 )
 from decider_agent import (
     extract_companies_from_summaries,
@@ -70,6 +71,7 @@ from d_ai_trader import (
 from pathlib import Path
 from policy_graph.routes import register_policy_graph_routes
 from policy_graph.prompts import CRITIC_DOCTRINE, CRITIC_OUTPUT_CANDIDATE, GATE_STYLE
+from shared.review_window import fetch_review_window
 
 # Configuration
 REFRESH_INTERVAL_MINUTES = 10
@@ -111,7 +113,7 @@ def _policy_graph_context(config_hash, agent_type):
         'decider_supplied_fields': _generation_supplied_fields(),
         'trade_level_evidence': _fetch_trade_evidence(config_hash),
         'past_review_verdicts': _fetch_prompt_review_history(config_hash, agent_type, limit=8),
-        'your_recent_verdicts_and_human_response': _fetch_prompt_review_history(config_hash, limit=10, genuine_only=True),
+        'your_recent_verdicts_and_human_response': _fetch_critic_track_record(config_hash),
     }
 
 
@@ -1347,6 +1349,7 @@ def dashboard():
                     "allowance": (_live.get("allowance") or {}).get("buys", ""),
                     "as_of": (f"decider snapshot {str(_snap.get('session_date'))} {str(_snap.get('as_of'))[11:16]}"
                               if _snap else "calendar only — no decider snapshot yet"),
+                    "calendar_gap": (_live.get("calendar_gap") or {}).get("warning"),
                 }
         except Exception as _ev_exc:
             print(f"⚠️  Event risk card skipped: {_ev_exc}")
@@ -2037,6 +2040,9 @@ def api_reset_prompts_to_baseline():
                     ))
                 except ValueError as exc:
                     changes.append({"agent_type": agent, "error": str(exc), "changed": False})
+        changed_agents = [c["agent_type"] for c in changes if c.get("changed")]
+        if changed_agents:      # committed — policy-graph latest/ follows (best effort, never raises)
+            refresh_latest_policy_graph(config_hash, changed_agents, materialized_by="reset_v0")
 
         return jsonify({
             "status": "success",
@@ -2932,7 +2938,9 @@ def reset_prompts():
         except Exception as e:
             print(f"❌ Main prompt reset failed: {e}")
             return jsonify({'error': f'Failed to reset main prompts: {str(e)}'}), 500
-        
+        # committed — policy-graph latest/ follows (best effort, never raises)
+        refresh_latest_policy_graph(config_hash, list(prompt_info), materialized_by="reset_v0")
+
         # Reset feedback system in separate transaction to avoid conflicts
         try:
             with engine.begin() as conn:
@@ -3083,6 +3091,8 @@ def reset_portfolio():
                             action="reset_portfolio", actor="dashboard",
                             reason="Portfolio reset to simulation baseline", batch_id=batch_id,
                         )
+            # committed — policy-graph latest/ follows (best effort, never raises)
+            refresh_latest_policy_graph(config_hash, agent_types, materialized_by="reset_portfolio")
 
         if schwab_snapshot:
             positions = schwab_snapshot.get('positions', [])
@@ -3812,43 +3822,38 @@ def _fetch_trade_evidence(config_hash, days=30, cap=40):
         return {"total_closed_trades": 0, "coverage": "unavailable", "worst": [], "best": []}
 
 
-def _fetch_prompt_review_history(config_hash, agent_type=None, limit=8, genuine_only=False):
+def _fetch_prompt_review_history(config_hash, agent_type=None, limit=8, genuine_only=False,
+                                 human_quota=5, critic_quota=3):
     """Recent prompt-change reviews — critic verdicts, the human's RLHF
     verdicts, and realized outcomes when measured. This is the signal the
     generation and feedback prompts learn from: WHY past candidates were
     rejected, and whether the human agreed with the critic.
 
-    Human-labeled rows are kept in the window ahead of pending ones, so a run
-    of unreviewed batches can never evict the actual RLHF signal.
-    genuine_only=True additionally drops heuristic auto-verdicts and
-    outage rows (confidence 0) — required for critic self-calibration, where
-    a non-judgment must never count as a judgment."""
+    Balanced window (shared/review_window.py): up to `human_quota` newest
+    human-labeled rows + up to `critic_quota` newest unlabeled GENUINE critic
+    verdicts, filled to `limit` by recency, newest-first. Human-first ordering
+    used to fill every slot with labeled rows, so an unclicked critic verdict
+    never reached the next prompt. Outage rows (confidence 0, not auto) carry
+    no judgment and are always dropped; genuine_only=True also drops heuristic
+    auto-verdicts — required for critic self-calibration, where a non-judgment
+    must never count as a judgment."""
     try:
-        params = {"h": config_hash, "lim": int(limit)}
-        clauses = ""
-        if agent_type:
-            clauses += " AND agent_type = :a"
-            params["a"] = agent_type
-        if genuine_only:
-            clauses += (" AND COALESCE(critic_auto, FALSE) = FALSE"
-                        " AND COALESCE(critic_confidence, 0) > 0")
         with engine.connect() as conn:
-            rows = conn.execute(text(f"""
-                SELECT created_at::date AS review_date, agent_type,
-                       from_version, to_version, critic_verdict, critic_auto,
-                       ROUND(critic_confidence::numeric, 2) AS critic_confidence,
-                       LEFT(COALESCE(critic_reason, ''), 300) AS critic_reason,
-                       human_verdict, human_agrees_critic, human_sections,
-                       realized_winrate_delta, realized_pnl
-                FROM prompt_change_reviews
-                WHERE config_hash = :h {clauses}
-                ORDER BY (human_verdict IS NOT NULL) DESC, created_at DESC
-                LIMIT :lim
-            """), params).fetchall()
-        return [dict(r._mapping) for r in rows]
+            return fetch_review_window(
+                conn, config_hash, agent_type=agent_type, genuine_only=genuine_only,
+                reason_chars=300, limit=limit, human_quota=human_quota, critic_quota=critic_quota)
     except Exception as exc:
         print(f"⚠️ Could not fetch prompt review history: {exc}")
         return []
+
+
+def _fetch_critic_track_record(config_hash, limit=10):
+    """The critic's own genuine verdicts WITH the human's response, for
+    self-calibration (CALIBRATE in the critic doctrine). Human-labeled rows fill
+    the window first — an unlabeled verdict has no response to calibrate
+    against — and pending ones only fill a short window."""
+    return _fetch_prompt_review_history(config_hash, limit=limit, genuine_only=True,
+                                        human_quota=limit, critic_quota=0)
 
 
 def _generation_supplied_fields():
@@ -3908,7 +3913,7 @@ def _critique_candidate(candidate, feedback_summary=None):
     trade_evidence = _fetch_trade_evidence(config_hash)
     # genuine_only: heuristic auto-rejects and outage rows are NOT judgments —
     # feeding them here taught the critic to "calibrate" on its own downtime.
-    own_track_record = _fetch_prompt_review_history(config_hash, limit=10, genuine_only=True)
+    own_track_record = _fetch_critic_track_record(config_hash)
     try:
         from feedback_diagnostics import SUPPLIED_DECIDER_FIELDS as _supplied
     except Exception:
@@ -4757,6 +4762,8 @@ def apply_prompt_evolution_candidate():
                 action="apply_candidate", actor="prompt_lab",
                 reason=description or None,
             )
+        # committed — policy-graph latest/ follows (best effort, never raises)
+        refresh_latest_policy_graph(config_hash, [agent_type], materialized_by="prompt_lab")
 
         return jsonify({
             'success': True,
