@@ -242,7 +242,7 @@ One trading cycle. The four cycle agents (Summarizer, Company extraction, Decide
 | `decider_agent.py` | Decision engine; also hosts company extraction, the momentum recap and execution sizing |
 | `contrarian_screener.py` | INDEX REGIME line and the pull-back watchlist (yfinance, no LLM) |
 | `event_calendar.py` | FOMC / CPI / jobs calendars, NYSE sessions, earnings dates, event-risk score, per-cycle snapshots |
-| `order_sizing.py` | Whole-share sizing: a sub-share ticket rounds up to one share within the MAX rail and settled funds |
+| `order_sizing.py` | Whole-share sizing (a sub-share ticket rounds up to one share within the MAX rail, settled funds and the position caps), the position / total-investment caps, and the per-cycle sell/buy split |
 | `decision_validator.py` | Financial guardrails against hallucinated trades |
 | `decider_memory.py` / `memory_compress.py` | Decider long-term memory rows; weekly diary compression |
 | `feedback_agent.py` / `feedback_diagnostics.py` | Weekly outcome analysis; population diagnostics (regime, extension, re-entry, kill kind, event windows) |
@@ -252,7 +252,7 @@ One trading cycle. The four cycle agents (Summarizer, Company extraction, Decide
 | `policy_graph/` | The guideline graph: decompose / compile / store, assembly (routing), citations, proposals, operator versions, decision paths, world factors |
 | `dashboard_server.py` | Flask web UI and API |
 | `trading_interface.py` / `schwab_client.py` / `schwab_ledger.py` | Live execution layer, Schwab API, shadow ledger of effective funds |
-| `safety_checks.py` | Position and total-investment caps (see [Guardrails](#guardrails) for where they apply) |
+| `safety_checks.py` | Safety manager for `trading_interface.execute_trade_decisions`; its cap rule (`order_sizing.resolve_cap`) is the one the scheduled buy path enforces |
 | `init_database.py` / `initialize_prompts.py` | Schema setup and v0 prompts |
 | `config.py` | Env loading, models, reasoning levels, database setup |
 | `shared/` | Market clock, run context, ticker normalization, news context for decisions |
@@ -308,11 +308,11 @@ DAILY_TICKET_CAP=6                  # max sells executed per cycle (live)
 DAILY_BUY_CAP=3                     # max buys executed per cycle (live)
 MIN_ENTRY_SPACING_MIN=45            # parsed, but no current template shows it and nothing enforces it
 REENTRY_COOLDOWN_MIN=240            # parsed, but no current template shows it and nothing enforces it
-DAI_ONE_TRADE_MODE=0                # 1 = pilot: at most one buy per cycle and NO sells execute
+DAI_ONE_TRADE_MODE=0                # 1 = pilot: at most one buy per cycle; sells execute normally
 DAI_FORCE_PROFIT_TAKING=1           # force-sell holdings up at least DAI_FORCE_PROFIT_MIN_PCT
 DAI_FORCE_PROFIT_MIN_PCT=3.0
 
-# Position caps (safety_checks.py; see Guardrails for where they apply)
+# Position caps, enforced on every buy (order_sizing.py; market value after the buy, existing position counted)
 MAX_POSITION_VALUE=2000
 MAX_POSITION_FRACTION=0             # combined with MAX_POSITION_VALUE as the larger of the two
 MAX_TOTAL_INVESTMENT=10000
@@ -403,7 +403,8 @@ The Decider's strategy directives hold twelve numbered gates plus the weekly rem
 ### Sizing and execution
 
 - **Ticket rails.** The Decider sees MIN / TYPICAL / MAX buy amounts (`DAI_*_BUY_*`), and the validator rejects buys outside MIN to MAX. "Half size" is the Decider's call within those rails.
-- **Whole shares only.** A ticket smaller than one share rounds up to exactly one share when that share is within `DAI_MAX_BUY_AMOUNT` and within settled cash minus `MIN_CASH_BUFFER`. Otherwise it is skipped with the bound that blocked it.
+- **Whole shares only.** A ticket smaller than one share rounds up to exactly one share when that share is within `DAI_MAX_BUY_AMOUNT`, within settled cash minus `MIN_CASH_BUFFER`, and within the room left under the position and total-investment caps. Otherwise it is skipped with the bound that blocked it.
+- **Position caps.** Every buy is cut to fit `MAX_POSITION_*` (this name's market value after the buy) and `MAX_TOTAL_INVESTMENT*` (all positions after the buy); see [Guardrails](#guardrails).
 - **Cash account.** Buys use settled funds only (Schwab settled cash minus unsettled). Sells run first, then a 30-second wait, then buys.
 - **Orders** are market orders, placed only during regular hours. Outside them, decisions are recorded as "MARKET CLOSED".
 
@@ -471,7 +472,7 @@ Seven tabs:
 ### Pilot, then full automation
 
 ```bash
-# pilot: at most one buy per cycle; NO sells execute (including profit-taking and kill breaches)
+# pilot: at most one buy per cycle; sells (profit-taking, kill breaches) execute normally under DAILY_TICKET_CAP
 DAI_ONE_TRADE_MODE=1 ./start_d_ai_trader.sh -p 8080 -t real_world -c 120 -m gpt-5.6-terra -H <hash>
 
 # full automation (needs DAI_ONE_TRADE_MODE=0; DAILY_BUY_CAP / DAILY_TICKET_CAP bound each cycle)
@@ -508,10 +509,10 @@ Schwab refresh tokens expire after about 7 days. On `refresh_token_authenticatio
 - **Decision validator** — cannot sell what you don't hold, cannot buy what you already hold, buy size within the MIN to MAX rails, valid tickers.
 - **Profit-taking guardrail** — force-sells a holding up at least `DAI_FORCE_PROFIT_MIN_PCT` (on by default).
 - **Settled funds, buffer and whole shares** — see [Sizing and execution](#sizing-and-execution).
-- **Per-cycle caps (live)** — `DAILY_BUY_CAP` buys and `DAILY_TICKET_CAP` sells.
+- **Per-cycle caps (live)** — `DAILY_BUY_CAP` buys and `DAILY_TICKET_CAP` sells. Pilot mode (`DAI_ONE_TRADE_MODE=1`) lowers the buy cap to one and leaves sells alone.
 - **Mode and read-only flags** — orders are placed only in `real_world`; `DAI_SCHWAB_READONLY=1` blocks them.
 - **Market hours** — no execution outside 9:30–16:00 ET on weekdays.
-- **Safety manager** (`safety_checks.py`: `MAX_POSITION_*`, `MAX_TOTAL_INVESTMENT*`) runs only through `trading_interface.execute_trade_decisions`, which the scheduled trader does not call. On the scheduled path the binding limits are the rails, settled funds, the buffer and the per-cycle caps.
+- **Position and total-investment caps** (`MAX_POSITION_VALUE` / `MAX_POSITION_FRACTION`, `MAX_TOTAL_INVESTMENT` / `MAX_TOTAL_INVESTMENT_FRACTION`, each the larger of the floor and the fraction of account value) — enforced in `process_buy_decisions` for live and simulation: a buy is cut so the position's market value after the buy stays within the position cap (counting what is already held) and total invested stays within the total cap; buys earlier in the same cycle count. Account value is the Schwab snapshot already fetched this cycle in live mode, otherwise the holdings table. If the cap book cannot be built, buys size as before and the log says so in one line. `safety_checks.py` applies the same rule on the `trading_interface.execute_trade_decisions` path.
 
 ### Emergency stop
 
@@ -634,7 +635,9 @@ The router is thin and open: candidates, an `eligible()` capability filter, a de
 
 **Schwab token expired** — use **Refresh Schwab Token** on the dashboard or `schwab_manual_auth.py --save`, then restart.
 
-**A buy skipped for "no whole share"** — the allocation was below one share and one share exceeded the MAX rail or the settled funds behind the buffer. The skip reason names which.
+**A buy skipped for "no whole share"** — the allocation was below one share and one share exceeded the MAX rail, the settled funds behind the buffer, or the room left under the position / total-investment cap. The skip reason names which, with the dollar value.
+
+**A buy smaller than the model asked for** — the Trades tab's sizing note names the bound: `position cap $2,000` or `total investment cap $…` (market value after the buy, existing position counted), or `settled-funds guardrail`.
 
 ---
 
