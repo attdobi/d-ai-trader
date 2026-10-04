@@ -25,7 +25,21 @@ def isolated_policy_graph():
 
 
 @pytest.fixture
-def dashboard_server_module(monkeypatch, isolated_policy_graph):
+def isolated_cash_flows():
+    """cash_flows / cash_flow_routes imported under the stubs (stub sqlalchemy.text, stub flask) must
+    not leak into later tests: drop them before, restore the originals after."""
+    names = ("cash_flows", "cash_flow_routes")
+    before = {k: sys.modules[k] for k in names if k in sys.modules}
+    for k in names:
+        sys.modules.pop(k, None)
+    yield
+    for k in names:
+        sys.modules.pop(k, None)
+    sys.modules.update(before)
+
+
+@pytest.fixture
+def dashboard_server_module(monkeypatch, isolated_policy_graph, isolated_cash_flows):
     """Import dashboard_server with deterministic stub dependencies."""
 
     flask_stub = types.ModuleType("flask")
@@ -211,6 +225,20 @@ def test_dashboard_registers_policy_graph_routes(dashboard_server_module):
     assert "/api/policy-graph/paths" in paths
     assert "/api/policy-graph/proposals/<int:proposal_id>/apply" in paths
     assert "/api/policy-graph/proposals/<int:proposal_id>/reject" in paths
+
+
+def test_dashboard_registers_cash_flow_routes(dashboard_server_module, monkeypatch):
+    module, _decider_stub = dashboard_server_module
+    monkeypatch.delenv("DAI_SCHWAB_LIVE_VIEW", raising=False)
+
+    routes = {(r[0][0], tuple(r[1].get("methods") or ("GET",))) for r in module.app.routes if r[0]}
+    assert ("/api/cash-flows", ("GET",)) in routes
+    assert ("/api/cash-flows", ("POST",)) in routes
+    assert ("/api/cash-flows/<int:flow_id>", ("DELETE",)) in routes
+    assert ("/api/cash-flows/<int:flow_id>/exclude", ("POST",)) in routes
+    assert ("/api/cash-flows/sync", ("POST",)) in routes
+    # Simulation mode (the stub config): the Sync button reports unavailable instead of calling Schwab.
+    assert module._sync_cash_flows_from_schwab("test-config-hash")["status"] == "unavailable"
 
 
 def test_policy_graph_routes_import_alone_under_stubs(monkeypatch, isolated_policy_graph):

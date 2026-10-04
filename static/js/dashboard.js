@@ -175,6 +175,28 @@ const modelTransitionPlugin = {
 };
 
 Chart.register(modelTransitionPlugin);
+// Deposit / withdrawal markers (static/js/cash-flows.js) on every Dashboard chart that sets them.
+if (typeof transferMarkersPlugin !== 'undefined') Chart.register(transferMarkersPlugin);
+
+// Attach the counted transfers to a portfolio chart once /api/cash-flows has answered.
+function applyTransferMarkers(chartInstance, dates) {
+  if (!chartInstance || typeof loadCashFlows !== 'function') return;
+  chartInstance.$pointDates = dates;
+  loadCashFlows().then(payload => {
+    const live = [chart, performanceChart, breakdownChart].includes(chartInstance); // not destroyed meanwhile
+    if (!payload || !payload.flows || !live) return;
+    setTransferMarkers(chartInstance, payload.flows, dates);
+    chartInstance.draw();
+  });
+}
+
+function pointDate(ts) {
+  return typeof isoLocalDate === 'function' ? isoLocalDate(ts) : null;
+}
+
+function transferFooter(items) {
+  return typeof transferTooltipFooter === 'function' ? transferTooltipFooter(items) : [];
+}
 
 function renderChart(data, label = 'Portfolio Value') {
   const el = document.getElementById('historyChart');
@@ -228,7 +250,7 @@ function renderChart(data, label = 'Portfolio Value') {
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        tooltip: tooltipConfig,
+        tooltip: { ...tooltipConfig, callbacks: { ...tooltipConfig.callbacks, footer: transferFooter } },
         legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
         zoom: {
           zoom: {
@@ -271,6 +293,8 @@ function renderChart(data, label = 'Portfolio Value') {
   };
   chartConfig._modelTransitionAnnotations = transitionAnnotations;
   chart = new Chart(ctx, chartConfig);
+  // Transfers only mean something on the account-value series, not on a single ticker's history.
+  if (label === 'Portfolio Value') applyTransferMarkers(chart, data.map(row => pointDate(row.timestamp)));
 }
 
 function renderPerformanceChart(data) {
@@ -287,7 +311,7 @@ function renderPerformanceChart(data) {
       data: {
         labels,
         datasets: [{
-          label: 'Net Gain/Loss ($)',
+          label: data.some(row => row.flow_adjusted) ? 'Net Gain/Loss excl. transfers ($)' : 'Net Gain/Loss ($)',
           data: netGainLoss,
           borderColor: '#29d697',
           segment: {
@@ -321,7 +345,27 @@ function renderPerformanceChart(data) {
           }
         },
         plugins: {
-          tooltip: tooltipConfig,
+          tooltip: {
+            ...tooltipConfig,
+            callbacks: {
+              ...tooltipConfig.callbacks,
+              label: function(context) {
+                const row = data[context.dataIndex] || {};
+                const pct = Number(row.net_percentage_gain);
+                return ' ' + formatCurrency(context.parsed.y) + (Number.isFinite(pct) ? ` (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)` : '');
+              },
+              afterBody: function(items) {
+                const row = data[items[0].dataIndex] || {};
+                if (!row.flow_adjusted || !Number(row.cumulative_flows)) return [];
+                const cum = Number(row.cumulative_flows);
+                return [
+                  `Transfers to date: ${cum >= 0 ? '+' : '−'}${formatCurrency(Math.abs(cum))} (removed)`,
+                  `Unadjusted: ${formatCurrency(row.net_gain_loss_raw)} (${Number(row.net_percentage_gain_raw).toFixed(2)}%)`,
+                ];
+              },
+              footer: transferFooter,
+            }
+          },
           legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
           zoom: {
             zoom: {
@@ -349,6 +393,18 @@ function renderPerformanceChart(data) {
     };
     chartConfig._modelTransitionAnnotations = transitionAnnotations;
     performanceChart = new Chart(el, chartConfig);
+    applyTransferMarkers(performanceChart, data.map(row => pointDate(row.timestamp)));
+    const foot = document.getElementById('performanceFootnote');
+    const last = data[data.length - 1] || {};
+    if (foot && last.flow_adjusted) {
+      const cum = Number(last.cumulative_flows) || 0;
+      foot.textContent = cum
+        ? `Gain vs the first snapshot with ${cum >= 0 ? '+' : '−'}${formatCurrency(Math.abs(cum))} of net transfers removed ` +
+          `(unadjusted ${formatCurrency(last.net_gain_loss_raw)}). Each transfer is subtracted from the snapshot where it posted; % is Modified Dietz.`
+        : 'Gain vs the first snapshot; no external transfers in this period.';
+    } else if (foot && data.length && !last.flow_adjusted) {
+      foot.textContent = 'Transfer adjustment unavailable right now — this curve shows the unadjusted gain.';
+    }
   } catch (err) {
     el.style.display = 'flex';
     el.style.alignItems = 'center';
@@ -426,7 +482,7 @@ function renderBreakdownChart(data) {
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        tooltip: tooltipConfig,
+        tooltip: { ...tooltipConfig, callbacks: { ...tooltipConfig.callbacks, footer: transferFooter } },
         legend: { labels: { color: '#7f8ca6', usePointStyle: true } },
         zoom: {
           zoom: {
@@ -468,6 +524,7 @@ function renderBreakdownChart(data) {
   };
   chartConfig._modelTransitionAnnotations = transitionAnnotations;
   breakdownChart = new Chart(ctx, chartConfig);
+  applyTransferMarkers(breakdownChart, data.map(row => pointDate(row.timestamp)));
 }
 
 function loadChart(ticker = null) {
@@ -714,7 +771,238 @@ function resetAllChartZoom() {
   document.querySelector('[data-range="all"]')?.classList.add('active');
 }
 
+/* ========== Cash transfers card ==========
+ * Lists Schwab-synced and manual transfers, adds / deletes manual ones, excludes / re-includes
+ * Schwab ones and re-renders the headline Net Gain, the performance curve and the chart markers
+ * without a page reload (the server does all the math: /api/cash-flows).
+ */
+function cfQuery() {
+  const card = document.getElementById('netGainCard');
+  if (!card) return '';
+  const p = new URLSearchParams();
+  if (card.dataset.currentValue) p.set('current_value', card.dataset.currentValue);
+  if (card.dataset.baselineValue) p.set('baseline_value', card.dataset.baselineValue);
+  if (card.dataset.baselineAt) p.set('baseline_at', card.dataset.baselineAt);
+  return p.toString();
+}
+
+function cfSigned(amount) {
+  const a = Number(amount) || 0;
+  return `${a >= 0 ? '+' : '−'}${formatCurrency(Math.abs(a))}`;
+}
+
+function cfSetStatus(message, kind = '') {
+  const el = document.getElementById('cfStatus');
+  if (!el) return;
+  el.textContent = message || '';
+  el.className = `cf-status${kind ? ` ${kind}` : ''}`;
+}
+
+function cfChip(k, v, sub, cls = '') {
+  return `<div class="cf-chip"><div class="k">${escapeHtml(k)}</div><div class="v ${cls}">${escapeHtml(v)}</div>` +
+    (sub ? `<div class="s">${escapeHtml(sub)}</div>` : '') + '</div>';
+}
+
+function cfStatusBadge(f) {
+  if (f.excluded) return '<span class="badge badge-muted" title="Excluded by you: not subtracted from any gain">Excluded</span>';
+  if (f.duplicate_of != null) {
+    return `<span class="badge badge-muted" title="Within ±3 days and ±$0.01 of Schwab transfer #${f.duplicate_of}: counted once">Duplicate of #${f.duplicate_of}</span>`;
+  }
+  if (!f.in_gain_period) return '<span class="badge badge-muted" title="Dated before the gain baseline: already inside the starting value">Before baseline</span>';
+  return '<span class="badge badge-success" title="Subtracted from every gain figure">Counted</span>';
+}
+
+function renderNetGainHero(gain) {
+  const card = document.getElementById('netGainCard');
+  if (!card || !gain) return;
+  const valueEl = document.getElementById('netGainValue');
+  const pctEl = document.getElementById('netGainPct');
+  const noteEl = document.getElementById('netGainFlowNote');
+  if (valueEl) valueEl.textContent = `$${Number(gain.net_gain_loss).toFixed(2)}`;
+  if (pctEl) pctEl.textContent = `(${Number(gain.net_percentage_gain).toFixed(2)}%)`;
+  card.classList.toggle('gain', gain.net_gain_loss >= 0);
+  card.classList.toggle('loss', gain.net_gain_loss < 0);
+  if (noteEl) {
+    noteEl.innerHTML = gain.flow_count
+      ? `<br>Excl. ${escapeHtml(formatCurrency(Math.abs(gain.net_flows)))} net ${gain.net_flows >= 0 ? 'deposits' : 'withdrawals'} ` +
+        `(${gain.flow_count} transfer${gain.flow_count === 1 ? '' : 's'}) · unadjusted ` +
+        `$${Number(gain.net_gain_loss_raw).toFixed(2)} (${Number(gain.net_percentage_gain_raw).toFixed(2)}%)`
+      : '';
+  }
+}
+
+function renderCashFlowCard(payload) {
+  const body = document.getElementById('cfTableBody');
+  const totalsEl = document.getElementById('cfTotals');
+  if (!body || !totalsEl) return;
+  if (!payload || payload.error) {
+    body.innerHTML = `<tr><td colspan="6" class="cf-empty">Transfers unavailable${payload && payload.error ? `: ${escapeHtml(payload.error)}` : ''}.</td></tr>`;
+    return;
+  }
+  const since = (payload.totals || {}).since_baseline || {};
+  const all = (payload.totals || {}).all || {};
+  const baselineDate = payload.baseline && payload.baseline.date;
+  const chips = [
+    cfChip(`Net transfers since ${baselineDate || 'start'}`, cfSigned(since.net || 0),
+      `${since.count || 0} counted · in ${formatCurrency(since.deposits || 0)} · out ${formatCurrency(since.withdrawals || 0)}`,
+      (since.net || 0) >= 0 ? 'pos' : 'neg'),
+  ];
+  if (payload.gain) {
+    const g = payload.gain;
+    chips.push(cfChip('Net gain excl. transfers', `${g.net_gain_loss >= 0 ? '+' : '−'}${formatCurrency(Math.abs(g.net_gain_loss))}`,
+      `${g.net_percentage_gain >= 0 ? '+' : ''}${Number(g.net_percentage_gain).toFixed(2)}% Modified Dietz`, g.net_gain_loss >= 0 ? 'pos' : 'neg'));
+    chips.push(cfChip('Unadjusted gain', `${g.net_gain_loss_raw >= 0 ? '+' : '−'}${formatCurrency(Math.abs(g.net_gain_loss_raw))}`,
+      `${Number(g.net_percentage_gain_raw).toFixed(2)}% — counts deposits as profit`));
+    renderNetGainHero(g);
+  }
+  if ((all.net || 0) !== (since.net || 0)) {
+    chips.push(cfChip('All transfers on record', cfSigned(all.net || 0), `${all.count || 0} counted, incl. before baseline`));
+  }
+  if (all.excluded || all.duplicates) {
+    chips.push(cfChip('Not counted', `${(all.excluded || 0) + (all.duplicates || 0)}`,
+      `${all.excluded || 0} excluded · ${all.duplicates || 0} duplicate${all.duplicates === 1 ? '' : 's'}`));
+  }
+  totalsEl.innerHTML = chips.join('');
+
+  const flows = (payload.flows || []).slice().reverse(); // newest first
+  if (!flows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="cf-empty">No transfers recorded. Schwab deposits and withdrawals appear here after a sync; add any others above.</td></tr>';
+  } else {
+    body.innerHTML = flows.map(f => {
+      const manual = f.source === 'manual';
+      const counted = f.counted && f.in_gain_period;
+      const action = manual
+        ? `<button type="button" class="cf-btn danger" data-cf-action="delete" data-id="${f.id}" aria-label="Delete manual transfer ${escapeHtml(f.label)} dated ${escapeHtml(f.date)}">Delete</button>`
+        : `<button type="button" class="cf-btn" data-cf-action="exclude" data-id="${f.id}" data-excluded="${f.excluded ? 'false' : 'true'}"
+             aria-label="${f.excluded ? 'Include' : 'Exclude'} Schwab transfer ${escapeHtml(f.label)} dated ${escapeHtml(f.date)}">${f.excluded ? 'Include' : 'Exclude'}</button>`;
+      const note = f.note && f.note !== f.description ? `<small>${escapeHtml(f.note)}</small>` : '';
+      return `<tr class="${counted ? '' : 'cf-not-counted'}">
+        <td>${escapeHtml(f.date)}</td>
+        <td class="cf-amount ${f.amount >= 0 ? 'pos' : 'neg'}">${escapeHtml(cfSigned(f.amount))}</td>
+        <td>${manual ? '<span class="badge badge-warning">Manual</span>' : '<span class="badge badge-info">Schwab</span>'}</td>
+        <td class="cf-desc">${escapeHtml(f.description || (manual ? 'Manual entry' : ''))}${note}</td>
+        <td>${cfStatusBadge(f)}</td>
+        <td class="cf-actions">${action}</td>
+      </tr>`;
+    }).join('');
+  }
+  const syncBtn = document.getElementById('cfSyncBtn');
+  if (syncBtn) syncBtn.disabled = !payload.sync_available;
+}
+
+function refreshCashFlows({ charts = false } = {}) {
+  if (typeof loadCashFlows !== 'function') return Promise.resolve(null);
+  return loadCashFlows(true, cfQuery()).then(payload => {
+    renderCashFlowCard(payload);
+    if (charts) {
+      loadPerformanceChart(); // the adjusted curve is recomputed server-side
+      for (const c of [chart, breakdownChart]) {
+        if (c && c.$pointDates && payload && payload.flows) {
+          setTransferMarkers(c, payload.flows, c.$pointDates);
+          c.draw();
+        }
+      }
+    }
+    return payload;
+  });
+}
+
+async function cfRequest(url, opts) {
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  let data = null;
+  try { data = await res.json(); } catch (_) { data = null; }
+  if (!res.ok) throw new Error((data && data.error) || `${res.status} ${res.statusText}`);
+  return data || {};
+}
+
+function initCashFlowCard() {
+  const form = document.getElementById('cfForm');
+  if (!form) return;
+  const dateEl = document.getElementById('cfDate');
+  const noteEl = document.getElementById('cfNote');
+  const countEl = document.getElementById('cfNoteCount');
+  const today = pointDate(new Date());
+  if (dateEl && today) { dateEl.max = today; if (!dateEl.value) dateEl.value = today; }
+  if (noteEl && countEl) noteEl.addEventListener('input', () => { countEl.textContent = `${noteEl.value.length}/200`; });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const amount = parseFloat(document.getElementById('cfAmount').value);
+    const date = dateEl ? dateEl.value : '';
+    const direction = document.getElementById('cfDirection').value;
+    if (!date) return cfSetStatus('Pick the date the money moved.', 'err');
+    if (today && date > today) return cfSetStatus('The date cannot be in the future.', 'err');
+    if (!Number.isFinite(amount) || amount <= 0) return cfSetStatus('Enter an amount greater than $0 (the direction sets the sign).', 'err');
+    const btn = document.getElementById('cfAddBtn');
+    if (btn) btn.disabled = true;
+    cfSetStatus('Saving…');
+    try {
+      const data = await cfRequest('/api/cash-flows', {
+        method: 'POST',
+        body: JSON.stringify({ date, amount, direction, note: noteEl ? noteEl.value : '' }),
+      });
+      const f = data.flow || {};
+      const dup = f.duplicate_of != null ? ` — matches Schwab transfer #${f.duplicate_of}, so it is not counted twice` : '';
+      cfSetStatus(`Added ${f.label || transferLabel(f.amount)} dated ${f.date}${dup}.`, 'ok');
+      document.getElementById('cfAmount').value = '';
+      if (noteEl) { noteEl.value = ''; if (countEl) countEl.textContent = '0/200'; }
+      refreshCashFlows({ charts: true });
+    } catch (err) {
+      cfSetStatus(`Could not add the transfer: ${err.message}`, 'err');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+
+  document.getElementById('cfTableBody')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-cf-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    btn.disabled = true;
+    try {
+      if (btn.dataset.cfAction === 'delete') {
+        if (!confirm('Delete this manual transfer? Gains will be recomputed without it.')) { btn.disabled = false; return; }
+        await cfRequest(`/api/cash-flows/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        cfSetStatus('Manual transfer deleted.', 'ok');
+      } else {
+        const excluded = btn.dataset.excluded === 'true';
+        await cfRequest(`/api/cash-flows/${encodeURIComponent(id)}/exclude`, {
+          method: 'POST', body: JSON.stringify({ excluded }),
+        });
+        cfSetStatus(excluded ? 'Schwab transfer excluded — it no longer adjusts any gain.' : 'Schwab transfer included again.', 'ok');
+      }
+      refreshCashFlows({ charts: true });
+    } catch (err) {
+      cfSetStatus(`Update failed: ${err.message}`, 'err');
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('cfSyncBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('cfSyncBtn');
+    btn.disabled = true;
+    cfSetStatus('Syncing transfers from Schwab…');
+    try {
+      const data = await cfRequest('/api/cash-flows/sync', { method: 'POST' });
+      if (data.status === 'ok') {
+        const n = data.inserted || 0;
+        cfSetStatus(n ? `Synced: ${n} new transfer${n === 1 ? '' : 's'} from Schwab.` : 'Synced: no new transfers from Schwab.', 'ok');
+        refreshCashFlows({ charts: n > 0 });
+      } else {
+        cfSetStatus(data.message || `Sync ${data.status || 'unavailable'}.`, data.status === 'error' ? 'err' : '');
+      }
+    } catch (err) {
+      cfSetStatus(`Sync failed: ${err.message}`, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  refreshCashFlows();
+}
+
 window.addEventListener('load', () => {
+  initCashFlowCard(); // first: its query (current value + baseline) seeds the shared /api/cash-flows fetch
   fetchModelTransitions().then(() => {
     loadChart();
     loadPerformanceChart();

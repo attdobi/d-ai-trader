@@ -225,6 +225,11 @@
   <div id="benchStats" class="bench-stats"></div>
   <div class="chart-canvas-box bench-panel"><canvas id="benchmarkChart"></canvas></div>
   <div id="benchFootnote" class="bench-footnote"></div>
+  <div class="bench-footnote transfer-footnote">
+    <span class="tf-dep">▲ deposit</span> / <span class="tf-wd">▼ withdrawal</span> markers are external cash transfers.
+    They are not performance: the system return above excludes them (manual entries and exclusions from the
+    Dashboard's Cash Transfers card included).
+  </div>
 </div>
 
 <div class="chart-container" id="eventRisk">
@@ -250,6 +255,10 @@
   <div id="eventStats" class="bench-stats"></div>
   <div class="chart-canvas-box bench-panel"><canvas id="eventRiskChart"></canvas></div>
   <div id="eventFootnote" class="bench-footnote"></div>
+  <div class="bench-footnote transfer-footnote">
+    <span class="tf-dep">▲ deposit</span> / <span class="tf-wd">▼ withdrawal</span> markers show when cash moved in or
+    out of the account. They do not change the risk score, and every gain on this tab excludes them.
+  </div>
 </div>
 <style>
 .trend-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -281,11 +290,15 @@
 .bench-chip .v.pos { color: #29d697; }
 .bench-chip .v.neg { color: #ff5f73; }
 .bench-footnote { color: #7f8ca6; font-size: 0.75em; margin-top: 8px; line-height: 1.5; }
+.transfer-footnote { margin-top: 4px; }
+.transfer-footnote .tf-dep { color: #29d697; font-weight: 600; }
+.transfer-footnote .tf-wd { color: #ff5f73; font-weight: 600; }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script defer src="{{ url_for('static', filename='js/cash-flows.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/feedback.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {

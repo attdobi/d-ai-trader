@@ -9,6 +9,8 @@ Three pieces:
   2. external_cash_flows table — deposits/withdrawals/journals pulled from the
      Schwab transactions API. These are NOT performance and must be stripped
      before comparing to an index (a $1,000 deposit is not a 40% "gain").
+     The table, manual entries, the operator's exclude toggle and duplicate
+     resolution live in cash_flows.py; the TWR here uses its counted rows.
   3. Pure math: daily time-weighted return (TWR) index for the portfolio with
      flow adjustment, benchmark growth indexes, and summary stats (alpha,
      Sharpe, max drawdown, profit factor, expectancy, payoff ratio).
@@ -55,6 +57,13 @@ _last_refresh = {"benchmarks": 0.0, "flows": 0.0}
 # --------------------------------------------------------------------------
 
 def ensure_tables(engine):
+    # external_cash_flows (Schwab + manual transfers, excluded flag) is owned by cash_flows.py. A
+    # failed migration must not take the benchmark chart down: cash_flows reads the legacy columns.
+    import cash_flows
+    try:
+        cash_flows.ensure_schema(engine)
+    except Exception as e:
+        print(f"⚠️  external_cash_flows schema check failed ({e}); reading legacy columns")
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS benchmark_history (
@@ -62,17 +71,6 @@ def ensure_tables(engine):
                 date DATE NOT NULL,
                 close DOUBLE PRECISION NOT NULL,
                 PRIMARY KEY (symbol, date)
-            )
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS external_cash_flows (
-                id SERIAL PRIMARY KEY,
-                config_hash TEXT NOT NULL,
-                txn_key TEXT UNIQUE NOT NULL,
-                flow_date DATE NOT NULL,
-                amount DOUBLE PRECISION NOT NULL,
-                description TEXT,
-                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
 
@@ -132,28 +130,47 @@ def refresh_benchmark_history(engine, lookback_days=430, force=False):
 
 
 def refresh_cash_flows(engine, config_hash, force=False):
-    """Pull external transfers (deposits/withdrawals/journals) from Schwab."""
+    """Pull external transfers (deposits/withdrawals/journals) from Schwab.
+
+    Inserts only (ON CONFLICT DO NOTHING): an existing row — its `excluded` flag, a manual entry —
+    is never rewritten. Returns a status dict ({"status": "ok", "fetched", "inserted"} or
+    "skipped" / "unavailable" / "error" with a message); the TWR caller ignores it, the dashboard's
+    Sync from Schwab button shows it.
+    """
     now = time.time()
     if not force and now - _last_refresh["flows"] < REFRESH_TTL_SECONDS:
-        return
+        return {"status": "skipped", "message": "synced recently"}
     _last_refresh["flows"] = now
 
     try:
         from schwab_client import schwab_client
         if not schwab_client.ensure_authenticated() or not schwab_client.client:
-            return
+            return {"status": "unavailable", "message": "Schwab is not authenticated"}
     except Exception as e:
         print(f"⚠️  Schwab unavailable for cash-flow sync: {e}")
-        return
+        return {"status": "unavailable", "message": f"Schwab unavailable: {e}"}
+
+    import cash_flows
+    try:
+        cash_flows.ensure_schema(engine)
+    except Exception as e:
+        print(f"⚠️  external_cash_flows schema check failed ({e}); syncing into legacy columns")
 
     with engine.connect() as conn:
+        # Resume from the newest SCHWAB row: a manual entry dated later must not move the window
+        # past transfers Schwab has not reported yet.
         last = conn.execute(text(
-            "SELECT max(flow_date) FROM external_cash_flows WHERE config_hash = :c"
-        ), {"c": config_hash}).scalar()
+            "SELECT max(flow_date) FROM external_cash_flows "
+            "WHERE config_hash = :c AND txn_key NOT LIKE :manual"
+        ), {"c": config_hash, "manual": cash_flows.MANUAL_KEY_PREFIX + "%"}).scalar()
         first_snapshot = conn.execute(text(
             "SELECT min(timestamp) FROM portfolio_history WHERE config_hash = :c"
         ), {"c": config_hash}).scalar()
 
+    if isinstance(last, str):           # SQLite hands DATE back as text
+        last = date_type.fromisoformat(last[:10])
+    if isinstance(first_snapshot, str):
+        first_snapshot = datetime.fromisoformat(first_snapshot)
     if last:
         start = datetime.combine(last, datetime.min.time()) - timedelta(days=7)
     elif first_snapshot:
@@ -168,12 +185,13 @@ def refresh_cash_flows(engine, config_hash, force=False):
         )
         if resp.status_code != 200:
             print(f"⚠️  Schwab transactions HTTP {resp.status_code}; keeping cached flows")
-            return
+            return {"status": "error", "message": f"Schwab transactions HTTP {resp.status_code}"}
         txns = resp.json() or []
     except Exception as e:
         print(f"⚠️  Schwab transactions fetch failed: {e}")
-        return
+        return {"status": "error", "message": f"Schwab transactions fetch failed: {e}"}
 
+    fetched = inserted = 0
     with engine.begin() as conn:
         for t in txns:
             if t.get("type") not in EXTERNAL_FLOW_TYPES:
@@ -185,7 +203,10 @@ def refresh_cash_flows(engine, config_hash, force=False):
             key = str(t.get("activityId") or "")
             if not key:
                 key = hashlib.sha1(f"{when}|{amount}|{t.get('description','')}".encode()).hexdigest()
-            conn.execute(text("""
+            fetched += 1
+            # source / excluded / note take their column DEFAULTs ('schwab', FALSE, NULL); an existing
+            # row is left exactly as it is (the operator may have excluded it).
+            res = conn.execute(text("""
                 INSERT INTO external_cash_flows (config_hash, txn_key, flow_date, amount, description)
                 VALUES (:c, :k, :d, :a, :desc)
                 ON CONFLICT (txn_key) DO NOTHING
@@ -196,6 +217,9 @@ def refresh_cash_flows(engine, config_hash, force=False):
                 "a": float(amount),
                 "desc": (t.get("description") or "")[:200],
             })
+            inserted += max(int(getattr(res, "rowcount", 0) or 0), 0)
+    return {"status": "ok", "fetched": fetched, "inserted": inserted,
+            "since": start.date().isoformat() if isinstance(start, datetime) else str(start)}
 
 
 # --------------------------------------------------------------------------
@@ -398,17 +422,17 @@ def get_benchmark_performance(engine, config_hash, days=90):
 
     window_start = datetime.utcnow().date() - timedelta(days=days)
 
+    # Counted transfers only: Schwab rows minus the ones the operator excluded, plus manual entries
+    # that do not duplicate a Schwab row (cash_flows.mark_counted).
+    import cash_flows
+    flow_rows = [f for f in cash_flows.list_flows(engine, config_hash, start=window_start - timedelta(days=5))
+                 if f["counted"]]
+
     with engine.connect() as conn:
         snap_rows = conn.execute(text("""
             SELECT timestamp, total_portfolio_value FROM portfolio_history
             WHERE config_hash = :c AND timestamp >= :start
             ORDER BY timestamp
-        """), {"c": config_hash, "start": window_start - timedelta(days=5)}).fetchall()
-
-        flow_rows = conn.execute(text("""
-            SELECT flow_date, amount, description FROM external_cash_flows
-            WHERE config_hash = :c AND flow_date >= :start
-            ORDER BY flow_date
         """), {"c": config_hash, "start": window_start - timedelta(days=5)}).fetchall()
 
         bench_rows = conn.execute(text("""
@@ -463,17 +487,18 @@ def get_benchmark_performance(engine, config_hash, days=90):
 
     flows_by_date = {}
     flow_list = []
-    for r in flow_rows:
-        d = r.flow_date
+    for f in flow_rows:
+        d = f["date"]
         # Flows on/before the window's first plotted day are already embedded
         # in the starting value; attributing them to an in-window step would
         # subtract them a second time (a pre-window +$1,000 deposit rendered
         # as a fake -34% first step in the 30d view).
         if d <= aligned[0][0]:
             continue
-        flows_by_date[d] = flows_by_date.get(d, 0.0) + float(r.amount)
-        flow_list.append({"date": d.isoformat(), "amount": float(r.amount),
-                          "description": r.description})
+        flows_by_date[d] = flows_by_date.get(d, 0.0) + float(f["amount"])
+        flow_list.append({"id": f["id"], "date": d.isoformat(), "amount": float(f["amount"]),
+                          "description": f["description"], "source": f["source"],
+                          "label": cash_flows.flow_label(f["amount"])})
 
     aligned, artifact_days = filter_artifact_days(aligned, flows_by_date)
     port_returns = twr_daily_returns(aligned, flows_by_date)

@@ -376,7 +376,8 @@ async function loadPortfolioHistory() {
           tooltip: {
             callbacks: {
               title: function(items) { return items[0]?.label || ''; },
-              label: function(ctx) { return formatCurrency(ctx.parsed.y); }
+              label: function(ctx) { return formatCurrency(ctx.parsed.y); },
+              footer: function(items) { return typeof transferTooltipFooter === 'function' ? transferTooltipFooter(items) : []; }
             }
           },
           zoom: {
@@ -414,8 +415,19 @@ async function loadPortfolioHistory() {
             }
           }
         }
-      }
+      },
+      plugins: typeof transferMarkersPlugin !== 'undefined' ? [transferMarkersPlugin] : []
     });
+    // Deposit / withdrawal markers (static/js/cash-flows.js): value jumps that are not gains.
+    if (typeof loadCashFlows === 'function') {
+      const chartAtRequest = historyChartInstance;
+      const dates = data.map(d => isoLocalDate(d.timestamp));
+      loadCashFlows().then(cf => {
+        if (!cf || !cf.flows || historyChartInstance !== chartAtRequest) return;
+        setTransferMarkers(historyChartInstance, cf.flows, dates);
+        historyChartInstance.draw();
+      });
+    }
   } catch (e) {
     console.warn('Failed to load portfolio history:', e.message);
   }

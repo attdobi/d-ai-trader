@@ -69,6 +69,7 @@ from d_ai_trader import (
 )
 from pathlib import Path
 from policy_graph.routes import register_policy_graph_routes
+from cash_flow_routes import register_cash_flow_routes
 from policy_graph.prompts import CRITIC_DOCTRINE, CRITIC_OUTPUT_CANDIDATE, GATE_STYLE
 
 # Configuration
@@ -896,8 +897,14 @@ def _fetch_latest_momentum_snapshot(config_hash):
 
 def _get_live_portfolio_baseline(config_hash, current_value):
     """Return baseline portfolio value for given config, creating if missing."""
+    return _get_live_portfolio_baseline_info(config_hash, current_value)[0]
+
+
+def _get_live_portfolio_baseline_info(config_hash, current_value):
+    """(baseline value, baseline timestamp) for the config, creating the row if missing. The
+    timestamp starts the period whose external transfers the Net Gain/Loss subtracts."""
     if not config_hash:
-        return current_value
+        return current_value, None
 
     with engine.begin() as conn:
         conn.execute(text("""
@@ -909,19 +916,83 @@ def _get_live_portfolio_baseline(config_hash, current_value):
         """))
 
         baseline_row = conn.execute(text("""
-            SELECT baseline_value FROM live_portfolio_baselines
+            SELECT baseline_value, created_at FROM live_portfolio_baselines
             WHERE config_hash = :config_hash
         """), {"config_hash": config_hash}).fetchone()
 
         if baseline_row:
-            return float(baseline_row.baseline_value)
+            return float(baseline_row.baseline_value), baseline_row.created_at
 
         conn.execute(text("""
             INSERT INTO live_portfolio_baselines (config_hash, baseline_value)
             VALUES (:config_hash, :baseline_value)
         """), {"config_hash": config_hash, "baseline_value": current_value})
 
-        return float(current_value)
+        return float(current_value), datetime.now()
+
+
+def _cash_flow_baseline(config_hash):
+    """(value, timestamp) the headline Net Gain/Loss is measured from: the live baseline row when
+    the config has one, else its first portfolio snapshot. None when neither exists."""
+    with engine.connect() as conn:
+        try:
+            row = conn.execute(text("""
+                SELECT baseline_value, created_at FROM live_portfolio_baselines
+                WHERE config_hash = :config_hash
+            """), {"config_hash": config_hash}).fetchone()
+        except Exception:
+            row = None
+        if row:
+            return float(row.baseline_value), row.created_at
+    with engine.connect() as conn:
+        first = conn.execute(text("""
+            SELECT timestamp, total_portfolio_value FROM portfolio_history
+            WHERE config_hash = :config_hash
+            ORDER BY timestamp ASC LIMIT 1
+        """), {"config_hash": config_hash}).fetchone()
+    if first and first.total_portfolio_value:
+        return float(first.total_portfolio_value), first.timestamp
+    return None
+
+
+def _flow_adjusted_net_gain(config_hash, current_value, baseline_value, baseline_at):
+    """Net Gain/Loss with external transfers removed (cash_flows.flow_adjusted_gain), or None —
+    on any error the dashboard keeps the raw figure and logs one line."""
+    try:
+        import cash_flows
+        flows = cash_flows.counted_pairs(cash_flows.list_flows(engine, config_hash))
+        return cash_flows.flow_adjusted_gain(
+            current_value, baseline_value, flows, baseline_at=baseline_at, as_of=datetime.now())
+    except Exception as exc:
+        print(f"⚠️  Cash-transfer adjustment skipped (showing the raw net gain): {exc}")
+        return None
+
+
+def _schwab_live_view_active():
+    """Same predicate the Dashboard uses to read Schwab positions instead of the local book."""
+    ti = globals().get("trading_interface")
+    return (
+        os.getenv("DAI_SCHWAB_LIVE_VIEW", "0") in {"1", "true", "True"}
+        or get_trading_mode() in {"live", "real_world"}
+        or bool(getattr(ti, "schwab_enabled", False))
+    )
+
+
+def _sync_cash_flows_from_schwab(config_hash):
+    """Sync from Schwab button: pull transfers now. Simulation stays manual-only (its book never
+    receives Schwab transfers); read-only live view only reads, so it may sync."""
+    if not _schwab_live_view_active():
+        return {"status": "unavailable",
+                "message": "Simulation mode: Schwab transfers are not synced — add transfers manually"}
+    import benchmark_tracker
+    return benchmark_tracker.refresh_cash_flows(engine, config_hash, force=True)
+
+
+register_cash_flow_routes(
+    app, engine=engine, get_config_hash=get_current_config_hash,
+    sync=_sync_cash_flows_from_schwab, baseline=_cash_flow_baseline,
+)
+
 
 def _get_active_prompts_bundle():
     """Fetch active prompt data for all primary agents with current feedback applied."""
@@ -1108,6 +1179,7 @@ def dashboard():
         
         # Calculate metrics relative to initial $10,000 investment by default
         initial_investment = 10000.0
+        gain_baseline_at = None
         net_gain_loss = total_portfolio_value - initial_investment
         net_percentage_gain = (net_gain_loss / initial_investment * 100) if initial_investment else 0
         
@@ -1203,7 +1275,9 @@ def dashboard():
                     cash_balance = funds_available_display
 
                     # Use account valuation relative to baseline (first snapshot) for net gain/loss
-                    baseline_value = _get_live_portfolio_baseline(config_hash, total_portfolio_value)
+                    # (external transfers are subtracted below, after the simulation fallback)
+                    baseline_value, gain_baseline_at = _get_live_portfolio_baseline_info(
+                        config_hash, total_portfolio_value)
                     net_gain_loss = total_portfolio_value - baseline_value
                     initial_investment = baseline_value
                     net_percentage_gain = (net_gain_loss / baseline_value * 100) if baseline_value else 0
@@ -1286,7 +1360,7 @@ def dashboard():
 
         baseline_snapshot = conn.execute(text("""
             SELECT total_portfolio_value, cash_balance, total_invested,
-                   total_profit_loss, percentage_gain
+                   total_profit_loss, percentage_gain, timestamp
             FROM portfolio_history
             WHERE config_hash = :config_hash
             ORDER BY timestamp ASC
@@ -1304,8 +1378,19 @@ def dashboard():
 
         if not use_schwab_positions and baseline_total_value:
             initial_investment = baseline_total_value
+            gain_baseline_at = baseline_snapshot.timestamp
             net_gain_loss = total_portfolio_value - baseline_total_value
             net_percentage_gain = (net_gain_loss / baseline_total_value * 100) if baseline_total_value else 0
+
+        # External transfers are not performance: subtract the deposits/withdrawals dated on/after the
+        # baseline from the net gain and report the percent as Modified Dietz. The unadjusted figures
+        # stay available (*_raw) and the card subtitle shows the adjustment.
+        net_gain_loss_raw = net_gain_loss
+        net_percentage_gain_raw = net_percentage_gain
+        gain_flows = _flow_adjusted_net_gain(config_hash, total_portfolio_value, initial_investment, gain_baseline_at)
+        if gain_flows:
+            net_gain_loss = gain_flows["net_gain_loss"]
+            net_percentage_gain = gain_flows["net_percentage_gain"]
 
         # Fetch model transitions for config panel
         try:
@@ -1365,6 +1450,11 @@ def dashboard():
             initial_investment=initial_investment,
             net_gain_loss=net_gain_loss,
             net_percentage_gain=net_percentage_gain,
+            net_gain_loss_raw=net_gain_loss_raw,
+            net_percentage_gain_raw=net_percentage_gain_raw,
+            gain_flows=gain_flows,
+            gain_baseline_at=(gain_baseline_at.isoformat() if hasattr(gain_baseline_at, "isoformat")
+                              else (str(gain_baseline_at) if gain_baseline_at else "")),
             current_config=current_config,
             schwab_summary=schwab_summary,
             use_schwab_positions=use_schwab_positions,
@@ -1971,7 +2061,13 @@ def api_portfolio_history():
 
 @app.route("/api/portfolio-performance")
 def api_portfolio_performance():
-    """Get portfolio performance relative to initial $10,000 investment - strictly filtered by current config"""
+    """Portfolio gain vs the first snapshot of the current config, with external transfers removed.
+
+    net_gain_loss = value − first value − cumulative transfers embedded so far (each transfer pinned
+    to the snapshot step it posted in, see cash_flows.align_flows); net_percentage_gain is Modified
+    Dietz from the first snapshot. *_raw keep the unadjusted figures; cumulative_flows and
+    flows_at_point show the adjustment. On any cash-flow error the raw figures are served
+    (flow_adjusted=false)."""
     config_hash = get_current_config_hash()
 
     with engine.connect() as conn:
@@ -1988,18 +2084,44 @@ def api_portfolio_performance():
         return jsonify([])
 
     base = rows[0]["total_portfolio_value"] or 0
+    adjusted = None
+    try:
+        import cash_flows
+        first_ts = rows[0].get("timestamp")
+        flows = cash_flows.counted_pairs(cash_flows.list_flows(engine, config_hash), start=first_ts)
+        adjusted = cash_flows.adjusted_performance_series(
+            [(row.get("timestamp"), row.get("total_portfolio_value")) for row in rows], flows)
+    except Exception as exc:
+        print(f"⚠️  Cash-transfer adjustment skipped for the performance chart: {exc}")
+        adjusted = None
+
     output = []
-    for row in rows:
+    for i, row in enumerate(rows):
         total_value = float(row.get("total_portfolio_value") or 0)
         net_gain_loss = total_value - base
         net_percentage = (net_gain_loss / base * 100) if base else 0
-        output.append({
+        point = {
             "timestamp": row.get("timestamp").isoformat() if isinstance(row.get("timestamp"), datetime) else row.get("timestamp"),
             "total_portfolio_value": total_value,
             "cash_balance": float(row.get("cash_balance") or 0),
             "net_gain_loss": net_gain_loss,
             "net_percentage_gain": net_percentage,
-        })
+            "net_gain_loss_raw": net_gain_loss,
+            "net_percentage_gain_raw": net_percentage,
+            "cumulative_flows": 0.0,
+            "flows_at_point": [],
+            "flow_adjusted": False,
+        }
+        if adjusted:
+            a = adjusted[i]
+            point.update({
+                "net_gain_loss": a["net_gain_loss"],
+                "net_percentage_gain": a["net_percentage_gain"],
+                "cumulative_flows": a["cumulative_flows"],
+                "flows_at_point": a["flows"],
+                "flow_adjusted": True,
+            })
+        output.append(point)
 
     return jsonify(output)
 
