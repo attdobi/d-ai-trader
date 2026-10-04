@@ -80,6 +80,7 @@
       <button class="chart-range-btn chart-reset-btn" onclick="resetSchwabChartZoom()">🔍 Reset Zoom</button>
     </div>
     <canvas id="schwabHistoryChart"></canvas>
+    <p class="chart-footnote">Account value includes transfers; ▲ deposit / ▼ withdrawal markers show when cash moved (not a gain).</p>
   </div>
 </div>
 
@@ -182,5 +183,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0"></script>
+<script defer src="{{ url_for('static', filename='js/cash-flows.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/schwab.js') }}"></script>
 {% endblock %}

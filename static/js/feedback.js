@@ -384,6 +384,14 @@ const BENCH_COLORS = {
 };
 let benchmarkChart = null;
 
+// Deposit / withdrawal markers from static/js/cash-flows.js (absent → charts render without them).
+function transferPlugins() {
+  return typeof transferMarkersPlugin !== 'undefined' ? [transferMarkersPlugin] : [];
+}
+function transferFooterLines(items) {
+  return typeof transferTooltipFooter === 'function' ? transferTooltipFooter(items) : [];
+}
+
 // "gpt-5.6-terra" → "Terra", "gpt-5.5" → "GPT-5.5"
 function shortModelName(m) {
   if (!m) return '?';
@@ -527,14 +535,21 @@ async function loadBenchmarkChart(days = 90) {
           borderWidth: 1, titleColor: '#dfe8f7', bodyColor: TREND_INK.text,
           padding: 10, usePointStyle: true,
           itemSort: (a, b) => b.parsed.y - a.parsed.y,
-          callbacks: { label: item => ` ${item.dataset.label}: ${fmtPct(item.parsed.y)}` },
+          callbacks: {
+            label: item => ` ${item.dataset.label}: ${fmtPct(item.parsed.y)}`,
+            footer: transferFooterLines,
+          },
         },
       },
     },
-    plugins: [trendEndLabelPlugin, benchModelLinePlugin],
+    plugins: [trendEndLabelPlugin, benchModelLinePlugin, ...transferPlugins()],
   });
   benchmarkChart.$trendFmt = fmtPct;
   benchmarkChart.$modelTransitions = stats.model_transitions || [];
+  // Transfers inside the window (counted rows only — the same ones the TWR strips).
+  if (typeof setTransferMarkers === 'function') {
+    setTransferMarkers(benchmarkChart, (stats.external_flows || []).map(f => ({ ...f, counted: true })), labels);
+  }
   benchmarkChart.draw();
 
   if (foot) {
@@ -542,7 +557,7 @@ async function loadBenchmarkChart(days = 90) {
     const artifacts = stats.artifact_days_filtered || [];
     const bits = [];
     bits.push(`${flows.length ? flows.length : 'No'} external transfer${flows.length === 1 ? '' : 's'} in window` +
-      (flows.length ? ` (${flows.map(f => `${f.amount > 0 ? '+' : '−'}$${Math.abs(f.amount).toFixed(0)} ${f.date}`).join(', ')}) stripped from returns via time-weighting` : ''));
+      (flows.length ? ` (${flows.map(f => `${f.amount > 0 ? '+' : '−'}$${Math.abs(f.amount).toFixed(Math.abs(f.amount) % 1 ? 2 : 0)} ${f.date}${f.source === 'manual' ? ' manual' : ''}`).join(', ')}) stripped from returns via time-weighting and marked ▲/▼ on the chart` : ''));
     if (artifacts.length) bits.push(`${artifacts.length} bad snapshot day${artifacts.length === 1 ? '' : 's'} (${artifacts.join(', ')}) auto-filtered`);
     const trans = stats.model_transitions || [];
     if (stats.model_at_start || trans.length) {
@@ -790,16 +805,26 @@ async function loadEventRiskChart(days = 90) {
               if (tradeNotes.has(d)) lines.push(tradeNotes.get(d).join('  '));
               return lines;
             },
+            footer: transferFooterLines,
           },
         },
       },
     },
-    plugins: [eventBandsPlugin, eventMarkersPlugin],
+    plugins: [eventBandsPlugin, eventMarkersPlugin, ...transferPlugins()],
   });
   eventRiskChart.$eventRows = rows;
   eventRiskChart.$eventTodayIndex = todayIndex;
   eventRiskChart.$eventMarkers = payload.events || [];
   eventRiskChart.draw();
+  // External transfers on the same session axis (history only; the projection has none).
+  if (typeof loadCashFlows === 'function') {
+    const chartAtRequest = eventRiskChart;
+    loadCashFlows().then(cf => {
+      if (!cf || !cf.flows || eventRiskChart !== chartAtRequest) return;
+      setTransferMarkers(eventRiskChart, cf.flows, labels.slice(0, todayIndex + 1));
+      eventRiskChart.draw();
+    });
+  }
 
   if (foot) {
     const rec = payload.snapshots_recorded || 0;

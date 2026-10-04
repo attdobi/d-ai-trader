@@ -12,16 +12,27 @@
     <p class="value">${{ '%.2f'|format(total_profit_loss) }}</p>
     <p class="percentage">({{ '%.2f'|format(percentage_gain) }}%)</p>
   </div>
-  <div class="metric-card hero-card {% if net_gain_loss >= 0 %}gain{% else %}loss{% endif %}">
+  <div class="metric-card hero-card {% if net_gain_loss >= 0 %}gain{% else %}loss{% endif %}" id="netGainCard"
+       data-current-value="{{ '%.2f'|format(current_account_value) }}"
+       data-baseline-value="{{ '%.2f'|format(initial_investment) }}"
+       data-baseline-at="{{ gain_baseline_at or '' }}">
     <h3>Net Gain/Loss</h3>
-    <p class="value">${{ '%.2f'|format(net_gain_loss) }}</p>
-    <p class="percentage">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
+    <p class="value" id="netGainValue">${{ '%.2f'|format(net_gain_loss) }}</p>
+    <p class="percentage" id="netGainPct">({{ '%.2f'|format(net_percentage_gain) }}%)</p>
     <p class="subtitle">
       {% if use_schwab_positions %}
         Account cost basis ${{ '%.2f'|format(initial_investment) }}
       {% else %}
         on ${{ '%.0f'|format(initial_investment) }} initial
       {% endif %}
+      <span id="netGainFlowNote" class="flow-note">
+        {% if gain_flows and gain_flows.flow_count %}
+          <br>Excl. ${{ '{:,.2f}'.format(gain_flows.net_flows|abs) }}
+          net {{ 'deposits' if gain_flows.net_flows >= 0 else 'withdrawals' }}
+          ({{ gain_flows.flow_count }} transfer{{ '' if gain_flows.flow_count == 1 else 's' }}) ·
+          unadjusted ${{ '%.2f'|format(net_gain_loss_raw) }} ({{ '%.2f'|format(net_percentage_gain_raw) }}%)
+        {% endif %}
+      </span>
     </p>
   </div>
   <div class="metric-card hero-card">
@@ -131,16 +142,81 @@
   <div class="chart-section">
     <h2 id="chart-title">Portfolio Value Over Time</h2>
     <canvas id="historyChart"></canvas>
+    <p class="chart-footnote">Account value includes transfers: a deposit lifts this line without being a gain. Markers show each transfer (▲ deposit / ▼ withdrawal).</p>
   </div>
   <div class="chart-section">
-    <h2>Net Performance vs Initial $10,000</h2>
+    <h2>Net Performance (excl. transfers)</h2>
     <canvas id="performanceChart"></canvas>
+    <p class="chart-footnote" id="performanceFootnote">Gain vs the first snapshot with deposits and withdrawals removed; hover for the unadjusted figure.</p>
   </div>
   <div class="chart-section">
     <h2>Portfolio Breakdown</h2>
     <canvas id="breakdownChart"></canvas>
+    <p class="chart-footnote">Cash includes transferred money; markers show when it moved.</p>
   </div>
 </div>
+
+<section class="cash-flow-card" id="cashFlowCard" aria-labelledby="cashFlowTitle">
+  <div class="cf-header">
+    <div>
+      <h2 id="cashFlowTitle">💸 Cash Transfers</h2>
+      <p class="cf-subtitle">
+        Deposits and withdrawals are not performance — every gain on the Dashboard and the Feedback tab
+        excludes them. Schwab transfers sync automatically; add anything the sync missed. A manual entry
+        within ±3 days and ±$0.01 of a Schwab transfer is treated as the same transfer and not counted twice.
+      </p>
+    </div>
+    <button type="button" class="trigger-btn cf-sync-btn" id="cfSyncBtn" aria-label="Sync transfers from Schwab">
+      <span class="btn-icon">⟳</span>Sync from Schwab
+    </button>
+  </div>
+
+  <div class="cf-totals" id="cfTotals">
+    <div class="cf-chip"><div class="k">Net transfers since baseline</div><div class="v">—</div></div>
+  </div>
+
+  <form class="cf-form" id="cfForm" autocomplete="off" novalidate>
+    <label class="cf-field">
+      <span>Date</span>
+      <input type="date" id="cfDate" name="date" required>
+    </label>
+    <label class="cf-field">
+      <span>Amount ($)</span>
+      <input type="number" id="cfAmount" name="amount" min="0.01" step="0.01" inputmode="decimal" placeholder="700.00" required>
+    </label>
+    <label class="cf-field">
+      <span>Direction</span>
+      <select id="cfDirection" name="direction">
+        <option value="deposit">Deposit (money in)</option>
+        <option value="withdrawal">Withdrawal (money out)</option>
+      </select>
+    </label>
+    <label class="cf-field cf-field-note">
+      <span>Note <em id="cfNoteCount">0/200</em></span>
+      <input type="text" id="cfNote" name="note" maxlength="200" placeholder="e.g. transfer from checking">
+    </label>
+    <button type="submit" class="trigger-btn trigger-all cf-add-btn" id="cfAddBtn"><span class="btn-icon">＋</span>Add transfer</button>
+  </form>
+  <div id="cfStatus" class="cf-status" role="status" aria-live="polite"></div>
+
+  <div class="table-container">
+    <table class="cf-table" id="cfTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Amount</th>
+          <th>Source</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="cfTableBody">
+        <tr><td colspan="6" class="cf-empty">Loading transfers…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <div class="cost-section" id="costSection" style="margin-top:18px; padding:16px 18px; border:1px solid rgba(120,140,170,0.25); border-radius:12px;">
   <div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;">
@@ -399,5 +475,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0"></script>
+<script defer src="{{ url_for('static', filename='js/cash-flows.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

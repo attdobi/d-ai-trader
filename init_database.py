@@ -1144,6 +1144,18 @@ def initialize_database() -> None:
             ON event_risk_snapshots (config_hash, session_date)
         """))
 
+        # External cash transfers (cash_flows.py): Schwab-synced deposits/withdrawals plus manual
+        # entries from the Dashboard's Cash transfers card. Every gain figure subtracts them. The
+        # table predates manual entries (benchmark_tracker created it), so the three columns are
+        # added idempotently; their DEFAULTs mark every existing row as a counted Schwab row.
+        from cash_flows import (
+            ALTER_POSTGRES as _CASH_FLOW_ALTERS, DDL_INDEX as _CASH_FLOWS_INDEX, DDL_POSTGRES as _CASH_FLOWS_DDL,
+        )
+        ensure_table(conn, stats, "external_cash_flows", _CASH_FLOWS_DDL)
+        for _col, _alter_sql in _CASH_FLOW_ALTERS.items():
+            ensure_column(conn, stats, "external_cash_flows", _col, _alter_sql)
+        conn.execute(text(_CASH_FLOWS_INDEX))
+
         # 7a) Migrate feedback_analyzer → FeedbackAgent (one-time cleanup)
         fa_count = conn.execute(text(
             "SELECT count(*) FROM prompt_versions WHERE agent_type = 'feedback_analyzer'"
