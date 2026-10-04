@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from shared.review_window import fetch_review_window, select_balanced
-from tests.test_dashboard_imports import dashboard_server_module, isolated_policy_graph  # noqa: F401
+from tests.test_dashboard_imports import dashboard_server_module, isolated_cash_flows, isolated_policy_graph  # noqa: F401
 
 CFG = "cfg_test"
 T0 = datetime(2026, 9, 1, 12, 0, 0)

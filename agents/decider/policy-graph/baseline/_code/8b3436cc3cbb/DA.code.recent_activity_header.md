@@ -1,6 +1,6 @@
 ---
 id: DA.code.recent_activity_header
-version: code@de675e8bfea8
+version: code@8b3436cc3cbb
 agent: DeciderAgent
 title: "# RECENT ACTIVITY"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_memory.py
 source_symbol: build_working_memory
-code_sha: de675e8bfea8
+code_sha: 8b3436cc3cbb
 condition: null
 fires: true
 position: user_prompt_dynamic

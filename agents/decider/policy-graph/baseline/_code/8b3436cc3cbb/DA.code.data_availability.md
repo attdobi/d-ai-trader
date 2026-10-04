@@ -1,6 +1,6 @@
 ---
 id: DA.code.data_availability
-version: code@de675e8bfea8
+version: code@8b3436cc3cbb
 agent: DeciderAgent
 title: "DATA-AVAILABILITY RULE"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_agent.py
 source_symbol: "ask_decision_agent:prompt+=#4"
-code_sha: de675e8bfea8
+code_sha: 8b3436cc3cbb
 condition: null
 fires: true
 position: user_prompt_tail

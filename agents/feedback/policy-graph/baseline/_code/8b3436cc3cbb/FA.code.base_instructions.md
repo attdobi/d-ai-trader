@@ -1,6 +1,6 @@
 ---
 id: FA.code.base_instructions
-version: code@de675e8bfea8
+version: code@8b3436cc3cbb
 agent: FeedbackAgent
 title: "Feedback base instructions (code)"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: feedback_agent.py
 source_symbol: _generate_ai_feedback:FEEDBACK_BASE_INSTRUCTIONS
-code_sha: de675e8bfea8
+code_sha: 8b3436cc3cbb
 condition: null
 fires: true
 position: user_prompt_head

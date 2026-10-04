@@ -1,6 +1,6 @@
 ---
 id: DA.code.event_calendar
-version: code@de675e8bfea8
+version: code@8b3436cc3cbb
 agent: DeciderAgent
 title: "# EVENT CALENDAR"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: event_calendar.py
 source_symbol: format_event_calendar
-code_sha: de675e8bfea8
+code_sha: 8b3436cc3cbb
 condition: null
 fires: true
 position: user_prompt_dynamic

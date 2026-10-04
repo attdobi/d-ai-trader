@@ -39,6 +39,7 @@ def decider(monkeypatch):
     cfg.session = None
     cfg.openai = None
     cfg.get_agent_model = lambda *a, **k: "stub-model"
+    cfg.get_reasoning_params = lambda *a, **k: {}
     cfg.get_current_config_hash = lambda: HASH
     cfg.get_trading_mode = lambda: "simulation"
     cfg.IS_MARGIN_ACCOUNT = False

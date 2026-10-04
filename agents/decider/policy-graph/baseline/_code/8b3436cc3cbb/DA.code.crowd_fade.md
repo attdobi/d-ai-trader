@@ -1,6 +1,6 @@
 ---
 id: DA.code.crowd_fade
-version: code@de675e8bfea8
+version: code@8b3436cc3cbb
 agent: DeciderAgent
 title: "🚫 CROWD-FADE AWARENESS"
 node_type: code
@@ -21,7 +21,7 @@ tags: []
 tickers: []
 source_file: decider_agent.py
 source_symbol: ask_decision_agent:contrarian_directive
-code_sha: de675e8bfea8
+code_sha: 8b3436cc3cbb
 condition: "'CROWD-FADE' not in user_prompt_template and 'CROWD-FADE' not in strategy_directives"
 fires: false
 position: user_template_tail
