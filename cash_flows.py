@@ -7,8 +7,9 @@ them as another $981). Only the Feedback tab's System vs Market TWR (benchmark_t
 
 Rows live in `external_cash_flows`, one row per transfer, scoped by config_hash:
   * source 'schwab' — inserted by benchmark_tracker.refresh_cash_flows from the Schwab transactions API
-    (txn_key = activityId, ON CONFLICT DO NOTHING: the sync never rewrites an existing row, so an
-    operator's `excluded` flag and every manual row survive it);
+    (txn_key = activityId, unique per config: UNIQUE (config_hash, txn_key); ON CONFLICT DO NOTHING:
+    the sync never rewrites an existing row, so an operator's `excluded` flag and every manual row
+    survive it);
   * source 'manual' — entered on the Dashboard's Cash transfers card (txn_key = 'manual:<uuid>').
 
 Counting rules (`mark_counted`):
@@ -39,6 +40,13 @@ Public API:
     align_flows(timestamps, flows, values=None) / cumulative_flow_series(timestamps, flows, values=None)
     flow_adjusted_gain(current_value, baseline_value, flows, baseline_at, as_of) -> dict
     adjusted_performance_series(points, flows) -> [dict]
+    baseline_embedded(flows, baseline_value, baseline_at, snapshots, current) -> {index}
+    in_baseline_ids(engine, config_hash, flows, baseline_value, baseline_at, current=None) -> {id}
+    migrate_unique_key(conn) -> status                                          # txn_key unique per config
+
+A transfer dated on the first point's / baseline's day may already be inside that value (it posted
+before the snapshot / baseline was taken). The chart (align_flows), the headline and the Cash transfers
+card (in_baseline_ids) all treat it as part of the starting value unless a later value step explains it.
 """
 from __future__ import annotations
 
@@ -60,22 +68,44 @@ NOTE_MAX_CHARS = 200
 MAX_MANUAL_AMOUNT = 10_000_000.0       # sanity rail for a typo'd amount, not a business limit
 EARLIEST_FLOW_DATE = date(2000, 1, 1)
 DIRECTIONS = ("deposit", "withdrawal")
+# A transfer dated on the first point's / baseline's day counts as already inside that value unless a
+# later value step explains it: |step − amount| <= this share of the amount (see align_flows).
+EMBEDDED_MATCH_FRACTION = 0.5
+# Points examined for a baseline-day transfer: those dated before baseline day + this many days, i.e.
+# every step align_flows can pin it to (its date + settle_days 3, and the step out of that day).
+BASELINE_EVIDENCE_DAYS = 5
 
-DDL_POSTGRES = """
+# A Schwab activityId is unique per CONFIG, not across the table: every reader is scoped by
+# config_hash, so a global UNIQUE (txn_key) let whichever dashboard synced a transfer first (the
+# read-only live view, a simulation config) own it, and the trading config never saw the deposit.
+UNIQUE_INDEX = "ux_external_cash_flows_cfg_key"
+LEGACY_UNIQUE_CONSTRAINT = "external_cash_flows_txn_key_key"   # Postgres' name for `txn_key TEXT UNIQUE`
+
+DDL_POSTGRES = f"""
 CREATE TABLE IF NOT EXISTS external_cash_flows (
     id SERIAL PRIMARY KEY,
     config_hash TEXT NOT NULL,
-    txn_key TEXT UNIQUE NOT NULL,
+    txn_key TEXT NOT NULL,
     flow_date DATE NOT NULL,
     amount DOUBLE PRECISION NOT NULL,
     description TEXT,
     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source TEXT DEFAULT 'schwab',
     note TEXT,
-    excluded BOOLEAN DEFAULT FALSE
+    excluded BOOLEAN DEFAULT FALSE,
+    CONSTRAINT {UNIQUE_INDEX} UNIQUE (config_hash, txn_key)
 )
 """
 DDL_SQLITE = DDL_POSTGRES.replace("id SERIAL PRIMARY KEY", "id INTEGER PRIMARY KEY AUTOINCREMENT")
+
+# Migration of a table created with the global UNIQUE (txn_key) (Postgres only: SQLite cannot drop an
+# inline constraint, and a new SQLite table gets the composite key from the DDL). The composite index
+# is created BEFORE the old constraint is dropped, inside one savepoint, so a failure at either step
+# rolls both back and leaves the old constraint in force. IF [NOT] EXISTS on both makes a concurrent
+# run (dashboard ensure_schema vs init_database) a no-op for whichever comes second.
+DDL_UNIQUE_INDEX = f"CREATE UNIQUE INDEX IF NOT EXISTS {UNIQUE_INDEX} ON external_cash_flows (config_hash, txn_key)"
+DROP_LEGACY_UNIQUE = f"ALTER TABLE external_cash_flows DROP CONSTRAINT IF EXISTS {LEGACY_UNIQUE_CONSTRAINT}"
+LOCK_FOR_MIGRATION = "LOCK TABLE external_cash_flows IN ACCESS EXCLUSIVE MODE"
 
 # Columns added to tables created before manual entries existed (benchmark_tracker's original DDL).
 # The DEFAULTs backfill existing rows: every legacy row is a Schwab row and nothing is excluded.
@@ -175,12 +205,46 @@ def _columns(conn, pg: bool) -> set:
     return {r[1] for r in conn.execute(text("PRAGMA table_info(external_cash_flows)")).fetchall()}
 
 
+def migrate_unique_key(conn) -> str:
+    """Postgres: make txn_key unique per config (UNIQUE (config_hash, txn_key)) instead of table-wide.
+
+    Idempotent and safe to run concurrently (cash_flows.ensure_schema, init_database). Checks first
+    and issues DDL only when something is missing, so a migrated table is never locked again. Then,
+    inside one savepoint: take the ACCESS EXCLUSIVE lock the DROP needs anyway up front (two
+    migrators queue on it instead of deadlocking on a SHARE → EXCLUSIVE upgrade; the second one's
+    IF [NOT] EXISTS statements are no-ops), CREATE the composite unique index, and only then DROP the
+    table-wide constraint. A failure (permissions, a lock error) rolls back to the savepoint, leaves
+    the old constraint working and the caller's transaction usable. Never raises. Call it before
+    anything else locks the table in the caller's transaction. Returns 'skipped' (not Postgres / no
+    table), 'current' (nothing to do), 'migrated' or 'failed: <error>'."""
+    if (getattr(getattr(conn, "dialect", None), "name", "") or "") != "postgresql":
+        return "skipped"
+    try:
+        with conn.begin_nested():
+            if conn.execute(text("SELECT to_regclass('external_cash_flows')")).scalar() is None:
+                return "skipped"
+            have_index = conn.execute(text("SELECT to_regclass(:n)"), {"n": UNIQUE_INDEX}).scalar() is not None
+            have_legacy = conn.execute(text(
+                "SELECT 1 FROM pg_constraint WHERE conrelid = to_regclass('external_cash_flows') AND conname = :n"
+            ), {"n": LEGACY_UNIQUE_CONSTRAINT}).scalar() is not None
+            if have_index and not have_legacy:
+                return "current"
+            conn.execute(text(LOCK_FOR_MIGRATION))
+            conn.execute(text(DDL_UNIQUE_INDEX))
+            conn.execute(text(DROP_LEGACY_UNIQUE))
+        return "migrated"
+    except Exception as exc:     # noqa: BLE001 — the old constraint stays; the sync's targetless ON CONFLICT works with either
+        print(f"⚠️  external_cash_flows per-config txn_key migration not applied ({exc}); the table-wide key stays")
+        return f"failed: {exc}"
+
+
 def ensure_schema(engine) -> None:
     """Create the table / add the manual-entry columns (idempotent; checked once per engine).
 
     init_database.py runs the same DDL on Postgres; this lazy path mirrors the CREATE TABLE IF NOT
     EXISTS that benchmark_tracker always ran, so a dashboard started before init_database still works.
-    ALTERs are issued only for columns that are actually missing (no lock on every request)."""
+    ALTERs are issued only for columns that are actually missing (no lock on every request), and the
+    per-config txn_key migration (`migrate_unique_key`) only while the table-wide key is still there."""
     try:
         if engine in _SCHEMA_READY:
             return
@@ -193,6 +257,8 @@ def ensure_schema(engine) -> None:
         for col, typ in MIGRATION_COLUMNS:
             if col not in have:
                 conn.execute(text(ALTER_POSTGRES[col] if pg else f"ALTER TABLE external_cash_flows ADD COLUMN {col} {typ}"))
+        if pg:                   # before DDL_INDEX: the migration's exclusive lock must not upgrade a SHARE lock
+            migrate_unique_key(conn)
         conn.execute(text(DDL_INDEX))
     try:
         _SCHEMA_READY.add(engine)
@@ -302,15 +368,18 @@ def flow_totals(flows: list, since=None) -> dict:
     }
 
 
-def serialize_flow(f: dict, baseline_date=None) -> dict:
-    """JSON-ready flow (ISO dates, display label, whether it falls inside the gain period)."""
+def serialize_flow(f: dict, baseline_date=None, in_baseline: bool = False) -> dict:
+    """JSON-ready flow (ISO dates, display label, whether it falls inside the gain period).
+    in_baseline: a baseline-day transfer already inside the baseline value (in_baseline_ids) is
+    outside the gain period like one dated before it."""
     out = dict(f)
     out["date"] = f["date"].isoformat()
     ra = f.get("recorded_at")
     out["recorded_at"] = ra.isoformat() if hasattr(ra, "isoformat") else (str(ra) if ra else None)
     out["label"] = flow_label(f["amount"])
     out["direction"] = "deposit" if f["amount"] >= 0 else "withdrawal"
-    out["in_gain_period"] = baseline_date is None or f["date"] >= _as_date(baseline_date)
+    out["in_baseline"] = bool(in_baseline)
+    out["in_gain_period"] = not in_baseline and (baseline_date is None or f["date"] >= _as_date(baseline_date))
     return out
 
 
@@ -370,7 +439,8 @@ def add_manual_flow(engine, config_hash: str, flow_date, amount, direction, note
             VALUES (:c, :k, :d, :a, :desc, :src, :note, :ex)
         """), {"c": config_hash, "k": key, "d": d if _is_pg(engine) else d.isoformat(), "a": signed,
                "desc": description[:NOTE_MAX_CHARS], "src": SOURCE_MANUAL, "note": note or None, "ex": False})
-        new_id = conn.execute(text("SELECT id FROM external_cash_flows WHERE txn_key = :k"), {"k": key}).scalar()
+        new_id = conn.execute(text("SELECT id FROM external_cash_flows WHERE config_hash = :c AND txn_key = :k"),
+                              {"c": config_hash, "k": key}).scalar()
     return _get_flow(engine, config_hash, new_id)
 
 
@@ -427,7 +497,12 @@ def align_flows(timestamps, flows, values=None, settle_days=3, grace_days=1, top
     solved jointly for flows that share candidate steps by minimizing the total unexplained change
     (a −$1,853 / +$1,394.97 pair that posted as one −$459.61 step lands on that step together).
     Candidates are each flow's `top_k` largest moves in its window; clusters too large for an
-    exhaustive search fall back to largest-flow-first greedy."""
+    exhaustive search fall back to largest-flow-first greedy.
+
+    A flow dated on/before the first point's day may have posted before that point was taken (dates
+    carry no time of day), i.e. it is already inside point 0. With values, it gets None (not
+    subtracted) unless one of its candidate steps explains it: |jump − amount| <= EMBEDDED_MATCH_FRACTION
+    of the amount. Pinning it to the best step anyway drew a permanent fake −amount step."""
     days = [_as_date(t) for t in timestamps]
     n = len(days)
     pairs = [(_as_date(d), float(a)) for d, a in flows]
@@ -450,6 +525,11 @@ def align_flows(timestamps, flows, values=None, settle_days=3, grace_days=1, top
         steps = [i for i in range(1, n) if days[i] >= lo and days[i - 1] <= hi]
         steps.sort(key=lambda i: (-abs(delta[i]), i))
         cands.append(steps[:top_k])
+
+    for k, (d, amt) in enumerate(pairs):
+        if d <= days[0] and not any(abs(delta[s] - amt) <= EMBEDDED_MATCH_FRACTION * abs(amt) for s in cands[k]):
+            cands[k] = []        # no step after point 0 explains it: it was already in point 0
+            result[k] = None
 
     # Cluster flows that share any candidate step (union-find over the flow indices).
     parent = list(range(len(pairs)))
@@ -516,8 +596,9 @@ def flow_adjusted_gain(current_value, baseline_value, flows, baseline_at=None, a
     """Headline Net Gain/Loss with external transfers removed.
 
     flows: [(date, amount)] counted flows (see counted_pairs); those dated on/after the baseline date
-    are subtracted. The percent is Modified Dietz from baseline_at to as_of; without both timestamps
-    it falls back to the mid-period Dietz convention (every flow weighted 1/2)."""
+    are subtracted, so callers leave out the baseline-day transfers already inside the baseline value
+    (in_baseline_ids). The percent is Modified Dietz from baseline_at to as_of; without both
+    timestamps it falls back to the mid-period Dietz convention (every flow weighted 1/2)."""
     cur = float(current_value or 0.0)
     base = float(baseline_value or 0.0)
     start_day = _as_date(baseline_at) if baseline_at is not None else None
@@ -550,13 +631,83 @@ def flow_adjusted_gain(current_value, baseline_value, flows, baseline_at=None, a
     }
 
 
+def baseline_embedded(flows, baseline_value, baseline_at, snapshots=(), current=None) -> set:
+    """Indexes of the `flows` ([(date, amount)]) already inside the baseline value.
+
+    Only a transfer dated on the baseline day is in question: dates carry no time of day, so it may
+    have posted before the baseline was captured (then subtracting it shows a permanent −amount) or
+    after. The values decide, with the chart's test (align_flows over the baseline point, then the
+    `snapshots` [(timestamp, value)] taken after baseline_at and `current` (as_of, value), each kept
+    when dated before baseline day + BASELINE_EVIDENCE_DAYS): embedded unless a value step after the
+    baseline explains it. With no point after the baseline there is no evidence and the transfer is
+    subtracted as before."""
+    if baseline_at is None or baseline_value is None:
+        return set()
+    b_day = _as_date(baseline_at)
+    day0 = [k for k, (d, _) in enumerate(flows) if _as_date(d) == b_day]
+    if not day0:
+        return set()
+    t0 = _as_datetime(baseline_at)
+    horizon = datetime.combine(b_day + timedelta(days=BASELINE_EVIDENCE_DAYS), dtime.min)
+    pts = [(t0, float(baseline_value))]
+    for t, v in sorted(((_as_datetime(t), v) for t, v in (snapshots or ()) if t is not None and v is not None),
+                       key=lambda p: p[0]):
+        if t0 < t < horizon:
+            pts.append((t, float(v)))
+    if current is not None and current[0] is not None and current[1] is not None:
+        t_cur = _as_datetime(current[0])
+        if pts[-1][0] < t_cur < horizon:
+            pts.append((t_cur, float(current[1])))
+    if len(pts) < 2:
+        return set()
+    idx = align_flows([p[0] for p in pts], [flows[k] for k in day0], values=[p[1] for p in pts])
+    return {k for k, i in zip(day0, idx) if i is None}
+
+
+def baseline_snapshots(engine, config_hash: str, baseline_at) -> list:
+    """[(timestamp, value)] of this config's portfolio_history after baseline_at, through the window
+    baseline_embedded examines. [] on any error (a baseline-day transfer is then subtracted)."""
+    if baseline_at is None:
+        return []
+    t0 = _as_datetime(baseline_at)
+    end = datetime.combine(_as_date(baseline_at) + timedelta(days=BASELINE_EVIDENCE_DAYS), dtime.min)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT timestamp, total_portfolio_value FROM portfolio_history "
+                "WHERE config_hash = :c AND timestamp > :t AND timestamp < :e ORDER BY timestamp"
+            ), {"c": config_hash, "t": t0, "e": end}).fetchall()
+    except Exception as exc:     # noqa: BLE001 — no evidence: keep subtracting, as before
+        print(f"⚠️  Baseline-day transfer check skipped (portfolio snapshots unavailable: {exc})")
+        return []
+    return [(r[0], r[1]) for r in rows]
+
+
+def in_baseline_ids(engine, config_hash: str, flows: list, baseline_value, baseline_at, current=None) -> set:
+    """ids of the counted flows (list_flows dicts) dated on the baseline day that the snapshot values
+    show were already inside the baseline value (baseline_embedded). The headline Net Gain and the
+    Cash transfers card leave them out, as the performance chart does; the snapshots are read only
+    when such a flow exists. current: (as_of, live value) or None."""
+    if baseline_at is None or baseline_value is None:
+        return set()
+    b_day = _as_date(baseline_at)
+    day0 = [f for f in flows if f.get("counted") and _as_date(f["date"]) == b_day]
+    if not day0:
+        return set()
+    snaps = baseline_snapshots(engine, config_hash, baseline_at)
+    emb = baseline_embedded([(f["date"], f["amount"]) for f in day0], baseline_value, baseline_at,
+                            snaps, current=current)
+    return {day0[k]["id"] for k in emb}
+
+
 def adjusted_performance_series(points, flows, **align_kw) -> list:
     """Per-point gain vs the first point with transfers removed.
 
     points: [(timestamp, value)] in time order; flows: [(date, amount)] counted flows dated on/after
     the first point's date. Each row: net_gain_loss (value − first value − cumulative flows),
     net_percentage_gain (Modified Dietz from the first point, %), their *_raw twins, cumulative_flows
-    and `flows` (the amounts that took effect at this point)."""
+    and `flows` (the amounts that took effect at this point). A flow already inside the first value
+    (align_flows: None, or index 0 when there is no step to test) is part of the base, not subtracted."""
     if not points:
         return []
     ts = [p[0] for p in points]
@@ -564,7 +715,7 @@ def adjusted_performance_series(points, flows, **align_kw) -> list:
     base, t0 = vals[0], ts[0]
     pairs = [(_as_date(d), float(a)) for d, a in flows]
     idx = align_flows(ts, pairs, values=vals, **align_kw)
-    placed = sorted(((i, a) for (_, a), i in zip(pairs, idx) if i is not None), key=lambda x: x[0])
+    placed = sorted(((i, a) for (_, a), i in zip(pairs, idx) if i is not None and i > 0), key=lambda x: x[0])
     out = []
     for i, (t, v) in enumerate(zip(ts, vals)):
         active = [(ts[j], a) for j, a in placed if j <= i]

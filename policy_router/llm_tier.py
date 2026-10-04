@@ -144,6 +144,9 @@ class LLMTier:
                                             f"{node_text[:1200]}\n\n{QUESTION}"}]
 
     def ask(self, context_text: str, node_id: str, node_text: str, timeout: float) -> Optional[float]:
+        """P(needed) for one node within `timeout` seconds in total: the logprobs probe and the JSON fallback
+        share that window (the fallback gets only what the probe left; None when that is under 0.2 s)."""
+        t0 = time.monotonic()
         if self._logprobs_ok is not False:
             payload = {"model": self.model, "messages": self._messages(context_text, node_id, node_text, SYSTEM),
                        "temperature": 0, "max_tokens": 1, "logprobs": True, "top_logprobs": 10}
@@ -153,6 +156,9 @@ class LLMTier:
                 self._logprobs_ok = True
                 return p
             self._logprobs_ok = False          # the server ignores logprobs: use the JSON form from now on
+            timeout = timeout - (time.monotonic() - t0)
+            if timeout <= 0.2:
+                return None                    # refine() moves on and stops on its own budget check
         payload = {"model": self.model, "messages": self._messages(context_text, node_id, node_text, SYSTEM_JSON),
                    "temperature": 0, "max_tokens": 20,
                    "response_format": {"type": "json_schema", "json_schema": {

@@ -9,8 +9,8 @@ Sources per cycle (run_id), oldest first:
     momentum_snapshots    entities (company extraction + holdings) and trend tickers, when the table exists
     event_risk_snapshots  holdings / watchlist tickers and the EVENT CALENDAR block, when it exists
     trade_outcomes        the re-entry quarantine (sells within 2 sessions before the cycle)
-    decider_inputs        EXACT cycle inputs when that table exists (feature-detected; it wins over the
-                          reconstruction field by field)
+    decider_inputs        EXACT cycle inputs when that table exists (feature-detected; the 'decide' call's
+                          row, never the citation-repair row; it wins over the reconstruction field by field)
 plus the materialized policy version directory (agents/decider/policy-graph/<hash>/v<N>) for the nodes:
 diary entries, lessons and the DA.ltm.<id> overlay (active memory rows at that version).
 
@@ -138,9 +138,13 @@ def _by_run(engine, sql: str, params: dict, run_ids: list) -> dict:
     return out
 
 
-def decider_inputs_for(engine, run_ids: list, tables: Optional[set] = None) -> dict:
+def decider_inputs_for(engine, run_ids: list, tables: Optional[set] = None, *, config_hash: Optional[str] = None) -> dict:
     """{run_id: {field: value}} from a `decider_inputs` table when one exists (any column layout: direct
-    columns named like DECIDER_INPUT_KEYS, or a JSON column holding them). Empty otherwise."""
+    columns named like DECIDER_INPUT_KEYS, or a JSON column holding them). Empty otherwise.
+
+    Only the decision call's rows are read when the table has a `call_kind` column: a cycle also logs a
+    'citation_repair' row under the same run_id, with no context. Rows are merged oldest first, field by
+    field, so a later row never erases what an earlier one recorded."""
     tables = _tables(engine) if tables is None else tables
     if "decider_inputs" not in tables or not run_ids:
         return {}
@@ -150,10 +154,18 @@ def decider_inputs_for(engine, run_ids: list, tables: Optional[set] = None) -> d
         return {}
     if "run_id" not in cols:
         return {}
-    stmt = text("SELECT * FROM decider_inputs WHERE run_id IN :ids").bindparams(bindparam("ids", expanding=True))
+    sql, params = "SELECT * FROM decider_inputs WHERE run_id IN :ids", {"ids": list(run_ids)}
+    if "call_kind" in cols:
+        sql += " AND COALESCE(call_kind, 'decide') = 'decide'"
+    if config_hash is not None and "config_hash" in cols:
+        sql += " AND config_hash = :h"
+        params["h"] = config_hash
+    if "id" in cols:
+        sql += " ORDER BY id"
+    stmt = text(sql).bindparams(bindparam("ids", expanding=True))
     out: dict = {}
     with engine.connect() as conn:
-        rows = conn.execute(stmt, {"ids": list(run_ids)}).fetchall()
+        rows = conn.execute(stmt, params).fetchall()
     for r in rows:
         m = dict(r._mapping)
         found: dict = {}
@@ -171,7 +183,9 @@ def decider_inputs_for(engine, run_ids: list, tables: Optional[set] = None) -> d
                     if nm in b and b[nm] not in (None, ""):
                         found[field] = b[nm]
                         break
-        out[str(m["run_id"])] = found
+        cur = out.setdefault(str(m["run_id"]), {})
+        for f, v in found.items():
+            cur.setdefault(f, v)                     # merge: an empty or later row never erases a filled one
     return out
 
 
@@ -218,7 +232,7 @@ def load_cycles(engine, config_hash: str, *, store_root: Path, agent_type: str =
             exits = [(str(r[0]).upper(), _dt(r[1])) for r in conn.execute(text(
                 "SELECT ticker, sell_timestamp FROM trade_outcomes WHERE config_hash = :h AND sell_timestamp IS NOT NULL"),
                 {"h": config_hash}).fetchall() if r[0] and str(r[0]) != "N/A"]
-    exact = decider_inputs_for(engine, run_ids, tables)
+    exact = decider_inputs_for(engine, run_ids, tables, config_hash=config_hash)
 
     versions: dict = {}
     out = []

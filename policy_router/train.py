@@ -1,18 +1,25 @@
 """Train, evaluate and certify the policy router from the logs (read-only on the database).
 
     python -m policy_router.train --config-hash 9ea09b9as [--recall-target 0.98] [--routable entry,ltm]
-           [--db-url postgresql:///] [--repo-root .] [--out-dir …] [--base-url http://127.0.0.1:1234/v1]
+           [--label marginal|plain] [--db-url postgresql:///] [--repo-root .] [--out-dir …]
+           [--base-url http://127.0.0.1:1234/v1]
 
 Protocol
   1. Rebuild every logged Decider cycle (dataset.py), oldest first, and label every candidate node
-     (labels.py; theta from the explicit citation pairs).
+     (labels.py; theta from the explicit citation pairs). The default label is "marginal" (a node is
+     needed only where it carries something the always-served prompt does not); "plain" stays available.
   2. TIME SPLIT: the oldest ~70% of cycles train, the newest ~30% are held out.
   3. Settings (tau_min, the expected-recall target of the selection) are chosen by LEAVE-ONE-WEEK-OUT
      inside the training cycles only: the cheapest setting (fewest served chars) whose pooled
      out-of-fold recall meets the target. The held-out cycles are never used to choose.
   4. The model is fit on the training cycles and scored on the held-out cycles with those settings:
      recall overall and per node kind, served chars vs today's assembly, Brier, reliability bins,
-     AUC, and the needed nodes the router would have missed. `certified` = held-out recall >= target.
+     AUC, and the needed nodes the router would have missed. Two certification criteria, both recorded:
+       target       held-out recall >= the recall target
+       beats_today  held-out recall >= today's assembly's held-out recall AND served routable chars <=
+                    today's, on the same held-out cycles
+     `certified` = either passed; certification.criterion = "target" | "beats_today" | null (target first).
+     The runtime decides which criterion it accepts (DAI_ROUTER_CERTIFY, see runtime.py).
   5. Leave-one-week-out over ALL cycles is reported as a second opinion.
   6. The artifact is refit on every cycle (priors included) with the chosen settings.
 
@@ -54,6 +61,19 @@ LABEL_WEAKNESS = (
     "Similarity cannot tell use from redundancy: a memory row restating a pinned gate is labeled needed whenever "
     "the gate is applied; a ticker mention marks a node needed whenever the ticker is on the table. Both errors "
     "label more nodes needed, so recall against this label is conservative and savings are understated.")
+MARGINAL_DEFINITION = (
+    "Marginal (redundancy-aware): as the plain label, except that the similarity clause counts a reason only "
+    "when the node explains it at least as well as every pinned guideline does (cosine(node, reason) >= the "
+    "best pinned cosine on that reason - delta): the node carried something the always-served prompt did not. "
+    "Explicit citations and ticker mentions count as before.")
+MARGINAL_WEAKNESS = (
+    "Cosine dominance is a proxy for 'adds something': a node that restates a gate with one decisive nuance "
+    "worded like the gate is under-labeled (an error toward serving less). Redundancy among routable nodes is "
+    "not removed (two rows saying the same thing both count), and few nodes are labeled needed, so held-out "
+    "recall rests on a small count and moves by whole points per miss.")
+LABEL_TEXT = {"plain": (LABEL_DEFINITION, LABEL_WEAKNESS), "marginal": (MARGINAL_DEFINITION, MARGINAL_WEAKNESS)}
+DEFAULT_LABEL = "marginal"
+CERTIFY_CRITERIA = ("target", "beats_today")
 
 
 def router_dir(repo_root: Path, config_hash: str, agent_dir: str = "decider") -> Path:
@@ -250,6 +270,19 @@ def choose_setting(rows: list, target: float) -> tuple:
     return best, False
 
 
+def certify(held: dict, recall_target: float) -> tuple:
+    """(criterion, {"target": bool, "beats_today": bool}) from a held-out evaluation (`evaluate` output).
+    target       recall >= recall_target
+    beats_today  recall >= today's assembly's recall AND chars_selected <= chars_today (per-cycle means over the
+                 same held-out cycles, so the same as totals)
+    criterion    "target" when it passed, else "beats_today" when that passed, else None."""
+    r, tr, cs, ct = (held.get(k) for k in ("recall", "today_recall", "chars_selected", "chars_today"))
+    target_ok = r is not None and r >= recall_target - 1e-12
+    beats_ok = (None not in (r, tr, cs, ct)) and r >= tr - 1e-12 and cs <= ct + 1e-9
+    passed = {"target": bool(target_ok), "beats_today": bool(beats_ok)}
+    return next((k for k in CERTIFY_CRITERIA if passed[k]), None), passed
+
+
 def weeks_of(cycles: list) -> list:
     return sorted({c.week for c in cycles})
 
@@ -327,7 +360,8 @@ def protocol(cycles: list, X_by: dict, labels: dict, *, recall_target: float, ro
                  "base_rate": float(ys.mean()) if len(ys) else None, "mean_p": float(ps.mean()) if len(ps) else None,
                  "first": test[0].decided_at.isoformat(), "last": test[-1].decided_at.isoformat()})
     held["grid"] = grid_search(test, p_test, labels, routable=routable, ltm_cap=ltm_cap)
-    certified = bool(held["recall"] is not None and held["recall"] >= recall_target - 1e-12)
+    criterion, criteria = certify(held, recall_target)
+    certified = criterion is not None
     oof_all, weeks_all = lowo_predictions(cycles, X_by, labels, **fit_kw)
     lowo_cycles = [c for c in cycles if c.run_id in oof_all]
     lowo = evaluate(lowo_cycles, oof_all, labels, tau_min=setting["tau_min"], recall_target=setting["recall_target"],
@@ -336,13 +370,15 @@ def protocol(cycles: list, X_by: dict, labels: dict, *, recall_target: float, ro
         ps2, ys2 = _flat(lowo_cycles, oof_all, labels, routable)
         lowo.update({"brier": brier(ps2, ys2), "auc": auc(ps2, ys2), "weeks": weeks_all})
     return {"train": train, "test": test, "setting": setting, "met_cv": met_cv, "cv_weeks": weeks_scored,
-            "cv_grid": grid, "heldout": held, "lowo": lowo, "certified": certified}
+            "cv_grid": grid, "heldout": held, "lowo": lowo, "certified": certified, "criterion": criterion,
+            "criteria": criteria}
 
 
 def _summary(res: dict) -> dict:
     h = res["heldout"]
     return {"setting": {k: res["setting"].get(k) for k in ("tau_min", "recall_target", "recall")},
-            "certified": res["certified"], "lowo_recall": (res["lowo"] or {}).get("recall"),
+            "certified": res["certified"], "criterion": res["criterion"], "criteria": res["criteria"],
+            "lowo_recall": (res["lowo"] or {}).get("recall"),
             **{k: h.get(k) for k in ("recall", "recall_ceiling", "today_recall", "chars_selected", "chars_today", "chars_routable",
                                      "chars_reduction_vs_today", "nodes_selected", "nodes_today", "brier", "ece",
                                      "auc", "base_rate", "needed")},
@@ -353,7 +389,7 @@ def _summary(res: dict) -> dict:
 
 def run(cycles: list, embedder, *, config_hash: str, recall_target: float = 0.98, routable=DEFAULT_ROUTABLE,
         train_frac: float = 0.7, implicit_quantile: float = 0.5, theta: Optional[float] = None, l2: float = 1.0,
-        ltm_cap: Optional[int] = 14, strength: float = 4.0, label_mode: str = "plain", delta: float = 0.0,
+        ltm_cap: Optional[int] = 14, strength: float = 4.0, label_mode: str = DEFAULT_LABEL, delta: float = 0.0,
         compare_labels: bool = True, query_prefix: str = QUERY_PREFIX, doc_prefix: str = DOC_PREFIX,
         log: Callable = print) -> tuple:
     """(artifact dict, report dict) from CycleRecords (oldest first)."""
@@ -392,15 +428,20 @@ def run(cycles: list, embedder, *, config_hash: str, recall_target: float = 0.98
     model_version = hashlib.sha256((body + trained_at).encode("utf-8")).hexdigest()[:12]
     certification = {
         "target": float(recall_target), "certified": certified, "heldout_recall": held["recall"],
+        # which criterion certified it (target first) and both comparisons, so the runtime can apply DAI_ROUTER_CERTIFY
+        "criterion": res["criterion"], "criteria": res["criteria"],
+        "today_recall": held["today_recall"], "chars_selected": held["chars_selected"], "chars_today": held["chars_today"],
         "heldout_cycles": len(res["test"]), "train_cycles": len(res["train"]),
         "protocol": f"time split {int(round(train_frac * 100))}/{100 - int(round(train_frac * 100))} "
                     f"(settings by leave-one-week-out on the training cycles)",
         "lowo_recall": lowo.get("recall"), "cv_recall": setting.get("recall"), "cv_met": res["met_cv"],
         "routable": list(routable), "ltm_cap": ltm_cap, "label_mode": label_mode,
+        "llm_model": None,           # evaluated without the LLM tier: an LLM-refined p is not covered
     }
+    definition, weakness = LABEL_TEXT[label_mode]
     label_meta = {"mode": label_mode, "delta": delta if label_mode == "marginal" else None, "theta": theta_used,
                   "quantile": implicit_quantile if theta is None else None,
-                  "definition": LABEL_DEFINITION, "weakness": LABEL_WEAKNESS}
+                  "definition": definition, "weakness": weakness}
     artifact = {
         "schema": SCHEMA, "kind": "policy_router", "agent_type": "DeciderAgent", "config_hash": config_hash,
         "model_version": model_version, "trained_at": trained_at, "cycles": len(cycles),
@@ -421,7 +462,7 @@ def run(cycles: list, embedder, *, config_hash: str, recall_target: float = 0.98
         "config_hash": config_hash, "trained_at": trained_at, "model_version": model_version,
         "cycles": len(cycles), "first": cycles[0].decided_at.isoformat(), "last": cycles[-1].decided_at.isoformat(),
         "weeks": weeks_of(cycles), "routable": list(routable), "recall_target": recall_target,
-        "label": dict(label_meta, citation_pairs=len(sims),
+        "label": dict(label_meta, plain_definition=LABEL_DEFINITION, citation_pairs=len(sims),
                       citation_sim_quantiles=({q: float(np.quantile(sims, q)) for q in (0.1, 0.25, 0.5, 0.75, 0.9)}
                                               if sims else {}),
                       stats=label_stats(cycles, labels)),
@@ -447,6 +488,15 @@ def _pct(x) -> str:
     return "—" if x is None else f"{x * 100:.1f}%"
 
 
+def _verdict(cert: dict) -> str:
+    crit = cert.get("criterion")
+    return f"CERTIFIED ({crit})" if cert.get("certified") and crit else ("CERTIFIED" if cert.get("certified") else "NOT certified")
+
+
+def _passfail(cert: dict, criterion: str) -> str:
+    return "pass" if (cert.get("criteria") or {}).get(criterion) else "fail"
+
+
 def report_markdown(report: dict) -> str:
     h = report["heldout"]
     c = report["certification"]
@@ -461,7 +511,10 @@ def report_markdown(report: dict) -> str:
         "## Verdict",
         "",
         f"- Held-out recall (newest {h['cycles']} cycles, {h['first'][:10]} → {h['last'][:10]}): **{_pct(h['recall'])}** "
-        f"vs target {_pct(c['target'])} → **{'CERTIFIED' if c['certified'] else 'NOT certified'}**.",
+        f"→ **{_verdict(c)}**.",
+        f"  - target: recall {_pct(h['recall'])} ≥ {_pct(c['target'])} → {_passfail(c, 'target')}",
+        f"  - beats_today: recall {_pct(h['recall'])} ≥ today {_pct(h['today_recall'])} and chars/cycle "
+        f"{h['chars_selected']:.0f} ≤ today {h['chars_today']:.0f} → {_passfail(c, 'beats_today')}",
         f"- Today's assembly on the same cycles: recall {_pct(h['today_recall'])}. Best recall any ranking could reach "
         f"under the memory cap: {_pct(h.get('recall_ceiling'))}.",
         f"- Served routable chars per cycle: router {h['chars_selected']:.0f} vs today {h['chars_today']:.0f} "
@@ -493,8 +546,10 @@ def report_markdown(report: dict) -> str:
                 continue
             lines.append(f"| {mode} | {_pct(a['recall'])} | {_pct(a['today_recall'])} | {a['chars_selected']:.0f} | "
                          f"{a['chars_today']:.0f} | {_pct(a['chars_reduction_vs_today'])} | {a['brier']:.4f} | "
-                         f"{'yes' if a['certified'] else 'no'} |")
-    lines += ["", "## Label", "", L["definition"], "", f"Weakness: {L['weakness']}", "",
+                         f"{('yes (' + a['criterion'] + ')') if a.get('criterion') else 'no'} |")
+    plain_def = L.get("plain_definition")
+    lines += ["", "## Label", ""] + ([plain_def, ""] if plain_def and plain_def != L["definition"] else []) + [
+              L["definition"], "", f"Weakness: {L['weakness']}", "",
               f"theta = {L['theta']:.4f} (quantile {L['quantile']} of {L['citation_pairs']} cited guideline ↔ citing reason "
               f"cosines; quantiles {', '.join(f'{k}: {v:.3f}' for k, v in L['citation_sim_quantiles'].items())}).", "",
               "| kind | rows | needed | rate | explicit | similar | ticker |", "|---|---|---|---|---|---|---|"]
@@ -564,8 +619,9 @@ def main(argv=None) -> int:
     p.add_argument("--l2", type=float, default=1.0)
     p.add_argument("--ltm-cap", type=int, default=14, help="upper bound on memory rows served (DAI_MEMORY_LT_LIMIT)")
     p.add_argument("--limit", type=int, default=None, help="only the newest N cycles")
-    p.add_argument("--label", choices=LABEL_MODES, default="plain",
-                   help="plain = explicit | similar | ticker; marginal = similar only where the node beats every pinned guideline")
+    p.add_argument("--label", choices=LABEL_MODES, default=DEFAULT_LABEL,
+                   help="marginal (default) = similar only where the node explains a reason at least as well as every "
+                        "pinned guideline; plain = explicit | similar | ticker")
     p.add_argument("--delta", type=float, default=0.0, help="marginal label: tolerance below the best pinned cosine")
     p.add_argument("--no-compare", action="store_true", help="skip evaluating the other label mode")
     args = p.parse_args(argv)
@@ -589,7 +645,7 @@ def main(argv=None) -> int:
     paths = write_outputs(out_dir, artifact, report)
     h = report["heldout"]
     print(f"✅ held-out recall {_pct(h['recall'])} (target {_pct(args.recall_target)}) → "
-          f"{'CERTIFIED' if artifact['certified'] else 'NOT certified'}; today {_pct(h['today_recall'])}; "
+          f"{_verdict(artifact['certification'])}; today {_pct(h['today_recall'])}; "
           f"chars/cycle router {h['chars_selected']:.0f} vs today {h['chars_today']:.0f}; Brier {h['brier']:.4f}; "
           f"missed {len(h.get('missed') or [])}")
     for k, v in paths.items():

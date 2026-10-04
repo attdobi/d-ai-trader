@@ -162,3 +162,76 @@ def test_a_cap_book_error_falls_back_to_todays_sizing(decider, monkeypatch):
     _seed(engine, 6000.0, {"NVDA": 5})
     da.update_holdings([{"action": "buy", "ticker": "NVDA", "amount_usd": 1200, "reason": "add"}])
     assert _book(engine)["NVDA"].shares == 9               # uncapped: +4 shares, as before this change
+
+
+# ----------------------------------------------------------------------------- live buys count once the broker has them
+def _live_two_buys(da, engine, monkeypatch, first_outcome):
+    """Two live buys under a $2,000 total-investment cap: NVDA ($1,800) then AMD ($500 asked). `first_outcome`
+    plays the broker for NVDA; AMD fills. Returns (AMD's caps.invested at sizing, AMD decision, skipped)."""
+    monkeypatch.setattr(da, "MAX_TOTAL_INVESTMENT", 2000.0)
+    _seed(engine, 6000.0, {})
+
+    def _broker(decision):
+        if decision["ticker"] == "NVDA":
+            return first_outcome(decision)
+        decision["execution_status"], decision["order_id"] = "filled", "amd-1"
+        return True
+
+    monkeypatch.setattr(da, "execute_real_world_trade", _broker)
+    seen = {}
+    _real_alloc = da.whole_share_allocation
+
+    def _spy(amount, price, available_cash, **kw):
+        if kw.get("caps") is not None:
+            seen[price] = kw["caps"].invested
+        return _real_alloc(amount, price, available_cash, **kw)
+
+    monkeypatch.setattr(da, "whole_share_allocation", _spy)
+    buys = [{"action": "buy", "ticker": "NVDA", "amount_usd": 1800, "reason": "first"},    # 6 sh = $1,800
+            {"action": "buy", "ticker": "AMD", "amount_usd": 500, "reason": "second"}]     # $200 room → 2 sh
+    skipped = []
+    da.process_buy_decisions(buys, 6000.0, None, HASH, skipped, True, live_snapshot=None, enforce_position_caps=True)
+    return seen[PRICES["AMD"]], buys[1], skipped
+
+
+def test_live_fill_counts_in_the_cap_book_even_when_the_holdings_write_fails(decider, monkeypatch):
+    da, engine = decider
+    with engine.begin() as conn:      # the local bookkeeping for NVDA fails after the broker filled it
+        conn.execute(text("""
+            CREATE TRIGGER nvda_write_fails BEFORE INSERT ON holdings WHEN NEW.ticker = 'NVDA'
+            BEGIN SELECT RAISE(ABORT, 'holdings write failed'); END
+        """))
+
+    def _filled(decision):
+        decision["execution_status"], decision["order_id"] = "filled", "nvda-1"
+        return True
+
+    invested, amd, skipped = _live_two_buys(da, engine, monkeypatch, _filled)
+    assert invested == 1800.0                                   # the filled NVDA buy is in the book
+    assert amd["shares_override"] == 2 and _book(engine)["AMD"].shares == 2
+    nvda = next(s for s in skipped if s.get("ticker") == "NVDA")
+    assert "holdings write failed" in nvda["reason"]
+
+
+def test_live_order_the_broker_accepted_but_did_not_confirm_counts_in_the_cap_book(decider, monkeypatch):
+    da, engine = decider
+
+    def _working(decision):           # WORKING at the confirm deadline: trading_interface flattens it to 'error'
+        decision["execution_status"], decision["order_id"] = "error", "nvda-1"
+        decision["execution_error"] = "order still WORKING"
+        return False
+
+    invested, amd, _skipped = _live_two_buys(da, engine, monkeypatch, _working)
+    assert invested == 1800.0 and amd["shares_override"] == 2
+    assert "NVDA" not in _book(engine)                         # still no phantom local holding
+
+
+def test_live_order_the_broker_never_received_does_not_count(decider, monkeypatch):
+    da, engine = decider
+
+    def _no_order(decision):          # e.g. Schwab auth failed: no order id
+        decision["execution_status"] = "failed"
+        return False
+
+    invested, amd, _skipped = _live_two_buys(da, engine, monkeypatch, _no_order)
+    assert invested == 0.0 and amd["shares_override"] == 5

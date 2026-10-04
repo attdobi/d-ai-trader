@@ -20,7 +20,7 @@ fewer characters are served. It is a non-generative decision model, built locall
     labels.py    what "needed" means (see below)
     dataset.py   the labeled dataset rebuilt from the logs (read-only)
     train.py     `python -m policy_router.train --config-hash <hash>`: time split + leave-one-week-out
-                 evaluation, settings that meet the recall target on held-out cycles, artifact
+                 evaluation, certification (recall target, or beats today's assembly), artifact
     runtime.py   one cycle at decision time: off | shadow | active, every failure → today's prompt
     log.py       policy_router_decisions / policy_router_runs (one row per node, one per run)
     panel.py     the Policy Graph tab's Router panel
@@ -39,7 +39,8 @@ a memory row that restates a pinned gate is labeled needed whenever the gate is 
 the pinned gate already carries the content; and a ticker mention marks a node needed whenever the
 ticker is on the table even if its lesson was irrelevant. Both errors push toward serving more,
 never less, so recall measured against this label is conservative for safety and pessimistic for
-savings.
+savings. The trainer's DEFAULT is therefore the redundancy-aware "marginal" variant (labels.py): the
+similar clause counts only where the node explains a reason at least as well as every pinned guideline.
 
 The package never imports `config` and never reads the process environment: settings, the engine and the HTTP
 transport are passed in.

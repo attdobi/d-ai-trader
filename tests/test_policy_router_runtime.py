@@ -25,18 +25,28 @@ _spec.loader.exec_module(fakes)
 CFG = "cfg_router"
 
 
-def make_artifact(*, certified=True, target=0.98, routable=("entry", "ltm"), ltm_cap=14, embed_model="m"):
+def make_artifact(*, certified=True, target=0.98, routable=("entry", "ltm"), ltm_cap=14, embed_model="m", criteria=None,
+                  heldout_recall=None, llm_model=None):
+    """criteria=None writes an artifact as the trainer did before the beats_today criterion (certified = recall >= target)."""
     rng = np.random.default_rng(0)
     X = rng.normal(size=(200, len(FEATURES)))
     y = (X[:, FEATURES.index("cos_ctx")] > 0).astype(float)
     model = LogisticModel(l2=1.0, class_weight="balanced").fit(X, y, feature_names=FEATURES)
+    cert = {"target": target, "certified": certified,
+            "heldout_recall": heldout_recall if heldout_recall is not None else (0.99 if certified else 0.9),
+            "routable": list(routable), "ltm_cap": ltm_cap}
+    if criteria is not None:
+        cert.update(criteria=dict(criteria), criterion=next((k for k in ("target", "beats_today") if criteria.get(k)), None),
+                    today_recall=0.908, chars_selected=5854.0, chars_today=7587.0, llm_model=llm_model)
+    elif llm_model:
+        cert["llm_model"] = llm_model
     return {"schema": 1, "kind": "policy_router", "model_version": "abc123def456", "certified": certified,
             "embed": {"model": embed_model, "query_prefix": "search_query: ", "doc_prefix": "search_document: "},
             "features": list(FEATURES), "model": model.to_dict(), "priors": Priors().to_dict(),
-            "selection": {"tau_min": 0.6, "recall_target": 0.9, "min_per_kind": {}, "max_per_kind": {"ltm": ltm_cap}},
+            "selection": {"tau_min": 0.6, "recall_target": 0.9, "min_per_kind": {},
+                          "max_per_kind": {"ltm": ltm_cap} if ltm_cap else {}},
             "routable": list(routable),
-            "certification": {"target": target, "certified": certified, "heldout_recall": 0.99 if certified else 0.9,
-                              "routable": list(routable), "ltm_cap": ltm_cap},
+            "certification": cert,
             "heldout": {"recall": 0.99, "today_recall": 0.8, "chars_selected": 500.0, "chars_today": 900.0,
                         "chars_routable": 1200.0, "chars_reduction_vs_today": 0.44, "brier": 0.08}}
 
@@ -77,6 +87,7 @@ def test_settings_from_mapping_defaults_and_parsing(tmp_path):
                                      "DAI_ROUTER_RECALL_TARGET": "1.7", "DAI_MEMORY_LT_LIMIT": "9",
                                      "DAI_ROUTER_LLM_MODEL": " qwen "}, repo_root=tmp_path, config_hash=CFG)
     assert s.mode == "off" and s.routable == ("lesson", "entry") and s.recall_target == 1.0 and s.ltm_limit == 9
+    assert s.certify == "either"
     assert s.llm_model == "qwen"
     assert RouterSettings.from_mapping({"DAI_POLICY_ROUTER": "active"}, repo_root=tmp_path, config_hash=CFG).mode == "active"
     assert RouterSettings.from_mapping({"DAI_POLICY_ROUTER": "weird"}, repo_root=tmp_path, config_hash=CFG).mode == "shadow"
@@ -132,17 +143,76 @@ def test_active_with_certified_artifact_exposes_override_ltm_choice_and_tail(tmp
     assert tail.startswith("Memory rows not shown this cycle (routed out") and all(i in tail for i in r.ltm_excluded_ids())
 
 
-@pytest.mark.parametrize("env,gap", [
-    ({"DAI_ROUTER_RECALL_TARGET": "0.99"}, "DAI_ROUTER_RECALL_TARGET"),
-    ({"DAI_ROUTER_ROUTABLE": "entry,ltm,lesson"}, "certified for routable"),
-    ({"DAI_MEMORY_LT_LIMIT": "5"}, "DAI_MEMORY_LT_LIMIT"),
+@pytest.mark.parametrize("art_kw,env,gap", [
+    ({}, {"DAI_ROUTER_RECALL_TARGET": "0.99"}, "DAI_ROUTER_RECALL_TARGET"),
+    ({}, {"DAI_ROUTER_ROUTABLE": "entry,ltm,lesson"}, "certified for routable"),
+    ({}, {"DAI_MEMORY_LT_LIMIT": "5"}, "DAI_MEMORY_LT_LIMIT"),
+    # certified WITHOUT a memory cap (train --ltm-cap 0) but served under the runtime cap → not covered
+    ({"ltm_cap": 0}, {"DAI_MEMORY_LT_LIMIT": "14"}, "DAI_MEMORY_LT_LIMIT"),
+    ({"ltm_cap": None}, {"DAI_MEMORY_LT_LIMIT": "14"}, "without a memory-row cap"),
+    ({"ltm_cap": 0}, {"DAI_MEMORY_LT_LIMIT": "1"}, "without a memory-row cap"),
 ])
-def test_certification_gaps_keep_active_in_shadow(tmp_path, env, gap):
-    art = make_artifact()
+def test_certification_gaps_keep_active_in_shadow(tmp_path, art_kw, env, gap):
+    art = make_artifact(**art_kw)
     s = settings(tmp_path, DAI_POLICY_ROUTER="active", **env)
     assert any(gap in g for g in certification_gaps(art, s))
     r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), artifact=art)
-    assert r.effective_mode == "shadow" and gap in r.note
+    assert r.effective_mode == "shadow" and not r.active and gap in r.note
+
+
+def test_uncapped_certification_runs_active_only_when_the_runtime_does_not_cap(tmp_path):
+    # DAI_MEMORY_LT_LIMIT=0: route_cycle serves the artifact's own (empty) cap, i.e. what was certified
+    art = make_artifact(ltm_cap=0)
+    s = settings(tmp_path, DAI_POLICY_ROUTER="active", DAI_MEMORY_LT_LIMIT="0")
+    assert certification_gaps(art, s) == []
+    r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), artifact=art)
+    assert r.active and set(r.ltm_selected_ids()) | set(r.ltm_excluded_ids()) == {"DA.ltm.7", "DA.ltm.8"}
+
+
+# ----------------------------------------------------------------------------- DAI_ROUTER_CERTIFY
+def test_certify_setting_parsing(tmp_path):
+    assert settings(tmp_path).certify == "either"
+    assert settings(tmp_path, DAI_ROUTER_CERTIFY="Beats-Today").certify == "beats_today"
+    assert settings(tmp_path, DAI_ROUTER_CERTIFY="target").certify == "target"
+    assert settings(tmp_path, DAI_ROUTER_CERTIFY="").certify == "either"
+    assert settings(tmp_path, DAI_ROUTER_CERTIFY="bogus").certify == "target"      # fails closed to the original rule
+
+
+BEATS_ONLY = {"target": False, "beats_today": True}
+TARGET_ONLY = {"target": True, "beats_today": False}
+
+
+@pytest.mark.parametrize("criteria,certify,env,active,gap", [
+    # beats today but misses 0.98: accepted by either / beats_today whatever DAI_ROUTER_RECALL_TARGET asks
+    (BEATS_ONLY, "either", {}, True, None),
+    (BEATS_ONLY, "either", {"DAI_ROUTER_RECALL_TARGET": "0.99"}, True, None),
+    (BEATS_ONLY, "beats_today", {}, True, None),
+    (BEATS_ONLY, "target", {}, False, "DAI_ROUTER_CERTIFY=target"),
+    # the beats_today chars comparison holds only at the certified memory cap
+    (BEATS_ONLY, "either", {"DAI_MEMORY_LT_LIMIT": "20"}, False, "beating today's assembly at a 14-row memory cap"),
+    # target-certified: the old rule; a looser memory cap only adds rows
+    (TARGET_ONLY, "either", {}, True, None),
+    (TARGET_ONLY, "target", {"DAI_MEMORY_LT_LIMIT": "20"}, True, None),
+    (TARGET_ONLY, "either", {"DAI_ROUTER_RECALL_TARGET": "0.99"}, False, "DAI_ROUTER_RECALL_TARGET asks 0.99"),
+    (TARGET_ONLY, "beats_today", {}, False, "does not beat today's assembly"),
+])
+def test_certify_setting_selects_the_accepted_criterion(tmp_path, criteria, certify, env, active, gap):
+    art = make_artifact(criteria=criteria, heldout_recall=0.974 if not criteria["target"] else 0.985)
+    s = settings(tmp_path, DAI_POLICY_ROUTER="active", DAI_ROUTER_CERTIFY=certify, **env)
+    gaps = certification_gaps(art, s)
+    r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), artifact=art)
+    assert r.active is active and (gaps == []) is active
+    if gap:
+        assert any(gap in g for g in gaps) and gap in r.note and r.effective_mode == "shadow"
+    expected = "target" if criteria["target"] else "beats_today"
+    assert r.criterion == expected and f"certified ({expected})" in r.summary_line()
+
+
+def test_uncertified_artifact_names_both_criteria(tmp_path):
+    art = make_artifact(certified=False, criteria={"target": False, "beats_today": False}, heldout_recall=0.96)
+    gaps = certification_gaps(art, settings(tmp_path, DAI_POLICY_ROUTER="active"))
+    assert len(gaps) == 1 and gaps[0].startswith("model not certified")
+    assert "0.960 < target 0.98" in gaps[0] and "does not beat today's assembly: recall 0.960 vs today 0.908" in gaps[0]
 
 
 def test_embedding_timeout_and_endpoint_down_fall_back(tmp_path):
@@ -179,6 +249,30 @@ def test_llm_tier_refines_uncertain_nodes(tmp_path):
     assert r.backend == "embed+llm" and r.llm == {"answered": 1}
     refined = [d for d in r.selection.decisions if d.p_base is not None]
     assert len(refined) == 1 and refined[0].p == pytest.approx(0.999)
+
+
+def test_active_with_an_uncertified_llm_tier_runs_as_shadow(tmp_path):
+    class Tier:
+        def __init__(self, out):
+            self.out = out
+
+        def refine(self, ctx_text, items):
+            return ({items[0][0]: 0.001} if self.out else {}), {"answered": int(bool(self.out))}
+    s = settings(tmp_path, DAI_POLICY_ROUTER="active", DAI_ROUTER_LLM_MODEL="local-chat")
+    # the trainer certified the embed-only model: an LLM-refined p is not covered → shadow, with the reason
+    for art in (make_artifact(), make_artifact(criteria=TARGET_ONLY, heldout_recall=0.985)):
+        r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), llm=Tier(True), artifact=art)
+        assert r.backend == "embed+llm" and r.effective_mode == "shadow" and not r.active
+        assert "LLM tier (local-chat) refined p" in r.note and "only the base model" in r.note
+    # the tier configured but silent (offline, budget spent): nothing refined → active as certified
+    r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), llm=Tier(False), artifact=make_artifact())
+    assert r.backend == "embed" and r.active and r.note == ""
+    # a certification that covers that chat model → active with the refined p
+    art = make_artifact(criteria=TARGET_ONLY, heldout_recall=0.985, llm_model="local-chat")
+    r = route_cycle(s, fakes.context(), nodes(), embedder=embedder(), llm=Tier(True), artifact=art)
+    assert r.backend == "embed+llm" and r.active
+    other = make_artifact(llm_model="another-chat")
+    assert any("covers another-chat" in g for g in certification_gaps(other, s, llm_refined=True))
 
 
 # ----------------------------------------------------------------------------- log + shadow recall + panel
@@ -227,6 +321,7 @@ def test_panel_payload_and_route(tmp_path, engine):
     out = router_panel(engine, CFG, repo_root=tmp_path)
     assert out["mode"] == "shadow" and out["effective_mode"] == "shadow" and out["artifact"]["certified"] is True
     assert out["artifact"]["heldout_recall"] == 0.99 and len(out["last_cycle"]["nodes"]) == 4
+    assert out["artifact"]["criterion"] == "target"                       # an artifact from before beats_today
     assert "Shadow" in out["note"]
 
     from flask import Flask

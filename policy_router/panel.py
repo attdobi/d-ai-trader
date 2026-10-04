@@ -39,6 +39,8 @@ def router_panel(engine, config_hash: str, *, repo_root, last_n: int = 30) -> di
         out["artifact"] = {
             "model_version": art.get("model_version"), "trained_at": art.get("trained_at"), "cycles": art.get("cycles"),
             "certified": bool(art.get("certified")), "target": cert.get("target"),
+            "criterion": cert.get("criterion") or ("target" if art.get("certified") else None),
+            "criteria": cert.get("criteria"),
             "heldout_recall": cert.get("heldout_recall"), "lowo_recall": cert.get("lowo_recall"),
             "today_recall": h.get("today_recall"), "recall_ceiling": h.get("recall_ceiling"),
             "chars_selected": h.get("chars_selected"), "chars_today": h.get("chars_today"),

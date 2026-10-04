@@ -14,10 +14,11 @@ Weakness (see the package docstring): similarity cannot separate use from redund
 restates a pinned gate is labeled needed whenever the gate is applied), and a ticker mention marks a node
 needed whenever its ticker is on the table. Both errors label MORE nodes needed, never fewer.
 
-Variant "marginal" (train --label marginal): the similar clause also requires that the node explains the
-reason at least as well as every pinned guideline (gates, rules, sections, soul, code blocks) does, minus
-`delta` — "the node carried something the always-served prompt did not". It removes the redundancy error
-but can under-label a node that restates a gate with one decisive nuance worded like the gate.
+Variant "marginal" (the trainer's default; `--label plain` trains on the label above): the similar clause
+also requires that the node explains the reason at least as well as every pinned guideline (gates, rules,
+sections, soul, code blocks) does, minus `delta` — "the node carried something the always-served prompt
+did not". It removes the redundancy error but can under-label a node that restates a gate with one
+decisive nuance worded like the gate.
 """
 from __future__ import annotations
 

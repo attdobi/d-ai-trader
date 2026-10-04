@@ -952,6 +952,12 @@ class PromptManager:
         allow_reasoning_payload = True  # disable if API rejects reasoning_effort
         while retries < max_retries:
             try:
+                # only the attempt that yields the return value is "the reply": a retried attempt's
+                # discarded text must not be logged as the reply behind a later error / fallback
+                self._tls.last_reply = None
+            except Exception:
+                pass
+            try:
                 if model_override is not None:
                     _, model_name = _normalize_model_name(model_override)
                 else:
@@ -1282,8 +1288,16 @@ class PromptManager:
                     continue
                 retries += 1
                 if retries >= max_retries:
+                    try:
+                        self._tls.last_reply = None  # the caller gets this error dict, not any model text
+                    except Exception:
+                        pass
                     return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
 
+        try:
+            self._tls.last_reply = None  # the caller gets this dict, not the last retried attempt's text
+        except Exception:
+            pass
         return {"headlines": ["Max retries reached"], "insights": "Failed to get valid response after multiple attempts"}
 
     def _create_fallback_response(self, content, agent_name):

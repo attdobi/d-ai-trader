@@ -2332,12 +2332,12 @@
     if (art) {
       const cls = art.certified ? 'ok' : 'warn';
       tiles.push(`<div class="pg-router-stat"><div class="k">Held-out recall</div><div class="v ${cls}">${pct(art.heldout_recall, 1)}</div>`
-        + `<div class="s">target ${pct(art.target, 0)} · ${art.certified ? 'certified' : 'not certified'} · today's prompt ${pct(art.today_recall, 1)}`
+        + `<div class="s">target ${pct(art.target, 0)} · ${art.certified ? ('certified' + (art.criterion === 'beats_today' ? ' (beats today\'s prompt)' : art.criterion === 'target' ? ' (meets the target)' : '')) : 'not certified'} · today's prompt ${pct(art.today_recall, 1)}`
         + `${art.recall_ceiling !== null && art.recall_ceiling !== undefined ? ` · best possible under the memory cap ${pct(art.recall_ceiling, 1)}` : ''}</div></div>`);
       tiles.push(`<div class="pg-router-stat"><div class="k">Served per cycle (held out)</div><div class="v">${kChars(art.chars_selected)} chars</div>`
         + `<div class="s">today ${kChars(art.chars_today)} of ${kChars(art.chars_routable)} routable · ${art.chars_reduction_vs_today !== null && art.chars_reduction_vs_today !== undefined ? `${art.chars_reduction_vs_today >= 0 ? 'saves' : 'adds'} ${pct(Math.abs(art.chars_reduction_vs_today), 0)}` : '—'}</div></div>`);
       tiles.push(`<div class="pg-router-stat"><div class="k">Model</div><div class="v">${esc(art.model_version || '—')}</div>`
-        + `<div class="s">trained ${esc(fmtDateOnly(art.trained_at))} on ${plural(art.cycles || 0, 'cycle')} · Brier ${art.brier !== null && art.brier !== undefined ? Number(art.brier).toFixed(3) : '—'} · label ${esc(art.label_mode || 'plain')}</div></div>`);
+        + `<div class="s">trained ${esc(fmtDateOnly(art.trained_at))} on ${plural(art.cycles || 0, 'cycle')} · Brier ${art.brier !== null && art.brier !== undefined ? Number(art.brier).toFixed(3) : '—'} · label ${esc(art.label_mode || 'marginal')}</div></div>`);
     } else {
       tiles.push(`<div class="pg-router-stat"><div class="k">Model</div><div class="v warn">none</div><div class="s">${esc(data.artifact_error || 'run python -m policy_router.train')}</div></div>`);
     }

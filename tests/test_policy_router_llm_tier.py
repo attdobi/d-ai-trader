@@ -25,10 +25,12 @@ class FakeChat:
     def __init__(self, *, logprobs=True, p=0.9, delay=0.0, fail=None):
         self.logprobs, self.p, self.delay, self.fail = logprobs, p, delay, fail
         self.payloads = []
+        self.timeouts = []
 
     def __call__(self, url, payload, timeout):
         assert url.endswith("/chat/completions")
         self.payloads.append(payload)
+        self.timeouts.append(timeout)
         if self.delay:
             time.sleep(self.delay)
         if self.fail:
@@ -102,3 +104,23 @@ def test_refine_stops_on_budget_and_on_errors_without_raising():
                      log=logs.append)
     out, info = broken.refine("ctx", [("a", "t", 0.5)])
     assert out == {} and "RuntimeError" in info["skipped"] and len(logs) == 1
+
+
+def test_json_fallback_gets_only_the_time_the_logprobs_probe_left():
+    # a server that ignores logprobs: the probe and the JSON call share one per-call window
+    chat = FakeChat(logprobs=False, p=0.7, delay=0.25)
+    tier = LLMTier("http://fake/v1", "m", transport=chat, get_transport=_models("m"), budget_s=5.0, per_call_s=1.0,
+                   log=lambda *_: None)
+    out, info = tier.refine("ctx", [("a", "t", 0.5)])
+    assert set(out) == {"a"} and len(chat.payloads) == 2 and "response_format" in chat.payloads[1]
+    assert chat.timeouts[0] == pytest.approx(1.0) and chat.timeouts[1] <= 1.0 - 0.25 + 0.05
+    # the probe ate the window: no JSON call, and refine() stays inside its hard budget (it used to take ~2 calls)
+    chat = FakeChat(logprobs=False, delay=0.35)
+    logs = []
+    tier = LLMTier("http://fake/v1", "m", transport=chat, get_transport=_models("m"), budget_s=0.5, per_call_s=0.45,
+                   log=logs.append)
+    t0 = time.monotonic()
+    out, info = tier.refine("ctx", [("a", "t", 0.5), ("b", "t", 0.45)])
+    elapsed = time.monotonic() - t0
+    assert out == {} and len(chat.payloads) == 1 and info["logprobs"] is False
+    assert elapsed < 0.5 + 0.1 and "budget" in (info["skipped"] or "")

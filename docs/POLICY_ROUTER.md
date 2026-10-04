@@ -30,7 +30,9 @@ served. The package is `policy_router/`: config-free, local, no hosted model.
    from a constrained JSON `{"p": …}` when the server returns no logprobs, and averaged with the base p in
    logit space. The tier is auto-detected through `GET /v1/models`, has a hard budget of 15 s per cycle,
    and is skipped with one log line when no chat model is loaded. That is the case today, while the
-   2×RTX 3090 host is offline.
+   2×RTX 3090 host is offline. The trainer certifies the embed-only model, so in `active` a cycle whose p
+   the tier changed runs as shadow unless the certification names that chat model (`certification.llm_model`;
+   no training path records one yet). A configured tier that stays silent changes nothing.
 6. **Selection.** Include every node with p ≥ tau_min. Then add nodes by descending p until the expected
    recall Σp(selected) / Σp(all) reaches the artifact's target. Memory rows are capped at
    `DAI_MEMORY_LT_LIMIT` (14).
@@ -43,11 +45,46 @@ served. The package is `policy_router/`: config-free, local, no hosted model.
 | `shadow` | **exactly today's prompt** | every node's p, choice, and whether the prompt carried it |
 | `active` | pinned nodes + the routable nodes kept. The memory rows are chosen from ALL active rows, at most 14. The excluded ids are listed in one tail line per block and accepted as citations | same, plus `served_in_prompt` reflects the router's choice |
 
-`active` runs only when the artifact is **certified** for the configured recall target, routable kinds
-and memory cap. Otherwise the cycle runs as shadow and the log says why. Every failure falls back to
-today's prompt with one log line: no artifact, an embedding timeout, the endpoint down, a malformed
-artifact, or an embedding-model mismatch. The router never touches decisions, so it can never block a
-SELL.
+`active` runs only when the artifact is **certified** under the configured criterion
+(`DAI_ROUTER_CERTIFY`, below) and its certification covers the configured routable kinds, memory cap and
+LLM tier. Otherwise the cycle runs as shadow and the log says why. In particular:
+
+- an artifact certified **without** a memory cap (`--ltm-cap 0`) runs as shadow whenever
+  `DAI_MEMORY_LT_LIMIT` caps memory rows (any value above 0), and one certified at N rows runs as shadow
+  under a tighter cap;
+- an LLM-refined p is not covered by an embed-only certification (see step 5).
+
+Every failure falls back to today's prompt with one log line: no artifact, an embedding timeout, the
+endpoint down, a malformed artifact, or an embedding-model mismatch. The router never touches decisions,
+so it can never block a SELL.
+
+### Certification criteria (`DAI_ROUTER_CERTIFY`, default `either`)
+
+The trainer records both criteria on the held-out cycles (`certification.criteria`), the one that
+certified the artifact (`certification.criterion`: `target`, else `beats_today`, else null) and the
+numbers behind them (held-out recall and target; today's recall; router vs today served routable chars).
+
+| criterion | passes when |
+|---|---|
+| `target` | held-out recall ≥ the recall target (and that target ≥ `DAI_ROUTER_RECALL_TARGET`) |
+| `beats_today` | held-out recall ≥ today's assembly's held-out recall **and** the router's served routable chars ≤ today's, on the same held-out cycles |
+
+| `DAI_ROUTER_CERTIFY` | active accepts |
+|---|---|
+| `either` (default) | `target`, or `beats_today` whatever `DAI_ROUTER_RECALL_TARGET` asks |
+| `target` | `target` only (the original rule) |
+| `beats_today` | `beats_today` only |
+
+An unrecognized value falls back to `target`. A `beats_today` certification holds only at the memory cap
+it was measured under, because a different cap changes both sides of the chars comparison; a `target`
+certification also accepts a looser cap, which only adds rows. The package reads the setting from the
+mapping the trader passes to `RouterSettings.from_mapping` (the process environment), like every other
+`DAI_ROUTER_*` key. Artifacts written before this criterion existed count as `target`-only.
+
+Why a second criterion: under the 14-row memory cap the plain label's recall ceiling is 98.0%, so a
+0.98 target can only be met by a perfect ranking. And a router that misses no more needed nodes than
+today's assembly while serving no more characters is no worse than what runs now on either measure,
+whatever the target says.
 
 ## Label: what "needed" means
 
@@ -64,41 +101,66 @@ SELL.
 Why not explicit citations alone? Memory rows had zero citations ever, because they were not citable, and
 diary entries were never cited. A model trained only on citations would learn to drop all of them.
 
-**Weakness.** Similarity cannot tell *use* from *redundancy*. A memory row that restates a pinned gate is
-labeled needed whenever the gate is applied, although the gate already carries the content. A ticker
-mention marks a node needed whenever its ticker is on the table. Both errors label more nodes as needed,
-never fewer. The trainer therefore also evaluates a **marginal** variant (`--label marginal`): a reason
-counts only when the node explains it at least as well as every pinned guideline. That removes the
-redundancy error, but it can under-label a node that restates a gate with one decisive nuance.
+**Weakness of the plain label.** Similarity cannot tell *use* from *redundancy*. A memory row that
+restates a pinned gate is labeled needed whenever the gate is applied, although the gate already carries
+the content. A ticker mention marks a node needed whenever its ticker is on the table. Both errors label
+more nodes as needed, never fewer.
+
+### Default: the marginal label (`--label marginal`; `--label plain` stays available)
+
+The router's job is the *minimal subgraph that preserves what the Decider uses*. The pinned guidelines
+are always served, so a routable node matters only for what it adds on top of them. The **marginal**
+label encodes exactly that. The similar clause counts a reason only when the node explains it at least
+as well as the best pinned guideline does on that reason (cosine(node, reason) ≥ best pinned cosine −
+`--delta`, default 0). Explicit citations and ticker mentions count as before. The plain label instead
+asks the router to keep rows whose content the pinned gates already carry, which inflates "needed" to
+54.6% of memory rows and makes the 14-row cap, not the router, the limit on recall.
+
+Weaknesses of the marginal label:
+
+- **Proxy for "adds something".** Cosine dominance cannot see a single decisive nuance. A node that
+  restates a gate with one extra condition, worded like the gate, is under-labeled. This error goes
+  toward serving *less*, unlike the plain label's errors.
+- **No redundancy among routable nodes.** Two memory rows saying the same thing are both labeled needed.
+  This errs toward serving more.
+- **Small counts.** Few nodes are needed per cycle (76 in the 30 held-out cycles, against 603 under the
+  plain label). Each miss moves held-out recall by more than a point, so the estimate is noisy.
+
+The trainer always evaluates the other label under the same protocol and reports it side by side
+(`alternatives` in `eval.json`, a table in `eval.md`).
 
 ## Training and certification
 
 ```
-python -m policy_router.train --config-hash 9ea09b9as --db-url postgresql:///adobi [--recall-target 0.98]
+python -m policy_router.train --config-hash 9ea09b9as --db-url postgresql:///adobi [--recall-target 0.98] [--label marginal|plain]
 ```
 
 The trainer reads the database read-only. It rebuilds each logged cycle from `policy_graph_runs`,
 `policy_graph_hits`, `trade_decisions`, `summaries`, `momentum_snapshots`, `event_risk_snapshots` and
 `trade_outcomes`, plus the materialized version directory. A `decider_inputs` table is used field by field
-when it exists. The protocol:
+when it exists. Only the decision call's row of the cycle is read: the citation-repair row that shares its
+run id carries no context and never overrides it. The protocol:
 
 - a **time split**: the oldest 70% of cycles train and the newest 30% are held out;
 - settings chosen by **leave-one-week-out on the training cycles only**;
 - **leave-one-week-out over all cycles** as a second opinion.
 
 Priors are leak-free: each training cycle sees only earlier cycles, and held-out cycles use the frozen
-training counts. The artifact is written with `certified = true` only if held-out recall ≥ target, and is
-then refit on every cycle. Outputs go to `agents/decider/policy-router/<hash>/` (gitignored): `model.json`,
+training counts. The artifact is written with `certified = true` when either certification criterion passes
+on the held-out cycles (see above), and is then refit on every cycle. Outputs go to `agents/decider/policy-router/<hash>/` (gitignored): `model.json`,
 `eval.json` and `eval.md`.
 
 ## Measured on the live logs (2026-10-04, 101 cycles, 2026-09-03 → 2026-10-02)
 
 Held out: the newest 30 cycles (2026-09-23 → 2026-10-02). Routable: diary entries + memory rows.
 
-| label | held-out recall | today's prompt | best possible under the 14-row cap | chars/cycle router vs today | Brier (base-rate forecast) | LOWO recall | certified at 0.98 |
-|---|---|---|---|---|---|---|---|
-| plain (default) | **96.0%** (24 misses of 603) | 74.8% | 98.0% | 8,288 vs 7,587 (+9%) | 0.094 (0.233), AUC 0.93 | 97.6% | no |
-| marginal | **97.4%** (2 misses of 76) | 90.8% | 100% | 5,854 vs 7,587 (−23%) | 0.062 (0.073), AUC 0.86 | 98.7% | no |
+| label | held-out recall | today's prompt | best possible under the 14-row cap | chars/cycle router vs today | Brier (base-rate forecast) | LOWO recall | `target` (0.98) | `beats_today` |
+|---|---|---|---|---|---|---|---|---|
+| plain | **96.0%** (24 misses of 603) | 74.8% | 98.0% | 8,288 vs 7,587 (+9%) | 0.094 (0.233), AUC 0.93 | 97.6% | no | no (serves more chars) |
+| marginal (default) | **97.4%** (2 misses of 76) | 90.8% | 100% | 5,854 vs 7,587 (−23%) | 0.062 (0.073), AUC 0.86 | 98.7% | no | yes |
+
+These runs predate the `beats_today` criterion, so the last two columns are computed from the recorded
+numbers. Retrain to write an artifact that carries `certification.criterion`.
 
 Reading these numbers:
 
@@ -110,6 +172,8 @@ Reading these numbers:
 - **What the misses are.** Plain-label misses are memory rows only. DA.ltm.7 (the IRDM chase mistake)
   accounts for 10 of the 24, and DA.ltm.21 (re-entry quarantine) for 5. The marginal label misses two
   diary entries once each.
-- **Verdict.** Neither label clears 98% on the held-out cycles, so the default stays **shadow**. Shadow
-  logs accumulate the cycles to retrain on. Once memory rows and rejections carry citations, the explicit
-  part of the label stops being empty.
+- **Verdict.** Neither label clears 98% on the held-out cycles. The marginal label beats today's assembly
+  on both recall and served characters, so a retrained marginal artifact certifies as `beats_today` and
+  may run `active` under the default `DAI_ROUTER_CERTIFY=either`. The default mode stays **shadow**;
+  `active` is an explicit opt-in. Shadow logs accumulate the cycles to retrain on. Once memory rows and
+  rejections carry citations, the explicit part of the label stops being empty.

@@ -123,12 +123,21 @@ def register_cash_flow_routes(app, *, engine, get_config_hash, sync=None, baseli
         base = _baseline(config_hash)
         b_value, b_at = (base if base else (None, None))
         b_date = cash_flows.as_date(b_at) if b_at is not None else None
+        current = _float_arg("current_value")
+        now = datetime.now()
+        # Baseline-day transfers the snapshots show were already inside the baseline value: "before
+        # baseline" in the list, outside the since-baseline totals and the gain — the same test as the
+        # headline Net Gain (dashboard_server) and the performance chart.
+        in_base = cash_flows.in_baseline_ids(engine, config_hash, flows, b_value, b_at,
+                                             current=(now, current) if current is not None else None)
+        period = [f for f in flows if f["id"] not in in_base]
         out = {
             "config_hash": config_hash,
-            "flows": [cash_flows.serialize_flow(f, baseline_date=b_date) for f in flows],
+            "flows": [cash_flows.serialize_flow(f, baseline_date=b_date, in_baseline=f["id"] in in_base)
+                      for f in flows],
             "totals": {
                 "all": cash_flows.flow_totals(flows),
-                "since_baseline": cash_flows.flow_totals(flows, since=b_date),
+                "since_baseline": cash_flows.flow_totals(period, since=b_date),
             },
             "baseline": ({"value": round(float(b_value), 2), "date": b_date.isoformat() if b_date else None,
                           "at": b_at.isoformat() if hasattr(b_at, "isoformat") else None}
@@ -141,10 +150,9 @@ def register_cash_flow_routes(app, *, engine, get_config_hash, sync=None, baseli
                 "note_max_chars": cash_flows.NOTE_MAX_CHARS,
             },
         }
-        current = _float_arg("current_value")
         if current is not None and b_value is not None:
             out["gain"] = cash_flows.flow_adjusted_gain(
-                current, b_value, cash_flows.counted_pairs(flows), baseline_at=b_at, as_of=datetime.now())
+                current, b_value, cash_flows.counted_pairs(period), baseline_at=b_at, as_of=now)
         return out
 
     @app.route("/api/cash-flows", methods=["GET"])

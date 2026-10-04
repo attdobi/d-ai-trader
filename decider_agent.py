@@ -2204,6 +2204,14 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             # account never held. The Schwab sync remains authoritative.
             if live_execution_enabled:
                 real_trade_success = execute_real_world_trade(decision)
+                # The broker has this order (filled, or accepted and possibly filling later):
+                # count it in the cap book now, so a failed holdings write below or an
+                # unconfirmed fill cannot hide it from later buys this cycle. A WORKING order
+                # comes back with execution_status 'error' (trading_interface flattens it) but
+                # carries an order_id; counting a rejected order that also has one only shrinks
+                # later buys (the safe side).
+                if cap_book is not None and (real_trade_success or decision.get('order_id')):
+                    cap_book.record_buy(clean_ticker, actual_spent)
                 if not real_trade_success:
                     status = decision.get('execution_status', 'failed')
                     print(f"⛔ {ticker}: real order did not fill (status={status}) — "
@@ -2335,8 +2343,10 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 })
                 continue
 
-            if cap_book is not None:
-                cap_book.record_buy(clean_ticker, actual_spent)  # the next buy this cycle counts this one
+            if cap_book is not None and not live_execution_enabled:
+                # Simulation: the next buy this cycle counts this one once it is written
+                # (a live buy was counted above, as soon as the broker had the order).
+                cap_book.record_buy(clean_ticker, actual_spent)
 
     return available_cash
 
@@ -2880,14 +2890,7 @@ OUTPUT (STRICT)
         from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
         _mem_cfg = get_current_config_hash()
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
-        _mem_rows = get_relevant_memories(_mem_cfg, tickers=_mem_tks)
-        _ltm_tail = ""
-        if _router_active:
-            # active router: the rows it kept (by p, from ALL active rows, at most DAI_MEMORY_LT_LIMIT) replace
-            # the fixed top-N sort; the rest are named in one tail line so they stay citable
-            _by_id = _router.extras.get("ltm_rows") or {}
-            _mem_rows = [_by_id[i] for i in _router.ltm_selected_ids() if i in _by_id]
-            _ltm_tail = _router.ltm_tail_line()
+        _mem_rows, _ltm_tail = _router_memory_rows(_router, get_relevant_memories(_mem_cfg, tickers=_mem_tks))
         _ltm_tag = None
         try:
             from policy_graph.assembly import health_tag as _ltm_health_tag
@@ -3591,6 +3594,20 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
         result.extras["ltm_rows"] = {f"DA.ltm.{m['id']}": m for m in ltm_rows if m.get("id")}
         result.extras["config_hash"] = _cfg
     return result
+
+
+def _router_memory_rows(router, todays_rows):
+    """(memory rows, tail line) for the Decider's LESSONS block. An active router's kept rows (by p, from ALL
+    active rows, at most DAI_MEMORY_LT_LIMIT) replace today's fixed top-N sort, and the rest are named in one
+    tail line so they stay citable — but only when the router actually scored memory rows this cycle.
+    `router.nodes` holds only routable nodes, so it has no "ltm" node when "ltm" is not in DAI_ROUTER_ROUTABLE
+    or when get_all_active_memories failed and returned []; then today's rows are served unchanged."""
+    if router is None or not router.active:
+        return todays_rows, ""
+    if not any(getattr(n, "kind", None) == "ltm" for n in (router.nodes or {}).values()):
+        return todays_rows, ""
+    by_id = router.extras.get("ltm_rows") or {}
+    return [by_id[i] for i in router.ltm_selected_ids() if i in by_id], router.ltm_tail_line()
 
 
 def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,

@@ -28,7 +28,7 @@ Every activation by these writers goes through `prompt_manager.set_active_prompt
 
 **The policy is a knowledge graph.** Each prompt version is mirrored as one Markdown guideline per file plus `edges.json`, under `agents/<agent>/policy-graph/<config>/v<N>/`, in the RUSH layout. The directory is written the first time the version is read (by a Decider cycle, the Policy Graph tab or a proposal), and it compiles back to the stored row byte for byte. The `prompt_versions` row stays canonical; the graph is an exact, editable view of it. The **Policy Graph** tab shows three layers: **policy** (the `.md` guidelines compiled into the prompt), **prompt scaffold** (templates and code-owned text) and **cycle context** (memory rows and world factors such as the regime, FOMC, CPI and jobs windows, and earnings dates). Each gate reads as plain lines, and a version timeline shows the policy changing.
 
-**How the Decider reads it.** Each cycle the Decider's soul, directives and memory are rebuilt from the active graph by a deterministic query, with no model call. Every gate, lesson and soul section is served every cycle; only dated diary entries are routed (by regime, held or watched tickers, news tickers, extracted companies, trend tickers, quarantine, recency and shared tags). Over the 30 days to 2026-10-02, about 40 guidelines were served per cycle and about 1 was dropped, roughly 4.7k tokens. That fits the prompt comfortably, so there is no LLM routing agent; the lever is pruning what is never cited. Each served guideline carries its id and record (`⟨id · cited 7d/30d/90d · win %⟩`), and every decision must cite 1 to 4 guideline ids, so each rule accumulates its own realized win rate.
+**How the Decider reads it.** Each cycle the Decider's soul, directives and memory are rebuilt from the active graph by a deterministic query, with no model call. Every gate, lesson and soul section is served every cycle; only dated diary entries are routed (by regime, held or watched tickers, news tickers, extracted companies, trend tickers, quarantine, recency and shared tags), plus up to 14 long-term memory rows. Over the 30 days to 2026-10-02, about 40 guidelines were served per cycle and about 1 was dropped, roughly 4.7k tokens. Each served guideline and memory row carries its id and record (`⟨id · cited 7d/30d/90d · win %⟩`). Every decision must cite 1 to 4 guideline ids, and every rejected setup cites the 1 or 2 guidelines that rejected it, so each rule accumulates its own record of trades and rejections. A **policy router** (`policy_router/`, [docs/POLICY_ROUTER.md](docs/POLICY_ROUTER.md)) scores every diary entry and memory row with a calibrated probability of being needed this cycle, using a local embedding model in LM Studio. It runs in shadow mode by default: it logs its choice next to today's prompt and changes nothing until you switch it on. Every Decider call is also stored in `decider_inputs` (prompts, policy as rendered, context, raw reply), so any cycle can be replayed.
 
 **Decision paths.** The bottom of the Policy Graph tab draws *route or world factor → guideline cited → buy / sell / hold*, lists guidelines cited but never served (the query missed them) and served but never cited (dead weight), and scores each guideline over the closed trades that cited it. Details: [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md), with the short form in [docs/POLICY_GRAPH_AND_ROUTING.md](docs/POLICY_GRAPH_AND_ROUTING.md) (also as `.docx`).
 
@@ -332,6 +332,7 @@ DAI_ROUTER_EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 DAI_ROUTER_LLM_MODEL=               # optional chat model for the uncertain band (empty = no LLM tier)
 DAI_ROUTER_RECALL_TARGET=0.98       # active needs an artifact certified at >= this held-out recall
 DAI_ROUTER_ROUTABLE=entry,ltm       # add "lesson" to let the router drop lessons too (needs its own certification)
+DAI_ROUTER_CERTIFY=either           # target (held-out recall >= target) | beats_today (recall >= today's prompt with fewer chars) | either
 
 # Contrarian watchlist
 DAI_CONTRARIAN_ENABLED=1            # also: _UNIVERSE, _LIMIT, _MAX_EXT, _HALF_EXT, _CACHE_MIN
@@ -397,13 +398,13 @@ Rates live in `model_pricing.json` (re-read per request) and drive per-agent cos
 
 The strategy is the policy the RLMF loop starts from and then mutates, so treat everything here as starting conditions, not promises. The Policy Graph tab always shows the active version.
 
-### Active gates (Decider v46, October 2026)
+### Active gates (Decider v48, October 2026)
 
 The Decider's strategy directives hold twelve numbered gates plus the weekly reminder rules. They are not applied strictly in number order: the prompt has the Decider clear exits first (kill breach, harvest, earnings), then check each new buy in the user template's order (quarantine, regime allowance, extension, setup, priced kill, correlation, day chase) and stop at the first failure.
 
 1. **REGIME GATE** — RISK-ON allows up to 3 new buys; MIXED at most 2 at half size; RISK-OFF defaults to cash.
 2. **EXTENSION CAP** — ≤5% above the 20-day MA is full size; 5–8% half size in RISK-ON only; above 8% is a chase.
-3. **PRICED KILL** — every buy names its kill price K and distance D. The gate text sizes D ≤3% full and ≤6% half, but since Prompt Lab v44 (2026-09-20) the system prompt passes any buy with no D or D above 1.3%, and the Decider is told to follow that stricter rule.
+3. **PRICED KILL** — every buy names its kill price K and distance D; pass when D is missing or above 1.3%, otherwise size by the regime gate. The system prompt (since Prompt Lab v44), gate 3 and the `#priced-kill` lesson all state this rule since v47/v48; the old 3% / 6% ladder is gone.
 4. **RE-ENTRY QUARANTINE** — no buy in a name on the QUARANTINE line or exited within 2 sessions; after a losing exit, also wait for a reclaim of the failed level or a genuinely new catalyst.
 5. **CORRELATION**, 6. **HARVEST** (take profit at +3%), 7. **DAY CHASE**, 8. **CANDIDATES** (rank 2–3 setups).
 9. **EVENT GATE** — inside an FOMC / CPI / jobs window, at most one half-size buy with D ≤2%.

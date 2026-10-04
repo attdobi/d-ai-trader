@@ -1163,7 +1163,8 @@ def initialize_database() -> None:
         # External cash transfers (cash_flows.py): Schwab-synced deposits/withdrawals plus manual
         # entries from the Dashboard's Cash transfers card. Every gain figure subtracts them. The
         # table predates manual entries (benchmark_tracker created it), so the three columns are
-        # added idempotently; their DEFAULTs mark every existing row as a counted Schwab row.
+        # added idempotently; their DEFAULTs mark every existing row as a counted Schwab row. The
+        # per-config txn_key migration runs after this transaction, in its own (see below).
         from cash_flows import (
             ALTER_POSTGRES as _CASH_FLOW_ALTERS, DDL_INDEX as _CASH_FLOWS_INDEX, DDL_POSTGRES as _CASH_FLOWS_DDL,
         )
@@ -1242,6 +1243,25 @@ def initialize_database() -> None:
         # when a feedback-evolved version was active. Deactivate those
         # duplicates across ALL configs so only one version stays active.
         deactivate_superseded_v0_prompts(conn, stats)
+
+    # external_cash_flows: txn_key unique per config, UNIQUE (config_hash, txn_key), replacing the
+    # table-wide external_cash_flows_txn_key_key. Its own short transaction (the DROP CONSTRAINT takes
+    # an exclusive lock, released at this commit instead of after the whole init); inside it the
+    # migration runs in a savepoint and never raises, so a failure keeps the old constraint working.
+    try:
+        from cash_flows import UNIQUE_INDEX as _CF_UNIQUE, migrate_unique_key as _cf_migrate_unique_key
+        with engine.begin() as conn:
+            _cf_status = _cf_migrate_unique_key(conn)
+        if _cf_status == "migrated":
+            stats.added_constraints += 1
+            print(f"   ✅ Added constraint: {_CF_UNIQUE} (external_cash_flows txn_key unique per config)")
+        elif _cf_status == "current":
+            stats.existing_constraints += 1
+            print(f"   ↪ Constraint exists: {_CF_UNIQUE}")
+        elif _cf_status.startswith("failed"):
+            print(f"   ⚠️  external_cash_flows per-config txn_key not applied: {_cf_status}")
+    except Exception as _cf_exc:
+        print(f"   ⚠️  external_cash_flows per-config txn_key migration skipped: {_cf_exc}")
 
     # 7d) Policy graph: write the guideline files of this config's v0 so a fresh checkout has
     # its graph on disk from the first run (the committed baseline lives under

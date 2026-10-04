@@ -148,3 +148,26 @@ def test_routes_survive_a_legacy_table_and_import_without_config(monkeypatch):
     # A manual entry migrates the table on first write.
     assert client.post("/api/cash-flows", json={"date": "2026-09-30", "amount": 1, "direction": "deposit"}).status_code == 201
     assert "config" not in sys.modules
+
+
+@pytest.mark.parametrize("jump, in_baseline", [(0.0, True), (1000.0, False)])
+def test_baseline_day_transfer_already_inside_the_baseline_is_not_counted(env, jump, in_baseline):
+    """A transfer dated on the baseline day (2026-07-01, baseline at 09:00) counts only when a value
+    step after the baseline explains it — the headline Net Gain and the performance chart agree."""
+    eng = env["engine"]
+    with eng.begin() as conn:
+        conn.execute(text("CREATE TABLE portfolio_history (timestamp TIMESTAMP, total_portfolio_value REAL, config_hash TEXT)"))
+        for ts, v in [(datetime(2026, 7, 1, 12), 1476.0 + jump), (datetime(2026, 7, 2, 8), 1480.0 + jump)]:
+            conn.execute(text("INSERT INTO portfolio_history VALUES (:t, :v, :c)"), {"t": ts, "v": v, "c": CFG})
+        conn.execute(text("""
+            INSERT INTO external_cash_flows (config_hash, txn_key, flow_date, amount, description)
+            VALUES (:c, 'day0', '2026-07-01', 1000.0, 'ELECTRONIC FUNDING')
+        """), {"c": CFG})
+    d = env["client"].get("/api/cash-flows?current_value=4217.15").get_json()
+    day0 = [f for f in d["flows"] if f["txn_key"] == "day0"][0]
+    assert day0["in_baseline"] is in_baseline and day0["in_gain_period"] is (not in_baseline)
+    expected = 722.82 + (0.0 if in_baseline else 1000.0)
+    assert d["totals"]["since_baseline"]["net"] == pytest.approx(expected)
+    assert d["gain"]["net_flows"] == pytest.approx(expected)
+    assert d["gain"]["net_gain_loss"] == pytest.approx(4217.15 - 1474.63 - expected, abs=0.01)
+    assert d["totals"]["all"]["net"] == pytest.approx(1222.82)                 # still on record

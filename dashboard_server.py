@@ -962,9 +962,15 @@ def _flow_adjusted_net_gain(config_hash, current_value, baseline_value, baseline
     on any error the dashboard keeps the raw figure and logs one line."""
     try:
         import cash_flows
-        flows = cash_flows.counted_pairs(cash_flows.list_flows(engine, config_hash))
+        flows = cash_flows.list_flows(engine, config_hash)
+        now = datetime.now()
+        # A transfer dated on the baseline day that the snapshots show was already inside the baseline
+        # value is not subtracted again (the performance chart and the Cash transfers card agree).
+        in_base = cash_flows.in_baseline_ids(engine, config_hash, flows, baseline_value, baseline_at,
+                                             current=(now, current_value))
+        pairs = cash_flows.counted_pairs([f for f in flows if f["id"] not in in_base])
         return cash_flows.flow_adjusted_gain(
-            current_value, baseline_value, flows, baseline_at=baseline_at, as_of=datetime.now())
+            current_value, baseline_value, pairs, baseline_at=baseline_at, as_of=now)
     except Exception as exc:
         print(f"⚠️  Cash-transfer adjustment skipped (showing the raw net gain): {exc}")
         return None
@@ -2312,8 +2318,9 @@ def get_feedback_benchmarks():
         else:
             days = max(7, min(int(days_param), 3650))
         import benchmark_tracker
+        # Same predicate as the Sync from Schwab button: simulation configs stay manual-only.
         payload = benchmark_tracker.get_benchmark_performance(
-            engine, get_current_config_hash(), days=days
+            engine, get_current_config_hash(), days=days, sync_flows=_schwab_live_view_active()
         )
         return jsonify(payload)
     except Exception as e:

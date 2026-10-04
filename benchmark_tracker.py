@@ -205,11 +205,15 @@ def refresh_cash_flows(engine, config_hash, force=False):
                 key = hashlib.sha1(f"{when}|{amount}|{t.get('description','')}".encode()).hexdigest()
             fetched += 1
             # source / excluded / note take their column DEFAULTs ('schwab', FALSE, NULL); an existing
-            # row is left exactly as it is (the operator may have excluded it).
+            # row is left exactly as it is (the operator may have excluded it). The key is unique per
+            # config, UNIQUE (config_hash, txn_key) (cash_flows.migrate_unique_key), so another config
+            # holding the same activityId does not block this one. No conflict target on purpose: on a
+            # migrated table the composite key is the only one a sync row can hit, and on a table whose
+            # migration did not apply the old table-wide key still de-duplicates instead of erroring.
             res = conn.execute(text("""
                 INSERT INTO external_cash_flows (config_hash, txn_key, flow_date, amount, description)
                 VALUES (:c, :k, :d, :a, :desc)
-                ON CONFLICT (txn_key) DO NOTHING
+                ON CONFLICT DO NOTHING
             """), {
                 "c": config_hash,
                 "k": key,
@@ -415,10 +419,15 @@ def trade_stats(outcomes):
 # Orchestration (called by the /api/feedback/benchmarks endpoint)
 # --------------------------------------------------------------------------
 
-def get_benchmark_performance(engine, config_hash, days=90):
+def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
+    """sync_flows: pull Schwab transfers into this config first (TTL-guarded). The dashboard passes
+    the same live/Schwab predicate as its Sync button, so a simulation config — whose book never
+    receives Schwab transfers — stays manual-only instead of subtracting the real account's
+    deposits from its own gains."""
     ensure_tables(engine)
     refresh_benchmark_history(engine)
-    refresh_cash_flows(engine, config_hash)
+    if sync_flows:
+        refresh_cash_flows(engine, config_hash)
 
     window_start = datetime.utcnow().date() - timedelta(days=days)
 

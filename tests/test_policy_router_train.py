@@ -185,6 +185,38 @@ def test_decider_inputs_table_wins_when_present(world):
     assert c.source["holdings"] == "decider_inputs" and c.source["event_block"] == "decider_inputs"
 
 
+def test_decider_inputs_reads_the_decide_row_not_the_citation_repair_row(world):
+    from policy_graph import inputs as I
+    eng = world["engine"]
+    run = world["runs"][1]                       # no event snapshot: without decider_inputs the watchlist is unknown
+    I.ensure_schema(eng)
+    # another config's row for the same run id, written first: never read for this config
+    I.record_input(eng, "other_cfg", run_id=run, prompt_version=21, context={"regime": "x", "watchlist": ["XX"]})
+    did = I.record_input(eng, CFG, run_id=run, prompt_version=21, call_kind=I.CALL_DECIDE,
+                         context={"regime": "risk_on", "holdings": ["AAPL"], "watchlist": ["ZS"]})
+    I.record_reply(eng, did, {"decisions": [{"action": "hold", "ticker": "CASH", "reason": "no setup clears the gates"}]})
+    rid = I.record_input(eng, CFG, run_id=run, prompt_version=21, call_kind=I.CALL_CITATION_REPAIR)   # no context
+    I.record_reply(eng, rid, {"citations": {"0": ["DA.ltm.1"]}})
+    got = decider_inputs_for(eng, [run], config_hash=CFG)[run]
+    assert got["watchlist"] == ["ZS"] and got["holdings"] == ["AAPL"] and got["regime"] == "risk_on"
+    c = [x for x in load_cycles(eng, CFG, store_root=world["store"]) if x.run_id == run][0]
+    assert c.ctx.watchlist == ["ZS"] and c.ctx.holdings == ["AAPL"] and c.ctx.regime == "risk_on"
+    assert c.source["watchlist"] == "decider_inputs" and c.source["holdings"] == "decider_inputs"
+
+
+def test_decider_inputs_merge_never_lets_a_later_row_erase_context(world):
+    eng = world["engine"]                        # a layout without call_kind: rows merge oldest first
+    run = world["runs"][1]
+    with eng.begin() as conn:
+        conn.execute(text("CREATE TABLE decider_inputs (id INTEGER PRIMARY KEY, run_id TEXT, config_hash TEXT, context TEXT)"))
+        conn.execute(text("INSERT INTO decider_inputs (run_id, config_hash, context) VALUES (:r, :h, :c)"),
+                     {"r": run, "h": CFG, "c": json.dumps({"watchlist": ["ZS"]})})
+        conn.execute(text("INSERT INTO decider_inputs (run_id, config_hash, context) VALUES (:r, :h, NULL)"), {"r": run, "h": CFG})
+        conn.execute(text("INSERT INTO decider_inputs (run_id, config_hash, context) VALUES (:r, :h, :c)"),
+                     {"r": run, "h": CFG, "c": json.dumps({"watchlist": ["YY"], "holdings": ["AMD"]})})
+    assert decider_inputs_for(eng, [run])[run] == {"watchlist": ["ZS"], "holdings": ["AMD"]}
+
+
 def test_training_protocol_artifact_and_reports(world, tmp_path):
     cycles = load_cycles(world["engine"], CFG, store_root=world["store"])
     t = fakes.FakeEmbeddingsTransport()
@@ -192,7 +224,13 @@ def test_training_protocol_artifact_and_reports(world, tmp_path):
     art, rep = T.run(cycles, emb, config_hash=CFG, recall_target=0.9, ltm_cap=14, log=lambda *_: None)
     assert art["kind"] == "policy_router" and art["features"] == list(T.FEATURES) and art["embed"]["model"] == "fake-embed"
     assert isinstance(art["certified"], bool)
-    assert art["certified"] == (rep["heldout"]["recall"] is not None and rep["heldout"]["recall"] >= 0.9)
+    crit, passed = T.certify(rep["heldout"], 0.9)
+    cert = art["certification"]
+    assert art["certified"] == (crit is not None) and cert["criterion"] == crit and cert["criteria"] == passed
+    assert passed["target"] == (rep["heldout"]["recall"] is not None and rep["heldout"]["recall"] >= 0.9)
+    assert cert["today_recall"] == rep["heldout"]["today_recall"] and cert["chars_today"] == rep["heldout"]["chars_today"]
+    assert cert["chars_selected"] == rep["heldout"]["chars_selected"] and cert["llm_model"] is None
+    assert art["label"]["mode"] == "marginal" and art["label"]["definition"] == T.MARGINAL_DEFINITION   # the default label
     assert art["certification"]["heldout_cycles"] == 5 and art["certification"]["train_cycles"] == 13
     assert set(rep["lowo_all"]["weeks"]) == {"2026-W37", "2026-W38", "2026-W39"}
     assert rep["label"]["citation_pairs"] >= 18 and 0 < rep["label"]["theta"] <= 1
@@ -202,9 +240,10 @@ def test_training_protocol_artifact_and_reports(world, tmp_path):
     h = rep["heldout"]
     assert h["chars_today"] > 0 and h["recall_ceiling"] == pytest.approx(1.0)
     assert {"recall", "today_recall", "chars_selected", "brier", "reliability", "missed"} <= set(h)
-    assert "marginal" in rep["alternatives"]
+    assert "plain" in rep["alternatives"] and set(rep["alternatives"]["plain"]["criteria"]) == {"target", "beats_today"}
     md = T.report_markdown(rep)
-    assert "## Verdict" in md and "Needed nodes the router would have missed" in md and "marginal" in md
+    assert "## Verdict" in md and "Needed nodes the router would have missed" in md and "Label: marginal" in md
+    assert "beats_today: recall" in md and "| plain |" in md and T.LABEL_DEFINITION in md
     paths = T.write_outputs(tmp_path / "out", art, rep)
     assert json.loads(paths["artifact"].read_text())["model_version"] == art["model_version"]
     assert paths["report_md"].read_text().startswith("# Policy router")
@@ -213,6 +252,26 @@ def test_training_protocol_artifact_and_reports(world, tmp_path):
     s = RouterSettings.from_mapping({"DAI_ROUTER_EMBED_MODEL": "fake-embed"}, repo_root=tmp_path, config_hash=CFG)
     r = route_cycle(s, cycles[-1].ctx, cycles[-1].nodes, embedder=emb, artifact=art)
     assert r.effective_mode == "shadow" and r.selection is not None
+
+
+def test_plain_label_stays_available(world):
+    cycles = load_cycles(world["engine"], CFG, store_root=world["store"])
+    emb = EmbeddingClient("http://fake/v1", "fake-embed", transport=fakes.FakeEmbeddingsTransport())
+    art, rep = T.run(cycles, emb, config_hash=CFG, recall_target=0.9, label_mode="plain", compare_labels=False,
+                     log=lambda *_: None)
+    assert art["label"]["mode"] == "plain" and art["label"]["definition"] == T.LABEL_DEFINITION
+    assert art["certification"]["label_mode"] == "plain" and rep["alternatives"] == {}
+
+
+def test_certify_records_target_and_beats_today():
+    marginal = {"recall": 0.974, "today_recall": 0.908, "chars_selected": 5854.0, "chars_today": 7587.0}
+    assert T.certify(marginal, 0.98) == ("beats_today", {"target": False, "beats_today": True})
+    assert T.certify(dict(marginal, recall=0.985), 0.98) == ("target", {"target": True, "beats_today": True})
+    plain = {"recall": 0.960, "today_recall": 0.748, "chars_selected": 8288.0, "chars_today": 7587.0}
+    assert T.certify(plain, 0.98) == (None, {"target": False, "beats_today": False})        # serves more than today
+    assert T.certify(dict(marginal, today_recall=0.98), 0.98)[0] is None                     # below today's recall
+    assert T.certify(dict(marginal, chars_selected=7587.0), 0.98)[0] == "beats_today"        # ties count
+    assert T.certify(dict(marginal, recall=None), 0.98) == (None, {"target": False, "beats_today": False})
 
 
 def test_priors_are_leak_free_inside_the_fit_set(world):
@@ -248,5 +307,6 @@ def test_cli_with_sqlite_and_fake_transport(world, tmp_path, monkeypatch, capsys
                  "--out-dir", str(out), "--cache", str(tmp_path / "cache.sqlite3"), "--recall-target", "0.9",
                  "--no-compare"])
     assert rc == 0 and (out / "model.json").exists() and (out / "eval.md").exists() and (out / "eval.json").exists()
+    assert json.loads((out / "model.json").read_text())["label"]["mode"] == "marginal"
     assert "held-out recall" in capsys.readouterr().out
     assert T.main(["--config-hash", CFG, "--routable", "bogus"]) == 2

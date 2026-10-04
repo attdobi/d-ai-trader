@@ -34,7 +34,7 @@ def _schwab_row(engine, key, day, amount, config_hash=CFG, desc="JOURNAL FRM 538
         conn.execute(text("""
             INSERT INTO external_cash_flows (config_hash, txn_key, flow_date, amount, description)
             VALUES (:c, :k, :d, :a, :desc)
-            ON CONFLICT (txn_key) DO NOTHING
+            ON CONFLICT DO NOTHING
         """), {"c": config_hash, "k": key, "d": day, "a": amount, "desc": desc})
 
 
@@ -371,9 +371,232 @@ def test_twr_uses_counted_flows_only(monkeypatch):
     cf.add_manual_flow(eng, CFG, days[4].isoformat(), 700, "deposit", today=today)   # duplicate of "dep"
 
     monkeypatch.setattr(bt, "_last_refresh", {"benchmarks": _time.time(), "flows": _time.time()})
+    synced = []
+    real_refresh = bt.refresh_cash_flows
+    monkeypatch.setattr(bt, "refresh_cash_flows", lambda e, h, force=False: synced.append(h) or real_refresh(e, h, force))
+    # A simulation dashboard passes sync_flows=False: its config never ingests the real account's transfers.
+    assert "error" not in bt.get_benchmark_performance(eng, CFG, days=30, sync_flows=False) and synced == []
     out = bt.get_benchmark_performance(eng, CFG, days=30)
+    assert synced == [CFG]
     assert "error" not in out, out
     # Flowless growth only: 1000 → 1002 then 1003 → 1709 less the $700 → about +0.9%, not +71% / +40%.
     assert 0.5 < out["stats"]["portfolio"]["return_pct"] < 1.5
     flows = out["stats"]["external_flows"]
     assert [(f["amount"], f["source"], f["label"]) for f in flows] == [(700.0, "schwab", "+$700 deposit")]
+
+
+# ----------------------------------------------------------------------------- txn_key unique per config
+def test_same_schwab_transfer_syncs_into_each_config(engine, monkeypatch):
+    """The read-only live view (or any other config) syncing a transfer first must not hide it from the
+    trading config: the key is unique per config, so each config gets its own row."""
+    import benchmark_tracker as bt
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE portfolio_history (timestamp TIMESTAMP, config_hash TEXT)"))
+    _stub_schwab(monkeypatch, [{"type": "JOURNAL", "activityId": 131462110360, "netAmount": 700.0,
+                                "time": "2026-09-23T14:00:00+0000", "description": "JOURNAL FRM 53822742"}])
+    assert bt.refresh_cash_flows(engine, "SCHWAB_LIVE_VIEW", force=True)["inserted"] == 1
+    assert bt.refresh_cash_flows(engine, CFG, force=True)["inserted"] == 1
+    assert bt.refresh_cash_flows(engine, CFG, force=True)["inserted"] == 0        # same config: no duplicate
+    for cfg in ("SCHWAB_LIVE_VIEW", CFG):
+        assert [(f["txn_key"], f["amount"]) for f in cf.list_flows(engine, cfg)] == [("131462110360", 700.0)]
+    g = cf.flow_adjusted_gain(10700, 10000, cf.counted_pairs(cf.list_flows(engine, CFG)),
+                              baseline_at=datetime(2026, 9, 1), as_of=datetime(2026, 10, 1))
+    assert g["net_flows"] == 700.0 and g["net_gain_loss"] == 0.0                  # the deposit is not profit
+    # Manual rows: the id lookup after the insert is scoped by config too.
+    m = cf.add_manual_flow(engine, OTHER, "2026-09-30", 5, "deposit", today=date(2026, 10, 4))
+    assert m["source"] == "manual" and cf.list_flows(engine, OTHER)[0]["id"] == m["id"]
+
+
+class _FakePgConn:
+    """Records the SQL migrate_unique_key issues on a 'postgresql' connection (no database)."""
+    dialect = type("D", (), {"name": "postgresql"})()
+
+    def __init__(self, index=False, legacy=True, fail_on=None):
+        self.index, self.legacy, self.fail_on, self.log = index, legacy, fail_on, []
+
+    def begin_nested(self):
+        conn = self
+
+        class _Savepoint:
+            def __enter__(self):
+                conn.log.append("SAVEPOINT")
+
+            def __exit__(self, exc_type, exc, tb):
+                conn.log.append("ROLLBACK TO SAVEPOINT" if exc_type else "RELEASE SAVEPOINT")
+                return False
+        return _Savepoint()
+
+    def execute(self, clause, params=None):
+        sql = " ".join(str(clause).split())
+        self.log.append(sql)
+        if self.fail_on and self.fail_on in sql:
+            raise RuntimeError("must be owner of table external_cash_flows")
+        if "pg_constraint" in sql:
+            value = 1 if self.legacy else None
+        elif "to_regclass(:n)" in sql:
+            value = cf.UNIQUE_INDEX if self.index else None
+        elif "to_regclass('external_cash_flows')" in sql:
+            value = "external_cash_flows"
+        else:
+            value = None
+        return type("R", (), {"scalar": staticmethod(lambda: value)})()
+
+
+def test_migrate_unique_key_creates_the_composite_index_before_dropping_the_old_key():
+    assert "txn_key TEXT UNIQUE" not in cf.DDL_POSTGRES and "UNIQUE (config_hash, txn_key)" in cf.DDL_POSTGRES
+    assert "IF NOT EXISTS" in cf.DDL_UNIQUE_INDEX and "(config_hash, txn_key)" in cf.DDL_UNIQUE_INDEX
+    assert "DROP CONSTRAINT IF EXISTS external_cash_flows_txn_key_key" in cf.DROP_LEGACY_UNIQUE
+
+    conn = _FakePgConn()
+    assert cf.migrate_unique_key(conn) == "migrated"
+    ddl = [s for s in conn.log if s.startswith(("LOCK", "CREATE", "ALTER"))]
+    assert ddl == [cf.LOCK_FOR_MIGRATION, cf.DDL_UNIQUE_INDEX, cf.DROP_LEGACY_UNIQUE]
+    assert conn.log[0] == "SAVEPOINT" and conn.log[-1] == "RELEASE SAVEPOINT"
+
+    # The DROP fails (not the owner): the savepoint rolls the new index back with it, the old
+    # table-wide key stays in force, and nothing is raised into the caller's transaction.
+    conn = _FakePgConn(fail_on="DROP CONSTRAINT")
+    assert cf.migrate_unique_key(conn).startswith("failed:")
+    assert conn.log[-1] == "ROLLBACK TO SAVEPOINT" and cf.DDL_UNIQUE_INDEX in conn.log
+
+    # Already migrated: no DDL, no lock.
+    conn = _FakePgConn(index=True, legacy=False)
+    assert cf.migrate_unique_key(conn) == "current"
+    assert not [s for s in conn.log if s.startswith(("LOCK", "CREATE", "ALTER"))]
+
+    eng = create_engine("sqlite://")
+    with eng.begin() as sqlite_conn:
+        assert cf.migrate_unique_key(sqlite_conn) == "skipped"
+
+
+def test_migrate_unique_key_on_a_real_postgres():
+    """Opt-in (DAI_TEST_PG_URL, a scratch database): legacy table → per-config key, idempotent,
+    concurrent-safe. Runs in its own schema, which it drops."""
+    import os
+    import threading
+    url = os.environ.get("DAI_TEST_PG_URL")
+    if not url:
+        pytest.skip("set DAI_TEST_PG_URL to a scratch Postgres database")
+    schema = f"cf_test_{os.getpid()}"
+    admin = create_engine(url)
+    with admin.begin() as conn:
+        conn.execute(text(f"CREATE SCHEMA {schema}"))
+    engines = []
+
+    def scoped():
+        e = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+        engines.append(e)
+        return e
+
+    try:
+        eng = scoped()
+        with eng.begin() as conn:
+            conn.execute(text(LEGACY_DDL.replace("AUTOINCREMENT", "").replace("id INTEGER PRIMARY KEY", "id SERIAL PRIMARY KEY")))
+        _schwab_row(eng, "131462110360", "2026-09-23", 700.0, config_hash="SCHWAB_LIVE_VIEW")
+        _schwab_row(eng, "131462110360", "2026-09-23", 700.0)                      # blocked by the old key
+        assert cf.list_flows(eng, CFG) == []
+
+        out = []                                                                   # dashboard vs init_database
+        a, b = scoped(), scoped()
+        barrier = threading.Barrier(2)
+
+        def dashboard():
+            barrier.wait()
+            cf.ensure_schema(a)
+            out.append("dashboard")
+
+        def init_db():
+            barrier.wait()
+            with b.begin() as conn:
+                out.append(cf.migrate_unique_key(conn))
+
+        threads = [threading.Thread(target=dashboard), threading.Thread(target=init_db)]
+        [t.start() for t in threads]
+        [t.join(60) for t in threads]
+        assert sorted(out)[0] == "dashboard" and not any(str(o).startswith("failed") for o in out), out
+        with eng.begin() as conn:
+            assert cf.migrate_unique_key(conn) == "current"
+            uniques = conn.execute(text(
+                "SELECT conname FROM pg_constraint WHERE conrelid = to_regclass('external_cash_flows') AND contype = 'u'"
+            )).fetchall()
+        assert uniques == []                                                       # the table-wide key is gone
+        _schwab_row(eng, "131462110360", "2026-09-23", 700.0)
+        _schwab_row(eng, "131462110360", "2026-09-23", 700.0)
+        assert [f["amount"] for f in cf.list_flows(eng, CFG)] == [700.0]           # once per config
+    finally:
+        for e in engines:
+            e.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f"DROP SCHEMA {schema} CASCADE"))
+        admin.dispose()
+
+
+# ----------------------------------------------------------------------------- baseline-day transfers
+# A +$1,000 deposit dated 2026-05-04, the day of the first snapshot / baseline (10:00). Dates carry no
+# time of day, so only the values say whether it was already inside the 10:00 value.
+EMBEDDED_PTS = [(datetime(2026, 5, 4, 10), 2000.0), (datetime(2026, 5, 4, 12), 2010.0),
+                (datetime(2026, 5, 5, 8), 1980.0), (datetime(2026, 5, 5, 12), 1995.0), (datetime(2026, 5, 6, 8), 2005.0)]
+POSTED_AFTER_PTS = [(datetime(2026, 5, 4, 10), 2000.0), (datetime(2026, 5, 4, 12), 3010.0),
+                    (datetime(2026, 5, 5, 8), 2980.0), (datetime(2026, 5, 5, 12), 2995.0), (datetime(2026, 5, 6, 8), 3005.0)]
+DAY0_DEPOSIT = [(date(2026, 5, 4), 1000.0)]
+
+
+def _headline(points, flows, current=None):
+    base_at, base = points[0]
+    cur_at, cur = current or points[-1]
+    keep = cf.baseline_embedded(flows, base, base_at, points[1:], current=(cur_at, cur))
+    return cf.flow_adjusted_gain(cur, base, [p for k, p in enumerate(flows) if k not in keep],
+                                 baseline_at=base_at, as_of=cur_at), keep
+
+
+def test_baseline_day_deposit_already_in_the_first_point_is_not_subtracted():
+    # Chart: no value step explains +$1,000, so it is part of the first value — no fake −$1,000 step.
+    assert cf.align_flows([p[0] for p in EMBEDDED_PTS], DAY0_DEPOSIT, values=[p[1] for p in EMBEDDED_PTS]) == [None]
+    rows = cf.adjusted_performance_series(EMBEDDED_PTS, DAY0_DEPOSIT)
+    assert [r["cumulative_flows"] for r in rows] == [0.0] * 5 and not any(r["flows"] for r in rows)
+    assert rows[-1]["net_gain_loss"] == pytest.approx(5.0) and rows[-1]["net_percentage_gain"] == pytest.approx(0.25)
+    # Headline: the same evidence, the same answer (+$5, +0.25%), not −$995 / −33%.
+    g, embedded = _headline(EMBEDDED_PTS, DAY0_DEPOSIT)
+    assert embedded == {0}
+    assert g["net_gain_loss"] == pytest.approx(5.0) and g["net_flows"] == 0 and g["flow_count"] == 0
+    assert g["net_percentage_gain"] == pytest.approx(0.25)
+    # One point only: nothing to test against, and point 0 is the base — the chart shows no step either.
+    one = cf.adjusted_performance_series(EMBEDDED_PTS[:1], DAY0_DEPOSIT)
+    assert one[0]["net_gain_loss"] == 0 and one[0]["cumulative_flows"] == 0
+
+
+def test_baseline_day_deposit_that_posts_after_the_first_point_is_still_subtracted():
+    assert cf.align_flows([p[0] for p in POSTED_AFTER_PTS], DAY0_DEPOSIT, values=[p[1] for p in POSTED_AFTER_PTS]) == [1]
+    rows = cf.adjusted_performance_series(POSTED_AFTER_PTS, DAY0_DEPOSIT)
+    assert rows[1]["flows"] == [1000.0] and rows[-1]["net_gain_loss"] == pytest.approx(5.0)
+    g, embedded = _headline(POSTED_AFTER_PTS, DAY0_DEPOSIT)
+    assert embedded == set() and g["net_flows"] == 1000.0 and g["net_gain_loss"] == pytest.approx(5.0)
+    # Before any snapshot after the baseline, the live value is the evidence.
+    g, embedded = _headline(POSTED_AFTER_PTS[:1], DAY0_DEPOSIT, current=(datetime(2026, 5, 4, 15), 3004.0))
+    assert embedded == set() and g["net_gain_loss"] == pytest.approx(4.0)
+    g, embedded = _headline(POSTED_AFTER_PTS[:1], DAY0_DEPOSIT, current=(datetime(2026, 5, 4, 15), 2004.0))
+    assert embedded == {0} and g["net_gain_loss"] == pytest.approx(4.0)
+    # No evidence at all (no later point, the live value is weeks later): subtracted, as before.
+    assert cf.baseline_embedded(DAY0_DEPOSIT, 2000.0, datetime(2026, 5, 4, 10), [],
+                                current=(datetime(2026, 6, 4), 2004.0)) == set()
+
+
+def test_in_baseline_ids_reads_this_configs_snapshots(engine):
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE portfolio_history (timestamp TIMESTAMP, total_portfolio_value REAL, config_hash TEXT)"))
+        for (ts, v), cfg in [(p, CFG) for p in EMBEDDED_PTS[1:]] + [((datetime(2026, 5, 4, 12), 3010.0), OTHER)]:
+            conn.execute(text("INSERT INTO portfolio_history VALUES (:t, :v, :c)"), {"t": ts, "v": v, "c": cfg})
+    _schwab_row(engine, "dep", "2026-05-04", 1000.0)
+    _schwab_row(engine, "later", "2026-05-20", 50.0)
+    flows = cf.list_flows(engine, CFG)
+    dep_id = [f["id"] for f in flows if f["txn_key"] == "dep"][0]
+    base_at = datetime(2026, 5, 4, 10)
+    assert cf.in_baseline_ids(engine, CFG, flows, 2000.0, base_at) == {dep_id}
+    assert cf.baseline_snapshots(engine, CFG, base_at) and len(cf.baseline_snapshots(engine, CFG, base_at)) == 4
+    # Another baseline day: nothing dated on it, nothing queried or dropped.
+    assert cf.in_baseline_ids(engine, CFG, flows, 2000.0, datetime(2026, 5, 3, 10)) == set()
+    # No portfolio_history table: no evidence, the transfer keeps being subtracted.
+    bare = create_engine("sqlite://")
+    cf.ensure_schema(bare)
+    _schwab_row(bare, "dep", "2026-05-04", 1000.0)
+    assert cf.in_baseline_ids(bare, CFG, cf.list_flows(bare, CFG), 2000.0, base_at) == set()
