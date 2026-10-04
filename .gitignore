@@ -88,3 +88,7 @@ agents/*/policy-graph/*
 
 # local data backups written by reconcile_execution_status.py
 backups/
+
+# Policy router (policy_router/): trained artifacts, eval reports and the embedding cache are local
+# (python -m policy_router.train writes them) — never committed.
+agents/*/policy-router/

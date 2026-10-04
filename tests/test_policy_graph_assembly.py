@@ -193,3 +193,32 @@ def test_run_log_and_stats(hits_db):
     assert abs(st["latest"]["ratio"] - 0.825) < 1e-9 and abs(st["average"]["ratio"] - 0.875) < 1e-9
     assert st["routes"] == {"core": 28, "news": 2, "trend": 1} and st["latest"]["context"] == {"regime": "MIXED"}
     assert C.run_stats(hits_db, "h", "SummarizerAgent") is None
+
+
+def test_router_override_none_is_todays_selection_byte_for_byte(version):
+    ctx = A.Context(regime="RISK-ON", holdings=["IRDM"], today=datetime(2026, 9, 3))
+    base = A.assemble(version, ctx)
+    same = A.assemble(version, ctx, override=None)
+    empty = A.assemble(version, ctx, override={})
+    for out in (same, empty):
+        assert (out.strategy_directives, out.memory, out.soul) == (base.strategy_directives, base.memory, base.soul)
+        assert [(s.node_id, s.route) for s in out.served] == [(s.node_id, s.route) for s in base.served]
+
+
+def test_router_override_includes_excludes_and_skips_the_tag_hop(version):
+    entries = [i for i, n in version.nodes.items() if n.node_type == "entry"]
+    old = [i for i in entries if i.startswith("DA.memory.log.2026_06")]
+    recent = [i for i in entries if i.startswith("DA.memory.log.2026_09")]
+    assert old and recent
+    ctx = A.Context(regime="RISK-ON", today=datetime(2026, 9, 3))
+    base = A.assemble(version, ctx)
+    assert old[0] in base.dropped and recent[0] not in base.dropped
+    out = A.assemble(version, ctx, override={old[0]: True, recent[0]: False})
+    routes = {s.node_id: s.route for s in out.served}
+    assert routes[old[0]] == "router"                                    # kept by the router, no deterministic route
+    assert recent[0] in out.dropped and recent[0] not in routes          # routed out despite being recent
+    assert "routed out for this cycle's context" in out.memory and recent[0] in out.memory
+    rules = {s.node_id for s in base.served if version.nodes[s.node_id].node_type == "rule"}
+    assert rules <= set(routes)                                          # pinned rules are untouched
+    keep = A.assemble(version, ctx, override={recent[0]: True})          # an included node keeps its own route
+    assert {s.node_id: s.route for s in keep.served}[recent[0]] == "recent"

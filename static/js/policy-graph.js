@@ -2293,6 +2293,81 @@
     renderFactorQuality(data.factors);
   }
 
+  // ------------------------------------------------------------------ router (typed include / exclude per diary entry and memory row)
+  async function loadRouter(agent) {
+    const card = qs('#pgRouterCard');
+    if (!card) return;
+    if (agent !== 'DeciderAgent') { card.hidden = true; return; }
+    card.hidden = false;
+    let data;
+    try {
+      data = await apiGet(`${API}/router?agent=${encodeURIComponent(agent)}&n=30`);
+    } catch (error) {
+      data = { empty: true, note: `Router panel unavailable: ${error.message}` };
+    }
+    if (agent !== state.agent) return;
+    renderRouter(data || {});
+  }
+
+  function kChars(n) {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+    const v = Number(n);
+    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  }
+
+  function renderRouter(data) {
+    const note = qs('#pgRouterNote');
+    const stats = qs('#pgRouterStats');
+    const bars = qs('#pgRouterBars');
+    const sub = qs('#pgRouterLastSub');
+    if (!note || !stats || !bars) return;
+    note.textContent = data.note || '';
+    const art = data.artifact || null;
+    const last = data.last_cycle || null;
+    const sh = data.shadow || null;
+    const modeLabel = { shadow: 'Shadow', active: 'Active', fallback: 'Fell back' }[data.effective_mode] || 'Not running yet';
+    const modeSub = data.mode && data.mode !== data.effective_mode ? `requested: ${data.mode}` :
+      (data.effective_mode ? 'set by DAI_POLICY_ROUTER' : 'no routed cycle logged');
+    const tiles = [`<div class="pg-router-stat"><div class="k">Mode</div><div class="v">${esc(modeLabel)}</div><div class="s">${esc(modeSub)}</div></div>`];
+    if (art) {
+      const cls = art.certified ? 'ok' : 'warn';
+      tiles.push(`<div class="pg-router-stat"><div class="k">Held-out recall</div><div class="v ${cls}">${pct(art.heldout_recall, 1)}</div>`
+        + `<div class="s">target ${pct(art.target, 0)} · ${art.certified ? 'certified' : 'not certified'} · today's prompt ${pct(art.today_recall, 1)}`
+        + `${art.recall_ceiling !== null && art.recall_ceiling !== undefined ? ` · best possible under the memory cap ${pct(art.recall_ceiling, 1)}` : ''}</div></div>`);
+      tiles.push(`<div class="pg-router-stat"><div class="k">Served per cycle (held out)</div><div class="v">${kChars(art.chars_selected)} chars</div>`
+        + `<div class="s">today ${kChars(art.chars_today)} of ${kChars(art.chars_routable)} routable · ${art.chars_reduction_vs_today !== null && art.chars_reduction_vs_today !== undefined ? `${art.chars_reduction_vs_today >= 0 ? 'saves' : 'adds'} ${pct(Math.abs(art.chars_reduction_vs_today), 0)}` : '—'}</div></div>`);
+      tiles.push(`<div class="pg-router-stat"><div class="k">Model</div><div class="v">${esc(art.model_version || '—')}</div>`
+        + `<div class="s">trained ${esc(fmtDateOnly(art.trained_at))} on ${plural(art.cycles || 0, 'cycle')} · Brier ${art.brier !== null && art.brier !== undefined ? Number(art.brier).toFixed(3) : '—'} · label ${esc(art.label_mode || 'plain')}</div></div>`);
+    } else {
+      tiles.push(`<div class="pg-router-stat"><div class="k">Model</div><div class="v warn">none</div><div class="s">${esc(data.artifact_error || 'run python -m policy_router.train')}</div></div>`);
+    }
+    if (sh && sh.runs) {
+      const rec = sh.cited ? `${pct(sh.recall, 0)} (${sh.router_kept} of ${sh.cited})` : 'nothing cited yet';
+      tiles.push(`<div class="pg-router-stat"><div class="k">Shadow recall, last ${plural(sh.runs, 'cycle')}</div><div class="v">${esc(rec)}</div>`
+        + `<div class="s">diary entries and memory rows the Decider cited that the router kept${sh.cited ? ` · today's prompt kept ${sh.today_kept}` : ''} · avg ${kChars(sh.avg_chars_selected)} vs today ${kChars(sh.avg_chars_today)} chars</div></div>`);
+    }
+    stats.innerHTML = tiles.join('');
+    const nodes = (last && last.nodes) || [];
+    if (sub) sub.textContent = last ? `${fmtPT(last.decided_at)} · ${last.backend || ''}${last.expected_recall !== null && last.expected_recall !== undefined ? ` · expected recall ${pct(last.expected_recall, 1)}` : ''}${last.note ? ` · ${last.note}` : ''}` : '';
+    if (!nodes.length) {
+      bars.innerHTML = `<div class="pg-paths-empty">${last ? 'No per-node decisions on the last cycle (it fell back to today\'s prompt).' : 'No routed cycle yet. In shadow mode each Decider cycle adds one row per diary entry and memory row here.'}</div>`;
+      return;
+    }
+    bars.innerHTML = nodes.map(n => {
+      const p = Math.max(0, Math.min(1, Number(n.p) || 0));
+      const inc = n.choice === 'include';
+      return `<div class="pg-router-row ${inc ? 'included' : 'excluded'}" title="${esc(n.kind)} · ${n.chars} chars${n.p_base !== null && n.p_base !== undefined ? ` · before the LLM tier ${Number(n.p_base).toFixed(2)}` : ''}">`
+        + `<button type="button" class="id" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button>`
+        + `<div class="bar"><span style="width:${(p * 100).toFixed(1)}%"></span></div>`
+        + `<span class="p">${p.toFixed(2)}</span>`
+        + `<span class="choice ${inc ? 'include' : 'exclude'}">${inc ? 'include' : 'exclude'}</span>`
+        + `<span class="served ${n.served_in_prompt ? 'yes' : ''}">${n.served_in_prompt ? 'in prompt' : 'not in prompt'}</span></div>`;
+    }).join('');
+    bars.querySelectorAll('.id[data-node-id]').forEach(btn => btn.addEventListener('click', () => {
+      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+    }));
+  }
+
   // The one flow: left column by route (what pulled the guideline into the prompt) or by world factor
   // (what the market put in front of the Decider); middle and right columns are the same guidelines and actions.
   function renderPathFlowFor(flow, data) {
@@ -2418,6 +2493,7 @@
     const data = await loadVersions(agent);
     await loadProposals(agent, { quiet: true });
     loadPaths(agent);
+    loadRouter(agent);
     if (!data) { populateVersions(null); renderTimeline(); return; }
     if (!state.versions.length) {
       populateVersions(null);

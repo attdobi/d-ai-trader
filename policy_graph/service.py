@@ -1129,6 +1129,21 @@ def paths_payload(engine, config_hash: str, agent_type: str, *, days: int, repo_
                 "note": f"No path data yet ({type(exc).__name__}: the hit log is created on the trader's first cycle)."}
 
 
+def router_payload(engine, config_hash: str, agent_type: str, *, repo_root, last_n: int = 30) -> dict:
+    """The Router panel (policy_router/): mode, certification, served chars vs today, the last cycle's
+    per-node p, shadow recall over the last `last_n` cycles. Decider only."""
+    _check_agent(agent_type)
+    if agent_type != "DeciderAgent":
+        return {"agent_type": agent_type, "empty": True, "note": "The policy router routes the Decider's prompt only."}
+    try:
+        from policy_router.panel import router_panel
+        out = router_panel(engine, config_hash, repo_root=repo_root, last_n=last_n)
+        out["agent_type"] = agent_type
+        return _json_safe(out)
+    except Exception as exc:     # noqa: BLE001 — informational panel
+        return {"agent_type": agent_type, "empty": True, "note": f"Router panel unavailable ({type(exc).__name__}: {exc})."}
+
+
 # ----------------------------------------------------------------------------- public: diff
 def _diff_stats(lines: list) -> dict:
     added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))

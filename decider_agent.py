@@ -2825,7 +2825,7 @@ OUTPUT (STRICT)
     # rendered (the flat stored text unless the graph assembly below replaces them) and the context lists
     _policy_rendered = {"soul": locals().get("soul") or "", "directives": locals().get("strategy") or "",
                         "memory": locals().get("memory") or ""}
-    _ctx_lists = None
+    _ctx_lists, _ctx_error = None, None
     try:
         _ctx_lists = {
             "regime": str(((locals().get("_regime") or {}).get("label")) or ""),
@@ -2836,8 +2836,34 @@ OUTPUT (STRICT)
             "entities": [clean_ticker_symbol(e.get("symbol")) for e in (company_entities or []) if isinstance(e, dict)],
             "trend": [(d.get("symbol") or d.get("ticker")) for d in (momentum_data or []) if isinstance(d, dict)],
         }
+    except Exception as _ctx_exc:
+        _ctx_lists, _ctx_error = None, _ctx_exc   # as before: no graph assembly without its context (flat prompt kept)
+
+    # Policy router (policy_router/, DAI_POLICY_ROUTER=off|shadow|active, default shadow): a Jev-like typed
+    # decision — p(needed) and include/exclude — for every diary entry and long-term memory row, from local
+    # embeddings (LM Studio, hard 5 s budget). Shadow logs the decision and serves today's prompt unchanged;
+    # active (certified model only) serves the pinned policy plus the rows it keeps. Any failure → today's prompt.
+    _router = None
+    try:
+        if _ctx_lists is None:
+            raise RuntimeError(f"cycle context unavailable ({_ctx_error})")
+        _router = _policy_router_cycle(
+            prompt_version, run_id, **_ctx_lists,
+            parsed_summaries=parsed_summaries, event_block=((_event_ctx or {}).get("block") or ""))
+        if _router is not None:
+            print(_router.summary_line())
+    except Exception as _router_exc:
+        _router = None
+        print(f"⚠️  Policy router skipped (today's prompt served): {_router_exc}")
+    _router_active = bool(_router is not None and _router.active)
+
+    try:
+        if _ctx_lists is None:
+            raise RuntimeError(f"cycle context unavailable ({_ctx_error})")
         if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
-            _assembled = _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, **_ctx_lists)
+            _assembled = _graph_assemble_system_prompt(
+                prompt_data, prompt_version, run_id, **_ctx_lists,
+                override=(_router.assembly_override() if _router_active else None))
             if _assembled is not None:
                 system_prompt, _graph_served, _graph_index_text, _graph_rendered = _assembled
                 _policy_rendered = _graph_rendered
@@ -2855,6 +2881,13 @@ OUTPUT (STRICT)
         _mem_cfg = get_current_config_hash()
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
         _mem_rows = get_relevant_memories(_mem_cfg, tickers=_mem_tks)
+        _ltm_tail = ""
+        if _router_active:
+            # active router: the rows it kept (by p, from ALL active rows, at most DAI_MEMORY_LT_LIMIT) replace
+            # the fixed top-N sort; the rest are named in one tail line so they stay citable
+            _by_id = _router.extras.get("ltm_rows") or {}
+            _mem_rows = [_by_id[i] for i in _router.ltm_selected_ids() if i in _by_id]
+            _ltm_tail = _router.ltm_tail_line()
         _ltm_tag = None
         try:
             from policy_graph.assembly import health_tag as _ltm_health_tag
@@ -2870,6 +2903,8 @@ OUTPUT (STRICT)
         except Exception as _lt_exc:
             print(f"⚠️  Memory rows rendered without citation tags: {_lt_exc}")
         _lt = format_long_term_memory(_mem_rows, cite_tag=_ltm_tag)
+        if _ltm_tail:
+            _lt = (_lt + "\n" + _ltm_tail).strip()
         if _lt:
             prompt += "\n\n" + _lt
             _ltm_injected = [m for m in _mem_rows if isinstance(m, dict) and m.get("id")]
@@ -2889,6 +2924,20 @@ OUTPUT (STRICT)
         print(f"🧠 Memory injected: long-term lessons{' + recent activity' if _wm else ''}")
     except Exception as _mem_exc:
         print(f"⚠️  Memory injection skipped: {_mem_exc}")
+    # Policy router log: one row per routable node (p, choice, whether the prompt carried it) + one per cycle.
+    if _router is not None:
+        try:
+            from policy_router.log import record_routing as _record_routing
+            if _graph_served is not None:
+                _router_served = {s.node_id for s in _graph_served}
+            else:                       # flat prompt: the whole stored memory field (every entry and lesson)
+                _router_served = {i for i, n in _router.nodes.items() if n.kind != "ltm"}
+            if _ltm_injected:
+                _router_served |= {f"DA.ltm.{m['id']}" for m in _ltm_injected if isinstance(m, dict) and m.get("id")}
+            _record_routing(engine, _router.extras.get("config_hash") or get_current_config_hash(), prompt_version,
+                            run_id, _router, served_ids=_router_served)
+        except Exception as _rlog_exc:
+            print(f"⚠️  Could not log the policy router decision: {_rlog_exc}")
     prompt += (
         "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
         f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
@@ -3003,6 +3052,9 @@ OUTPUT (STRICT)
         _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
     else:
         _GUIDELINE_IDS_STASH.pop(run_id, None)
+    if _router_active and run_id in _GUIDELINE_IDS_STASH:
+        # the router's kept AND routed-out entries / memory rows stay citable (their ids are in the tail lines)
+        _GUIDELINE_IDS_STASH[run_id] |= set(_router.routable_ids())
 
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
@@ -3501,11 +3553,52 @@ def _tickers_in_summaries(parsed_summaries):
     return uniq
 
 
+def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist, quarantined, news=(), entities=(),
+                         trend=(), parsed_summaries=(), event_block=""):
+    """The Jev-like policy router (policy_router/, DAI_POLICY_ROUTER=off|shadow|active, default shadow): a
+    calibrated p(needed) and an include/exclude choice for every diary entry and long-term memory row of this
+    cycle. Returns a RoutingResult (None when off). In shadow — and whenever the model is not certified, or on
+    any failure — the Decider reads exactly today's prompt. Never raises past the caller's try."""
+    from pathlib import Path as _Path
+    from policy_router.features import CycleContext as _RCtx
+    from policy_router.nodes import ltm_row_nodes as _ltm_nodes, version_nodes as _version_nodes
+    from policy_router.runtime import RouterSettings as _RSettings, route_cycle as _route_cycle
+    _root = _Path(__file__).resolve().parent
+    _cfg = get_current_config_hash()
+    settings = _RSettings.from_mapping(os.environ, repo_root=_root, config_hash=_cfg)
+    if settings.mode == "off" or prompt_version is None:
+        return None
+    from decider_memory import get_all_active_memories, get_relevant_memories
+    from policy_graph import service as _pg_service
+    from policy_graph.assembly import select as _pg_select
+    from policy_graph.compile import read_version_dir as _read_version_dir
+    _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
+                                    is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
+    _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
+    ctx = _RCtx(run_id=run_id or "", regime=regime or "", holdings=[t for t in holdings if t],
+                watchlist=[t for t in watchlist if t], quarantined=list(quarantined or []), news=[t for t in news if t],
+                entities=[t for t in entities if t], trend=[t for t in trend if t],
+                summaries=[s for s in (parsed_summaries or []) if isinstance(s, dict)], event_block=event_block or "",
+                today=datetime.now())
+    ltm_rows = get_all_active_memories(_cfg)
+    nodes = _version_nodes(_version, ("entry", "lesson")) + _ltm_nodes(ltm_rows)
+    # what today's prompt serves of these nodes: the deterministic graph query + the fixed memory sort
+    served_today, _dropped_today = _pg_select(_version, ctx.assembly_context())
+    today_ids = {s.node_id for s in served_today}
+    today_ids |= {f"DA.ltm.{m['id']}" for m in get_relevant_memories(_cfg, tickers=list(ctx.holdings)) if m.get("id")}
+    result = _route_cycle(settings, ctx, nodes, today_ids=today_ids, log=print)
+    if result is not None:
+        result.extras["ltm_rows"] = {f"DA.ltm.{m['id']}": m for m in ltm_rows if m.get("id")}
+        result.extras["config_hash"] = _cfg
+    return result
+
+
 def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,
-                                  news=(), entities=(), trend=()):
+                                  news=(), entities=(), trend=(), override=None):
     """(system_prompt, served, index_text, rendered) built from the policy graph of the active version,
     or None when the graph is unavailable; `rendered` = {"soul", "directives", "memory"} as the model
-    reads them this cycle. Records the served guidelines (with routes) in policy_graph_hits."""
+    reads them this cycle. Records the served guidelines (with routes) in policy_graph_hits.
+    `override` ({node_id: include?}) is the policy router's choice in active mode (None = today's query)."""
     from pathlib import Path as _Path
     from policy_graph import service as _pg_service
     from policy_graph.assembly import Context as _Ctx, assemble as _assemble
@@ -3529,7 +3622,7 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     except Exception as _h_exc:
         print(f"⚠️  Guideline health unavailable: {_h_exc}")
         health = {}
-    out = _assemble(_version, ctx, health=health)
+    out = _assemble(_version, ctx, health=health, override=override)
     system_prompt = prompt_data["system_prompt"]
     if out.soul:
         system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{out.soul}"

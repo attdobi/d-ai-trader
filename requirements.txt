@@ -5,6 +5,7 @@ SQLAlchemy>=2.0.21
 psycopg2-binary>=2.9.9
 yfinance>=0.2.37
 pandas>=2.1.4
+numpy>=1.26              # policy_router (logistic model, embeddings); already installed with pandas
 python-dotenv>=1.0.1
 openai>=1.40.0
 

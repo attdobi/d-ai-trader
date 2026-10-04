@@ -13,6 +13,7 @@ Public API:
     ensure_table()
     add_memory(config_hash, content, kind=, tags=, ticker=, source=, weight=)
     get_relevant_memories(config_hash, tickers=None, limit=None) -> list[dict]
+    get_all_active_memories(config_hash) -> list[dict]  # the policy router's candidates
     format_long_term_memory(memories, cite_tag=None) -> str   # prompt block (cite_tag: row -> ' ⟨DA.ltm.<id>⟩')
     build_working_memory(config_hash, recent_cycles=6) -> str   # prompt block
 """
@@ -90,6 +91,23 @@ def get_relevant_memories(config_hash, tickers=None, limit=None):
         return [dict(r._mapping) for r in rows]
     except Exception as exc:
         logger.warning("decider_memory get_relevant_memories failed: %s", exc)
+        return []
+
+
+def get_all_active_memories(config_hash):
+    """Every active long-term memory row — the candidates the policy router (policy_router/) scores each
+    cycle; in active mode it chooses among ALL of them instead of the fixed top-N sort above."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT id, content, kind, ticker, weight, tags, source, active, created_at, updated_at
+                FROM decider_memory
+                WHERE config_hash = :c AND active = TRUE
+                ORDER BY weight DESC, created_at DESC
+            """), {"c": config_hash}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as exc:
+        logger.warning("decider_memory get_all_active_memories failed: %s", exc)
         return []
 
 

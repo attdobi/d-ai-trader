@@ -19,6 +19,7 @@ Routes (why a guideline reached the prompt — recorded per run for route import
     reminder    the weekly "Latest Feedback Reminder" section
     identity    soul sections (always, verbatim)
     context     section preambles / group text kept so the structure stays readable
+    router      kept by the policy router (policy_router/, active mode only) where no route above applied
 
 Older log entries (the diary) are dropped from the rendering and listed by id in a one-line
 tail so the model can still cite them; rules and lessons are never trimmed.
@@ -186,9 +187,15 @@ def _ordered_ids(version: Version, field: str) -> list:
     return list((version.manifest.get("compile_order") or {}).get(field, []))
 
 
-def select(version: Version, ctx: Context) -> tuple:
+def select(version: Version, ctx: Context, *, override: Optional[dict] = None) -> tuple:
     """(served [Selected], dropped [ids]) over the three evolving fields. Document order is kept,
-    except that within a section the rules naming the current regime move to the front."""
+    except that within a section the rules naming the current regime move to the front.
+
+    `override` ({node_id: include?}, from the policy router in active mode) decides the listed nodes
+    instead of their deterministic route: included ones keep their route when they have one (else
+    route "router"), excluded ones are dropped, and neither takes part in the tag hop. None (the
+    default) is today's selection exactly."""
+    override = override or None
     served, dropped = [], []
     for field in COMPILED_FIELDS:
         ids = _ordered_ids(version, field)
@@ -198,6 +205,8 @@ def select(version: Version, ctx: Context) -> tuple:
             if n is None:
                 continue
             r = route_for(n, ctx, field=field)
+            if override is not None and i in override:
+                r = (r or "router") if override[i] else None
             if r is None:
                 dropped.append(i)
             else:
@@ -233,7 +242,7 @@ def select(version: Version, ctx: Context) -> tuple:
         still_dropped = []
         for i in dropped:
             n = version.nodes[i]
-            if _plain_tags(n) & hot_tags:
+            if _plain_tags(n) & hot_tags and (override is None or i not in override):
                 served.append(Selected(node_id=i, route="tag", field=n.field or ""))
             else:
                 still_dropped.append(i)
@@ -276,15 +285,17 @@ def render_field(version: Version, served: list, field: str, health: Optional[di
     return "".join(parts).strip("\n")
 
 
-def assemble(version: Version, ctx: Context, *, health: Optional[dict] = None) -> Assembled:
-    served, dropped = select(version, ctx)
+def assemble(version: Version, ctx: Context, *, health: Optional[dict] = None,
+             override: Optional[dict] = None) -> Assembled:
+    served, dropped = select(version, ctx, override=override)
     sd = render_field(version, served, "strategy_directives", health)
     mem = render_field(version, served, "memory", health)
     soul = render_field(version, served, "soul", health)
     if dropped:
         listed = ", ".join(dropped[:40]) + (" …" if len(dropped) > 40 else "")
-        mem = (mem + f"\n\nNot shown this cycle (not tied to today's regime, holdings, watchlist, news or trends; "
-                     f"still citable by id): {listed}").strip()
+        why = ("routed out for this cycle's context" if override
+               else "not tied to today's regime, holdings, watchlist, news or trends")
+        mem = (mem + f"\n\nNot shown this cycle ({why}; still citable by id): {listed}").strip()
     full = 0
     for f in COMPILED_FIELDS:
         full += sum(len(version.nodes[i].text) for i in _ordered_ids(version, f) if i in version.nodes)
