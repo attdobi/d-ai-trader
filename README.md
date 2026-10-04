@@ -610,13 +610,14 @@ d-ai-trader/
 
 ---
 
-## Next steps: RUSH, Jev and model routing
+## Next steps: RUSH, Jev and the learning loop
 
-### Where things stand
+### Where things stand (October 2026)
 
-- **Guideline routing should stay deterministic.** The served policy is about 4.7k tokens and fits whole, so a model choosing which guidelines to show would add cost, latency and non-determinism. The lever is pruning: 21 leaf guidelines were served at least 20 times and cited zero times over the last 30 days.
-- **Model routing is a different question, and it is open.** Every agent call uses a fixed model and effort per agent. The Decider pays for a full Terra call every cycle, but only 44 of 90 cycles in the last 30 days stored a buy or sell.
-- **Realized P&L is too slow to judge versions alone.** The last 30 days had 9 Decider versions in service and 29 closed trades, about three trades per version.
+- **The Jev-like policy router is built and certified, running in shadow.** `policy_router/` gives every diary entry and long-term memory row a calibrated p(needed) from the local LM Studio embedding model, and keeps the smallest set that preserves expected recall. On the newest 30 logged cycles it reached 97.4% held-out recall against 90.8% for today's fixed selection, while serving 23% fewer diary and memory characters (Brier 0.062). Gates, lessons, the soul and code-owned text are always served. It certified under the `beats_today` rule; the absolute 98% target is not yet met. Turn it on with `DAI_POLICY_ROUTER=active` after a week of live shadow logging, and add the 3090 chat model with `DAI_ROUTER_LLM_MODEL` when that machine is on LM Link.
+- **Labels are now honest.** Memory rows are citable and rejected setups cite the guidelines that rejected them, so the router and the decision paths learn from rejections, not only from trades.
+- **Every Decider call is replayable** from `decider_inputs`, which unblocks the replay gate below.
+- **Realized P&L is still too slow to judge versions alone.** The last 30 days had 9 Decider versions in service and 29 closed trades, about three trades per version.
 
 ### What Jev is, and the moat question
 
@@ -624,17 +625,27 @@ d-ai-trader/
 
 The router is thin and open: candidates, an `eligible()` capability filter, a decider, and a `RulesDecider` fallback. Copying the pattern is easy, which is the "no moat" point. The closed part is the Jev model itself: hosted, no published weights or paper, and it sees whatever we send. So the plan is a router we own with a swappable decision backend, where Jev is one backend judged on our own logs like any other. One default must change for live money: the router's fallback is the cheapest eligible model, which here would silently drop the Decider from Terra to Luna. Our fallback stays today's fixed mapping.
 
-### Steps, in priority order
+### Recommended next upgrades: the learning loop (RLMF with RLHF)
 
-1. **Store each Decider cycle's exact input.** A local `decider_inputs` table keyed by `run_id`, with the assembled policy and the market context stored separately. Every later step replays these. *Measure:* one input row per `policy_graph_runs` row, and a test that swaps the policy without touching the context.
-2. **One routing layer in front of every LLM call, defaulting to today's mapping.** A config-free `model_routing/` package: `RouteRequest(agent, call_kind, features)` in, `RouteDecision(model, effort, backend, probabilities, latency_ms, fallback)` out. Backends: static (today), rules, Jev, a local model on RUSH's GPU host, and a cheap model with a JSON schema. Log every decision next to `api_usage` and show it in the decision paths. First call to route: citation repair, which made 44 extra Terra calls in 30 days just to pick ids from a list. *Measure:* static parity with `get_agent_model`, and repair id overlap of at least 90% on the cheap model.
-3. **Cite on rejections too, then prune on evidence.** The Decider rejected 228 setups in 30 days and none carried citations, so the gates' main work is invisible to the hit log. Require `cited` on considered setups, then remove a guideline only through an operator proposal after a replay shows decisions don't change without it. No routing agent unless the served policy passes about 10k tokens. *Measure:* reject citations per gate, and the cited-to-served ratio.
-4. **Check every buy against the plain gates, shadow first.** Most gates already reduce to one or a few yes/no questions; REGIME GATE and PRICED KILL branch three ways, and CANDIDATES is a ranking step that would need splitting first. Use code checks where the data exists (extension, K/D, quarantine, earnings dates, slot counts) and typed yes/no questions only where reading text is needed ("gapped or parabolic", "genuinely new catalyst"). Annotate and never block at first; sells never wait. *Measure:* violation rate per gate, and P&L of flagged vs unflagged buys over at least 15 trades before any gate blocks.
-5. **An escalation cascade for the Decider, copied from RUSH.** Tier 1 is three cheap votes on the same prompt. When they all hold and no code trigger fires (a holding near K or HARVEST, a macro window, an earnings flag), tier 1 settles the cycle; everything else goes to Terra or Sol at higher effort. Audit a random 15% of settled cycles on tier 2, following RUSH's "audit the agreements". Run about three weeks in shadow. *Measure:* cycles tier 1 would have held where tier 2 traded, with zero misses tolerated on sells.
-6. **One probability per critic clause.** The critic rejected 11 of 15 proposals and all 15 were applied, so a single verdict cannot show which clause the human disagrees with. Ask clauses (a) to (g) as typed yes/no questions, compute the verdict in code, record the human's call per clause, and call the Terra critic only when a clause is uncertain. *Measure:* per-clause agreement and Brier score; overrides should cluster in one or two clauses, which then get rewritten.
-7. **Backend bake-off.** Replay the logged questions from steps 4–6 through every backend, sending a short summary rather than the raw prompt, which carries holdings and cash. Hard time limits: 2 seconds for routing, 10 for gate checks, with a logged fallback. Log the hosted model's version and treat a change like a prompt change. *Measure:* calibration, p95 latency, error rate. Adopt Jev per question type only where it beats the local and schema backends.
-8. **From RUSH: a replay gate for policy versions.** `replay_gate.py --candidate vN --cycles 40` over the stored inputs. Re-running the current version on the same cycles gives the noise floor (RUSH's seed-sensitivity check); a candidate counts only above it. Report gate violations, counterfactual forward returns of buys it adds or drops, and deltas split by regime. Account P&L must be flow-adjusted first (`cash_flows.adjusted_performance_series` does it). *Measure:* whether the replay verdict predicts the realized delta as reviews mature.
-9. **To RUSH: one shared policy-graph package.** The two formats already agree on `<id>.md`, front matter and `edges.json`. From the trader: the same-bytes contract, plain-gate lint, the served/cited hit log, decision paths and 3-file proposals. From RUSH: the escalation trigger and the local-model registry. *Measure:* both test suites pass against the shared package, and RUSH's run summary shows served vs cited per node.
+1. **Gate the weekly automatic path.** It wrote 10 of the 44 versions since September 1, across all four agents, with no critic and no human. Route it through the proposal flow: auto-apply only when the critic approves, otherwise queue it for one-click review.
+2. **A cross-field consistency check on every new version.** v44 put a 1.3% kill rule in the system prompt while gate 3 still said 3% and 6%, and nothing flagged it for two weeks. Extract the numeric thresholds per rule from the templates, gates and lessons, and block activation when two disagree.
+3. **Score rejections against what happened next.** 305 cycles carry rejected setups, and they now cite their gate. Price each rejected ticker 1, 3 and 5 sessions later to show what every gate saved or cost. Gates mostly act by rejecting, so this is their missing reward signal.
+4. **Reward alpha, not raw P&L.** Score each closed trade against SPY over the same holding window, and split realized deltas by regime. A version shipped into a falling tape should not be blamed for the tape.
+5. **A minimum dwell per version.** No new Decider version until about 10 closed trades or 2 weeks have passed, except safety fixes, so each change gets a measurable sample.
+6. **Use the human labels you already give.** The 6 thumbs ratings in `decision_feedback` are stored but never read by the loop. Feed them to the feedback agent and the critic as preference labels, and add a pairwise view that replays one stored cycle under two versions and asks which decision is better, the RUSH adjudication pattern.
+7. **The replay gate from RUSH.** `replay_gate.py --candidate vN --cycles 40` over `decider_inputs`, with the current version's re-run flip rate as the noise floor and the result shown to the critic.
+8. **One probability per critic clause,** the escalation cascade for the Decider, and the backend bake-off for the router, as typed Jev-style questions against the local and hosted backends.
+9. **To RUSH: one shared policy-graph package** with the same-bytes contract, plain-gate lint, served/cited hit log, decision paths and 3-file proposals, and RUSH's escalation trigger and local-model registry in return.
+
+### Recommended next upgrades: charts and web UX
+
+1. **A version scorecard chart:** realized P&L and alpha per policy version with regime bands, on the Prompt Lab or Policy Graph tab.
+2. **A gate scorecard:** per gate, buys cited, rejections cited, win rate, and the forward return of its rejections.
+3. **Router panel history:** live shadow recall vs today's prompt and characters saved per cycle.
+4. **Trades tab:** filter by cited guideline and by status, thumbs on every row including rejections.
+5. **Dashboard headline:** alpha vs SPY and TWR next to the flow-adjusted gain.
+6. **Clean the snapshot artifacts:** the July settled-cash glitches (±$372 and ±$270 pairs) still show in the performance chart; filter them as the TWR already does.
+7. **Mobile pass** on the Policy Graph tab.
 
 ---
 
@@ -663,6 +674,13 @@ Day trading is risky. You can lose money. This is experimental software for educ
 ## Changelog
 
 ### October 2026
+- **Transfers.** Every gain on the dashboard excludes deposits and withdrawals: Schwab transfers are synced automatically, a Cash Transfers card adds manual ones, excludes wrong ones and syncs on demand, and every time-series chart on the Dashboard and Feedback tab marks each transfer. Percent returns use Modified Dietz.
+- **Jev-like policy router** (`policy_router/`, shadow by default), certified on the live logs.
+- **Replayable cycles and honest labels:** `decider_inputs`, citable memory rows, citations on rejected setups.
+- **Execution:** the position and total-investment caps now bind on the scheduled path; pilot mode executes sells.
+- **Learning loop:** the review history keeps unclicked critic verdicts; style warnings show on proposals; `latest/` follows every activation; a CALENDAR GAP line warns before CPI and jobs dates run out.
+- **Policy:** gate 3 PRICED KILL and its lesson restate the 1.3% rule already in the system prompt (Decider v47, v48).
+- 11 defects found by an adversarial review of the merged code were fixed before release.
 - Repository cleanup: 63 unused scripts, launchers, docs and backups moved to `archive/` after two independent reviews; the 9 dead prompt-profile tests went with them. `schwab-py` added to `requirements.txt`; `pytest.ini` added.
 - README rewritten against the current code, with the RUSH / Jev next steps.
 
