@@ -2,9 +2,9 @@
 
 An autonomous trading system built as a reinforcement-learning loop in which **the market is the reward signal**. Frozen LLM agents read financial news, decide trades, and execute them through the Schwab API (or in simulation); a feedback agent then scores the realized P&L and rewrites the agents' prompts. The policy that improves over time is **natural-language text — agent identity, strategy, and memory — not network weights.**
 
-We call this **RLMF — Reinforcement Learning from Market Feedback** ([detailed below](#how-it-learns-rlmf)). It's the actual point of the project; the trading is the environment it learns in, not a get-rich scheme. Treat it as a research harness for prompt-space policy iteration.
+We call this **RLMF — Reinforcement Learning from Market Feedback** ([detailed below](#how-it-learns-rlmf)). It's the actual point of the project; the trading is the environment it learns in, not a get-rich scheme. Treat it as a research harness for prompt-space policy iteration. Its sibling project, **RUSH**, applies the same idea (a versioned policy graph of Markdown guidelines, edited one gated step at a time) to content judging, where the reward is expert labels instead of P&L. See [Next steps](#next-steps-rush-jev-and-model-routing).
 
-Loop: `news → summarize → decide → execute → score → rewrite the prompt`. Default cadence is 3 hours, suited to 1–3 day holds on cash accounts (T+1 settlement). Runs fully in simulation with no broker required.
+Loop: `news → summarize → decide → execute → score → rewrite the prompt`. Cycles run every `-c` minutes during market hours (the live run uses 120), suited to 1–5 day holds on a cash account with T+1 settlement. It can also run in simulation without placing broker orders.
 
 ---
 
@@ -13,32 +13,33 @@ Loop: `news → summarize → decide → execute → score → rewrite the promp
 The system is a reinforcement-learning loop with two deliberate substitutions from the textbook setup:
 
 - The **reward** is realized trade P&L — *the market itself*. No human rater (as in RLHF) and no learned reward model. The environment hands back ground truth.
-- The **policy** is a block of prompt text — each agent's `SOUL` (identity), `STRATEGY DIRECTIVES` (evolving rules), and `MEMORY` (lessons) — injected into the system prompt at runtime. The LLM weights stay frozen. Learning happens in *text space*.
+- The **policy** is a block of prompt text — each agent's `SOUL` (identity), `STRATEGY DIRECTIVES` (numbered gates), and `MEMORY` (lessons and a dated diary) — injected into the system prompt at runtime. The LLM weights stay frozen. Learning happens in *text space*.
 
-An **episode** is one trading cycle. A **policy update** is the feedback agent reading recent outcomes, attributing them to the reasons the Decider gave, and rewriting the prompt. Updates are human-readable diffs, gated by an approve/reject step in the Prompt Lab.
+An **episode** is one trading cycle. A **policy update** is normally a new row in `prompt_versions`. The exceptions are that `init_database.py` re-syncs v0 to the code defaults at startup, and the first version saved after a reset to v0 overwrites v1. Four writers create versions:
 
-The policy is also kept as a **knowledge graph**: every prompt version is decomposed into one Markdown guideline per file (`agents/<agent>/policy-graph/<config>/v<N>/*.md` + `edges.json`), in the RUSH layout, and compiles back to the stored prompt byte-for-byte. The **Policy Graph** tab renders it as a force graph — rules, lessons, identity, code-owned blocks and memory rows as nodes; hierarchy, links, overlaps and "code constrains rule" as edges — with a version timeline so you can watch the policy evolve. The loop edits the graph directly: it proposes patches of at most three guideline files, the critic judges each file's diff, you approve per guideline, and the Decider cites the guideline ids that drove each decision, so every rule gets its own realized win rate. At decision time the Decider's prompt is assembled *from* the graph: a deterministic query over the cycle's regime, holdings, watchlist and quarantine selects and orders the guidelines, each tagged with its id and its record (hits in the last 7/30/90 days, win rate), so rules are weighed by evidence rather than wording. The tab shows the graph in three layers — **policy** (the .md guidelines compiled into the prompt), **prompt scaffold** (templates and code-owned text) and **cycle context** — and every gate reads as plain lines. A **world layer** adds what the market put in front of the Decider each cycle — the regime, FOMC / CPI / jobs windows, earnings dates — as read-time factor nodes wired to the rules that consume them and to the decisions made under them. See [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md), or the short form [docs/POLICY_GRAPH_AND_ROUTING.docx](docs/POLICY_GRAPH_AND_ROUTING.docx).
+| Writer | When | Gate |
+|---|---|---|
+| **Weekly feedback** (`feedback_agent.py`) | Thursday 20:30 ET | None. It replaces the `Latest Feedback Reminder` section of the directives with this week's 2 to 4 numbered gates, adds the same gates to memory as a dated diary entry, then activates the new version. |
+| **Prompt Lab** (`/prompt-evolution`) | On demand | Generator, then critic verdict, then human approve or reject |
+| **Policy-graph proposals** (`policy_graph/proposals.py`) | On demand | A patch of at most 3 guideline files, then critic per file, then human approval per guideline |
+| **Operator versions** (`policy_graph/operator.py`) | By hand | Hand-authored patches get the same validation and critic record as a drafted proposal. Maintenance versions skip both and are labelled `maintenance` in their description and the activation log. |
 
-**Decision paths.** The bottom of the Policy Graph tab shows how the graph is actually used. A
-decision's path is *context → route that pulled a guideline into the prompt → guideline the
-Decider cited → action → outcome*, and every cycle logs it. **Path frequency** draws the paths as a
-three-column flow — routes (regime, holdings, watchlist, news, entities, trends, quarantine,
-recency, tag) on the left, the most-cited guidelines in the middle showing cited over served,
-buy/sell/hold on the right, link width by count — and lists the two gaps that matter: guidelines
-cited but never served (the query missed them) and guidelines served but never cited (dead weight
-in the prompt). **Path quality** is a per-guideline table over the closed trades that cited it:
-win rate, P&L, and the guidelines most often co-cited on its winners versus its losers, which is
-the credit-assignment view of the policy. Both come with 30-, 90- and 365-day windows and start
-empty until cited decisions accumulate.
+Every activation by these writers goes through `prompt_manager.set_active_prompt_version` and is logged in `prompt_activation_events`, and the most recent batch can be undone from the Feedback tab. At startup `init_database.py` re-activates a dormant v0 directly, without a log entry.
+
+**The policy is a knowledge graph.** Each prompt version is mirrored as one Markdown guideline per file plus `edges.json`, under `agents/<agent>/policy-graph/<config>/v<N>/`, in the RUSH layout. The directory is written the first time the version is read (by a Decider cycle, the Policy Graph tab or a proposal), and it compiles back to the stored row byte for byte. The `prompt_versions` row stays canonical; the graph is an exact, editable view of it. The **Policy Graph** tab shows three layers: **policy** (the `.md` guidelines compiled into the prompt), **prompt scaffold** (templates and code-owned text) and **cycle context** (memory rows and world factors such as the regime, FOMC, CPI and jobs windows, and earnings dates). Each gate reads as plain lines, and a version timeline shows the policy changing.
+
+**How the Decider reads it.** Each cycle the Decider's soul, directives and memory are rebuilt from the active graph by a deterministic query, with no model call. Every gate, lesson and soul section is served every cycle; only dated diary entries are routed (by regime, held or watched tickers, news tickers, extracted companies, trend tickers, quarantine, recency and shared tags). Over the 30 days to 2026-10-02, about 40 guidelines were served per cycle and about 1 was dropped, roughly 4.7k tokens. That fits the prompt comfortably, so there is no LLM routing agent; the lever is pruning what is never cited. Each served guideline carries its id and record (`⟨id · cited 7d/30d/90d · win %⟩`), and every decision must cite 1 to 4 guideline ids, so each rule accumulates its own realized win rate.
+
+**Decision paths.** The bottom of the Policy Graph tab draws *route or world factor → guideline cited → buy / sell / hold*, lists guidelines cited but never served (the query missed them) and served but never cited (dead weight), and scores each guideline over the closed trades that cited it. Details: [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md), with the short form in [docs/POLICY_GRAPH_AND_ROUTING.md](docs/POLICY_GRAPH_AND_ROUTING.md) (also as `.docx`).
 
 ```
-        policy = prompt (soul + strategy directives + memory)
+        policy = prompt (soul + strategy directives + memory), stored as a guideline graph
                               │
                               ▼
    Decider acts ──→ trade executes ──→ market resolves P&L ──→ Feedback agent
-        ▲                                  (the reward)         scores outcomes,
-        │                                                       rewrites the policy
-        └──────────────── new prompt version ◀────────────────────────┘
+        ▲            (cites guideline ids)      (the reward)     scores outcomes,
+        │                                                         rewrites the policy
+        └──────────────── new prompt version ◀──────────────────────────┘
 ```
 
 ### Compared to PPO
@@ -51,48 +52,47 @@ Same control loop, different machinery at every joint:
 | **Reward** | Environment scalar | Realized market P&L — no human, no learned reward model |
 | **Update rule** | Gradient ascent on a clipped surrogate objective | An LLM rewrites the prompt from an outcome post-mortem |
 | **Update space** | Continuous (weight deltas) | Discrete (natural language) |
-| **Credit assignment** | Advantage / GAE over timesteps | Feedback agent ties P&L back to the stated trade rationale |
-| **Stability mechanism** | Trust region / clip ratio | Versioned prompts + human approve/reject gate |
+| **Credit assignment** | Advantage / GAE over timesteps | Guideline citations tie each decision's P&L to the rules it used |
+| **Stability mechanism** | Trust region / clip ratio | One attributable change per step, critic gate, human approval, versioned prompts |
 | **Sample regime** | Many on-policy rollouts | Few episodes; semantic generalization across them |
 | **Interpretability** | Opaque weight deltas | Every update is a readable prompt diff |
 
-PPO's clip exists to stop one update from moving the policy too far. The Prompt Lab's **approve/reject gate is the same idea** — a human-sized trust region on a textual policy step.
+PPO's clip exists to stop one update from moving the policy too far. The critic's doctrine is the textual version: approve only small, attributable, executable steps that target a measured leak (`policy_graph/prompts.py`). The weekly automatic path does not pass through that gate, which is worth remembering when reading a version's realized delta.
 
-The trade-off is honest: a gradient learner needs thousands of noisy episodes to extract signal from financial returns, but assigns credit rigorously. RLMF can generalize from a handful — *"stop buying gap-ups into earnings"* is one sentence, not ten thousand gradient steps — but its credit assignment is coarse and only as good as the feedback agent's reasoning. **Garbage reward in, garbage policy out**: if outcomes are mislabeled, the loop learns nothing (see the dollar-delta fix in the changelog).
+The trade-off is honest: a gradient learner needs thousands of noisy episodes to extract signal from financial returns, but assigns credit rigorously. RLMF can generalize from a handful — *"stop buying gap-ups into earnings"* is one sentence, not ten thousand gradient steps — but its credit assignment is coarse and only as good as the outcome labels. **Garbage reward in, garbage policy out** (see the June 2026 dollar-delta fix in the changelog).
 
 ### Where it lives in the code
 
 | Concept | Implementation |
 |---|---|
-| Policy | `prompt_versions` table (`soul` / `strategy_directives` / `memory`), injected at runtime as `## AGENT IDENTITY`, `## STRATEGY DIRECTIVES`, `## LESSONS FROM EXPERIENCE` |
-| Policy as a graph | `policy_graph/` + `agents/<agent>/policy-graph/…/v<N>/*.md` — one guideline per file, same bytes as the row; `/policy-graph` tab; proposals in `policy_graph_proposals`; citations in each decision's reason (`[cites: DA.…]`) |
+| Policy | `prompt_versions` (`soul` / `strategy_directives` / `memory`). The soul goes under `## AGENT IDENTITY`, the directives fill the system template's `{strategy_directives}` placeholder, and the memory goes under `## LESSONS FROM EXPERIENCE` |
+| Policy as a graph | `policy_graph/` + `agents/<agent>/policy-graph/`; the `/policy-graph` tab; proposals in `policy_graph_proposals`; served and cited rows in `policy_graph_hits` / `policy_graph_runs` |
 | Reward | `trade_outcomes.gain_loss_percentage` + `outcome_category` |
-| Policy update | `feedback_agent.py` — weekly outcome analysis → prompt rewrite |
-| Trust-region gate | Prompt Lab approve/reject (`/prompt-evolution`); per-guideline approve on the Policy Graph tab (`/policy-graph`) |
+| Policy update | The four writers above |
+| Trust-region gate | Critic doctrine + human approval (Prompt Lab, per-guideline approval on the Policy Graph tab) |
+| Realized effect of a change | `backfill_version_outcomes.py` writes realized win-rate deltas into `prompt_change_reviews` after the Thursday job |
 | Episode | One trading cycle (Summarizer → Decider → execution → outcome) |
 
 ### The Critic & the (optional) Human Gate
 
-Policy updates are not shipped blind. Every Prompt Lab batch runs a three-stage
-review, and **every verdict feeds back into the next round** — the loop learns
-even when no human ever clicks:
+Prompt Lab batches and policy-graph proposals run a three-stage review, and recent verdicts feed back into the next round:
 
 ```mermaid
 flowchart TB
-    subgraph CYCLE["Trading cycle (every 2-3h)"]
-        NEWS[News + screenshots] --> SUM[Summarizers ×~6<br/><i>Luna · low</i>]
-        SUM --> CO[Company extraction<br/><i>Luna · low — DAI_MODEL_COMPANY</i>]
-        CO --> TR[Market trends API<br/>momentum recap · no LLM]
-        SUM & CO & TR --> KG{{Policy graph query<br/>regime · holdings · watchlist ·<br/>news · entities · trends → trimmed guidelines}}
+    subgraph CYCLE["Trading cycle (every -c minutes)"]
+        NEWS[News + screenshots] --> SUM[Summarizers ×6<br/><i>Luna</i>]
+        SUM --> CO[Company extraction<br/><i>Luna — DAI_MODEL_COMPANY</i>]
+        CO --> TR[Momentum recap · regime · watchlist<br/>event calendar · no LLM]
+        SUM & CO & TR --> KG{{Policy graph query<br/>every gate and lesson served;<br/>diary entries routed}}
         KG --> DEC[Decider<br/><i>Terra · high</i>]
         DEC --> EXEC[Execution<br/>Schwab / simulation]
         EXEC --> OUT[(trade_outcomes<br/><b>market P&L = reward</b>)]
     end
 
     OUT -->|outcome analysis| FB[FeedbackAgent<br/><i>Sol · high</i>]
-    FB -->|guidance| GEN[Prompt evolution<br/><i>Terra · high — DAI_MODEL_EVOLUTION</i>]
-    GEN -->|candidate prompt + declared changes| CRITIC[Critic<br/><i>Terra · high — DAI_MODEL_CRITIC</i>]
-    OUT -->|"trade-level evidence<br/>(20 worst + 20 best, with reasons)"| CRITIC
+    FB -->|guidance| GEN[Prompt evolution / proposal drafter<br/><i>Terra · high — DAI_MODEL_EVOLUTION</i>]
+    GEN -->|candidate + declared changes| CRITIC[Critic<br/><i>Terra · high — DAI_MODEL_CRITIC</i>]
+    OUT -->|"trade-level evidence<br/>(up to 20 worst + 20 best, last 30 days)"| CRITIC
     OUT -->|trade-level evidence| GEN
     CRITIC -->|verdict · reason · confidence| REV[(prompt_change_reviews)]
     REV --> HUMAN{Human approve / reject<br/><b>optional RLHF gate</b>}
@@ -104,81 +104,24 @@ flowchart TB
     REV -->|"own genuine verdicts +<br/>human concordance (calibration)"| CRITIC
 ```
 
-How the learning signal flows:
+- **Review history.** Every verdict, reason and confidence lands in `prompt_change_reviews`. The 8 most recent rows, human-labeled first, go into the next Prompt Lab and proposal runs as `past_review_verdicts` and into the weekly feedback run as its review history. A candidate that repeats a rejected pattern without addressing the objection is told it will be rejected again. Because labeled rows sort first, an unclicked critic verdict stops reaching the next prompt once eight or more rows are labeled.
+- **Evidence, not vibes.** Generation and the critic both receive per-trade rows: up to the 20 worst and 20 best trades closed in the last 30 days, each with its entry and exit reasons cut to 140 characters. Proposals must cite tickers; the critic verifies claims against the same rows.
+- **Plain gates.** The drafter, the weekly feedback agent and the critic are all told to write rules in one shape: *"N. LABEL — IF one condition on a supplied field THEN one action. Otherwise next gate. Falsified if …"*, at most 240 characters. On policy-graph proposals a style lint (`proposals.style_check`) warns on gates over 300 characters, more than one IF, several parentheses, or a primary gate with no falsifier. The critic receives those warnings; the Policy Graph tab does not display them yet.
+- **Human RLHF labels (optional).** An approve or reject stamps `human_verdict` and `human_agrees_critic`. Concordance is computed only against genuine critic judgments, so a critic outage never reads as a human override.
+- **Anti-sycophancy guardrails.** The critic recalibrates only on a consistent pattern (3+ same-direction human overrides), and realized `winrate_delta` outranks concordance, read through the regime split because a change shipped into a falling tape shows a negative delta regardless of merit.
+- **Fail-closed.** Cosmetic-only candidates are auto-rejected without an LLM call; a critic outage defers to the human as a low-confidence reject.
 
-- **Critic-only learning (no clicks needed).** Every candidate's verdict, reason,
-  and confidence land in `prompt_change_reviews` and are injected into the *next*
-  generation and feedback runs as `past_review_verdicts` — a candidate that repeats
-  a rejected pattern without addressing the objection is told it will be rejected
-  again. Human review is a bonus label, not a dependency.
-- **Evidence, not vibes.** Generation and the critic both receive per-trade rows
-  (worst 20 + best 20 closed trades, with entry/exit reasoning and a self-declared
-  coverage statement). Proposals must cite tickers; the critic *verifies* claims
-  against the same rows instead of rejecting for lack of data.
-- **Human RLHF labels (optional).** An approve/reject click stamps
-  `human_verdict` and `human_agrees_critic`. Concordance is only computed against
-  *genuine* critic judgments — heuristic auto-rejects and critic outages record
-  `critic_auto` / confidence 0 and are excluded, so downtime can never read as
-  "the human overrode the critic."
-- **Anti-sycophancy guardrails.** The critic calibrates only on a consistent
-  pattern (3+ same-direction human overrides among genuine verdicts), and realized
-  `winrate_delta` — measured after a shipped change has lived in the market —
-  outranks human concordance. Labeled rows are kept in the learning window ahead
-  of pending ones.
-- **Fail-closed trust region.** Cosmetic-only candidates are auto-rejected without
-  an LLM call; a critic outage defers to the human as a low-confidence reject.
-
-Per-batch cost is dominated by the three generation calls, not the critic
-(estimates at high reasoning, one click = 1 feedback + 3 generation + up to 3
-critic calls):
-
-| Configuration | Feedback | Generation ×3 | Critic ×3 | ~Total/batch |
-|---|---|---|---|---|
-| All Sol | $0.22 | ~$0.93 | ~$0.41 | **~$1.55** |
-| Sol + Sol generation + Terra critic | $0.22 | ~$0.93 | ~$0.16 | **~$1.30** |
-| Sol + **Terra generation** + Terra critic ⭐ default | $0.22 | ~$0.37 | ~$0.16 | **~$0.75** |
-| Terra critic at *medium* effort | — | — | ~$0.10 | saves ~$0.06 |
-
-Keep reasoning at **high** throughout the learning loop: the entire high→medium
-saving across all seven calls is ~$0.20/batch, while candidate and verdict
-quality are the loop's ceiling — one sloppy shipped prompt costs more than a
-year of effort savings. The analysis brain (feedback) stays on Sol because
-credit assignment is the step everything downstream consumes; generation and
-judging run Terra, which benches within ~1 point of Sol on reasoning.
-
-All knobs live in `.env`: `DAI_MODEL_FEEDBACK` / `DAI_MODEL_EVOLUTION` /
-`DAI_MODEL_CRITIC` and `DAI_FEEDBACK_REASONING_LEVEL` / `DAI_CRITIC_REASONING_LEVEL`.
-Every call is metered in `api_usage` (model, tokens, cost) per agent.
+Keep reasoning at **high** throughout the learning loop: these calls are a small share of spend (see [Cost](#cost)), and candidate and verdict quality are the loop's ceiling.
 
 ### Is it actually beating the market?
 
-Win rate and raw % return can both look healthy while an index fund quietly
-wins, so the Feedback tab's **System vs Market** panel benchmarks the account
-against **SPY, DJIA, NASDAQ, and VTI** over the same window (`benchmark_tracker.py`,
-`/api/feedback/benchmarks`):
+Win rate and raw % return can both look healthy while an index fund quietly wins, so the Feedback tab's **System vs Market** panel benchmarks the account against **SPY, DJIA, NASDAQ, and VTI** over the same window (`benchmark_tracker.py`, `/api/feedback/benchmarks`):
 
-- **Time-weighted return (TWR)** — deposits/withdrawals are pulled from the
-  Schwab transactions API into `external_cash_flows` and stripped from the
-  growth curve, so moving money in or out never reads as trading skill.
-  Attribution is settlement-aware (a transfer dated Tuesday often posts to
-  account value Wednesday); clustered transfers are resolved jointly against
-  the value series.
-- **Benchmark closes** are cached daily in `benchmark_history` via yfinance
-  (dividend-adjusted for the ETFs). Override the lineup with
-  `DAI_BENCHMARK_SYMBOLS` in `.env`.
-- **Headline stats:** alpha vs SPY, Sharpe (system vs SPY), max drawdown
-  (system vs SPY), plus trade-quality metrics the equity curve can't show —
-  profit factor ($ won / $ lost), expectancy per trade, and payoff ratio
-  (avg win % / avg loss %). Expectancy > 0 with payoff ≥ ~1.3 means the loop's
-  risk-discipline lessons are landing even before alpha turns positive.
-- Flowless one-day V-shapes from the (since-fixed) settled-cash snapshot bug
-  are auto-filtered at read time and disclosed in the panel footnote.
-- **Model-switch annotations** — the config hash stays fixed across model
-  upgrades, so decider model changes (GPT-5.4 → GPT-5.5 → Terra, …) are logged
-  to `model_transitions` at each decision-cycle start
-  (`decider_agent.record_model_transition`) and drawn as dashed vertical lines
-  on the chart. That makes "did the new brain change the curve?" readable at
-  a glance; the footnote shows the full model chain for the window.
+- **Time-weighted return (TWR)** — deposits and withdrawals are pulled from the Schwab transactions API into `external_cash_flows` and stripped from the growth curve, so moving money in or out never reads as trading skill. Attribution is settlement-aware, and clustered transfers are resolved jointly against the value series.
+- **Only this panel is flow-adjusted.** The Dashboard's headline Net Gain/Loss and the "Net Performance" chart are account value minus a fixed starting baseline, so a deposit currently shows up there as a gain. Per-trade win rate and P&L in `trade_outcomes` are unaffected.
+- **Benchmark closes** are cached daily in `benchmark_history` via yfinance (dividend-adjusted for the ETFs). Override the lineup with `DAI_BENCHMARK_SYMBOLS`.
+- **Headline stats:** alpha vs SPY, Sharpe, max drawdown, plus profit factor, expectancy per trade and payoff ratio.
+- **Model-switch annotations.** Decider model changes are logged to `model_transitions` at each cycle start and drawn as dashed lines. The computed config hash includes only the global `-m` model, not per-agent keys such as `DAI_MODEL_DECIDER`, and the live run pins its hash with `-H`, so the history stays on one hash across Decider model upgrades.
 
 ---
 
@@ -188,63 +131,49 @@ against **SPY, DJIA, NASDAQ, and VTI** over the same window (`benchmark_tracker.
 
 | Requirement | Notes |
 |---|---|
-| Python 3.12+ | 3.14 tested |
-| PostgreSQL 17 | Optional — falls back to SQLite |
-| Chrome 141+ | Headless scraping |
+| Python 3.10+ | The launcher prefers 3.11 or 3.10 and builds the `dai/` virtualenv |
+| PostgreSQL | Needed in practice. A SQLite fallback exists, but several core tables use Postgres types (`JSONB`, `TEXT[]`). |
+| Chrome | Headless scraping and screenshots |
 | OpenAI API key | Required |
-| Schwab API creds | Only for live trading |
+| Schwab API credentials | Only for live trading. `schwab-py` is installed either way, because the dashboard imports the Schwab client. |
 
-### 1. Clone & Configure
+### 1. Clone & configure
 
 ```bash
 git clone <repo-url>
 cd d-ai-trader
 cp env_template.txt .env
-# Edit .env — at minimum set OPENAI_API_KEY
+# Edit .env — at minimum set OPENAI_API_KEY and DATABASE_URI
 ```
 
-### 2. Database (optional)
+`.env` holds your keys and is gitignored. Never commit it.
+
+### 2. Database
 
 ```bash
 brew install postgresql@17 && brew services start postgresql@17
-export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
 createdb adobi
-# Add to .env:
-#   DATABASE_URI=postgresql://$(whoami)@localhost/adobi
-python init_database.py
+# in .env:  DATABASE_URI=postgresql://<you>@localhost/adobi
 ```
 
-Skip this and the app boots on SQLite automatically.
+The launcher runs `init_database.py` on every start; it creates and migrates the tables and seeds v0 prompts.
 
-### 3. Run in Simulation
+### 3. Run in simulation
 
 ```bash
-# Default 3-hour cadence, GPT-5.4
-./start_d_ai_trader.sh -p 8080 -t simulation -c 180
-
-# Faster loops for experimentation
-./start_d_ai_trader.sh -p 8080 -t simulation -c 60
-./start_d_ai_trader.sh -p 8080 -t simulation -c 15
+./start_d_ai_trader.sh -p 8080 -t simulation -c 120 -m gpt-5.6-terra
 ```
 
-The launcher auto-creates a virtualenv and installs dependencies on first run.
+The launcher creates the virtualenv, installs `requirements.txt` when it changes, starts the dashboard and the trader, and keeps the Mac awake with `caffeinate` while the trader runs. Without `-m` the launcher exports `gpt-4o` as the global model; the per-agent `DAI_MODEL_*` keys in `.env` still decide each agent's model.
 
-**Pick your starting policy.** The repository ships two policy graphs per agent (see
-[Policy graph](#policy-graph-guidelines-as-a-knowledge-graph)): the committed **baseline** (v0 =
-the code defaults) and **latest**, a copy of the active, learned policy the repo was last pushed
-with. A fresh config seeds its v0 from whichever you choose; the choice applies only the first
-time a config hash is seeded and never touches an existing one.
+**Pick your starting policy.** The repository ships two policy graphs per agent: the committed **baseline** (v0 = the code defaults) and **latest**, a copy of the active, learned policy the repo was last pushed with. A fresh config seeds its v0 from whichever you choose; the choice applies only the first time a config hash is seeded.
 
 ```bash
-# start from the code defaults (baseline) — the textbook starting point
-./start_d_ai_trader.sh -p 8080 -t simulation -s default
-
-# start from the shipped latest policy — begin with the rules the loop has already learned
-./start_d_ai_trader.sh -p 8080 -t simulation -s latest
+./start_d_ai_trader.sh -p 8080 -t simulation -s default   # start from the code defaults
+./start_d_ai_trader.sh -p 8080 -t simulation -s latest    # start from the shipped learned policy
 ```
 
-The same switch is `DAI_POLICY_SEED=default|latest` in `.env`. The initializer prints which
-seed it used, e.g. `v0 = shipped latest policy (Decider v23, Summarizer v17, Feedback v8)`.
+The same switch is the shell variable `DAI_POLICY_SEED=default|latest` (for example `DAI_POLICY_SEED=latest ./start_d_ai_trader.sh …`). A value in `.env` is ignored under the launcher, which exports its own. The initializer prints which seed it used.
 
 **Dashboard:** http://localhost:8080
 
@@ -252,313 +181,252 @@ seed it used, e.g. `v0 = shipped latest policy (Decider v23, Summarizer v17, Fee
 
 ## 🧠 Agent Soul & Memory
 
-Each trading agent has a persistent **Soul** (identity/philosophy) and **Memory** (learned lessons).
-
-### File Structure
+Each agent has a **Soul** (identity and philosophy), **Strategy Directives** (numbered gates) and **Memory** (lessons, patterns, mistakes and a dated diary), stored in `prompt_versions` and injected into the system prompt at runtime.
 
 ```
 agents/
-├── decider/
-│   ├── SOUL.md      # Trading philosophy, risk rules, decision style
-│   └── MEMORY.md    # Lessons learned from trading experience
-├── summarizer/
-│   ├── SOUL.md      # Extraction philosophy, signal priorities
-│   └── MEMORY.md    # Source quality notes, extraction patterns
-├── company/
-│   ├── SOUL.md      # Entity resolution: parent roll-up, never guess a ticker
-│   └── MEMORY.md    # Extraction lessons (parent roll-ups, look-alike tickers)
-├── feedback/
-│   └── SOUL.md      # Review philosophy, feedback style
-└── <agent>/policy-graph/   # the same policy as a knowledge graph: baseline/v0 + latest/ (tracked),
-                            # <config_hash>/v<N>/ (this machine's evolution, local)
+├── decider/      SOUL.default.md · MEMORY.default.md · policy-graph/
+├── summarizer/   SOUL.default.md · MEMORY.default.md · policy-graph/
+├── company/      SOUL.default.md · MEMORY.default.md · policy-graph/
+└── feedback/     SOUL.default.md · MEMORY.default.md · policy-graph/
 ```
 
-### Policy graph (guidelines as a knowledge graph)
-
-Every prompt version is also a folder of Markdown guideline files plus `edges.json`, RUSH-style,
-under `agents/<agent>/policy-graph/<config_hash>/v<N>/` (local; `baseline/` and `latest/` are the tracked copies), and the dashboard's **Policy Graph** tab
-renders it as a force graph with a version timeline, per-guideline history, citations and health.
-The repository ships the baseline in `agents/<agent>/policy-graph/baseline/v0/` — the v0 policy
-every fresh checkout starts from — and `init_database.py` writes your own config's v0 next to it.
-Versions v1… are the evolution on your machine (weekly feedback, Prompt Lab, and proposals the
-loop drafts as guideline-file patches for you to approve); they stay local, and the repository
-tracks only the baseline plus `agents/<agent>/policy-graph/latest/`, a copy of the active
-version that refreshes on every activation. A fresh checkout can start from either one:
-`./start_d_ai_trader.sh -s default` seeds v0 from the code defaults (the baseline), `-s latest`
-seeds v0 from the shipped latest graph so you begin with the learned rules (`DAI_POLICY_SEED`;
-applies only the first time a config is seeded). See `docs/POLICY_GRAPH.md`.
-
-### How It Works
-
-- **Soul** defines *who the agent is* — personality, philosophy, decision-making style. Loaded from `agents/<name>/SOUL.md` as defaults, stored in DB, editable in Prompt Lab.
-- **Memory** captures *what the agent has learned* — patterns, mistakes, lessons. Auto-updated by the feedback agent after each analysis cycle.
-- Both are injected into the system prompt at runtime:
-  - `## AGENT IDENTITY` — soul content
-  - `## STRATEGY DIRECTIVES` — evolving strategy
-  - `## LESSONS FROM EXPERIENCE` — memory content
-
-### Editing
-
-- **Prompt Lab UI**: Edit soul and memory directly in the dashboard
-- **File override**: Set `DAI_SOUL_FILE_OVERRIDE=1` to load from `agents/` files instead of DB
-- **Database**: Soul and memory are stored in the `prompt_versions` table (`soul` and `memory` columns)
-
-### Memory Management
-
-- Memory auto-grows as the feedback agent adds lessons after each cycle
-- Compressed when exceeding ~4000 chars (~1000 tokens): oldest entries archived, most recent kept
-- Append-only with automatic compression — no data loss, just summarization
-
-### Backwards Compatibility
-
-Empty soul/memory fields are fully backwards compatible — agents behave exactly as before until content is added.
+- **`*.default.md`** are the committed seeds. `SOUL.md` and `MEMORY.md` are optional, hand-made local overrides of those seeds and are gitignored, since they can hold trade-specific lessons; nothing writes them, and the database is canonical. `DAI_SOUL_FILE_OVERRIDE=1` makes the Summarizer, Company extraction and Feedback agents read soul and memory from the files; the Decider's graph-assembled prompt still comes from the database.
+- **`policy-graph/baseline/v0`** and **`policy-graph/latest/`** are tracked. `latest/` is refreshed when the active version is materialized: every cycle for the Decider, and on a Policy Graph tab read or an applied proposal for the other agents, so it can lag an activation. Per-config history under `policy-graph/<config_hash>/v<N>/` stays local.
+- **Memory compression** (`memory_compress.py`) runs with the weekly job. When memory passes 9,000 characters, the oldest diary entries are archived; the standing lesson sections are never trimmed.
+- **Decider long-term memory.** Up to `DAI_MEMORY_LT_LIMIT` (default 14) active `decider_memory` rows are injected each cycle, held-ticker rows first, then by weight and recency, together with a working memory of the last 6 decision cycles. They appear as `DA.ltm.*` nodes in the cycle-context layer.
+- **Editing.** Edit soul and memory in the Prompt Lab, or propose guideline patches from the Policy Graph tab.
 
 ---
 
 ## Architecture
 
-One trading cycle, left to right — every LLM agent has its own soul / directives / memory in
-`prompt_versions` and its own folder under `agents/`:
+One trading cycle. The four cycle agents (Summarizer, Company extraction, Decider, Feedback) each have their own soul, directives and memory in `prompt_versions` and their own folder under `agents/`; the Prompt Lab's critic and evolution calls have neither.
 
 ```
   news + screenshots (6 sources)
         │
         ▼
-  Summarizers (~6 per cycle, Luna·low)      → headlines + insights + "Watchlist:" per source
+  Summarizers (6 per cycle, Luna)          → headlines + insights + "Watchlist:" per source
         │
         ▼
-  Company extraction agent (Luna·low)       → listed companies + tickers rolled up to the parent
+  Company extraction (Luna)                → listed companies + tickers, rolled up to the parent
         │
         ▼
-  Market trends API (yfinance, no LLM)       → momentum recap for those tickers + holdings
+  Momentum recap · INDEX REGIME line ·     → yfinance, no LLM: trend recap, RISK-ON / MIXED / RISK-OFF,
+  contrarian watchlist · quarantine          pull-back candidates, names exited in the last 2 sessions
         │
         ▼
-  Event calendar (FOMC · CPI · jobs · earnings, no LLM) → EVENT CALENDAR block: today's date, sessions to each
-        │                                      print, earnings dates of holdings + watchlist, event-risk score 0–100
+  Event calendar (no LLM)                  → EVENT CALENDAR block: date, sessions to FOMC / CPI / jobs,
+        │                                    earnings dates of holdings + watchlist, event-risk score 0–100
         ▼
-  Policy graph query (deterministic, no LLM) → the Decider's guidelines, selected & ordered by
-        │                                      regime · holdings · contrarian watchlist · quarantine ·
-        │                                      news tickers · extracted entities · trend tickers;
-        │                                      each tagged ⟨id · hits 7d/30d/90d · win rate⟩
+  Policy graph query (no LLM)              → soul + directives + memory rebuilt from the active graph,
+        │                                    each guideline tagged ⟨id · cited 7d/30d/90d · win %⟩
         ▼
-  Decider (Terra·high)                       → decisions with cited guideline ids
+  Decider (Terra · high)                   → decisions with cited guideline ids
         │
         ▼
-  Validator → execution (Schwab / sim) → trade_outcomes (the reward) → Feedback agent (Sol·high, weekly RLMF)
+  Profit-take guardrail → citation repair pass → validator → whole-share sizing within settled funds
+        │                                                      → execution (Schwab / sim)
+        │
+        ▼
+  trade_outcomes (the reward) → Feedback agent (Sol · high, weekly RLMF)
 ```
 
-### Pipeline Detail
-
-```
-              Every cadence cycle (first at market open 6:30 AM PT)
-                                │
-                                ▼
-                   ┌─────────────────────┐
-                   │     Summarizer      │
-                   │  6 news sources →   │
-                   │  screenshot + GPT   │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │   Momentum Recap    │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │      Decider        │
-                   │  BUY / SELL / HOLD  │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │   Decision Validator│
-                   │  (guardrails)       │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │  Execution Layer    │
-                   │  simulation │ Schwab│
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │  Feedback Agent     │
-                   │  (weekly → rewrites │
-                   │   the prompt/policy)│
-                   └─────────────────────┘
-```
-
-### Core Modules
+### Core modules
 
 | File | Purpose |
 |---|---|
-| `d_ai_trader.py` | Main orchestrator + scheduler |
-| `main.py` | News scraping & screenshot analysis |
-| `decider_agent.py` | Trading decision engine; also hosts the company-extraction agent call and the market-trends recap |
-| `contrarian_screener.py` | Non-extended front-run candidates + the INDEX REGIME line (yfinance, no LLM) |
-| `event_calendar.py` | FOMC / CPI / jobs calendars, NYSE sessions, earnings dates, event-risk score → the EVENT CALENDAR block, per-cycle snapshots, the Event Risk Landscape series |
-| `feedback_diagnostics.py` | Population-level trade diagnostics for the feedback loop (regime, extension, re-entry, kill kind, event windows, acknowledgment rate) |
-| `policy_graph/` | Guideline knowledge graph: decomposition, proposals, citations, the decision-time graph query |
-| `decision_validator.py` | Financial guardrails — prevents hallucinated trades |
-| `feedback_agent.py` | Post-close performance analysis |
-| `config.py` | Model config, env loading, DB setup |
-| `dashboard_server.py` | Flask web UI + API |
-| `schwab_client.py` | Schwab API integration |
-| `schwab_streaming.py` | Real-time Level-One quotes + account activity |
-| `schwab_ledger.py` | Shadow ledger for unsettled cash tracking |
-| `trading_interface.py` | Unified sim/live trading layer |
-| `safety_checks.py` | Multi-layer safety manager |
-| `prompt_manager.py` | Prompt versioning & evolution |
-| `shared/market_clock.py` | Market hours utility |
-| `shared/run_context.py` | Run context propagation |
-| `shared/ticker_normalize.py` | Consistent ticker handling |
+| `d_ai_trader.py` | Orchestrator and scheduler |
+| `main.py` | News scraping and screenshot summaries |
+| `decider_agent.py` | Decision engine; also hosts company extraction, the momentum recap and execution sizing |
+| `contrarian_screener.py` | INDEX REGIME line and the pull-back watchlist (yfinance, no LLM) |
+| `event_calendar.py` | FOMC / CPI / jobs calendars, NYSE sessions, earnings dates, event-risk score, per-cycle snapshots |
+| `order_sizing.py` | Whole-share sizing: a sub-share ticket rounds up to one share within the MAX rail and settled funds |
+| `decision_validator.py` | Financial guardrails against hallucinated trades |
+| `decider_memory.py` / `memory_compress.py` | Decider long-term memory rows; weekly diary compression |
+| `feedback_agent.py` / `feedback_diagnostics.py` | Weekly outcome analysis; population diagnostics (regime, extension, re-entry, kill kind, event windows) |
+| `prompt_manager.py` | Prompt versions and the audited activation switchboard |
+| `prompt_outcome_attribution.py` / `backfill_version_outcomes.py` | Realized effect of each prompt change, for the critic scorecard |
+| `benchmark_tracker.py` | System vs Market TWR with cash flows removed |
+| `policy_graph/` | The guideline graph: decompose / compile / store, assembly (routing), citations, proposals, operator versions, decision paths, world factors |
+| `dashboard_server.py` | Flask web UI and API |
+| `trading_interface.py` / `schwab_client.py` / `schwab_ledger.py` | Live execution layer, Schwab API, shadow ledger of effective funds |
+| `safety_checks.py` | Position and total-investment caps (see [Guardrails](#guardrails) for where they apply) |
+| `init_database.py` / `initialize_prompts.py` | Schema setup and v0 prompts |
+| `config.py` | Env loading, models, reasoning levels, database setup |
+| `shared/` | Market clock, run context, ticker normalization, news context for decisions |
 
 ---
 
 ## Configuration
 
-### `.env` Reference
+### `.env` reference
+
+Key names with code defaults where one exists. Model values shown are the live run's choices, not code defaults: an unset per-agent key uses the global model. Your values live in `.env`.
+
+Under `start_d_ai_trader.sh`, the launcher exports `DAI_GPT_MODEL` (from `-m`, default `gpt-4o`), `TRADING_MODE` (from `-t`) and `DAI_POLICY_SEED` (from `-s`), so those three `.env` values only apply when the Python entry points run directly.
 
 ```bash
 # Required
-OPENAI_API_KEY=sk-proj-your_key_here
+OPENAI_API_KEY=
+# Database: defaults to postgresql://<you>@localhost/<you> (DATABASE_URL also accepted);
+# falls back to SQLite (d_ai_trader.sqlite3) if Postgres is unreachable
+DATABASE_URI=
 
-# Global model (fallback for anything without a per-agent override; also -m flag)
-DAI_GPT_MODEL=gpt-5.6-terra
-
-# Per-agent model overrides (aliases work: sol / terra / luna)
-DAI_MODEL_SUMMARIZER=gpt-5.6-luna   # frequent vision calls — budget tier
-DAI_MODEL_COMPANY=gpt-5.6-luna      # ticker/entity extraction
-DAI_MODEL_DECIDER=gpt-5.6-terra     # the trade brain
-DAI_MODEL_FEEDBACK=gpt-5.6-sol      # weekly policy updates — flagship
-DAI_MODEL_CRITIC=gpt-5.6-terra      # prompt-change reviewer (defaults to feedback model)
-DAI_MODEL_EVOLUTION=gpt-5.6-terra   # candidate generation (defaults to feedback model)
-
-# Database (optional — falls back to SQLite)
-DATABASE_URI=postgresql://$(whoami)@localhost/adobi
-
-# Account type
-IS_MARGIN_ACCOUNT=0          # 0 = cash (default), 1 = margin ($25k+ only)
-
-# Trading
-TRADING_MODE=simulation      # simulation | live
-MAX_POSITION_VALUE=2000      # Per-position floor ($)
-MAX_POSITION_FRACTION=0.33   # Per-position fraction of account
-MAX_TOTAL_INVESTMENT=10000   # Total invested capital floor ($)
-MAX_TOTAL_INVESTMENT_FRACTION=0.95
-MIN_CASH_BUFFER=500          # Minimum cash reserve ($)
-DAI_MAX_TRADES=4             # Max trades per cycle (buys + sells)
-DAI_MODEL_TEMPERATURE=0.3
+# Models: global fallback (also -m) and per-agent overrides (aliases: sol / terra / luna)
+DAI_GPT_MODEL=
+DAI_MODEL_SUMMARIZER=gpt-5.6-luna
+DAI_MODEL_COMPANY=gpt-5.6-luna
+DAI_MODEL_DECIDER=gpt-5.6-terra
+DAI_MODEL_FEEDBACK=gpt-5.6-sol
+DAI_MODEL_CRITIC=gpt-5.6-terra      # defaults to the feedback model
+DAI_MODEL_EVOLUTION=gpt-5.6-terra   # defaults to the feedback model
+DAI_DECIDER_FALLBACK_MODEL=gpt-4.1  # asked again when a GPT-5 Decider returns an empty [] or {}
+DAI_MODEL_TEMPERATURE=0.2
 
 # Reasoning levels (light | low | medium | high | xhigh | max*)  *GPT-5.6 only
-DAI_SUMMARIZER_REASONING_LEVEL=low
-DAI_DECIDER_REASONING_LEVEL=high
-DAI_FEEDBACK_REASONING_LEVEL=high
-DAI_CRITIC_REASONING_LEVEL=high
+DAI_SUMMARIZER_REASONING_LEVEL=     # default medium
+DAI_COMPANY_REASONING_LEVEL=        # default low
+DAI_DECIDER_REASONING_LEVEL=        # default high
+DAI_FEEDBACK_REASONING_LEVEL=       # default high
+DAI_CRITIC_REASONING_LEVEL=         # default high
 
-# Schwab API (for live trading)
-SCHWAB_CLIENT_ID=your_client_id
-SCHWAB_CLIENT_SECRET=your_client_secret
-SCHWAB_ACCOUNT_HASH=your_account_hash
-SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
+# Account and mode
+TRADING_MODE=simulation             # simulation | real_world ("live" is accepted as an alias)
+IS_MARGIN_ACCOUNT=0                 # 0 = cash account (settled funds only)
 
-# Optional
-DAI_PROMPT_PROFILE=standard  # standard | gpt-pro
-DAI_DECIDER_RAW_PREVIEW=4000 # Debug: chars of raw Decider output to print
+# Ticket rails shown to the Decider; the validator enforces MIN and MAX, TYPICAL is guidance
+DAI_MIN_BUY_AMOUNT=1000
+DAI_TYPICAL_BUY_LOW=2000
+DAI_TYPICAL_BUY_HIGH=3500
+DAI_MAX_BUY_AMOUNT=4000             # also the ceiling for the one-share round-up
+MIN_CASH_BUFFER=500                 # cash floor for both the Decider budget and the Schwab pre-check
 
-# Scheduled events (event_calendar.py — the EVENT CALENDAR block and the Event Risk Landscape)
-DAI_EVENT_CALENDAR_ENABLED=1 # 0 = no block, no snapshots
-DAI_EVENT_CALENDAR_FILE=     # optional JSON adding dates: {"fomc": [], "cpi": [], "jobs": [], "holidays": [], "other": [{"date": "", "label": ""}]}
-DAI_EARNINGS_LOOKUP=1        # yfinance earnings dates for holdings + watchlist names (0 = cached dates only)
+# Live per-cycle caps and pacing
+DAILY_TICKET_CAP=6                  # max sells executed per cycle (live)
+DAILY_BUY_CAP=3                     # max buys executed per cycle (live)
+MIN_ENTRY_SPACING_MIN=45            # parsed, but no current template shows it and nothing enforces it
+REENTRY_COOLDOWN_MIN=240            # parsed, but no current template shows it and nothing enforces it
+DAI_ONE_TRADE_MODE=0                # 1 = pilot: at most one buy per cycle and NO sells execute
+DAI_FORCE_PROFIT_TAKING=1           # force-sell holdings up at least DAI_FORCE_PROFIT_MIN_PCT
+DAI_FORCE_PROFIT_MIN_PCT=3.0
+
+# Position caps (safety_checks.py; see Guardrails for where they apply)
+MAX_POSITION_VALUE=2000
+MAX_POSITION_FRACTION=0             # combined with MAX_POSITION_VALUE as the larger of the two
+MAX_TOTAL_INVESTMENT=10000
+MAX_TOTAL_INVESTMENT_FRACTION=0
+
+# Policy graph and memory
+DAI_GRAPH_ASSEMBLY=1                # rebuild the Decider's policy from the graph each cycle
+DAI_POLICY_SEED=default             # default | latest, for a new config's v0
+DAI_MEMORY_LT_LIMIT=14              # long-term memory rows per cycle
+
+# Contrarian watchlist
+DAI_CONTRARIAN_ENABLED=1            # also: _UNIVERSE, _LIMIT, _MAX_EXT, _HALF_EXT, _CACHE_MIN
+
+# Scheduled events
+DAI_EVENT_CALENDAR_ENABLED=1        # 0 = no block, no snapshots
+DAI_EVENT_CALENDAR_FILE=            # optional JSON adding dates: {"fomc": [], "cpi": [], "jobs": [], "holidays": [], "other": [{"date": "", "label": ""}]}
+DAI_EARNINGS_LOOKUP=1
 DAI_EARNINGS_CACHE_HOURS=12
+
+# Schwab (live trading)
+SCHWAB_CLIENT_ID=
+SCHWAB_CLIENT_SECRET=
+SCHWAB_ACCOUNT_HASH=
+SCHWAB_REDIRECT_URI=https://127.0.0.1:5556/callback
+DAI_SCHWAB_READONLY=0               # 1 blocks every order
+DAI_SCHWAB_LIVE_VIEW=0              # 1 = dashboard shows live Schwab positions; pair with DAI_SCHWAB_READONLY=1
+
+# Other
+DAI_BENCHMARK_SYMBOLS=              # System vs Market lineup
+DAI_OPENAI_TIMEOUT=75 / DAI_DECIDER_OPENAI_TIMEOUT=180   # seconds per API call
+SUMMARY_MAX_WORKERS=2
+DAI_DECIDER_RAW_PREVIEW=4000        # chars of raw Decider output printed on each call
 ```
 
-### CLI Options
+Keys that no longer do anything: `DAI_MAX_TRADES` (still parsed, never used), `DAI_PROMPT_PROFILE` and `DAI_PROMPT_VERSION` (exported by the launcher, read by no live code), and `DAI_DISABLE_UC` (the scraper always uses undetected-chromedriver).
+
+### CLI options
 
 ```
 ./start_d_ai_trader.sh [OPTIONS]
 
-  -p, --port PORT            Dashboard port (default: 8080)
-  -m, --model MODEL          AI model (default: gpt-5.4)
-  -v, --prompt-version VER   auto | vN (default: auto)
-  -P, --prompt-profile PROF  standard | gpt-pro (default: standard)
-  -t, --trading-mode MODE    simulation | live (default: simulation)
-  -c, --cadence MINUTES      180 (default) | 60 | 30 | 15
-  -H, --config-hash HASH     Force a specific configuration hash for this run
-  -b, --bind HOST            Dashboard bind address (default 0.0.0.0: reachable from your LAN at
-                             http://<this-mac's-IP>:PORT; 127.0.0.1 = this machine only). No login —
-                             bind wide only on a network you trust.
+  -p, --port PORT            Dashboard port (default 8080)
+  -m, --model MODEL          Global model, with an optional effort suffix (e.g. terra-high, gpt-5.6-sol-max).
+                             Default gpt-4o; per-agent DAI_MODEL_* keys still apply.
+  -t, --trading-mode MODE    simulation | real_world (default simulation)
+  -c, --cadence MINUTES      Minutes between cycles (default 180)
+  -H, --config-hash HASH     Pin the config hash. Without it the hash is derived from the resolved base model
+                             and the mode, so switching -m to a different model starts a separate history;
+                             an effort suffix, an alias or a DAI_MODEL_* change does not.
   -s, --policy-seed SEED     default | latest — where a NEW config's v0 policy comes from
-                             (default: the code defaults; latest: the shipped active
-                             policy graph in agents/*/policy-graph/latest). First seed only.
+  -b, --bind HOST            Dashboard bind address (default 0.0.0.0, reachable from your LAN; no login,
+                             so bind wide only on a network you trust; 127.0.0.1 = this machine only)
+  -v VERSION, -P PROFILE     Accepted for compatibility (each still takes a value); no code reads them
 ```
 
-### Supported Models
+The live run is `./start_d_ai_trader.sh -p 8081 -t real_world -c 120 -m gpt-5.6-terra -H <hash>`.
 
-| Model | Use Case | $/1M in/out | Notes |
+### Supported models
+
+| Model | Use | $/1M in/out | Notes |
 |---|---|---|---|
-| **gpt-5.6-sol** ⭐ | Feedback / evolution | $5 / $30 | Flagship; alias `sol`, bare `gpt-5.6` → Sol |
-| **gpt-5.6-terra** ⭐ | Decider, critic | $2 / $12 | Near-Sol reasoning at 40% of the price; alias `terra` (or `tera`) |
-| **gpt-5.6-luna** ⭐ | Summarizer, extraction | $0.20 / $1.20 | Vision-capable budget tier; alias `luna` |
-| **gpt-5.5** | Previous flagship | $5 / $30 | Same price as Sol, lower benchmarks |
-| **gpt-5.4 / -mini** | Previous default | — / $0.75 / $4.50 | Still supported |
-| **gpt-4o / 4o-mini** | Legacy | $2.50/$10 · $0.15/$0.60 | Non-reasoning fallbacks |
+| **gpt-5.6-sol** | Feedback | $5 / $30 | Flagship; alias `sol`, bare `gpt-5.6` → Sol |
+| **gpt-5.6-terra** | Decider, critic, evolution | $2 / $12 | Alias `terra` (or `tera`) |
+| **gpt-5.6-luna** | Summarizer, extraction | $0.20 / $1.20 | Vision-capable budget tier; alias `luna` |
+| gpt-5.5, gpt-5.4, gpt-4o / 4o-mini | Older | gpt-5.5 $5 / $30; gpt-5.4-mini $0.75 / $4.50 | Still accepted. A model with no price entry, or an entry of 0 (gpt-5.4, gpt-4o, gpt-4.1), is metered as $0, including the launcher default and the Decider fallback. |
 
-All GPT-5.x models accept a reasoning suffix on `-m` (e.g. `-m gpt-5.6-sol-max`,
-`-m terra-high`); the suffix globally overrides the per-agent reasoning envs.
-Rates live in `model_pricing.json` (re-read per request) and drive the
-dashboard's per-agent cost tracking.
-
-> o1/o3 models are **not** supported (no system messages or JSON mode).
+Rates live in `model_pricing.json` (re-read per request) and drive per-agent cost tracking in `api_usage`. o1/o3 models are not supported.
 
 ---
 
 ## Trading Strategy
 
-The strategy is not a claim about returns — it's the **initial policy** the RLMF loop starts from and then mutates. Everything below is the default `SOUL` + `STRATEGY DIRECTIVES`, and all of it is subject to being rewritten by the feedback agent as outcomes accumulate. Read it as starting conditions, not promises.
+The strategy is the policy the RLMF loop starts from and then mutates, so treat everything here as starting conditions, not promises. The Policy Graph tab always shows the active version.
 
-### Starting policy
+### Active gates (Decider v46, October 2026)
 
-- Short-swing horizon: 1–5 day holds, catalyst-driven entries
-- Capital rotation: exit on thesis-break, redeploy into fresher setups
-- Cash is a position: hold it when no setup clears the bar
-- Event gate (2026-09-14): scheduled binary events gap through any kill. Inside a macro window (FOMC decision within 2 sessions, CPI / jobs print next session) at most one half-size entry with the kill ≤2% away, event named in the reason; no entry in a name that reports earnings inside the 5-session hold window; sell or trim a holding that reports within 2 sessions. The Decider reads the dates from a code-built `EVENT CALENDAR` block (`event_calendar.py`), the same way it reads the `INDEX REGIME` line.
+The Decider's strategy directives hold twelve numbered gates plus the weekly reminder rules. They are not applied strictly in number order: the prompt has the Decider clear exits first (kill breach, harvest, earnings), then check each new buy in the user template's order (quarantine, regime allowance, extension, setup, priced kill, correlation, day chase) and stop at the first failure.
 
-### Default exit thresholds
+1. **REGIME GATE** — RISK-ON allows up to 3 new buys; MIXED at most 2 at half size; RISK-OFF defaults to cash.
+2. **EXTENSION CAP** — ≤5% above the 20-day MA is full size; 5–8% half size in RISK-ON only; above 8% is a chase.
+3. **PRICED KILL** — every buy names its kill price K and distance D. The gate text sizes D ≤3% full and ≤6% half, but since Prompt Lab v44 (2026-09-20) the system prompt passes any buy with no D or D above 1.3%, and the Decider is told to follow that stricter rule.
+4. **RE-ENTRY QUARANTINE** — no buy in a name on the QUARANTINE line or exited within 2 sessions; after a losing exit, also wait for a reclaim of the failed level or a genuinely new catalyst.
+5. **CORRELATION**, 6. **HARVEST** (take profit at +3%), 7. **DAY CHASE**, 8. **CANDIDATES** (rank 2–3 setups).
+9. **EVENT GATE** — inside an FOMC / CPI / jobs window, at most one half-size buy with D ≤2%.
+10. **EARNINGS CANDIDATE**, 11. **EARNINGS HOLDING** — no entry into a name reporting inside the hold window; sell or trim a holding that reports within 2 sessions.
+12. **KILL BREACH** — sell when price breaks K.
 
-| Condition | Action |
-|---|---|
-| ≥ +5% | Take profit |
-| −3% to −5% | Stop loss |
+### Sizing and execution
 
-These live in the strategy directives and drift over time as the loop learns; the dashboard always reflects the active version, not this table.
+- **Ticket rails.** The Decider sees MIN / TYPICAL / MAX buy amounts (`DAI_*_BUY_*`), and the validator rejects buys outside MIN to MAX. "Half size" is the Decider's call within those rails.
+- **Whole shares only.** A ticket smaller than one share rounds up to exactly one share when that share is within `DAI_MAX_BUY_AMOUNT` and within settled cash minus `MIN_CASH_BUFFER`. Otherwise it is skipped with the bound that blocked it.
+- **Cash account.** Buys use settled funds only (Schwab settled cash minus unsettled). Sells run first, then a 30-second wait, then buys.
+- **Orders** are market orders, placed only during regular hours. Outside them, decisions are recorded as "MARKET CLOSED".
 
-### Position sizing (default)
+### Account types
 
-- Per trade: $1,500–$4,000
-- Max concurrent positions: 5
-- Cash buffer maintained at all times
-
-### Account Types
-
-- **Cash (default, `IS_MARGIN_ACCOUNT=0`)**: Buys use settled funds only. T+1 settlement means 1–3 day hold periods. The 3-hour cadence keeps you compliant with good-faith rules.
-- **Margin (`IS_MARGIN_ACCOUNT=1`)**: Reuses same-day proceeds. Requires $25k+ to avoid PDT violations. Enables faster cadences (15–30 min).
+- **Cash (default, `IS_MARGIN_ACCOUNT=0`)** — settled funds only; T+1 settlement and the cadence keep it clear of good-faith violations.
+- **Margin (`IS_MARGIN_ACCOUNT=1`)** — reuses same-day proceeds; needs $25k+ to avoid PDT limits.
 
 ---
 
 ## Schedule
 
-| Time (PT) | Event |
-|---|---|
-| 6:30 AM | Market open — first cycle runs |
-| 6:30 AM → 1:00 PM | Intraday cycles every `--cadence` minutes |
-| 1:00 PM | Market close |
-| Thursday 5:30 PM | Feedback agent runs the weekly policy update (RLMF) |
-| After hours | Decisions recorded as "⛔ MARKET CLOSED", no execution |
+All times Eastern; the scheduler converts to the machine's local time.
 
-The scheduler auto-runs a catch-up cycle if started after 6:30 AM PT. The feedback/prompt-evolution step is weekly by design — it needs a batch of closed trades to compute a meaningful reward signal — but can also be triggered on demand from the Prompt Lab.
+| When | What |
+|---|---|
+| Startup | One summarizer + decider cycle. On a weekday after 9:30 the catch-up market-open sequence runs instead. Skipped before 9:30 if summarizers already ran today, or when `DAI_SKIP_STARTUP_CYCLE` is set. |
+| 9:30 weekdays | Market-open job: summarizers at the bell, then the Decider |
+| Every `-c` minutes until 17:25 weekdays | Counted from 9:30 (from startup on the first day): summarizers, then the Decider. Cycles outside 9:30–16:00 are recorded as MARKET CLOSED. |
+| Thursday 20:30 | Weekly feedback (the RLMF update), then `backfill_version_outcomes.py` |
+| Weekends | No market-open job. A cycle runs only if the cadence lands within 5 minutes of 15:00 (30- or 15-minute cadences do; 120 and 180 do not). |
+
+The weekly update needs a batch of closed trades to compute a meaningful reward; it can also be triggered from the Prompt Lab.
 
 ---
 
@@ -566,100 +434,86 @@ The scheduler auto-runs a catch-up cycle if started after 6:30 AM PT. The feedba
 
 | Source | Focus |
 |---|---|
-| Yahoo Finance (stock-market-news) | Stock news, earnings |
-| StockAnalysis (gainers) | Intraday movers, day-trade catalysts |
+| Yahoo Finance (stock market news) | Stock news, earnings |
+| StockAnalysis (gainers) | Intraday movers |
 | Fox Business | Market sentiment |
-| AP Business | Clean, factual |
+| Motley Fool (stock news) | Company news (replaced AP Business in September 2026) |
 | BBC Business | International markets |
 | CNBC | Breaking news, market movers |
 
-Sources rot. Sites add paywalls, Cloudflare challenges, or just start returning 404/500 — when one does, the summarizer wastes a cycle on an error page, so the list in `main.py` (`URLS`) gets pruned and replaced periodically. The retired roster (Benzinga, MarketBeat, Reuters, TheStreet, Investing.com, MarketWatch, Finviz, TipRanks) is documented inline there.
+Sources rot: paywalls, Cloudflare challenges, 404s. The list in `main.py` (`URLS`) is pruned and replaced periodically, and the retired roster is documented inline there.
 
 ---
 
 ## Dashboard
 
-**Tabs:**
+Seven tabs:
 
-- **Dashboard** — Portfolio value, cash balance, P&L, interactive charts. Schwab card shows settled vs raw cash, funds-available components, margin indicator. The configuration panel carries an **Event Risk** card (score, next FOMC, macro-window flag) from the Decider's latest snapshot.
-- **Trades** — All decisions with timestamps, tickers (linked to Yahoo Finance with chart popups), config-specific filtering.
-- **Summaries** — Latest news analysis from all 6 sources, timestamped PT.
-- **Feedback** — Win rate, average profit, trade outcomes, AI learning insights, System vs Market (TWR against SPY / DJIA / NASDAQ / VTI) and the **Event Risk Landscape**: the event-risk score per session (regime base + FOMC / CPI / jobs proximity + holdings' earnings) with regime bands, event verticals, fills marked on the risk they were taken at, and the calendar projected forward.
-- **Schwab** — Live account balance, holdings, buying power, real-time sync.
-- **Prompt Lab** — Interactive prompt evolution and testing.
-
-Manual trigger buttons: Run Summarizer, Run Decider, Run Feedback, Run All Agents.
+- **Dashboard** — portfolio value, cash, P&L and charts; the Schwab card (settled vs raw cash, funds-available components) and the Schwab API token card with re-auth; an **Event Risk** card; buttons to run the summarizers, the Decider, feedback or everything, update prices, and reset the portfolio.
+- **Schwab Live** — live balances, settled and unsettled cash, buying power, holdings, open orders and recent trades.
+- **Trades** — every buy and sell with its broker status (filled, not executed, market closed, rejected, failed) or "unconfirmed" when nothing is on record, the news behind it, citation chips into the policy graph, and sizing details.
+- **Summaries** — the latest news analysis per source.
+- **Feedback** — win rate, trade outcomes, System vs Market, Undo Last Prompt Change and Reset Prompts to v0, and the **Event Risk Landscape** (event-risk score per session with regime bands, event lines, fills at the risk they were taken, and the calendar projected forward).
+- **Prompt Lab** — refresh feedback, then generate, critique, diff and approve or reject prompt versions. The critic scorecard is API-only (`/api/prompt-evolution/critic-scorecard`).
+- **Policy Graph** — the guideline graph in three layers, version timeline, node detail, proposals, decision paths and factor quality.
 
 ---
 
 ## Live Trading
 
-### Step 1: Read-Only Schwab Test
+### Read-only first
 
 ```bash
-./start_schwab_live_view.sh -p 8080
-# Open http://localhost:8080/schwab
+./start_schwab_live_view.sh -p 8080      # dashboard only, orders blocked
+# open http://localhost:8080/schwab
 ```
 
-### Step 2: Single-Buy Pilot
+### Pilot, then full automation
 
 ```bash
-./start_live_trading.sh --port 8080 --model gpt-5.4 --cadence 180
-# Executes at most ONE buy per cycle
+# pilot: at most one buy per cycle; NO sells execute (including profit-taking and kill breaches)
+DAI_ONE_TRADE_MODE=1 ./start_d_ai_trader.sh -p 8080 -t real_world -c 120 -m gpt-5.6-terra -H <hash>
+
+# full automation (needs DAI_ONE_TRADE_MODE=0; DAILY_BUY_CAP / DAILY_TICKET_CAP bound each cycle)
+./start_d_ai_trader.sh -p 8080 -t real_world -c 120 -m gpt-5.6-terra -H <hash>
 ```
 
-### Step 3: Full Automation
+Pin `-H` so the live history stays on one config hash across model changes.
+
+### OAuth & tokens
 
 ```bash
-export DAI_MAX_TRADES=5
-export DAI_SCHWAB_READONLY=0
-./start_d_ai_trader.sh -p 8080 -t real_world -c 180
+./dai/bin/python schwab_manual_auth.py --save              # first login
+./dai/bin/python schwab_manual_auth.py --refresh --save    # refresh
+./dai/bin/python verify_schwab_token.py                    # check the token and account hashes
 ```
 
-### OAuth & Token Management
+Schwab refresh tokens expire after about 7 days. On `refresh_token_authentication_error`, use the dashboard's **Refresh Schwab Token** or re-run `schwab_manual_auth.py --save`, then restart. `schwab_tokens.json` is gitignored.
 
-```bash
-# Manual OAuth flow
-SCHWAB_CLIENT_ID=... SCHWAB_CLIENT_SECRET=... ./schwab_manual_auth.py --save
+### Operator tools
 
-# Refresh existing token
-SCHWAB_CLIENT_ID=... SCHWAB_CLIENT_SECRET=... ./schwab_manual_auth.py --refresh --save
-```
-
-> Schwab refresh tokens expire ~7 days. If you see `refresh_token_authentication_error`, delete `schwab_tokens.json`, re-run the OAuth flow via `./test_schwab_api.sh`, and restart.
-
-### Streaming (Live Quotes)
-
-```bash
-# Auto-detect symbols from current positions
-./run_schwab_streaming.py
-
-# Custom watchlist
-DAI_STREAM_SYMBOLS="SPY,AAPL,QQQ" ./run_schwab_streaming.py
-```
-
-The streaming helper maintains a shadow ledger so effective funds update immediately after fills. Launched automatically by `start_live_trading.sh`; add `--no-stream` to disable.
+| Tool | Use |
+|---|---|
+| `reconcile_execution_status.py` | Reconcile decisions against 60 days of Schwab orders. Dry-run by default; `--apply` writes a rollback copy to `backups/`. |
+| `check_order_status.py` | Did a given order fill? |
+| `effective_funds_probe.py` | Schwab funds vs the shadow ledger |
+| `python -m policy_graph.backfill --config-hash H [--verify-only]` | Rebuild or verify one config's policy-graph directories |
+| `python -m policy_graph.backfill --baseline [--verify-only]` | Regenerate or verify the committed baseline (no database) |
+| `run_schwab_streaming.py` | Level-one quotes and account activity (started by the live-view launcher) |
 
 ---
 
 ## Guardrails
 
-### Decision Validator
+- **Decision validator** — cannot sell what you don't hold, cannot buy what you already hold, buy size within the MIN to MAX rails, valid tickers.
+- **Profit-taking guardrail** — force-sells a holding up at least `DAI_FORCE_PROFIT_MIN_PCT` (on by default).
+- **Settled funds, buffer and whole shares** — see [Sizing and execution](#sizing-and-execution).
+- **Per-cycle caps (live)** — `DAILY_BUY_CAP` buys and `DAILY_TICKET_CAP` sells.
+- **Mode and read-only flags** — orders are placed only in `real_world`; `DAI_SCHWAB_READONLY=1` blocks them.
+- **Market hours** — no execution outside 9:30–16:00 ET on weekdays.
+- **Safety manager** (`safety_checks.py`: `MAX_POSITION_*`, `MAX_TOTAL_INVESTMENT*`) runs only through `trading_interface.execute_trade_decisions`, which the scheduled trader does not call. On the scheduled path the binding limits are the rails, settled funds, the buffer and the per-cycle caps.
 
-- Cannot sell stocks you don't own
-- Cannot buy stocks you already hold
-- Enforces position size limits
-- Validates tickers and amounts against current portfolio
-
-### Multi-Layer Safety (Live)
-
-1. `DAI_SCHWAB_READONLY` flag
-2. `TRADING_MODE` must be `live`
-3. Market hours enforcement
-4. Decision validator approval
-5. Safety manager checks
-
-### Emergency Stop
+### Emergency stop
 
 ```bash
 pkill -f d_ai_trader.py
@@ -670,27 +524,39 @@ pkill -f dashboard_server.py
 
 ## Parallel Runs
 
-Each configuration gets a unique `config_hash` — data is fully isolated:
+Each configuration has its own `config_hash`, and every per-run table (holdings, decisions, summaries, prompts, usage) is keyed by it, so runs are isolated; market reference data such as benchmark prices and the earnings calendar is shared. `-m` sets the global fallback model and the hash, but per-agent `DAI_MODEL_*` keys take precedence, so clear them to run a whole configuration on one model:
 
 ```bash
-# Terminal 1
-./start_d_ai_trader.sh -p 8080 -m gpt-5.4 -t simulation -c 180
-
-# Terminal 2 — different model, different port
-./start_d_ai_trader.sh -p 8081 -m gpt-4o -t simulation -c 60
+./start_d_ai_trader.sh -p 8080 -m gpt-5.6-terra -t simulation -c 120
+./start_d_ai_trader.sh -p 8081 -m gpt-5.6-luna  -t simulation -c 60
 ```
 
 ---
 
-## Cost Estimate
+## Cost
 
-### API Usage (default 3-hour cadence, GPT-4o pricing)
+Measured from `api_usage` on the live config over the 30 days to 2026-10-04 (calls from 2026-09-04 to 2026-10-02): about **$12**, or roughly $0.52 per active day.
 
-- 6 sources × 3 cycles/day ≈ 18 vision calls
-- ~90K tokens/day
-- **~$1/day** (~$30/month)
+| Agent | Model | Calls | Cost |
+|---|---|---|---|
+| Decider | Terra | 134 | $7.09 |
+| Feedback | Sol | 6 | $1.95 |
+| Summarizer | Luna | 524 | $1.77 |
+| Prompt evolution | Terra | 6 | $0.94 |
+| Critic | Terra | 6 | $0.19 |
+| Company extraction | Luna | 90 | $0.12 |
 
-GPT-5.4 costs more per token but uses fewer cycles. Actual spend depends on cadence and model choice.
+Decider calls include the citation-repair pass. Spend scales with cadence and model choice.
+
+---
+
+## Tests
+
+```bash
+./dai/bin/python -m pytest -q
+```
+
+The suite (about 1,000 tests) uses stubs and in-memory SQLite, never the live database. `pytest.ini` limits collection to `tests/`.
 
 ---
 
@@ -698,60 +564,77 @@ GPT-5.4 costs more per token but uses fewer cycles. Actual spend depends on cade
 
 ```
 d-ai-trader/
-├── d_ai_trader.py              # Orchestrator + scheduler
-├── main.py                     # News scraping
-├── decider_agent.py            # Trading decisions
-├── decision_validator.py       # Guardrails
-├── feedback_agent.py           # Performance analysis
-├── dashboard_server.py         # Web UI + API
-├── config.py                   # Configuration
-├── schwab_client.py            # Schwab API
-├── schwab_streaming.py         # Live quotes
-├── schwab_ledger.py            # Shadow ledger
-├── trading_interface.py        # Unified trading layer
-├── safety_checks.py            # Safety manager
-├── prompt_manager.py           # Prompt versioning
-├── init_database.py            # Schema setup
-├── shared/
-│   ├── market_clock.py         # Market hours utility
-│   ├── run_context.py          # Run context propagation
-│   └── ticker_normalize.py     # Ticker normalization
-├── prompts/                    # Prompt templates
-├── templates/                  # Flask HTML templates
-├── static/                     # Frontend assets
-├── tests/                      # Test suite
-├── screenshots/                # Captured news screenshots
-├── start_d_ai_trader.sh        # Main launcher
-├── start_live_trading.sh       # Live trading launcher
-├── start_schwab_live_view.sh   # Read-only Schwab viewer
-├── .env                        # Local config (not committed)
-└── env_template.txt            # .env template
+├── d_ai_trader.py · main.py · decider_agent.py · feedback_agent.py · dashboard_server.py
+├── config.py · prompt_manager.py · init_database.py · initialize_prompts.py
+├── contrarian_screener.py · event_calendar.py · order_sizing.py · decision_validator.py
+├── decider_memory.py · memory_compress.py · feedback_diagnostics.py · benchmark_tracker.py
+├── prompt_outcome_attribution.py · backfill_version_outcomes.py · update_prices.py
+├── trading_interface.py · schwab_client.py · schwab_ledger.py · schwab_streaming.py · safety_checks.py
+├── schwab_manual_auth.py · verify_schwab_token.py · check_order_status.py · effective_funds_probe.py
+├── reconcile_execution_status.py · fix_constraints_only.py · run_schwab_streaming.py
+├── start_d_ai_trader.sh · start_schwab_live_view.sh
+├── policy_graph/        # guideline graph package (no config import)
+├── agents/              # per-agent seeds + policy-graph baseline/ and latest/
+├── shared/              # market clock, run context, tickers, news context
+├── templates/ · static/ # dashboard
+├── tests/               # pytest suite + policy-graph fixtures
+├── docs/                # POLICY_GRAPH.md, POLICY_GRAPH_AND_ROUTING.md/.docx
+├── archive/             # unused scripts, launchers and docs (see archive/README.md)
+├── backups/             # rollback copies written by reconcile_execution_status.py (gitignored)
+├── SCHWAB_SETUP.md · env_template.txt · requirements.txt · model_pricing.json · pytest.ini
+└── .env                 # your keys (gitignored, never commit)
 ```
-
----
 
 ## Documentation
 
 | File | Contents |
 |---|---|
-| `GO_LIVE_CHECKLIST.md` | Pre-flight safety checklist |
-| `SCHWAB_API_SETUP.md` | Schwab API configuration |
-| `SCHWAB_READONLY_TEST.md` | Safe broker testing |
-| `FEEDBACK_SYSTEM.md` | AI learning system |
-| `AUTOMATION_README.md` | Scheduling & automation |
-| `SETUP_DEPENDENCIES.md` | Dependency setup |
+| [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md) | The policy graph in full: layout, same-bytes contract, layers, proposals, routing, citations, paths, world factors |
+| [docs/POLICY_GRAPH_AND_ROUTING.md](docs/POLICY_GRAPH_AND_ROUTING.md) (+ `.docx`) | The short explainer, written for reuse in RUSH |
+| [SCHWAB_SETUP.md](SCHWAB_SETUP.md) | Schwab developer app and API setup |
+| [archive/README.md](archive/README.md) | What was archived on 2026-10-04 and why |
+
+---
+
+## Next steps: RUSH, Jev and model routing
+
+### Where things stand
+
+- **Guideline routing should stay deterministic.** The served policy is about 4.7k tokens and fits whole, so a model choosing which guidelines to show would add cost, latency and non-determinism. The lever is pruning: 21 leaf guidelines were served at least 20 times and cited zero times over the last 30 days.
+- **Model routing is a different question, and it is open.** Every agent call uses a fixed model and effort per agent. The Decider pays for a full Terra call every cycle, but only 44 of 90 cycles in the last 30 days stored a buy or sell.
+- **Realized P&L is too slow to judge versions alone.** The last 30 days had 9 Decider versions in service and 29 closed trades, about three trades per version.
+
+### What Jev is, and the moat question
+
+[Jev](https://openrouter.ai/blog/insights/what-is-jev/) (TypeSafe AI, September 2026) is a non-generative *decision* model. It takes text plus a typed question and returns one answer from a fixed set with calibrated probabilities: a Choice, a 0–10 Score, or a yes/no probability. It costs $0.042 per million input tokens, output is free, and it reads text only. The [Jev Router](https://github.com/prismhq/jev-router) (MIT, 2026-09-25) wraps it as a LiteLLM proxy that picks the model and reasoning effort per request from a candidate list with capability flags and prices.
+
+The router is thin and open: candidates, an `eligible()` capability filter, a decider, and a `RulesDecider` fallback. Copying the pattern is easy, which is the "no moat" point. The closed part is the Jev model itself: hosted, no published weights or paper, and it sees whatever we send. So the plan is a router we own with a swappable decision backend, where Jev is one backend judged on our own logs like any other. One default must change for live money: the router's fallback is the cheapest eligible model, which here would silently drop the Decider from Terra to Luna. Our fallback stays today's fixed mapping.
+
+### Steps, in priority order
+
+1. **Store each Decider cycle's exact input.** A local `decider_inputs` table keyed by `run_id`, with the assembled policy and the market context stored separately. Every later step replays these. *Measure:* one input row per `policy_graph_runs` row, and a test that swaps the policy without touching the context.
+2. **One routing layer in front of every LLM call, defaulting to today's mapping.** A config-free `model_routing/` package: `RouteRequest(agent, call_kind, features)` in, `RouteDecision(model, effort, backend, probabilities, latency_ms, fallback)` out. Backends: static (today), rules, Jev, a local model on RUSH's GPU host, and a cheap model with a JSON schema. Log every decision next to `api_usage` and show it in the decision paths. First call to route: citation repair, which made 44 extra Terra calls in 30 days just to pick ids from a list. *Measure:* static parity with `get_agent_model`, and repair id overlap of at least 90% on the cheap model.
+3. **Cite on rejections too, then prune on evidence.** The Decider rejected 228 setups in 30 days and none carried citations, so the gates' main work is invisible to the hit log. Require `cited` on considered setups, then remove a guideline only through an operator proposal after a replay shows decisions don't change without it. No routing agent unless the served policy passes about 10k tokens. *Measure:* reject citations per gate, and the cited-to-served ratio.
+4. **Check every buy against the plain gates, shadow first.** Most gates already reduce to one or a few yes/no questions; REGIME GATE and PRICED KILL branch three ways, and CANDIDATES is a ranking step that would need splitting first. Use code checks where the data exists (extension, K/D, quarantine, earnings dates, slot counts) and typed yes/no questions only where reading text is needed ("gapped or parabolic", "genuinely new catalyst"). Annotate and never block at first; sells never wait. *Measure:* violation rate per gate, and P&L of flagged vs unflagged buys over at least 15 trades before any gate blocks.
+5. **An escalation cascade for the Decider, copied from RUSH.** Tier 1 is three cheap votes on the same prompt. When they all hold and no code trigger fires (a holding near K or HARVEST, a macro window, an earnings flag), tier 1 settles the cycle; everything else goes to Terra or Sol at higher effort. Audit a random 15% of settled cycles on tier 2, following RUSH's "audit the agreements". Run about three weeks in shadow. *Measure:* cycles tier 1 would have held where tier 2 traded, with zero misses tolerated on sells.
+6. **One probability per critic clause.** The critic rejected 11 of 15 proposals and all 15 were applied, so a single verdict cannot show which clause the human disagrees with. Ask clauses (a) to (g) as typed yes/no questions, compute the verdict in code, record the human's call per clause, and call the Terra critic only when a clause is uncertain. *Measure:* per-clause agreement and Brier score; overrides should cluster in one or two clauses, which then get rewritten.
+7. **Backend bake-off.** Replay the logged questions from steps 4–6 through every backend, sending a short summary rather than the raw prompt, which carries holdings and cash. Hard time limits: 2 seconds for routing, 10 for gate checks, with a logged fallback. Log the hosted model's version and treat a change like a prompt change. *Measure:* calibration, p95 latency, error rate. Adopt Jev per question type only where it beats the local and schema backends.
+8. **From RUSH: a replay gate for policy versions.** `replay_gate.py --candidate vN --cycles 40` over the stored inputs. Re-running the current version on the same cycles gives the noise floor (RUSH's seed-sensitivity check); a candidate counts only above it. Report gate violations, counterfactual forward returns of buys it adds or drops, and deltas split by regime. Account P&L must be flow-adjusted first. *Measure:* whether the replay verdict predicts the realized delta as reviews mature.
+9. **To RUSH: one shared policy-graph package.** The two formats already agree on `<id>.md`, front matter and `edges.json`. From the trader: the same-bytes contract, plain-gate lint, the served/cited hit log, decision paths and 3-file proposals. From RUSH: the escalation trigger and the local-model registry. *Measure:* both test suites pass against the shared package, and RUSH's run summary shows served vs cited per node.
 
 ---
 
 ## Troubleshooting
 
-**ChromeDriver mismatch** — System auto-detects Chrome version and downloads the matching driver. Restart if you see version errors after a Chrome update.
+**Chrome driver mismatch** — the scraper launches Chrome through undetected-chromedriver with a driver matched to the installed Chrome; restart after a Chrome update.
 
-**API key errors** — Check `.env` for stray characters (trailing `$`, extra quotes). Run with `PRINT_OPENAI_KEY=1` to see the masked key at startup.
+**API key errors** — check `.env` for stray characters. `PRINT_OPENAI_KEY=1` prints a masked key at startup.
 
-**"MARKET CLOSED" decisions** — Normal outside 9:30 AM–4:00 PM ET (Mon–Fri). Decisions are recorded but not executed.
+**"MARKET CLOSED" decisions** — normal outside 9:30–16:00 ET on weekdays. Decisions are recorded but not executed.
 
-**Schwab token expired** — Delete `schwab_tokens.json`, re-run OAuth via `./test_schwab_api.sh`, restart.
+**Schwab token expired** — use **Refresh Schwab Token** on the dashboard or `schwab_manual_auth.py --save`, then restart.
+
+**A buy skipped for "no whole share"** — the allocation was below one share and one share exceeded the MAX rail or the settled funds behind the buffer. The skip reason names which.
 
 ---
 
@@ -763,36 +646,36 @@ Day trading is risky. You can lose money. This is experimental software for educ
 
 ## Changelog
 
+### October 2026
+- Repository cleanup: 63 unused scripts, launchers, docs and backups moved to `archive/` after two independent reviews; the 9 dead prompt-profile tests went with them. `schwab-py` added to `requirements.txt`; `pytest.ini` added.
+- README rewritten against the current code, with the RUSH / Jev next steps.
+
+### September 2026
+- **Policy graph.** Guidelines as a versioned knowledge graph with the same-bytes contract; proposals of at most three files with per-guideline approval; guideline citations on every decision; decision paths; three layers (policy, scaffold, context); world factors; plain-gate style and lint; plain-language pass over all twelve gates.
+- **Event calendar.** FOMC, CPI, jobs and earnings dates as an EVENT CALENDAR block, the event-risk score, the Event Risk Landscape chart, and the EVENT GATE / EARNINGS gates.
+- **Broker as source of truth.** Execution status reconciled against 60 days of Schwab orders; Trades tab shows FILLED / NOT EXECUTED / UNCONFIRMED.
+- Weekly feedback path no longer overwrites approved prompts; critic recalibrated to the trust-region doctrine.
+- Memory compression fix (diary-only archiving at 9,000 characters).
+- Whole-share sizing with a one-share round-up; the Decider's cash buffer now follows `MIN_CASH_BUFFER`.
+- News: AP Business replaced by Motley Fool.
+
+### August 2026
+- GPT-5.6 Sol / Terra / Luna tiers with per-agent models and reasoning levels.
+
 ### June 2026
-- **Reward-integrity fixes (the RLMF loop was learning from bad labels).** `break_even` was any trade within ±2%, so real −$6 to −$137 losses on small positions were labeled break-even and never reached the feedback agent as losses — categorization is now a dollar-delta test (`|net P&L| ≤ $3`). Backfilled 89/291 historical rows; the outcome distribution went from mostly-break_even to a truthful 128 loss / 121 win split.
-- Fixed per-trade gain/loss % rendering ~100× too small (a stored fraction was displayed as a percent) across the Schwab Live, Feedback, and Prompt Lab tabs.
-- Prompt Lab: one-click "refresh feedback + regenerate all agents" with per-agent diff tabs and approve/reject; background job + polling so progress survives navigation; instant Feedback↔Prompt Lab version sync.
-- Added GPT-5.5 support and an `-m <model>-<effort>` reasoning suffix (e.g. `gpt-5.5-high`).
-- Agent SOUL/MEMORY framework: committed `.default.md` seeds, gitignored live mirrors, Obsidian-ready memory format.
-- macOS resilience: re-sign chromedriver after `undetected_chromedriver` patches it (Gatekeeper SIGKILL), Postgres.app permission-dialog workaround.
+- **Reward-integrity fixes.** `break_even` was any trade within ±2%, so real losses on small positions were labeled break-even; categorization is now a dollar-delta test (`|net P&L| ≤ $3`), and 89 of 291 historical rows were backfilled.
+- Fixed per-trade gain/loss % rendering about 100× too small.
+
+### May 2026
+- Prompt Lab: one-click refresh + regenerate all agents with per-agent diffs and approve/reject.
+- GPT-5.5 support and the `-m <model>-<effort>` suffix.
+- Agent SOUL / MEMORY framework with committed `.default.md` seeds.
 
 ### March 2026
-- Upgraded default model to GPT-5.4
-- Frontend overhaul — premium fintech dark theme
-- Added `init_database.py` for proper schema initialization
-- Prompt Lab tab — interactive prompt evolution dashboard
-- Extracted `MarketClock` utility + test suite
-- Codebase cleanup (−450 lines)
-- Centralized run context propagation
-- Shared ticker normalization
+- Frontend overhaul; `init_database.py`; the Prompt Lab tab; `MarketClock`; shared run context and ticker normalization.
 
 ### December 2025
-- Prompt profile flag (`-P/--prompt-profile`)
-- Trades tab: Yahoo Finance links + chart popups
-- Schwab card: settled funds / raw cash / margin differentiation
-- `DAI_DECIDER_RAW_PREVIEW` for raw output debugging
-- Scheduler catch-up if started after market open
+- Trades tab Yahoo Finance links and chart popups; settled vs raw cash on the Schwab card; scheduler catch-up after market open.
 
-### October 2025
-- GPT-4o Vision for screenshot analysis
-- GPT-5 reasoning model support
-- Configurable cadence (15/30/60/180 min)
-- Financial guardrails (AI hallucination prevention)
-- Config-isolated parallel runs
-- 6 reliable news sources
-- Schwab read-only testing mode
+### August–October 2025
+- GPT-4o vision for screenshots; GPT-5 reasoning models; configurable cadence; financial guardrails; config-isolated parallel runs; Schwab read-only mode.

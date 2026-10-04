@@ -19,7 +19,8 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]  # archived under archive/policy_ops/
+sys.path.insert(0, str(REPO_ROOT))
 ACTOR = "claude_code (operator: Attila Dobi, 2026-09-16)"
 
 FA_RULE_STYLE = (

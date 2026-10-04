@@ -14,6 +14,9 @@ undetected-chromedriver>=3.5.5
 chromedriver-autoinstaller>=0.6.4
 beautifulsoup4>=4.12.3
 
+# Broker (schwab_client.py is imported by the dashboard at startup)
+schwab-py>=1.5.1
+
 # Scheduling / Time
 schedule>=1.2.1
 pytz>=2024.1

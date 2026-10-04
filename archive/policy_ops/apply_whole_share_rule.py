@@ -12,7 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]  # archived under archive/policy_ops/
+sys.path.insert(0, str(REPO_ROOT))
 ACTOR = "claude_code"
 RAILS_LINE = "- Rails (per-buy, USD): MIN={min_buy}, TYPICAL={typical_buy_low}-{typical_buy_high}, MAX={max_buy}"
 WHOLE_SHARE_LINE = ("- Whole shares only: amount_usd must cover at least one share at the quoted price. If half size "

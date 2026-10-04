@@ -276,7 +276,7 @@ earnings gap through a "20d break" kill). The fix follows the INDEX REGIME patte
   Decider never acknowledged; the Feedback soul (v10) audits event windows after payoff, and the
   Summarizer (v20) names Fed/FOMC, CPI/jobs, earnings and geopolitical shocks with dates.
 
-`apply_event_risk_policy.py` is the one-off that applied the three prompt-side changes (dry-run
+`archive/policy_ops/apply_event_risk_policy.py` is the one-off that applied the three prompt-side changes (dry-run
 first; idempotent).
 
 ## Phase 4 — the world layer: events and market factors as nodes (2026-09-16)
@@ -316,7 +316,7 @@ outcome of every decision made under that event.
 
 `docs/POLICY_GRAPH_AND_ROUTING.docx` (and its Markdown source `docs/POLICY_GRAPH_AND_ROUTING.md`) is the
 five-page explainer of the graph, the layers, how learnings enter, how the Decider reads it and what to
-port to RUSH. The plain-gate pass of 2026-09-16 (`apply_plain_gates.py`, proposals #8–#15, maintenance
+port to RUSH. The plain-gate pass of 2026-09-16 (`archive/policy_ops/apply_plain_gates.py`, proposals #8–#15, maintenance
 v41) rewrote gates 1–8 in the plain shape, gave gates 7 and 8 labels (DAY CHASE, CANDIDATES) and moved the
 binding exit out of PRICED KILL into KILL BREACH (gate 12); the critic rejected every step as cosmetic,
 which is what they were, and caught three wording drifts that v41 restored.

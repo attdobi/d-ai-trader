@@ -731,8 +731,8 @@ def update_all_current_prices():
         # If API failures occurred, provide manual update option
         if api_failures:
             print(f"\n🚨 API failures detected for: {', '.join(api_failures)}")
-            print("💡 To manually update prices, run: python manual_price_update.py --interactive")
-            print("💡 Or use: python manual_price_update.py --show (to view current holdings)")
+            print("💡 Prices refresh on the next cycle; to force one now, use the dashboard's price update "
+                  "(POST /api/trigger/price-update).")
 
 def fetch_holdings():
     with engine.begin() as conn:
