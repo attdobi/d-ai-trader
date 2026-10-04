@@ -321,7 +321,15 @@ MAX_TOTAL_INVESTMENT_FRACTION=0
 # Policy graph and memory
 DAI_GRAPH_ASSEMBLY=1                # rebuild the Decider's policy from the graph each cycle
 DAI_POLICY_SEED=default             # default | latest, for a new config's v0
-DAI_MEMORY_LT_LIMIT=14              # long-term memory rows per cycle
+DAI_MEMORY_LT_LIMIT=14              # long-term memory rows per cycle (also the router's upper bound)
+
+# Policy router (docs/POLICY_ROUTER.md): p(needed) + include/exclude per diary entry and memory row
+DAI_POLICY_ROUTER=shadow            # off | shadow (log only, today's prompt) | active (certified model only)
+DAI_ROUTER_BASE_URL=http://127.0.0.1:1234/v1   # OpenAI-compatible endpoint (LM Studio)
+DAI_ROUTER_EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
+DAI_ROUTER_LLM_MODEL=               # optional chat model for the uncertain band (empty = no LLM tier)
+DAI_ROUTER_RECALL_TARGET=0.98       # active needs an artifact certified at >= this held-out recall
+DAI_ROUTER_ROUTABLE=entry,ltm       # add "lesson" to let the router drop lessons too (needs its own certification)
 
 # Contrarian watchlist
 DAI_CONTRARIAN_ENABLED=1            # also: _UNIVERSE, _LIMIT, _MAX_EXT, _HALF_EXT, _CACHE_MIN
@@ -591,6 +599,7 @@ d-ai-trader/
 |---|---|
 | [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md) | The policy graph in full: layout, same-bytes contract, layers, proposals, routing, citations, paths, world factors |
 | [docs/POLICY_GRAPH_AND_ROUTING.md](docs/POLICY_GRAPH_AND_ROUTING.md) (+ `.docx`) | The short explainer, written for reuse in RUSH |
+| [docs/POLICY_ROUTER.md](docs/POLICY_ROUTER.md) | The Jev-like policy router: p(needed) per diary entry / memory row, the label, shadow vs active, measured recall |
 | [SCHWAB_SETUP.md](SCHWAB_SETUP.md) | Schwab developer app and API setup |
 | [archive/README.md](archive/README.md) | What was archived on 2026-10-04 and why |
 

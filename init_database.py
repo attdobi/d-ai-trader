@@ -818,6 +818,14 @@ def initialize_database() -> None:
         # Per-run trim statistics of the graph query (served / dropped guidelines, full vs served chars).
         from policy_graph.citations import DDL_RUNS_POSTGRES as _POLICY_RUNS_DDL
         ensure_table(conn, stats, "policy_graph_runs", _POLICY_RUNS_DDL)
+        # Policy router (policy_router/): one row per routable node per Decider cycle (p, include/exclude,
+        # whether the prompt carried it) and one summary row per cycle (mode, chars, expected recall).
+        from policy_router.log import DDL_DECISIONS_POSTGRES as _ROUTER_DECISIONS_DDL, \
+            DDL_RUNS_POSTGRES as _ROUTER_RUNS_DDL, INDEXES as _ROUTER_INDEXES
+        ensure_table(conn, stats, "policy_router_decisions", _ROUTER_DECISIONS_DDL)
+        ensure_table(conn, stats, "policy_router_runs", _ROUTER_RUNS_DDL)
+        for _ddl in _ROUTER_INDEXES:
+            conn.execute(text(_ddl))
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(

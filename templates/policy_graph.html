@@ -166,6 +166,20 @@
       </div>
     </div>
   </section>
+
+  <!-- Card 5: policy router (a typed include / exclude decision per diary entry and memory row) -->
+  <section class="pe-card" id="pgRouterCard" hidden>
+    <div class="pg-change-head">
+      <div>
+        <h2>Router</h2>
+        <p class="pg-muted">Which diary entries and memory rows the Decider needs each cycle. A small local model gives each one a probability of being needed; gates, rules, the soul and the code-owned text are always shown.</p>
+      </div>
+    </div>
+    <p id="pgRouterNote" class="pg-muted"></p>
+    <div id="pgRouterStats" class="pg-router-stats"></div>
+    <h3 class="pg-paths-h">Last cycle <span class="pg-muted" id="pgRouterLastSub"></span></h3>
+    <div id="pgRouterBars" class="pg-router-bars"></div>
+  </section>
 </div>
 
 <style>
@@ -513,6 +527,28 @@
 .pg-paths-quality .pg-link-chip { font-family: var(--font-mono); font-size: 10.5px; }
 .pg-paths-quality .pg-co { display: flex; flex-wrap: wrap; gap: 3px; }
 @media (max-width: 1040px) { .pg-paths-grid { grid-template-columns: 1fr; } }
+
+/* ----- router card ----- */
+.pg-router-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.pg-router-stat { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: var(--surface); padding: 10px 12px; }
+.pg-router-stat .k { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; }
+.pg-router-stat .v { font-size: 17px; font-weight: 700; margin-top: 3px; }
+.pg-router-stat .s { color: var(--muted); font-size: 11.5px; margin-top: 3px; line-height: 1.4; }
+.pg-router-stat .v.ok { color: var(--success); }
+.pg-router-stat .v.warn { color: var(--warning); }
+.pg-router-bars { display: flex; flex-direction: column; gap: 3px; }
+.pg-router-row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(80px, 1fr) 44px 74px 70px; gap: 8px; align-items: center; font-size: 11.5px; }
+.pg-router-row .id { font-family: var(--font-mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--text); background: none; border: none; text-align: left; padding: 0; }
+.pg-router-row .id:hover { color: var(--accent); }
+.pg-router-row .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.06); overflow: hidden; }
+.pg-router-row .bar > span { display: block; height: 100%; background: rgba(66,201,255,.65); }
+.pg-router-row.excluded .bar > span { background: rgba(127,140,166,.55); }
+.pg-router-row .p { font-family: var(--font-mono); color: var(--muted); text-align: right; }
+.pg-router-row .choice { font-size: 10.5px; font-weight: 700; text-align: center; border-radius: 999px; padding: 1px 6px; }
+.pg-router-row .choice.include { color: var(--success); background: rgba(41,214,151,.14); }
+.pg-router-row .choice.exclude { color: var(--muted); background: rgba(127,140,166,.14); }
+.pg-router-row .served { font-size: 10.5px; color: var(--muted); }
+.pg-router-row .served.yes { color: var(--text); }
 
 @media (max-width: 1040px) {
   .pg-layout { grid-template-columns: 1fr; }

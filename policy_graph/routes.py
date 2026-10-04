@@ -246,6 +246,18 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             return jsonify(service.paths_payload(engine, config_hash, agent, days=days, **common))
         return _run(go)
 
+    @app.route("/api/policy-graph/router", methods=["GET"])
+    def policy_graph_router():
+        config_hash = get_config_hash()
+
+        def go():
+            agent = _agent_arg(default="DeciderAgent")
+            raw = request.args.get("n")
+            last_n = int(raw) if raw and _VERSION_RE.match(str(raw)) else 30
+            return jsonify(service.router_payload(engine, config_hash, agent, repo_root=repo_root,
+                                                  last_n=max(1, min(last_n, 500))))
+        return _run(go)
+
     # ------------------------------------------------------------------ proposals (Phase 2)
     def _json_body() -> dict:
         body = request.get_json(silent=True) if hasattr(request, "get_json") else None

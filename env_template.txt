@@ -33,6 +33,14 @@ DAI_MODEL_TEMPERATURE=0.2
 # DAI_DECIDER_FALLBACK_MODEL=gpt-4.1
 # DAI_DECIDER_RAW_PREVIEW=4000
 
+# --- Policy router (docs/POLICY_ROUTER.md; defaults shown) ---
+# DAI_POLICY_ROUTER=shadow
+# DAI_ROUTER_BASE_URL=http://127.0.0.1:1234/v1
+# DAI_ROUTER_EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
+# DAI_ROUTER_LLM_MODEL=
+# DAI_ROUTER_RECALL_TARGET=0.98
+# DAI_ROUTER_ROUTABLE=entry,ltm
+
 # --- Optional debug ---
 # PRINT_OPENAI_KEY=0
 
