@@ -17,6 +17,7 @@ from config import (
     DEBUG_TRADING,
     get_current_config_hash,
 )
+from order_sizing import resolve_cap  # the max-of cap rule, shared with the scheduled buy path
 
 logger = logging.getLogger(__name__)
 
@@ -62,29 +63,21 @@ class TradingSafetyManager:
         """
         Determine the active maximum position value, combining absolute and fractional limits.
         """
-        limits = []
-        if self.max_position_value > 0:
-            limits.append(self.max_position_value)
-
-        account_value = self._account_value(portfolio_value, current_cash)
-        if self.max_position_fraction > 0 and account_value > 0:
-            limits.append(account_value * self.max_position_fraction)
-
-        return max(limits) if limits else float("inf")
+        return resolve_cap(
+            self.max_position_value,
+            self.max_position_fraction,
+            self._account_value(portfolio_value, current_cash),
+        )
 
     def _resolve_total_investment_limit(self, portfolio_value: float, current_cash: float) -> float:
         """
         Determine the active maximum total investment, combining absolute and fractional limits.
         """
-        limits = []
-        if self.max_total_investment > 0:
-            limits.append(self.max_total_investment)
-
-        account_value = self._account_value(portfolio_value, current_cash)
-        if self.max_total_investment_fraction > 0 and account_value > 0:
-            limits.append(account_value * self.max_total_investment_fraction)
-
-        return max(limits) if limits else float("inf")
+        return resolve_cap(
+            self.max_total_investment,
+            self.max_total_investment_fraction,
+            self._account_value(portfolio_value, current_cash),
+        )
 
     def validate_trade_decision(self, 
                               decision: Dict, 

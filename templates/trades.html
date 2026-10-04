@@ -153,7 +153,7 @@
             <span class="sizing-note" title="How the order was sized: the model's allocation vs the settled cash the guardrails allowed">
               Sized ${{ '%.2f'|format(sz.get('executed_usd') or 0) }} of ${{ '%.2f'|format(sz.get('available_usd')) }} available
               ({{ '%.0f'|format(100 * (sz.get('executed_usd') or 0) / sz.get('available_usd')) }}%)
-              · {{ sz.get('bound_by') }}{% if sz.get('requested_usd') and sz.get('requested_usd') != sz.get('executed_usd') %} · model asked ${{ '%.0f'|format(sz.get('requested_usd')) }}{% endif %}
+              · {{ sz.get('bound_by') }}{% if sz.get('cap_usd') %} ${{ '{:,.0f}'.format(sz.get('cap_usd')) }}{% endif %}{% if sz.get('requested_usd') and sz.get('requested_usd') != sz.get('executed_usd') %} · model asked ${{ '%.0f'|format(sz.get('requested_usd')) }}{% endif %}
             </span>
           {% endif %}
         </td>

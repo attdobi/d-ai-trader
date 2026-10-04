@@ -39,6 +39,10 @@ from config import (
     MIN_ENTRY_SPACING_MIN,
     REENTRY_COOLDOWN_MIN,
     MIN_CASH_BUFFER,
+    MAX_POSITION_VALUE,
+    MAX_POSITION_FRACTION,
+    MAX_TOTAL_INVESTMENT,
+    MAX_TOTAL_INVESTMENT_FRACTION,
 )
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
@@ -53,7 +57,8 @@ EASTERN_TIMEZONE = pytz.timezone('US/Eastern')
 # Trading configuration
 MAX_FUNDS = 10000
 MIN_BUFFER = float(MIN_CASH_BUFFER)  # the .env MIN_CASH_BUFFER, the same buffer the Schwab client enforces at order time
-from order_sizing import whole_share_allocation  # whole-share round-up for sub-share tickets
+# whole-share round-up for sub-share tickets, MAX_POSITION_* / MAX_TOTAL_INVESTMENT* caps, per-cycle ticket split
+from order_sizing import CapBook, split_cycle_tickets, whole_share_allocation
 MIN_BUY_AMOUNT = float(_os.getenv("DAI_MIN_BUY_AMOUNT", "1000"))
 TYPICAL_BUY_LOW = float(_os.getenv("DAI_TYPICAL_BUY_LOW", "2000"))
 TYPICAL_BUY_HIGH = float(_os.getenv("DAI_TYPICAL_BUY_HIGH", "3500"))
@@ -1528,7 +1533,6 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
     trading_mode = get_trading_mode()
     config_hash = get_current_config_hash()
     one_trade_mode = _os.getenv("DAI_ONE_TRADE_MODE", "0") == "1"
-    allowed_buy_idx = None
 
     live_execution_enabled = trading_mode == "real_world" and not skip_live_execution
 
@@ -1565,13 +1569,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             return float(cash_row_local.current_value) if cash_row_local else MAX_FUNDS
 
     if one_trade_mode:
-        print("🎯 One-trade pilot mode active - enforcing single live buy limit")
-        for idx, decision in enumerate(decisions):
-            if (decision.get('action') or '').lower() == 'buy':
-                allowed_buy_idx = idx
-                break
-        if allowed_buy_idx is None:
-            print("⚠️  One-trade mode: no BUY decision provided; all live trades will be skipped")
+        print("🎯 One-trade pilot mode active - at most 1 buy this cycle; sells execute normally")
 
     print(f"🔄 Updating holdings in {trading_mode.upper()} mode (config: {config_hash})")
 
@@ -1613,57 +1611,29 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
     buy_decisions = list(all_buy_decisions)
     hold_decisions = [norm for idx, norm in decisions_with_idx if norm["action"] not in ("buy", "sell")]
 
-    if one_trade_mode:
-        if allowed_buy_idx is not None:
-            buy_decisions = [
-                norm for idx, norm in decisions_with_idx
-                if idx == allowed_buy_idx and norm["action"] == "buy"
-            ]
-        else:
-            buy_decisions = []
-
-        skipped_extra_buys = 0
-        for idx, norm in decisions_with_idx:
-            if norm["action"] == "buy" and (allowed_buy_idx is None or idx != allowed_buy_idx):
-                skipped_extra_buys += 1
-                skipped_decisions.append({
-                    **norm,
-                    "reason": "One-trade pilot mode - additional buy skipped",
-                })
-        if skipped_extra_buys:
-            print(f"⏭️  One-trade mode skipped {skipped_extra_buys} additional buy decision(s)")
-
-        if sell_decisions:
-            print(f"⏭️  One-trade mode skipping {len(sell_decisions)} sell decision(s)")
-            for norm in sell_decisions:
-                skipped_decisions.append({
-                    **norm,
-                    "reason": "One-trade pilot mode - sell execution disabled",
-                })
-            sell_decisions = []
-    elif live_execution_enabled:
-        if len(sell_decisions) > DAILY_TICKET_CAP:
-            overflow = sell_decisions[DAILY_TICKET_CAP:]
-            sell_decisions = sell_decisions[:DAILY_TICKET_CAP]
-            for norm in overflow:
-                norm["execution_status"] = "not_executed"
-                norm["execution_error"] = f"Not executed — exceeded the {DAILY_TICKET_CAP}-sell cap for this cycle"
-                skipped_decisions.append({
-                    **norm,
-                    "reason": f"Live mode limit reached - max {DAILY_TICKET_CAP} sells executed",
-                })
-            print(f"⏭️  Live mode capped additional {len(overflow)} sell decision(s)")
-        if len(buy_decisions) > DAILY_BUY_CAP:
-            overflow = buy_decisions[DAILY_BUY_CAP:]
-            buy_decisions = buy_decisions[:DAILY_BUY_CAP]
-            for norm in overflow:
-                norm["execution_status"] = "not_executed"
-                norm["execution_error"] = f"Not executed — exceeded the {DAILY_BUY_CAP}-buy cap for this cycle"
-                skipped_decisions.append({
-                    **norm,
-                    "reason": f"Live mode limit reached - max {DAILY_BUY_CAP} buys executed",
-                })
-            print(f"⏭️  Live mode capped additional {len(overflow)} buy decision(s)")
+    # Per-cycle caps: live mode executes at most DAILY_TICKET_CAP sells and DAILY_BUY_CAP buys.
+    # One-trade pilot mode limits BUYS to one (min with DAILY_BUY_CAP); it never holds back a
+    # sell, so profit-taking and kill-breach exits execute as usual.
+    _split = split_cycle_tickets(
+        sell_decisions,
+        buy_decisions,
+        sell_cap=DAILY_TICKET_CAP,
+        buy_cap=DAILY_BUY_CAP,
+        one_trade_mode=one_trade_mode,
+        live=live_execution_enabled,
+    )
+    sell_decisions, buy_decisions = _split.sells, _split.buys
+    for norm, _error, _reason in _split.dropped:
+        norm["execution_status"] = "not_executed"
+        norm["execution_error"] = _error
+        skipped_decisions.append({**norm, "reason": _reason})
+    _dropped_sells = sum(1 for norm, _, _ in _split.dropped if norm["action"] == "sell")
+    _dropped_buys = len(_split.dropped) - _dropped_sells
+    if _dropped_sells:
+        print(f"⏭️  Live mode capped additional {_dropped_sells} sell decision(s) (max {_split.sell_limit} per cycle)")
+    if _dropped_buys:
+        _who = "One-trade pilot mode" if _split.pilot_binds else "Live mode"
+        print(f"⏭️  {_who} capped additional {_dropped_buys} buy decision(s) (max {_split.buy_limit} per cycle)")
 
     print(f"📊 Processing {len(sell_decisions)} sells, {len(buy_decisions)} buys, {len(hold_decisions)} holds")
 
@@ -1773,6 +1743,11 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             config_hash,
             skipped_decisions,
             live_execution_enabled,
+            live_snapshot=latest_live_snapshot.get("data") if live_execution_enabled else None,
+            # A real_world run with live execution skipped is bookkeeping for orders that
+            # trading_interface already placed (its safety manager applied these caps);
+            # trimming the record here would understate a fill that happened.
+            enforce_position_caps=live_execution_enabled or trading_mode not in ("live", "real_world"),
         )
 
     # 3) Log hold decisions
@@ -2030,10 +2005,61 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
         else:
             return available_cash
 
-def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
+def _position_cap_book(config_hash, cash_balance, live_snapshot=None):
+    """The MAX_POSITION_* / MAX_TOTAL_INVESTMENT* cap book for this cycle's buys: market value
+    per held ticker and the account value the fractional caps resolve against. Live: the Schwab
+    snapshot this cycle already fetched (positions + all cash); otherwise the holdings table."""
+    limits = dict(
+        max_position_value=MAX_POSITION_VALUE,
+        max_position_fraction=MAX_POSITION_FRACTION,
+        max_total_investment=MAX_TOTAL_INVESTMENT,
+        max_total_investment_fraction=MAX_TOTAL_INVESTMENT_FRACTION,
+    )
+    if live_snapshot and live_snapshot.get("status") == "success":
+        positions = {}
+        for pos in live_snapshot.get("positions") or []:
+            sym = clean_ticker_symbol(pos.get("symbol"))
+            if sym:
+                positions[sym] = positions.get(sym, 0.0) + _safe_float(pos.get("market_value"))
+        account_value = _safe_float(live_snapshot.get("liquidation_value") or live_snapshot.get("total_portfolio_value"))
+        return CapBook.build(positions, _safe_float(live_snapshot.get("total_cash"), cash_balance),
+                             account_value=account_value, source="Schwab snapshot", **limits)
+    with engine.connect() as _conn:   # its own connection: a failed read must not abort the buy transaction
+        rows = _conn.execute(text("""
+            SELECT ticker, current_value FROM holdings
+            WHERE config_hash = :config_hash AND is_active = TRUE AND ticker != 'CASH'
+        """), {"config_hash": config_hash}).fetchall()
+    positions = {}
+    for row in rows:
+        sym = clean_ticker_symbol(row.ticker)
+        if sym:
+            positions[sym] = positions.get(sym, 0.0) + _safe_float(row.current_value)
+    return CapBook.build(positions, cash_balance, source="holdings", **limits)
+
+
+def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled,
+                          live_snapshot=None, enforce_position_caps=True):
     """Process all buy decisions and return updated cash balance"""
 
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
+
+    # Per-position and total-investment caps (MAX_POSITION_* / MAX_TOTAL_INVESTMENT*, max-of
+    # floor and fraction of account value, the safety manager's rule). Any error → size as
+    # before, without these caps, and say so in one line.
+    cap_book = None
+    if enforce_position_caps:
+        try:
+            with engine.connect() as _conn:
+                _cash = _conn.execute(text(
+                    "SELECT current_value FROM holdings WHERE ticker = 'CASH' AND config_hash = :config_hash"
+                ), {"config_hash": config_hash}).fetchone()
+            cap_book = _position_cap_book(
+                config_hash, float(_cash.current_value) if _cash else float(available_cash), live_snapshot
+            )
+            print(f"🧱 Buy caps: {cap_book.describe()}")
+        except Exception as exc:
+            cap_book = None
+            print(f"⚠️  Position/total-investment caps unavailable ({exc}); sizing buys without them this cycle")
 
     with engine.begin() as conn:
         # Two separate figures: `available_cash` is the settled-funds BUY BUDGET
@@ -2081,9 +2107,19 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
 
             from math import floor
             # Whole shares only. A sub-share allocation rounds up to exactly one share when that
-            # share fits the MAX rail and the settled funds behind the buffer (order_sizing.py);
-            # the sizing record below names what bound the ticket.
-            _ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT, min_buffer=MIN_BUFFER)
+            # share fits the MAX rail, the settled funds behind the buffer and the position /
+            # total-investment caps; a larger ticket is cut to what the caps leave room for
+            # (order_sizing.py). The sizing record below names what bound the ticket.
+            _ws = None
+            if cap_book is not None:
+                try:
+                    _ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT,
+                                                 min_buffer=MIN_BUFFER, caps=cap_book.caps_for(clean_ticker))
+                except Exception as exc:
+                    print(f"⚠️  {ticker}: position-cap sizing failed ({exc}); sizing without the caps")
+                    _ws = None
+            if _ws is None:
+                _ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT, min_buffer=MIN_BUFFER)
             requested_shares = _ws.shares
             if requested_shares == 0:
                 print(f"Skipping buy for {ticker}: {_ws.note}.")
@@ -2096,6 +2132,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
             if _ws.bound_by == "one-share minimum":
                 print(f"⬆️ {ticker}: {_ws.note}.")
+            elif _ws.cap_usd is not None:
+                print(f"✂️ {ticker}: {_ws.note}.")
 
             buffer_safe_cash = max(available_cash - MIN_BUFFER, 0.0)
             max_affordable_shares = floor(buffer_safe_cash / price) if price > 0 else 0
@@ -2156,6 +2194,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 "shares": int(shares),
                 "bound_by": ("settled-funds guardrail" if shares < requested_shares else _ws.bound_by),
             }
+            if _ws.cap_usd is not None and decision["sizing"]["bound_by"] == _ws.bound_by:
+                decision["sizing"]["cap_usd"] = round(_ws.cap_usd, 2)  # the dollar value of the cap that bound
 
             # Execute real-world trade if enabled. In live mode, if the order
             # did NOT actually fill (rejected / still working / error), DO NOT
@@ -2293,6 +2333,9 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     "reason": f"Execution error: {e} (Original: {reason})"
                 })
                 continue
+
+            if cap_book is not None:
+                cap_book.record_buy(clean_ticker, actual_spent)  # the next buy this cycle counts this one
 
     return available_cash
 
