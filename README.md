@@ -164,7 +164,7 @@ The launcher runs `init_database.py` on every start; it creates and migrates the
 ./start_d_ai_trader.sh -p 8080 -t simulation -c 120 -m gpt-5.6-terra
 ```
 
-The launcher creates the virtualenv, installs `requirements.txt` when it changes, starts the dashboard and the trader, and keeps the Mac awake with `caffeinate` while the trader runs. Without `-m` the launcher exports `gpt-4o` as the global model; the per-agent `DAI_MODEL_*` keys in `.env` still decide each agent's model.
+The launcher creates the virtualenv, installs `requirements.txt` when it changes, starts the dashboard and the trader, and keeps the Mac awake with `caffeinate` while the trader runs. Without `-m` the launcher exports `gpt-5.6-terra` as the global model; the per-agent `DAI_MODEL_*` keys in `.env` still decide each agent's model.
 
 **Pick your starting policy.** The repository ships two policy graphs per agent: the committed **baseline** (v0 = the code defaults) and **latest**, a copy of the active, learned policy the repo was last pushed with. A fresh config seeds its v0 from whichever you choose; the choice applies only the first time a config hash is seeded.
 
@@ -192,7 +192,7 @@ agents/
 ```
 
 - **`*.default.md`** are the committed seeds. `SOUL.md` and `MEMORY.md` are optional, hand-made local overrides of those seeds and are gitignored, since they can hold trade-specific lessons; nothing writes them, and the database is canonical. `DAI_SOUL_FILE_OVERRIDE=1` makes the Summarizer, Company extraction and Feedback agents read soul and memory from the files; the Decider's graph-assembled prompt still comes from the database.
-- **`policy-graph/baseline/v0`** and **`policy-graph/latest/`** are tracked. `latest/` is refreshed when the active version is materialized: every cycle for the Decider, and on a Policy Graph tab read or an applied proposal for the other agents, so it can lag an activation. Per-config history under `policy-graph/<config_hash>/v<N>/` stays local.
+- **`policy-graph/baseline/v0`** and **`policy-graph/latest/`** are tracked. `latest/` is refreshed when the active version is materialized: every cycle for the Decider, and for every agent right after any activation commits (weekly save, Prompt Lab apply, reset, undo, applied proposal), at trader startup and at the end of the Thursday job (`prompt_manager.refresh_latest_policy_graph`, best effort). Per-config history under `policy-graph/<config_hash>/v<N>/` stays local.
 - **Memory compression** (`memory_compress.py`) runs with the weekly job. When memory passes 9,000 characters, the oldest diary entries are archived; the standing lesson sections are never trimmed.
 - **Decider long-term memory.** Up to `DAI_MEMORY_LT_LIMIT` (default 14) active `decider_memory` rows are injected each cycle, held-ticker rows first, then by weight and recency, together with a working memory of the last 6 decision cycles. They appear as `DA.ltm.*` nodes in the cycle-context layer.
 - **Editing.** Edit soul and memory in the Prompt Lab, or propose guideline patches from the Policy Graph tab.
@@ -265,7 +265,7 @@ One trading cycle. The four cycle agents (Summarizer, Company extraction, Decide
 
 Key names with code defaults where one exists. Model values shown are the live run's choices, not code defaults: an unset per-agent key uses the global model. Your values live in `.env`.
 
-Under `start_d_ai_trader.sh`, the launcher exports `DAI_GPT_MODEL` (from `-m`, default `gpt-4o`), `TRADING_MODE` (from `-t`) and `DAI_POLICY_SEED` (from `-s`), so those three `.env` values only apply when the Python entry points run directly.
+Under `start_d_ai_trader.sh`, the launcher exports `DAI_GPT_MODEL` (from `-m`, default `gpt-5.6-terra`), `TRADING_MODE` (from `-t`) and `DAI_POLICY_SEED` (from `-s`), so those three `.env` values only apply when the Python entry points run directly.
 
 ```bash
 # Required
@@ -347,7 +347,7 @@ SUMMARY_MAX_WORKERS=2
 DAI_DECIDER_RAW_PREVIEW=4000        # chars of raw Decider output printed on each call
 ```
 
-Keys that no longer do anything: `DAI_MAX_TRADES` (still parsed, never used), `DAI_PROMPT_PROFILE` and `DAI_PROMPT_VERSION` (exported by the launcher, read by no live code), and `DAI_DISABLE_UC` (the scraper always uses undetected-chromedriver).
+Retired keys, which nothing reads: `DAI_MAX_TRADES`, `DAI_PROMPT_PROFILE`, `DAI_PROMPT_VERSION` and `DAI_DISABLE_UC`. The launchers no longer export them, `decider_agent.py` no longer parses `DAI_MAX_TRADES`, and the scraper always uses undetected-chromedriver.
 
 ### CLI options
 
@@ -356,7 +356,7 @@ Keys that no longer do anything: `DAI_MAX_TRADES` (still parsed, never used), `D
 
   -p, --port PORT            Dashboard port (default 8080)
   -m, --model MODEL          Global model, with an optional effort suffix (e.g. terra-high, gpt-5.6-sol-max).
-                             Default gpt-4o; per-agent DAI_MODEL_* keys still apply.
+                             Default gpt-5.6-terra; per-agent DAI_MODEL_* keys still apply.
   -t, --trading-mode MODE    simulation | real_world (default simulation)
   -c, --cadence MINUTES      Minutes between cycles (default 180)
   -H, --config-hash HASH     Pin the config hash. Without it the hash is derived from the resolved base model
@@ -365,7 +365,7 @@ Keys that no longer do anything: `DAI_MAX_TRADES` (still parsed, never used), `D
   -s, --policy-seed SEED     default | latest — where a NEW config's v0 policy comes from
   -b, --bind HOST            Dashboard bind address (default 0.0.0.0, reachable from your LAN; no login,
                              so bind wide only on a network you trust; 127.0.0.1 = this machine only)
-  -v VERSION, -P PROFILE     Accepted for compatibility (each still takes a value); no code reads them
+  -v VERSION, -P PROFILE     Deprecated: each still takes a value, prints a one-line notice and is ignored
 ```
 
 The live run is `./start_d_ai_trader.sh -p 8081 -t real_world -c 120 -m gpt-5.6-terra -H <hash>`.
@@ -377,7 +377,7 @@ The live run is `./start_d_ai_trader.sh -p 8081 -t real_world -c 120 -m gpt-5.6-
 | **gpt-5.6-sol** | Feedback | $5 / $30 | Flagship; alias `sol`, bare `gpt-5.6` → Sol |
 | **gpt-5.6-terra** | Decider, critic, evolution | $2 / $12 | Alias `terra` (or `tera`) |
 | **gpt-5.6-luna** | Summarizer, extraction | $0.20 / $1.20 | Vision-capable budget tier; alias `luna` |
-| gpt-5.5, gpt-5.4, gpt-4o / 4o-mini | Older | gpt-5.5 $5 / $30; gpt-5.4-mini $0.75 / $4.50 | Still accepted. A model with no price entry, or an entry of 0 (gpt-5.4, gpt-4o, gpt-4.1), is metered as $0, including the launcher default and the Decider fallback. |
+| gpt-5.5, gpt-5.4, gpt-4o / 4o-mini | Older | gpt-5.5 $5 / $30; gpt-5.4-mini $0.75 / $4.50 | Still accepted; gpt-4o $2.50 / $10, gpt-4o-mini $0.15 / $0.60, gpt-4.1 $2 / $8. A model with no price entry, or an entry of 0 (gpt-5.4, gpt-5.2, gpt-5, gpt-5-mini), is metered as $0. |
 
 Rates live in `model_pricing.json` (re-read per request) and drive per-agent cost tracking in `api_usage`. o1/o3 models are not supported.
 
@@ -571,7 +571,7 @@ d-ai-trader/
 ├── prompt_outcome_attribution.py · backfill_version_outcomes.py · update_prices.py
 ├── trading_interface.py · schwab_client.py · schwab_ledger.py · schwab_streaming.py · safety_checks.py
 ├── schwab_manual_auth.py · verify_schwab_token.py · check_order_status.py · effective_funds_probe.py
-├── reconcile_execution_status.py · fix_constraints_only.py · run_schwab_streaming.py
+├── reconcile_execution_status.py · run_schwab_streaming.py
 ├── start_d_ai_trader.sh · start_schwab_live_view.sh
 ├── policy_graph/        # guideline graph package (no config import)
 ├── agents/              # per-agent seeds + policy-graph baseline/ and latest/

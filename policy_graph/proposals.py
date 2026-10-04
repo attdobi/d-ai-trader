@@ -272,6 +272,33 @@ def style_check(files: list) -> list:
     return out
 
 
+STYLE_TARGET_CHARS = 240      # GATE_STYLE's per-gate target (the lint only fires above MAX_GATE_CHARS)
+_PLAIN_STYLE = (
+    (re.compile(r"^(gate|lesson) is (\d+) characters"),
+     lambda m: f"{m[1].capitalize()} is {m[2]} characters; the target is {STYLE_TARGET_CHARS}."),
+    (re.compile(r"^(gate|lesson) tests (\d+) conditions"),
+     lambda m: f"{m[1].capitalize()} tests {m[2]} conditions at once; a gate should test one, so split it."),
+    (re.compile(r"^(gate|lesson) has (\d+) parenthetical asides"),
+     lambda m: f"{m[1].capitalize()} has {m[2]} asides in parentheses; put the numbers in the sentence itself."),
+    (re.compile(r"^primary gate has no 'Falsified if"),
+     lambda m: "The primary gate never says how to tell it failed; add a \"Falsified if …\" sentence with a number."),
+)
+
+
+def plain_style_warning(warning) -> str:
+    """A style_check warning as one plain sentence for the Policy Graph tab. Read-time, so warnings stored
+    on older proposals render the same way; an unknown warning is passed through, capitalized."""
+    text = " ".join(str(warning or "").split())
+    for rx, fmt in _PLAIN_STYLE:
+        m = rx.match(text)
+        if m:
+            return fmt(m)
+    if not text:
+        return ""
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?" else text + "."
+
+
 # ----------------------------------------------------------------------------- validation
 def normalize_files(raw_files, version: Version) -> list:
     """LLM/JSON → [FileChange] with structural checks against `version` (ids, locks, parents, count)."""
@@ -595,14 +622,21 @@ def _public(row: dict, applies: Optional[dict] = None) -> dict:
     files = patch.get("files") or []
     critic = row.get("critic") or {}
     per_file = {f.get("id"): f for f in (critic.get("files") or []) if isinstance(f, dict)}
+    style = [{**w, "plain": plain_style_warning(w.get("warning"))}
+             for w in (patch.get("style") or []) if isinstance(w, dict)]
+    style_by_file = {}
+    for w in style:
+        style_by_file.setdefault(w.get("id"), []).append(w)
     out = {
         "id": row["id"], "status": row["status"], "agent_type": row["agent_type"],
         "created_at": service._iso(row.get("created_at")), "updated_at": service._iso(row.get("updated_at")),
         "created_by": row.get("created_by"), "focus": row.get("focus"), "model": row.get("model"),
         "base_version": row["base_version"], "base_prompt_version_id": row.get("base_prompt_version_id"),
         "reasoning": patch.get("reasoning") or "",
-        "style": patch.get("style") or [],
-        "files": [{**f, "critic": per_file.get(f.get("id"))} for f in files],
+        "style": style,
+        "files": [{**f, "critic": per_file.get(f.get("id")),
+                   "style": style_by_file.get(f.get("id")) or style_by_file.get(f.get("proposed_id") or None) or []}
+                  for f in files],
         "primary_id": next((f.get("id") for f in files if f.get("primary")), None),
         "critic": {k: v for k, v in critic.items() if k != "files"} if critic else None,
         "critic_at": service._iso(row.get("critic_at")),
@@ -1012,4 +1046,5 @@ __all__ = [
     "ProposalError", "ProposalConflict", "NotConfigured", "FileChange", "ensure_schema", "list_proposals",
     "get_proposal", "start_draft", "run_pipeline", "apply_proposal", "reject_proposal", "prepare", "apply_patch",
     "verify_patch", "normalize_files", "derive_kind", "parse_llm_json", "field_order", "MAX_FILES", "style_check",
+    "plain_style_warning",
 ]

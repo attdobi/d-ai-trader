@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 # Robust launcher for d-ai-trader (dashboard + automation)
 # Usage:
-#   ./start_d_ai_trader.sh -p 8080 -m gpt-4o-mini -v auto -t simulation
+#   ./start_d_ai_trader.sh -p 8080 -m gpt-5.6-terra -t simulation
 set -Eeuo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING_MODE] [-c CADENCE] [-H HASH] [-s SEED]
+Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-t TRADING_MODE] [-c CADENCE] [-H HASH] [-s SEED] [-b HOST]
 
   -p, --port            Dashboard port (default: 8080)
-  -m, --model           AI model (default: gpt-4o)
-                        RECOMMENDED (GPT-4 series):
-                          • gpt-4o          - BEST for trading (reliable, fast)
-                          • gpt-4o-mini     - Good for testing (cheap)
-                          • gpt-4-turbo     - "GPT-4.1" equivalent (older)
-
+  -m, --model           Global AI model (default: gpt-5.6-terra); the per-agent
+                        DAI_MODEL_* keys in .env still decide each agent's model.
                         GPT-5.6 family (Aug 2026 — all vision-capable):
                           • gpt-5.6-sol   (alias: sol)   - flagship, $5/$30 per 1M
-                          • gpt-5.6-terra (alias: terra) - mid tier, $2/$12
+                          • gpt-5.6-terra (alias: terra) - mid tier, $2/$12 (default)
                           • gpt-5.6-luna  (alias: luna)  - budget, $0.20/$1.20
                           • bare "gpt-5.6" → Sol (matches OpenAI's alias)
 
@@ -31,14 +27,15 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                               -m gpt-5.6-terra-xhigh
                               -m gpt-5.6-sol-max   (max: GPT-5.6 only)
 
+                        Older models (gpt-4o, gpt-4o-mini, gpt-4.1) are still accepted.
                         Note: o1/o3 models NOT supported
-  -v, --prompt-version  Prompt version strategy: auto | vN (default: auto)
   -t, --trading-mode    simulation | real_world (default: simulation)
-  -c, --cadence         How often to run (in minutes, default: 180)
+  -c, --cadence         Minutes between cycles after the 9:30 AM ET bell, weekdays until
+                        5:25 PM ET (default: 180)
                         Examples:
                           • 180 - Every 3 hours (default, swing/settled funds pacing)
+                          • 120 - Every 2 hours (the live run)
                           • 60  - Every hour (active monitoring)
-                          • 15  - Every 15 minutes (legacy intraday testing)
   -H, --config-hash     Force a specific configuration hash for this run
   -b, --bind            Dashboard bind address (default: 0.0.0.0 = reachable from the local
                         network at http://<this-mac's-IP>:PORT; use 127.0.0.1 for local-only)
@@ -48,20 +45,18 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-v PROMPT_VERSION] [-t TRADING
                                       (agents/*/policy-graph/latest, the version the repo
                                       was pushed with — start from the learned rules)
                         Only applies the first time a config hash is seeded.
-  -P, --prompt-profile  Prompt profile: standard | gpt-pro (default: standard)
+  -v, -P                Deprecated: still accept a value, which is ignored (the active
+                        prompt version comes from the database and the Policy Graph tab)
   --help                Show this help
 
-Tips:
-  • To run Selenium with stock Chrome (recommended on macOS), keep UC disabled:
-      export DAI_DISABLE_UC=1
-  • For day trading, use: -c 15 (runs every 15 minutes during market hours)
+Schedule (ET): market-open cycle at the 9:30 bell (trades at 9:30:05), then every
+CADENCE minutes until 5:25 PM on weekdays (decisions after 4:00 PM are recorded,
+not executed); weekly feedback Thursday 8:30 PM.
 USAGE
 }
 
 PORT=8080
-MODEL="gpt-4o"
-PROMPT_VERSION="auto"
-PROMPT_PROFILE="standard"
+MODEL="gpt-5.6-terra"
 TRADING_MODE="${TRADING_MODE:-simulation}"
 CADENCE_MINUTES=180
 CONFIG_HASH_OVERRIDE=""
@@ -72,10 +67,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -p|--port) PORT="$2"; shift 2;;
     -m|--model) MODEL="$2"; shift 2;;
-    -v|--prompt-version) PROMPT_VERSION="$2"; shift 2;;
+    -v|--prompt-version) echo "⚠️  $1 is deprecated and ignored (the active prompt version comes from the database)"; shift 2;;
     -t|--trading-mode) TRADING_MODE="$2"; shift 2;;
     -c|--cadence) CADENCE_MINUTES="$2"; shift 2;;
-    -P|--prompt-profile) PROMPT_PROFILE="$2"; shift 2;;
+    -P|--prompt-profile) echo "⚠️  $1 is deprecated and ignored (no code reads a prompt profile)"; shift 2;;
     -H|--config-hash) CONFIG_HASH_OVERRIDE="$2"; shift 2;;
     -s|--policy-seed) POLICY_SEED="$2"; shift 2;;
     -b|--bind) BIND_HOST="$2"; shift 2;;
@@ -160,15 +155,11 @@ fi
 # Export runtime env
 export DAI_PROJECT_ROOT="${PROJECT_ROOT}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
-# Default: disable UC to use Selenium Manager (stable on macOS)
-export DAI_DISABLE_UC="${DAI_DISABLE_UC:-1}"
 # Normalize trading mode to lower-case for downstream imports
 export TRADING_MODE="$(echo "${TRADING_MODE}" | tr '[:upper:]' '[:lower:]')"
 # Propagate config to the app
 export DAI_PORT="${PORT}"
 export DAI_GPT_MODEL="${MODEL}"
-export DAI_PROMPT_VERSION="${PROMPT_VERSION}"
-export DAI_PROMPT_PROFILE="${PROMPT_PROFILE}"
 export DAI_POLICY_SEED="${POLICY_SEED}"
 export DAI_BIND_HOST="${BIND_HOST}"
 export TRADING_MODE="${TRADING_MODE}"
@@ -182,26 +173,19 @@ echo "D-AI-Trader Startup Configuration"
 echo "========================================"
 echo "Dashboard Port:    ${PORT}"
 echo "AI Model:          ${MODEL}"
-echo "Prompt Version:    ${PROMPT_VERSION}"
-echo "Prompt Profile:    ${PROMPT_PROFILE}"
 echo "Trading Mode:      ${TRADING_MODE}"
 echo "Run Cadence:       Every ${CADENCE_MINUTES} minutes"
 if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then
   echo "Config Hash:       ${CONFIG_HASH_OVERRIDE} (forced override)"
 fi
-if [[ "${DAI_DISABLE_UC}" == "1" ]]; then
-  echo "UC Shim:           DISABLED"
-else
-  echo "UC Shim:           ENABLED (DAI_ENABLE_UC=${DAI_ENABLE_UC:-0})"
-fi
 echo "========================================"
 echo ""
 echo "🌐 Dashboard URL: http://localhost:${PORT}"
 echo ""
-echo "📊 DAY TRADING SCHEDULE:"
-echo "   🔔 Opening Bell: 6:30 AM PT (analyzes news + trades at 6:30:05 AM PT)"
-echo "   📈 Intraday:     Every ${CADENCE_MINUTES} min (6:35 AM - 1:00 PM PT)"
-echo "   📊 Feedback:     1:30 PM PT (daily performance analysis)"
+echo "📊 SCHEDULE (weekdays, ET; PT is 3 hours earlier):"
+echo "   🔔 Opening bell: 9:30 AM ET (summarizes the news, trades at 9:30:05)"
+echo "   📈 Cadence:      every ${CADENCE_MINUTES} min after the bell until 5:25 PM ET (after 4:00 PM decisions are recorded, not executed)"
+echo "   📊 Feedback:     weekly, Thursday 8:30 PM ET"
 echo ""
 
 # Free the dashboard port and the Schwab redirect port (if local) before launch

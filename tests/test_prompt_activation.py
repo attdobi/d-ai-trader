@@ -30,6 +30,9 @@ def pm_env(monkeypatch):
 
     sys.modules.pop("prompt_manager", None)
     pm = importlib.import_module("prompt_manager")
+    # the post-commit policy-graph refresh would materialize into the repo's agents/ dir
+    # (tests/test_policy_graph_latest_sync.py covers it against tmp dirs)
+    monkeypatch.setattr(pm, "refresh_latest_policy_graph", lambda *_a, **_k: {})
 
     with engine.begin() as conn:
         conn.execute(text("""

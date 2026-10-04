@@ -2007,6 +2007,22 @@
 
   function fileBadge(text, cls) { return `<span class="pg-badge ${esc(cls)}">${esc(text)}</span>`; }
 
+  // Style lint (policy_graph.proposals.style_check) — advisory, never blocks. The API adds a
+  // plain-language `plain` sentence per warning; fall back to the raw text for older payloads.
+  function styleWarningsHtml(warnings, heading) {
+    const items = (Array.isArray(warnings) ? warnings : [])
+      .map(w => String((w && (w.plain || w.warning)) || '').trim())
+      .filter(Boolean);
+    if (!items.length) return '';
+    const kicker = heading ? `<span class="pg-style-kicker">${esc(heading)}</span>` : '';
+    return `<div class="pg-file-style" role="note">${kicker}<ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>`;
+  }
+
+  function fileStyleWarnings(p, f) {
+    if (Array.isArray(f.style)) return f.style;
+    return (p.style || []).filter(w => w && (w.id === f.id || (f.proposed_id && w.id === f.proposed_id)));
+  }
+
   function fileCardHtml(p, f) {
     const critic = f.critic || null;
     const interactive = p.status === 'review';
@@ -2032,6 +2048,7 @@
     return `<div class="pg-file-card${interactive && !checked ? ' is-off' : ''}" data-file-id="${esc(f.id)}">
         <div class="pg-file-head">${control}<button type="button" class="pg-file-id" data-node-id="${esc(f.action === 'add' ? f.id : (f.proposed_id || f.id))}" title="Show on the graph">${esc(idLabel)}</button>${badges}${stats}</div>
         ${grid ? `<dl class="pg-file-grid">${grid}</dl>` : ''}
+        ${styleWarningsHtml(fileStyleWarnings(p, f), 'Style check')}
         ${criticLine}
         ${Array.isArray(f.diff) && f.diff.length ? `<details class="pg-file-diff"${f.primary && interactive ? ' open' : ''}><summary>${f.action === 'add' ? 'Proposed text' : f.action === 'remove' ? 'Text to remove' : 'What would change'}</summary><div class="pe-diff-view"></div></details>` : ''}
       </div>`;
@@ -2062,6 +2079,9 @@
     const error = status === 'failed' ? `<p class="pg-proposal-error">${esc(p.error || 'unknown error')}</p>` : '';
     const reasoning = p.reasoning ? `<p class="pg-proposal-reasoning">${esc(p.reasoning)}</p>` : '';
     const files = (p.files || []).length ? `<div class="pg-proposal-files">${(p.files || []).map(f => fileCardHtml(p, f)).join('')}</div>` : '';
+    // A warning whose id matches no file card (should not happen) still shows, once, under the files.
+    const fileIds = new Set((p.files || []).flatMap(f => [f.id, f.proposed_id].filter(Boolean)));
+    const orphanStyle = styleWarningsHtml((p.style || []).filter(w => w && !fileIds.has(w.id)), 'Style check');
     let actions = '';
     if (status === 'review') {
       const applies = p.applies_to || {};
@@ -2078,7 +2098,7 @@
     }
     return `<article class="${classes.join(' ')}" data-proposal-id="${esc(p.id)}">
         <div class="pg-proposal-title">${title.join('<span class="pg-sep">·</span>')}</div>
-        ${busyLine}${error}${reasoning}${critic}${human}${files}${actions}
+        ${busyLine}${error}${reasoning}${critic}${human}${files}${orphanStyle}${actions}
       </article>`;
   }
 

@@ -118,6 +118,7 @@ def dashboard_server_module(monkeypatch, isolated_policy_graph):
     prompt_manager_stub.set_active_prompt_version = lambda *_args, **_kwargs: {}
     prompt_manager_stub.undo_last_prompt_activation = lambda *_args, **_kwargs: {}
     prompt_manager_stub.get_prompt_activation_history = lambda *_args, **_kwargs: []
+    prompt_manager_stub.refresh_latest_policy_graph = lambda *_args, **_kwargs: {}
     monkeypatch.setitem(sys.modules, "prompt_manager", prompt_manager_stub)
 
     decider_stub = types.ModuleType("decider_agent")

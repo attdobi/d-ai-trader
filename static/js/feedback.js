@@ -672,6 +672,16 @@ function renderEventStats(live, payload) {
   ].join('');
 }
 
+// CPI / jobs calendars run out before the next 45 days do (event_calendar.calendar_coverage):
+// the same warning the Decider's EVENT CALENDAR block carries.
+function renderCalendarGap(gap) {
+  const el = document.getElementById('eventCalendarGap');
+  if (!el) return;
+  const warning = gap && gap.warning ? String(gap.warning) : '';
+  el.textContent = warning ? `⚠ ${warning}` : '';
+  el.hidden = !warning;
+}
+
 async function loadEventRiskChart(days = 90) {
   const canvas = document.getElementById('eventRiskChart');
   if (!canvas) return;
@@ -693,6 +703,7 @@ async function loadEventRiskChart(days = 90) {
   const labels = rows.map(r => r.date);
   const todayIndex = history.length - 1;
   if (payload.live) renderEventStats(payload.live, payload);
+  renderCalendarGap(payload.calendar_gap);
 
   const scoreHist = rows.map((r, i) => (i <= todayIndex ? r.score : null));
   const scoreProj = rows.map((r, i) => (i >= todayIndex ? r.score : null));
