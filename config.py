@@ -882,6 +882,12 @@ class PromptManager:
         """Return this thread's most-recent call usage dict, or None."""
         return getattr(self._tls, "last_usage", None)
 
+    def last_reply(self):
+        """This thread's most-recent completion, or None: {"agent", "model", "reasoning_effort",
+        "system_prompt", "user_prompt" (exactly as sent), "content" (the raw text), "finish_reason"}.
+        The Decider stores it in decider_inputs so a cycle can be replayed byte for byte."""
+        return getattr(self._tls, "last_reply", None)
+
     def _record_api_usage(self, agent_name, model_name, response):
         """Persist token usage + computed cost for the dashboard. Best-effort —
         wrapped so telemetry can never break a real API call."""
@@ -938,6 +944,10 @@ class PromptManager:
 
     def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None):
         base_system_prompt = system_prompt or ""
+        try:
+            self._tls.last_reply = None  # never attribute an earlier call's reply to this one
+        except Exception:
+            pass
         retries = 0
         allow_reasoning_payload = True  # disable if API rejects reasoning_effort
         while retries < max_retries:
@@ -1078,6 +1088,16 @@ class PromptManager:
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
                 content = choice.message.content
+                try:  # replay record for the caller (decider_inputs); never affects the call
+                    _gpt5_path = model_lower.startswith('gpt-5')
+                    self._tls.last_reply = {
+                        "agent": agent_name, "model": model_name,
+                        "reasoning_effort": (reasoning_params or {}).get("reasoning_effort") if _gpt5_path else None,
+                        "system_prompt": effective_system_prompt if _gpt5_path else base_system_prompt,
+                        "user_prompt": prompt, "content": content, "finish_reason": finish_reason,
+                    }
+                except Exception:
+                    pass
                 response_model = model_name
                 response_model_lower = model_lower
                 

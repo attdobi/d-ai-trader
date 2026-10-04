@@ -184,6 +184,14 @@
                 <span class="cons-verdict cons-{{ (c.get('verdict',''))|lower }}">{{ (c.get('verdict','?'))|upper }}</span>
                 <span class="cons-signals">{{ c.get('signals','') }}</span>
                 {% if c.get('why') %}<div class="cons-why">↳ {{ c.get('why') }}</div>{% endif %}
+                {% set c_cited = c.get('cited') %}
+                {% if c_cited and c_cited is iterable and c_cited is not string %}
+                <div class="cited-chips" title="Guidelines the Decider cited for this verdict">
+                  {% for cid in c_cited %}
+                    <a class="cited-chip" href="/policy-graph#agent=DeciderAgent&node={{ cid }}" title="Open {{ cid }} on the Policy Graph tab">{{ cid }}</a>
+                  {% endfor %}
+                </div>
+                {% endif %}
               </li>
               {% endfor %}
             </ul>

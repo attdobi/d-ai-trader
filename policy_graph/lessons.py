@@ -27,10 +27,24 @@ def _iso(value):
 
 
 def format_memory_line(row: dict) -> str:
-    """Byte-identical to one line of decider_memory.format_long_term_memory."""
+    """Byte-identical to one line of decider_memory.format_long_term_memory (without the ` ⟨DA.ltm.<id>⟩`
+    citation tag the trader appends at render time, as assembly does for every other guideline)."""
     tk = f" ({row['ticker']})" if row.get("ticker") else ""
     kind = (row.get("kind") or "lesson")
     return f"- [{kind}]{tk} {row['content']}"
+
+
+def ltm_node_id(row_id) -> str:
+    """'DA.ltm.<row id>' — the graph id of one decider_memory row."""
+    return f"{LTM_GROUP_ID}.{int(row_id)}"
+
+
+def ltm_title(row: dict) -> str:
+    """The row's title: the first line of its content, at most 72 characters."""
+    title = str(row.get("content") or "").strip().split("\n", 1)[0]
+    if len(title) > 72:
+        title = title[:69].rstrip() + "…"
+    return title or f"decider_memory #{row.get('id')}"
 
 
 def _tags(row: dict) -> list:
@@ -105,14 +119,10 @@ def ltm_nodes(rows: list, *, injected_limit: int = DEFAULT_INJECTED_LIMIT) -> tu
         rid = int(r["id"])
         active = bool(r.get("active", True))
         ticker = (r.get("ticker") or "").upper() or None
-        content = r.get("content") or ""
-        title = content.strip().split("\n", 1)[0]
-        if len(title) > 72:
-            title = title[:69].rstrip() + "…"
         nodes.append(Node(
-            id=f"{LTM_GROUP_ID}.{rid}",
+            id=ltm_node_id(rid),
             agent="DeciderAgent",
-            title=title or f"decider_memory #{rid}",
+            title=ltm_title(r),
             node_type="ltm",
             parent=LTM_GROUP_ID,
             field=None,

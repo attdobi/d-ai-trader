@@ -91,7 +91,10 @@ _CONSIDERED_SETUPS = (
     " (your R1..Rk ranked names plus any you seriously rejected). Each element MUST be"
     " {\"ticker\":\"SYM\", \"signals\":\"day/mo %chg, RS vs SPY, RSI, 20d-MA/range position, volume — concrete numbers\","
     " \"verdict\":\"buy\"|\"sell\"|\"hold\"|\"watch\"|\"reject\", \"why\":\"one specific, auditable sentence; for rejects/sells name the exact disqualifier"
-    " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\"}."
+    " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\","
+    " \"cited\":[\"<guideline id>\"]}. \"cited\" is REQUIRED on every \"reject\" and \"watch\" element: the 1-2 guideline ids"
+    " from the GUIDELINE INDEX below that decided the rejection, the deciding gate first, copied exactly as printed —"
+    " a rejection is a decision too, and each guideline's rejections are counted on the Policy Graph tab."
     " This is the FULL audit of WHY you did what you did (holds/sells + buys) — never leave it empty while you hold positions or have settled funds."
 )
 _DATA_AVAILABILITY = (
@@ -154,7 +157,7 @@ _GUIDELINE_CITATIONS = (
     " Every decision MUST carry one extra key \"cited\": a list of 1 to 4 guideline ids taken from the"
     " GUIDELINE INDEX below — first the gate that decided it (the rule you applied), then the lesson you"
     " weighed or the code policy you followed. Ids also appear as ⟨id⟩ after each guideline in your system"
-    " prompt, with its record (how often it was cited in the last 7/30/90 days and the win rate of the trades"
+    " prompt and after each LESSONS row (DA.ltm.<n>), with its record (how often it was cited in the last 7/30/90 days and the win rate of the trades"
     " it drove — weigh a rule by that record, not by its wording). Cite ids exactly as printed; never invent"
     " one. A decision without \"cited\" is incomplete: the ids are stored with the reason so every guideline's"
     " realized win rate can be measured on the Policy Graph tab."

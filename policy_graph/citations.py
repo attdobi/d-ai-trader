@@ -7,6 +7,14 @@ The trader folds that list into the decision's `reason` as a trailing ` [cites: 
 `parse_cites` / `strip_cites` read it back; `guideline_index` renders the id list the Decider is
 shown; `citation_health` joins decisions and closed trades back to one guideline id.
 
+Two more kinds of citation than the trade decisions:
+- long-term memory rows (decider_memory, `DA.ltm.<row id>`) injected into the user prompt are tagged
+  ⟨DA.ltm.<id>⟩ and listed in the GUIDELINE INDEX (`ltm_index_lines`), so they are citable like any rule;
+- the top-level "considered" array (setups the Decider weighed and passed on) carries `cited` on its
+  reject / watch elements. `fold_considered` validates those ids in place (kept as a list on the element,
+  never folded into text); `record_cited` logs them with action 'reject'. A rejection is never a trade:
+  it counts as a citation, never in win-rate math (which reads trade_outcomes only).
+
 stdlib + `sqlalchemy.text`; never imports config; config_hash is explicit.
 """
 from __future__ import annotations
@@ -17,12 +25,18 @@ from typing import Iterable, Optional
 
 from sqlalchemy import text
 
+from .lessons import ltm_node_id, ltm_title
 from .model import COMPILED_FIELDS, ID_RE, Version
 
 CITE_RE = re.compile(r"\s*\[cites?:\s*([^\]]*)\]\s*$", re.I)
 MAX_CITES = 6
 CITABLE_TYPES = ("section", "rule", "lesson", "entry", "reminder", "identity", "note", "code")
 SYNCED_REASON = "Schwab synced position"
+# "considered" verdicts that mean "weighed and passed on this cycle" (the prompt asks for reject / watch;
+# the rest are spellings models use for the same thing). buy / sell / hold elements mirror real decisions,
+# which carry their own citations, so they are never logged twice.
+REJECT_VERDICTS = ("reject", "rejected", "watch", "pass", "passed", "skip", "avoid")
+REJECT_ACTION = "reject"
 
 
 # ----------------------------------------------------------------------------- reason suffix
@@ -105,6 +119,72 @@ def fold_into_decisions(decisions, known: Optional[Iterable] = None) -> list:
         d["reason"] = append_cites(d.get("reason") or "", ids)
         used.extend(i for i in ids if i not in used)
     return used
+
+
+# ----------------------------------------------------------------------------- considered setups (rejections)
+def is_rejection(item) -> bool:
+    """A "considered" element the Decider weighed and passed on this cycle (verdict reject / watch / …)."""
+    return isinstance(item, dict) and str(item.get("verdict") or "").strip().lower() in REJECT_VERDICTS
+
+
+def fold_considered(considered, known: Optional[Iterable] = None) -> dict:
+    """Validate the `cited` ids of each "considered" element in place: a valid list stays on the element
+    as `cited` (restricted to `known` when given); an unusable one moves to `cited_raw` with a
+    `cited_dropped` note, as on decisions. Never asks the model again — an uncited rejection is accepted.
+    Returns counts: {"items", "rejections", "cited", "uncited"} (the last two over rejections only)."""
+    out = {"items": 0, "rejections": 0, "cited": 0, "uncited": 0}
+    for c in considered or []:
+        if not isinstance(c, dict):
+            continue
+        out["items"] += 1
+        raw = c.pop("cited", None)
+        if raw is None:
+            raw = c.pop("cites", None)
+        if raw is None:
+            raw = c.pop("guidelines", None)
+        ids = normalize_ids(raw, known)
+        if ids:
+            c["cited"] = ids
+            c.pop("cited_raw", None)
+            c.pop("cited_dropped", None)
+        elif raw not in (None, "", [], {}):
+            c["cited_raw"] = raw
+            c["cited_dropped"] = ("not in the served index" if known is not None and normalize_ids(raw) else "not valid guideline ids")
+        if is_rejection(c):
+            out["rejections"] += 1
+            out["cited" if ids else "uncited"] += 1
+    return out
+
+
+def considered_rejections(considered) -> list:
+    """[(node_id, TICKER)] for every rejection element carrying cited ids (after `fold_considered`)."""
+    out = []
+    for c in considered or []:
+        if not is_rejection(c):
+            continue
+        ticker = str(c.get("ticker") or "").strip().upper() or None
+        for nid in normalize_ids(c.get("cited")):
+            out.append((nid, ticker))
+    return out
+
+
+# ----------------------------------------------------------------------------- long-term memory rows
+def ltm_index_lines(rows) -> list:
+    """`DA.ltm.<id> — title` for each injected decider_memory row (dict with id and content), in the
+    order they were rendered — appended to the GUIDELINE INDEX so the rows can be cited."""
+    out, seen = [], set()
+    for r in rows or []:
+        if not isinstance(r, dict) or r.get("id") in (None, ""):
+            continue
+        try:
+            nid = ltm_node_id(r["id"])
+        except (TypeError, ValueError):
+            continue
+        if nid in seen:
+            continue
+        seen.add(nid)
+        out.append(f"{nid} — {ltm_title(r)}")
+    return out
 
 
 # ----------------------------------------------------------------------------- enforcement (repair pass)
@@ -252,10 +332,40 @@ def _decision_rows(engine, config_hash: str) -> list:
     return out
 
 
+def _rejection_rows(engine, config_hash: str) -> list:
+    """(timestamp, considered element) for every stored rejection that carries cited ids (the
+    non-executable `considered_audit` element of trade_decisions.data)."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT timestamp, data FROM trade_decisions
+            WHERE config_hash = :h AND CAST(data AS TEXT) LIKE '%considered_audit%' AND CAST(data AS TEXT) LIKE '%"cited"%'
+            ORDER BY timestamp DESC
+        """), {"h": config_hash}).fetchall()
+    out = []
+    for r in rows:
+        data = r[1]
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                continue
+        if isinstance(data, dict):
+            data = data.get("decisions") or []
+        for el in data or []:
+            if not isinstance(el, dict) or el.get("kind") != "considered_audit":
+                continue
+            for c in el.get("considered") or []:
+                if is_rejection(c) and normalize_ids(c.get("cited")):
+                    out.append((r[0], c))
+    return out
+
+
 def citation_health(engine, config_hash: str, node_id: str, *, recent: int = 8) -> dict:
-    """How one guideline has been used: decisions that cited it and the closed trades whose buy
-    reason cited it (`trade_outcomes.original_reason`)."""
+    """How one guideline has been used: decisions that cited it, the setups it rejected (the
+    "considered" rejections — citations, never trades) and the closed trades whose buy reason cited
+    it (`trade_outcomes.original_reason`)."""
     decisions = [(ts, d) for ts, d in _decision_rows(engine, config_hash) if node_id in parse_cites(d.get("reason"))]
+    rejections = [(ts, c) for ts, c in _rejection_rows(engine, config_hash) if node_id in normalize_ids(c.get("cited"))]
     by_action: dict = {}
     for _ts, d in decisions:
         a = str(d.get("action") or "").lower()
@@ -280,6 +390,9 @@ def citation_health(engine, config_hash: str, node_id: str, *, recent: int = 8) 
         "pnl": pnl,
         "recent_decisions": [{"timestamp": (ts.isoformat() if hasattr(ts, "isoformat") else str(ts)),
                               "ticker": d.get("ticker"), "action": d.get("action")} for ts, d in decisions[:recent]],
+        "rejections": len(rejections),
+        "recent_rejections": [{"timestamp": (ts.isoformat() if hasattr(ts, "isoformat") else str(ts)),
+                               "ticker": c.get("ticker"), "verdict": c.get("verdict")} for ts, c in rejections[:recent]],
         "recent_closed": [{"ticker": r[0], "sell_timestamp": (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1])),
                            "gain_pct": r[2], "gain_amount": r[3]} for r in closed[:recent]],
     }
@@ -343,16 +456,28 @@ def record_served(engine, config_hash: str, agent_type: str, prompt_version, run
     return len(rows)
 
 
-def record_cited(engine, config_hash: str, agent_type: str, prompt_version, run_id: str, decisions, *, decided_at=None) -> int:
+def record_cited(engine, config_hash: str, agent_type: str, prompt_version, run_id: str, decisions, *,
+                 considered=None, decided_at=None) -> int:
     """Mark the guideline ids cited by each decision of this run (rows exist when the id was served;
-    an id cited without being served gets its own row with route 'unserved')."""
+    an id cited without being served gets its own row with route 'unserved').
+
+    `considered` (the cycle's "considered" array, after `fold_considered`) adds one cited row per
+    (guideline, run) with action 'reject' and the first rejected ticker that cited it. Decisions are
+    written first and keep their claim on the served row; a rejection citing a guideline a decision
+    already claimed gets its own cited row (served = false, the served route copied) so neither label
+    is overwritten."""
     hits = []
     for d in decisions or []:
         if not isinstance(d, dict):
             continue
         for nid in parse_cites(d.get("reason")):
             hits.append((nid, str(d.get("ticker") or "").upper() or None, str(d.get("action") or "").lower() or None))
-    if not hits:
+    rejects, seen = [], set()
+    for nid, ticker in considered_rejections(considered):
+        if nid not in seen:
+            seen.add(nid)
+            rejects.append((nid, ticker))
+    if not hits and not rejects:
         return 0
     n = 0
     with engine.begin() as conn:
@@ -369,6 +494,32 @@ def record_cited(engine, config_hash: str, agent_type: str, prompt_version, run_
                 VALUES (:h, :a, :v, :r, :t, :n, 'unserved', :served, :cited, :tk, :ac)
             """), {"h": config_hash, "a": agent_type, "v": prompt_version, "r": run_id, "t": decided_at or _now(),
                    "n": nid, "served": False, "cited": True, "tk": ticker, "ac": action})
+            n += 1
+        for nid, ticker in rejects:
+            key = {"h": config_hash, "r": run_id, "n": nid}
+            if conn.execute(text("""
+                SELECT 1 FROM policy_graph_hits
+                WHERE config_hash = :h AND run_id = :r AND node_id = :n AND cited = :cited AND action = :ac
+            """), dict(key, cited=True, ac=REJECT_ACTION)).fetchone():
+                continue                                     # already logged for this run
+            # the served row is the rejection's only while no decision has cited the guideline
+            res = conn.execute(text("""
+                UPDATE policy_graph_hits SET cited = :cited, ticker = :tk, action = :ac
+                WHERE config_hash = :h AND run_id = :r AND node_id = :n AND served = :served AND cited = :uncited
+            """), dict(key, cited=True, served=True, uncited=False, tk=ticker, ac=REJECT_ACTION))
+            if getattr(res, "rowcount", 0):
+                n += 1
+                continue
+            row = conn.execute(text("""
+                SELECT route FROM policy_graph_hits
+                WHERE config_hash = :h AND run_id = :r AND node_id = :n AND served = :served
+                ORDER BY id LIMIT 1
+            """), dict(key, served=True)).fetchone()
+            conn.execute(text("""
+                INSERT INTO policy_graph_hits (config_hash, agent_type, prompt_version, run_id, decided_at, node_id, route, served, cited, ticker, action)
+                VALUES (:h, :a, :v, :r, :t, :n, :route, :served, :cited, :tk, :ac)
+            """), dict(key, a=agent_type, v=prompt_version, t=decided_at or _now(),
+                       route=(row[0] if row and row[0] else "unserved"), served=False, cited=True, tk=ticker, ac=REJECT_ACTION))
             n += 1
     return n
 
@@ -662,4 +813,5 @@ def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> 
 __all__ = ["CITE_RE", "MAX_CITES", "WINDOWS", "ensure_hits_schema", "ensure_runs_schema", "record_run", "run_stats", "last_run_served",
            "DDL_RUNS_POSTGRES", "record_served", "record_cited", "hit_counts", "backfill_code_served",
            "hit_map", "health_for_prompt", "backfill_hits_from_decisions", "DDL_HITS_POSTGRES", "parse_cites", "strip_cites", "split_cites", "append_cites", "normalize_ids",
-           "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health"]
+           "fold_into_decisions", "citable_nodes", "guideline_index", "citation_health",
+           "REJECT_VERDICTS", "REJECT_ACTION", "is_rejection", "fold_considered", "considered_rejections", "ltm_index_lines"]

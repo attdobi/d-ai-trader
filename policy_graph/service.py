@@ -1049,7 +1049,8 @@ def node_payload(engine, config_hash: str, agent_type: str, version, node_id: st
     overlaps.sort(key=lambda o: -(o["confidence"] or 0))
     fires_map = (cur.manifest.get("code") or {}).get("fires") or {}
     citations, hits = None, None
-    if agent_type == "DeciderAgent" and node.owner in ("db", "default-file", "code"):
+    # decider_memory rows are citable too (⟨DA.ltm.<id>⟩ in the LESSONS block + the GUIDELINE INDEX)
+    if agent_type == "DeciderAgent" and node.owner in ("db", "default-file", "code", "decider_memory"):
         try:
             from . import citations as _cit
             citations = _cit.citation_health(engine, config_hash, node_id)

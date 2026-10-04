@@ -818,6 +818,13 @@ def initialize_database() -> None:
         # Per-run trim statistics of the graph query (served / dropped guidelines, full vs served chars).
         from policy_graph.citations import DDL_RUNS_POSTGRES as _POLICY_RUNS_DDL
         ensure_table(conn, stats, "policy_graph_runs", _POLICY_RUNS_DDL)
+        # Decider replay log (policy_graph/inputs.py owns the schema; SQLite variant there for tests): one
+        # row per Decider call with the exact system/user prompt sent, the policy fields as rendered, the
+        # assembly context's ticker lists, the injected memory row ids and the raw reply. Holds holdings
+        # and cash — local database only.
+        from policy_graph.inputs import DDL_POSTGRES as _DECIDER_INPUTS_DDL, INDEX_RUN_SQL as _DECIDER_INPUTS_IDX
+        ensure_table(conn, stats, "decider_inputs", _DECIDER_INPUTS_DDL)
+        conn.execute(text(_DECIDER_INPUTS_IDX))
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(
