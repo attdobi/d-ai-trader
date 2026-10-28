@@ -3120,6 +3120,16 @@ OUTPUT (STRICT)
     _input_id = _log_decider_input(
         config_hash, run_id, prompt_version, system_prompt=system_prompt, user_prompt=prompt,
         policy=_policy_rendered, context=_ctx_lists, ltm_ids=_ltm_injected)
+    # Freeze the supplied candidate universe before asking the model. No market
+    # lookup or LLM call occurs here; a later answer cannot add hindsight to recall.
+    try:
+        from policy_graph.opportunities import record_snapshot as _record_opportunity_snapshot
+        _record_opportunity_snapshot(
+            engine, config_hash, run_id, _contra, input_id=_input_id,
+            prompt_version=prompt_version, context=_ctx_lists,
+            holdings=stock_holdings, quarantined=locals().get("_quarantined") or ())
+    except Exception as _opportunity_exc:
+        print(f"⚠️ Opportunity snapshot skipped ({type(_opportunity_exc).__name__})")
     # Comparison outputs never supply an assembly override or trade action.
     if _decisions_shadow.get("job") is not None:
         try:
@@ -3138,6 +3148,12 @@ OUTPUT (STRICT)
         agent_name="DeciderAgent"
     )
     _log_decider_reply(_input_id, ai_response)
+    try:
+        from policy_graph.opportunities import record_decisions as _record_opportunity_decisions
+        _record_opportunity_decisions(engine, config_hash, run_id, ai_response,
+                                      input_id=_input_id, prompt_version=prompt_version)
+    except Exception as _opportunity_exc:
+        print(f"⚠️ Opportunity action audit skipped ({type(_opportunity_exc).__name__})")
     print(f"🗒️ Parsed Decider response ({type(ai_response).__name__}): {ai_response}")
 
     # Ensure response is always a list

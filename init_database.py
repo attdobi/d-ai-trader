@@ -870,6 +870,17 @@ def initialize_database() -> None:
         ensure_table(conn, stats, "decider_inputs", _DECIDER_INPUTS_DDL)
         conn.execute(text(_DECIDER_INPUTS_IDX))
 
+        # Prospective supplied candidates and fixed-horizon paper returns are
+        # separate from executed orders and realized trade_outcomes.
+        from policy_graph.opportunities import DDL_POSTGRES as _OPPORTUNITIES_DDL, \
+            DDL_OUTCOMES_POSTGRES as _OPPORTUNITY_OUTCOMES_DDL, \
+            DDL_ATTEMPTS_POSTGRES as _OPPORTUNITY_ATTEMPTS_DDL, INDEXES as _OPPORTUNITY_INDEXES
+        ensure_table(conn, stats, "learning_opportunities", _OPPORTUNITIES_DDL)
+        ensure_table(conn, stats, "learning_opportunity_outcomes", _OPPORTUNITY_OUTCOMES_DDL)
+        ensure_table(conn, stats, "learning_opportunity_attempts", _OPPORTUNITY_ATTEMPTS_DDL)
+        for _ddl in _OPPORTUNITY_INDEXES:
+            conn.execute(text(_ddl))
+
         # Policy router (policy_router/): one row per routable node per Decider cycle (p, include/exclude,
         # whether the prompt carried it) and one summary row per cycle (mode, chars, expected recall).
         from policy_router.log import DDL_DECISIONS_POSTGRES as _ROUTER_DECISIONS_DDL, \

@@ -117,6 +117,8 @@ class DAITraderOrchestrator:
         self._startup_time_et = datetime.now(EASTERN_TIMEZONE)
         self._cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
         self._next_cadence_run_et = None
+        self._learning_outcomes_lock = threading.Lock()
+        self._learning_outcomes_thread = None
         
     def initialize_database(self):
         """Initialize database tables for tracking processed summaries"""
@@ -787,6 +789,43 @@ class DAITraderOrchestrator:
             self.scheduled_summarizer_and_decider_job()
             self._next_cadence_run_et += timedelta(minutes=self._cadence_minutes)
     
+    def scheduled_learning_outcomes_job(self):
+        """Launch one bounded paper-mark worker without delaying scheduled trading.
+
+        Daily 17:15 ET is after the evaluator's conservative daily-bar cutoff.
+        This worker only reads historical market bars and writes the candidate
+        ledger. It cannot invoke the Decider, place orders, or change holdings.
+        A daemon worker does not hold shutdown open; a lock prevents overlap.
+        """
+        if not self._learning_outcomes_lock.acquire(blocking=False):
+            return False
+
+        def _work():
+            try:
+                from policy_graph.opportunities import has_pending, refresh_outcomes
+                config_hash = get_current_config_hash()
+                if not has_pending(engine, config_hash):
+                    return
+                result = refresh_outcomes(engine, config_hash, limit=300, max_tickers=40)
+                logger.info("Learning paper outcomes: %d tickers, %d marks, %d unavailable sources",
+                            result.get("tickers", 0), result.get("outcomes_written", 0),
+                            result.get("source_failures", 0))
+            except Exception as exc:
+                # Connection exceptions can contain DSNs; log the class only.
+                logger.warning("Learning paper outcome maintenance skipped (%s)", type(exc).__name__)
+            finally:
+                self._learning_outcomes_lock.release()
+
+        try:
+            self._learning_outcomes_thread = threading.Thread(
+                target=_work, name="learning-paper-outcomes", daemon=True)
+            self._learning_outcomes_thread.start()
+        except Exception as exc:
+            self._learning_outcomes_lock.release()
+            logger.warning("Learning paper outcome worker unavailable (%s)", type(exc).__name__)
+            return False
+        return True
+
     def setup_schedule(self):
         """Setup the scheduling for all jobs with configurable cadence"""
         def _et_to_local_time_str(et_hhmm: str) -> str:
@@ -806,6 +845,9 @@ class DAITraderOrchestrator:
         # Feedback agent - weekly, Thursday nights after market close (8:30 PM ET / 5:30 PM PT)
         weekly_feedback_local = _et_to_local_time_str("20:30")  # e.g., 17:30 PT
         schedule.every().thursday.at(weekly_feedback_local).do(self.scheduled_feedback_job)
+
+        # Explicit ET timezone follows DST without changing the trading schedule.
+        schedule.every().day.at("17:15", "America/New_York").do(self.scheduled_learning_outcomes_job)
         
         logger.info("="*60)
         logger.info("Schedule setup completed")
@@ -817,6 +859,7 @@ class DAITraderOrchestrator:
         logger.info(f"      - Day 1 anchor: startup time + cadence")
         logger.info(f"      - Subsequent days: first cadence run at 9:30 AM ET + cadence, then every {cadence_minutes} minutes")
         logger.info(f"   📊 Feedback: Weekly on Thursday at 8:30 PM ET ({weekly_feedback_local} {LOCAL_TZ_ABBR})")
+        logger.info("   🧭 Learning paper outcomes: daily 5:15 PM ET, separate background worker")
         if cadence_minutes <= 15:
             # 390 minutes of trading (9:30 AM - 4:00 PM) minus opening trade
             cycles = int(390 / cadence_minutes)

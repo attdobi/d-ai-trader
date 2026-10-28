@@ -1,5 +1,10 @@
 # Policy Graph
 
+The **Learning map** subtab adds fixed semantic landmarks, policy-version playback,
+prospective opportunity evidence and explicitly launched paired policy comparisons.
+See [Learning map](LEARNING_MAP.md) for the paper outcome conventions, metric
+denominators, replay scope and rollout requirements.
+
 Each agent's prompt (Summarizer, Company extraction, Decider, Feedback) is now also a **versioned knowledge graph**:
 a directory of Markdown guideline files plus `edges.json`, one directory per prompt version, in the
 RUSH layout (see `~/RUSH/policy-graph/`). The dashboard's **Policy Graph** tab renders it as an

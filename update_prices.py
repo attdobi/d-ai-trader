@@ -245,10 +245,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Update current prices for D-AI-Trader holdings')
     parser.add_argument('--show', action='store_true', help='Show current holdings without updating')
     parser.add_argument('--update', action='store_true', help='Update all current prices')
+    parser.add_argument('--learning-outcomes', action='store_true',
+                        help='Refresh fixed-horizon paper outcomes for supplied candidates; no orders or holdings changes')
+    parser.add_argument('--config-hash', help='Required with --learning-outcomes to scope the candidate ledger')
     
     args = parser.parse_args()
     
-    if args.show:
+    if args.learning_outcomes:
+        if not args.config_hash:
+            parser.error('--learning-outcomes requires --config-hash')
+        from policy_graph.opportunities import refresh_outcomes
+        print(refresh_outcomes(engine, args.config_hash))
+    elif args.show:
         show_current_holdings()
     elif args.update:
         update_all_prices()
@@ -257,4 +265,4 @@ if __name__ == "__main__":
     else:
         # Default: show current holdings
         show_current_holdings()
-        print("\nTo update prices, run: python update_prices.py --update") 
+        print("\nTo update prices, run: python update_prices.py --update")

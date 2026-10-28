@@ -12,7 +12,12 @@ Error envelope: every JSON route answers `{"error": "<message>"}` with 400 (bad 
 from __future__ import annotations
 
 import re
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Response, jsonify, render_template, request
 
@@ -106,13 +111,15 @@ def _id_arg() -> str:
 
 
 def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_margin_account,
-                                 llm=None, proposal_context=None, activate=None, proposal_model=None) -> None:
+                                 llm=None, proposal_context=None, activate=None, proposal_model=None,
+                                 learning_runner=None) -> None:
     """`llm(role, system_text, user_text) -> str` (roles: drafter, critic), `proposal_context(config_hash,
     agent_type) -> dict` (diagnostics, evidence, verdict history) and `activate` (prompt_manager
     .set_active_prompt_version) are optional: without them the proposal routes answer 503."""
     repo_root = Path(repo_root)
     is_margin_account = bool(is_margin_account)
     common = dict(repo_root=repo_root, is_margin_account=is_margin_account)
+    replay_jobs, replay_lock, replay_pool = {}, threading.Lock(), None
 
     @app.route("/policy-graph")
     def policy_graph_page():
@@ -160,6 +167,22 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             factor_days = int(raw_days) if raw_days and _VERSION_RE.match(str(raw_days)) else 90
             return jsonify(service.node_payload(engine, config_hash, agent, version, node_id,
                                                 factor_days=max(7, min(factor_days, 3650)), **common))
+        return _run(go)
+
+    @app.route("/api/policy-graph/learning", methods=["GET"])
+    def policy_graph_learning():
+        config_hash = get_config_hash()
+
+        def go():
+            from .learning import learning_payload
+            raw = request.args.get("days", "90")
+            if not _VERSION_RE.fullmatch(str(raw)) or not 1 <= int(raw) <= 3650:
+                raise service.BadRequest("days must be an integer between 1 and 3650")
+            response = jsonify(learning_payload(engine, config_hash, _agent_arg(default="DeciderAgent"),
+                                               _version_arg(), days=int(raw), **common))
+            if hasattr(response, "headers"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
         return _run(go)
 
     @app.route("/api/policy-graph/diff", methods=["GET"])
@@ -262,6 +285,96 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
     def _json_body() -> dict:
         body = request.get_json(silent=True) if hasattr(request, "get_json") else None
         return body if isinstance(body, dict) else {}
+
+    # Explicit replay controls. GETs and page loads never invoke the runner.
+    def _replay_body():
+        from .learning_replay import MODES
+        origin = request.headers.get("Origin") if hasattr(request, "headers") else None
+        if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.scheme, request.host):
+            raise service.BadRequest("Replay requests must come from this dashboard")
+        if getattr(request, "content_length", 0) and request.content_length > 16384:
+            raise service.BadRequest("Replay request is too large")
+        body = _json_body()
+        ids = body.get("source_input_ids")
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 6 or any(
+                isinstance(i, bool) or not isinstance(i, int) or i < 1 for i in ids):
+            raise service.BadRequest("Choose between 1 and 6 exact saved input IDs")
+        candidate = body.get("candidate_version")
+        if isinstance(candidate, bool) or not isinstance(candidate, int) or candidate < 0:
+            raise service.BadRequest("candidate_version must be a non-negative integer")
+        mode = body.get("assembly_mode", "captured_subgraph_edits")
+        if mode not in MODES:
+            raise service.BadRequest("Unknown replay assembly mode")
+        spec = body.get("outcome_spec") or {"horizon": 3}
+        if not isinstance(spec, dict) or isinstance(spec.get("horizon"), bool) or spec.get("horizon") not in (1, 3, 5):
+            raise service.BadRequest("Paper horizon must be 1, 3 or 5 sessions")
+        return body, dict(source_input_ids=ids, candidate_version=candidate, assembly_mode=mode,
+                          outcome_spec={"horizon": spec["horizon"]}, max_calls=12)
+
+    @app.route("/api/policy-graph/learning/replay-preview", methods=["POST"])
+    def policy_learning_replay_preview():
+        def go():
+            from .learning_replay import preview_comparison
+            _body, kwargs = _replay_body()
+            return jsonify(preview_comparison(engine, get_config_hash(), **kwargs))
+        return _run(go)
+
+    @app.route("/api/policy-graph/learning/replay", methods=["POST"])
+    def policy_learning_replay_start():
+        def go():
+            nonlocal replay_pool
+            from .learning_replay import preview_comparison, run_comparison
+            body, kwargs = _replay_body()
+            if learning_runner is None:
+                return _error("Replay model client is not configured", 503)
+            config_hash = get_config_hash()
+            expected = body.get("expected_cohort_hash")
+            if not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected):
+                raise service.BadRequest("Preview this exact comparison before running it")
+            preview = preview_comparison(engine, config_hash, **kwargs)
+            if not preview.get("compatible"):
+                return _error("; ".join(preview.get("errors") or ["Comparison is incompatible"]), 400)
+            if preview.get("cohort_hash") != expected:
+                return _error("Saved comparison changed; preview it again", 409)
+            with replay_lock:
+                if any(j["status"] in ("queued", "running") for j in replay_jobs.values()):
+                    return _error("A policy replay is already running", 409)
+                completed = sorted(replay_jobs, key=lambda key: replay_jobs[key]["created"])
+                for old in completed[:-11]:
+                    replay_jobs.pop(old, None)
+                job_id = uuid.uuid4().hex
+                replay_jobs[job_id] = {"status": "queued", "created": time.time(), "config_hash": config_hash}
+                if replay_pool is None:
+                    replay_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="policy-replay")
+
+            def work():
+                with replay_lock:
+                    replay_jobs[job_id]["status"] = "running"
+                try:
+                    def scoped_runner(request_data):
+                        return learning_runner({**request_data, "config_hash": config_hash})
+                    result = run_comparison(engine, config_hash, runner=scoped_runner,
+                                            expected_cohort_hash=expected, **kwargs)
+                    with replay_lock:
+                        replay_jobs[job_id].update(status="complete", result=result)
+                except Exception as exc:
+                    # Provider errors can echo requests. Never expose their raw message.
+                    with replay_lock:
+                        replay_jobs[job_id].update(status="error", error=f"Replay stopped ({type(exc).__name__}); no policy activated")
+            replay_pool.submit(work)
+            return jsonify({"job_id": job_id, "status": "queued"}), 202
+        return _run(go)
+
+    @app.route("/api/policy-graph/learning/replay-jobs/<job_id>", methods=["GET"])
+    def policy_learning_replay_job(job_id):
+        with replay_lock:
+            job = replay_jobs.get(job_id)
+            if not job or job["config_hash"] != get_config_hash():
+                return _error("Replay job unavailable for this configuration", 404)
+            result = {k: v for k, v in job.items() if k not in ("created", "config_hash")}
+        response = jsonify(result)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route("/api/policy-graph/proposals", methods=["GET"])
     def policy_graph_proposals_list():

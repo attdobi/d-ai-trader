@@ -361,6 +361,7 @@
     params.set('agent', state.agent);
     if (state.version !== null && state.version !== undefined) params.set('v', String(state.version));
     if (state.selected) params.set('node', state.selected);
+    if (new URLSearchParams(location.hash.replace(/^#/, '')).get('view') === 'learning') params.set('view', 'learning');
     const next = `#${params.toString()}`;
     if (location.hash === next) return;
     state.hashWriting = true;
@@ -850,6 +851,7 @@
 
     rememberVersion();
     writeHash();
+    window.dispatchEvent(new CustomEvent('policygraph:loaded', { detail: { agent, version: state.version, payload } }));
   }
 
   function updateLinks(payload) {

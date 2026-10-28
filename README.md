@@ -513,9 +513,21 @@ Schwab refresh tokens expire after about 7 days. On `refresh_token_authenticatio
 | `effective_funds_probe.py` | Schwab funds vs the shadow ledger |
 | `python -m policy_graph.backfill --config-hash H [--verify-only]` | Rebuild or verify one config's policy-graph directories |
 | `python -m policy_graph.backfill --baseline [--verify-only]` | Regenerate or verify the committed baseline (no database) |
+| `learning_replay.py --input-id ID --candidate-version V` | Preview a paired policy comparison; paid calls require explicit `--execute` |
+| `update_prices.py --learning-outcomes --config-hash H` | Refresh fixed-horizon paper outcomes for supplied candidates |
 | `run_schwab_streaming.py` | Level-one quotes and account activity (started by the live-view launcher) |
 
 ---
+
+## Learning map
+
+**Policy Graph → Learning map** connects exact rule revisions, reviews and cited
+cases through a fixed local embedding projection. Its opportunity ledger records
+supplied candidates before decisions and marks paper outcomes at 1/3/5 sessions.
+Paired replay previews show the exact cohort and model-call count; running a
+comparison is explicit and never activates a policy. See
+[Learning map](docs/LEARNING_MAP.md) for conventions and evidence limits. Restart
+the regular trader to load prospective capture and daily 17:15 ET paper maintenance.
 
 ## Guardrails
 

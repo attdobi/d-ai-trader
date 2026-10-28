@@ -2,6 +2,10 @@
 
 {% block title %}Policy Graph{% endblock %}
 
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/policy-learning.css') }}" />
+{% endblock %}
+
 {% block content %}
 <div class="pe-page pg-page">
 
@@ -26,14 +30,14 @@
         <button type="button" id="pgPrev" class="pe-btn secondary pg-btn-small" disabled>Previous</button>
         <button type="button" id="pgNext" class="pe-btn secondary pg-btn-small" disabled>Latest version</button>
         <span id="pgActiveBadge" class="pe-badge pe-active pg-active-badge" hidden>Active</span>
-        <select id="pgLayer" class="pe-select pg-select" aria-label="Which text to show">
+        <select id="pgLayer" class="pe-select pg-select" aria-label="Which text to show" data-explorer-only>
           <option value="effective">Full effective policy</option>
           <option value="stored">Stored guidelines only</option>
         </select>
-        <label class="pg-check"><input type="checkbox" id="pgHighlightChanges" /> Highlight changes vs previous version</label>
-        <label class="pg-check"><input type="checkbox" id="pgShowRefs" /> Show references</label>
-        <label class="pg-check" title="Grey out every guideline the graph query did not serve on the Decider's latest cycle (from the hit log)"><input type="checkbox" id="pgLastRun" /> Dim what the Decider did not read last cycle</label>
-        <span class="pg-links">
+        <label class="pg-check" data-explorer-only><input type="checkbox" id="pgHighlightChanges" /> Highlight changes vs previous version</label>
+        <label class="pg-check" data-explorer-only><input type="checkbox" id="pgShowRefs" /> Show references</label>
+        <label class="pg-check" data-explorer-only title="Grey out every guideline the graph query did not serve on the Decider's latest cycle (from the hit log)"><input type="checkbox" id="pgLastRun" /> Dim what the Decider did not read last cycle</label>
+        <span class="pg-links" data-explorer-only>
           <a id="pgCompiledLink" class="pg-link" href="#" target="_blank" rel="noopener">Compiled prompt ↗</a>
           <a id="pgRuntimeLink" class="pg-link" href="#" target="_blank" rel="noopener">As the model runs it ↗</a>
           <a id="pgBundleLink" class="pg-link" href="#" target="_blank" rel="noopener">Bundle (.md) ↗</a>
@@ -47,6 +51,71 @@
     <div id="pgVersionMeta" class="pg-version-summary"></div>
   </section>
 
+  <div class="pl-subnav" role="tablist" aria-label="Policy Graph views">
+    <button type="button" id="plExplorerTab" role="tab" aria-selected="true" aria-controls="pgGraphCard" data-policy-view="explorer">Policy explorer</button>
+    <button type="button" id="plLearningTab" role="tab" aria-selected="false" aria-controls="plLearning" data-policy-view="learning">Learning map <span class="pl-new-mark" aria-hidden="true"></span></button>
+    <span class="pl-subnav-note">From experience to a reviewed policy</span>
+  </div>
+
+  <section class="pe-card pl-learning" id="plLearning" role="tabpanel" aria-labelledby="plLearningTab" hidden>
+    <div class="pl-heading">
+      <div><span class="pg-eyebrow">EXPERIENCE → POLICY → EVALUATION</span><h2>Watch the policy learn.</h2><p class="pg-muted">Follow a rule through its versions, inspect its evidence, and compare decisions on the same saved cases.</p></div>
+      <span class="pl-readonly">Observation &amp; paper evaluation</span>
+    </div>
+    <div class="pl-lenses" role="tablist" aria-label="Learning map lenses">
+      <button type="button" role="tab" data-learning-lens="evolution" aria-selected="true" aria-controls="plEvolution"><span>01</span> Policy evolution</button>
+      <button type="button" role="tab" data-learning-lens="evidence" aria-selected="false" aria-controls="plEvidence"><span>02</span> Opportunity evidence</button>
+      <button type="button" role="tab" data-learning-lens="comparison" aria-selected="false" aria-controls="plComparison"><span>03</span> Policy comparisons</button>
+    </div>
+    <div class="pl-status-row"><p id="plStatus" class="pl-status" role="status" aria-live="polite">Open Learning map to load policy history.</p><button type="button" id="plRefresh" class="pl-button">Refresh evidence</button></div>
+    <div id="plEvolution" role="tabpanel">
+      <div class="pl-history-bar">
+        <button id="plPlay" type="button" class="pl-button" aria-label="Play policy history" disabled>▶ Play history</button>
+        <button id="plPrevious" type="button" class="pl-button pl-step" aria-label="Previous learning version" disabled>←</button>
+        <input id="plTimeline" type="range" min="0" max="0" value="0" aria-label="Learning history version" disabled />
+        <button id="plNext" type="button" class="pl-button pl-step" aria-label="Next learning version" disabled>→</button>
+        <strong id="plVersionLabel">—</strong>
+      </div>
+      <div class="pl-version-row"><p id="plVersionDescription"></p><span id="plVersionChanges"></span></div>
+      <div class="pl-map-tools">
+        <label class="pl-search"><span class="pg-sr-only">Search learning landmarks</span><input id="plSearch" type="search" placeholder="Find a rule, lesson or theme…" autocomplete="off" /></label>
+        <select id="plTheme" aria-label="Learning map policy section"><option value="">All themes</option><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></select>
+        <label class="pl-checkbox"><input id="plShowRetired" type="checkbox" checked /> Show changes from previous version</label>
+      </div>
+      <div class="pl-map-layout">
+        <div class="pl-map-frame">
+          <div id="plMap" class="pl-map" aria-label="Policy learning landscape"></div>
+          <div class="pl-map-key"><span><i class="pl-key-dot added"></i>Added</span><span><i class="pl-key-dot modified"></i>Modified</span><span><i class="pl-key-dot retired"></i>Retired</span><span class="pl-map-count" id="plMapCount"></span></div>
+          <div id="plTypeKey" class="pl-map-key pl-type-key" aria-label="Landmark node types"></div>
+          <p id="plProjectionNote" class="pl-footnote"></p>
+        </div>
+        <aside id="plInspector" class="pl-inspector" aria-live="polite"><span class="pg-eyebrow">SELECT A LANDMARK</span><h3>Every rule has a history.</h3><p class="pg-muted">Choose a point to read its exact text, compare revisions, and inspect the cases and reviews connected to it.</p></aside>
+      </div>
+    </div>
+    <div id="plEvidence" role="tabpanel" hidden>
+      <div class="pl-panel-heading"><div><h3>Which opportunities did we learn from?</h3><p class="pg-muted">Each observation keeps its decision-time context and policy version. Paper returns use a declared horizon and cost assumption; they are separate from realized trades.</p></div><label class="pl-horizon">Paper horizon <select id="plHorizon" aria-label="Paper outcome horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label></div>
+      <div id="plEvidenceMetrics" class="pl-metrics"></div>
+      <p id="plCoverageNote" class="pl-footnote"></p>
+      <div class="pl-evidence-layout"><div id="plCases" class="pl-case-list"></div><aside id="plCaseInspector" class="pl-inspector"><span class="pg-eyebrow">CASE DETAILS</span><h3>A setup at a point in time.</h3><p class="pg-muted">Select an observation to see its action, coverage, recorded features, cited rules and paper outcomes.</p></aside></div>
+    </div>
+    <div id="plComparison" role="tabpanel" hidden>
+      <div class="pl-panel-heading"><div><h3>Did the candidate change the right decisions?</h3><p class="pg-muted">Compare incumbent and candidate policies on the same frozen inputs. Replay decisions are observations, not orders, and never activate a policy.</p></div></div>
+      <form id="plReplayForm" class="pl-replay-form">
+        <div class="pl-replay-fields">
+          <label>Saved incumbent version<select id="plReplayIncumbent" aria-label="Saved incumbent policy version"></select></label>
+          <label>Saved inputs<select id="plReplayCount" aria-label="Number of saved inputs"><option value="1">Latest input · 2 model calls</option><option value="3" selected>Up to 3 inputs · 6 model calls</option><option value="6">Up to 6 inputs · 12 model calls</option></select></label>
+          <label>Candidate version<select id="plReplayCandidate" aria-label="Candidate policy version"></select></label>
+          <label>Policy scope<select id="plReplayMode" aria-label="Replay policy scope"><option value="captured_subgraph_edits">Preserve served subgraph · edits only</option><option value="full_policy">Full stored policy · additions and removals</option></select></label>
+          <label>Paper horizon<select id="plReplayHorizon" aria-label="Replay paper outcome horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label>
+        </div>
+        <p id="plReplayCohortNote" class="pl-footnote"></p>
+        <div class="pl-replay-actions"><button type="submit" id="plReplayPreview" class="pl-button" disabled>Preview comparison</button><button type="button" id="plReplayRun" class="pl-button pl-run" disabled>Preview before running</button><button type="button" id="plReplayRefresh" class="pl-button" hidden>Check running comparison</button></div>
+        <div id="plReplayPlan" class="pl-replay-plan" aria-live="polite"></div>
+      </form>
+      <div id="plReplays" class="pl-replays"></div>
+    </div>
+    <details class="pl-methods"><summary>How to read this map</summary><div><p>Nearby policy landmarks have similar text. Their positions stay fixed across the version playback. Color identifies the existing node type; rings identify version changes. Text similarity does not estimate profit.</p><p>The opportunity ledger records a bounded candidate universe. Recall and false-positive rate require matured, assessed cases from that universe. Unobserved, unassessed and pending cases stay visible as missing evidence.</p><p>Policy citations and co-occurring outcomes show association. An individual rule's incremental effect requires a paired policy comparison and independent future evaluation. No smooth profitability boundary is inferred from this map.</p><div id="plNotes"></div></div></details>
+  </section>
 
   <!-- Card 1b: proposals — the loop edits the graph, you approve per guideline -->
   <section class="pe-card" id="pgProposalCard">
@@ -686,4 +755,5 @@
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph-schema.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
 {% endblock %}

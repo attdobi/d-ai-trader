@@ -119,11 +119,18 @@ def _policy_graph_context(config_hash, agent_type):
     }
 
 
+def _policy_learning_runner(request_data):
+    """Explicit replay jobs use captured prompts and never invoke the live trader."""
+    from policy_graph.learning_replay_client import make_openai_runner
+    runner = make_openai_runner(engine=engine, config_hash=request_data["config_hash"])
+    return runner(request_data)
+
+
 register_policy_graph_routes(
     app, engine=engine, get_config_hash=get_current_config_hash,
     repo_root=Path(__file__).resolve().parent, is_margin_account=IS_MARGIN_ACCOUNT,
     llm=_policy_graph_llm, proposal_context=_policy_graph_context, activate=set_active_prompt_version,
-    proposal_model=lambda: get_agent_model('PromptEvolutionAgent'))
+    proposal_model=lambda: get_agent_model('PromptEvolutionAgent'), learning_runner=_policy_learning_runner)
 
 # Manual "Run All" concurrency guard and state tracking
 _manual_run_lock = threading.Lock()
