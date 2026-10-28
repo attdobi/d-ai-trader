@@ -157,15 +157,25 @@ Before an active provider is considered:
 ## Configuration and local verification
 
 ```dotenv
-DAI_DECISIONS_ROUTER=off
+DAI_DECISIONS_ROUTER=shadow
 DAI_DECISIONS_TIMEOUT_S=8
 ```
 
 Only `off` and `shadow` are supported; `active` does not enable hosted routing.
-The local rollout stays off pending explicit approval for sending saved/live cycle
-context to OpenAI. No saved-cycle hosted probe has been run yet. After approval,
-set `shadow` and restart the trader; restart the dashboard to load new server
-code. No restart or trader invocation is needed to run the offline tests.
+The default remains `off`. After explicit owner approval on October 28, the local
+configuration was set to `shadow`. Restart the trader to load this setting and the
+new code; restart the dashboard to load the new server code. Existing running
+processes were not restarted by the probe. No restart or trader invocation is
+needed to run the offline tests.
+
+The first approved saved-cycle probe succeeded and is recorded as comparison 1,
+`source_kind=replay`, linked to exact Decider input 148. It scored 31 optional
+nodes against 55 pinned nodes and selected 17, in 1,326 ms. Reported usage was
+25,473 input tokens: 7,522 uncached and 17,951 written to the 30-minute cache,
+with no cache reads or output tokens. Its endpoint-specific estimated cost was
+**$0.002996075**, about $0.003. This cold-cache probe measures request mechanics
+and relevance estimates; it does not establish forward quality or actual prompt
+savings. The trading prompt and trade decisions were unchanged.
 
 ```bash
 ./dai/bin/python -m pytest -q tests/test_decisions_router.py tests/test_decisions_shadow_bridge.py tests/test_cost_usage_decisions.py

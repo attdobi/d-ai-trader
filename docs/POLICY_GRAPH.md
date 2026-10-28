@@ -2,8 +2,8 @@
 
 Each agent's prompt (Summarizer, Company extraction, Decider, Feedback) is now also a **versioned knowledge graph**:
 a directory of Markdown guideline files plus `edges.json`, one directory per prompt version, in the
-RUSH layout (see `~/RUSH/policy-graph/`). The dashboard's **Policy Graph** tab renders it as a
-force-directed graph with a version timeline, so you can watch the policy evolve through the
+RUSH layout (see `~/RUSH/policy-graph/`). The dashboard's **Policy Graph** tab renders it as an
+interactive grouped overview and focused relationship map with a version timeline, so you can watch the policy evolve through the
 reinforcement-learning loop instead of reading five-field diffs.
 
 ```
@@ -47,14 +47,64 @@ re-reads what it wrote and asserts equality before renaming the directory into p
 Because the graph compiles back to the exact prompt text, the graph *is* the policy. Phase 1 keeps
 the live trader untouched: the runtime still reads `prompt_versions`; the graph is derived beside it.
 
+## Explorer vocabulary (October 28, 2026)
+
+The presentation schema in `static/js/policy-graph-schema.js` gives every card one
+stable type, independent of its behavioral **polarity**. A lesson that warns about
+a risk remains a Lesson; it does not become a Rule merely because its text is
+restrictive. Canonical storage types, guideline IDs, edges and policy text are
+unchanged. The schema only organizes their display.
+
+| Display type | Meaning | Type color |
+|---|---|---|
+| Rule | Numbered rule or feedback reminder | Coral |
+| Principle | Identity, mission and guiding policy | Violet |
+| Lesson | Learned guidance, patterns or mistakes | Teal |
+| Diary | Dated experience entry | Amber |
+| Memory | Long-term memory row | Blue |
+| Context | Market factor, event or ticker reference | Sky |
+| Scaffold | Template, code-owned instruction or runtime description | Slate |
+| Group | Structural root, field or header-only container | Gray |
+
+Overview places same-size cards in five responsive groups: **Identity**, **Trading
+rules**, **Learned context**, **Prompt scaffold** and **Cycle context**. Citation
+counts never change card geometry. Container hubs become group headers rather
+than competing with content cards; the inspector's breadcrumb and parent link
+retain access to their hierarchy. Sections containing meaningful principles or
+patterns remain content cards.
+
+Card features carry separate meanings: **source** identifies who owns the text;
+**status** distinguishes current, historical, retired, conditional code not used,
+and proposed content; **usage** reports last-cycle inclusion and 30-day citations;
+**change** reports the selected version's diff. A lock concerns editability, not
+relevance or measured performance. Color means type, not profitability, certainty
+or a routing verdict.
+
+Select a card to open **Connections**, a one-hop view of actual relationships in
+the selected layers. Search, node-type and field filters narrow the view; the
+inspector keeps the complete original text and provenance available. Overview
+provides organization without drawing every cross-link at once.
+
+All 14 canonical edge types have an explicit presentation definition:
+
+| Edge family | Canonical relations | Encoding |
+|---|---|---|
+| Structure | `subtype_of` | Gray; child → parent, labeled "Part of" |
+| Flow | `includes`, `constrains`, `enforced_by`, `triggers` | Sky; arrows preserve the recorded source → target direction |
+| Reference | `related_to`, `overlaps`, `cites`, `exception_to`, `boundary_with`, `confused_with`, `clarifies`, `example_of`, `negative_example_of` | Violet dotted links; arrows only for directional relations |
+
+Relatedness, overlap, boundaries and confusion are undirected. Citations,
+exceptions, clarifications and examples retain their direction. The relation's
+specific label remains available even when a family is filtered together.
+
 ## What the graph shows
 
 - **Stored guidelines** (owner `db`): the text in the `prompt_versions` row, split into sections,
   numbered rules, tagged lessons and dated log entries.
-- **Inherited defaults** (owner `default-file`, hollow nodes): when a row's soul/memory column is
+- **Inherited defaults** (owner `default-file`, identified by source): when a row's soul/memory column is
   empty the runtime falls back to `agents/<dir>/SOUL.default.md` / `MEMORY.default.md`; the graph shows
   the git blob as of the row's `created_at`, labelled as inherited, never claiming the database held it.
-- **Code-owned blocks** (owner `code`, dashed orange ring): the eight paragraphs `decider_agent.py`
+- **Code-owned blocks** (owner `code`, Scaffold cards): the paragraphs `decider_agent.py`
   appends every cycle, the CROWD-FADE / CASH PLAYBOOK conditionals, the screener's INDEX REGIME and
   WATCHLIST headers, the event calendar's EVENT CALENDAR header, the LESSONS header. These are
   verbatim copies guarded by an `ast` drift test (`tests/test_policy_graph_code_blocks.py`) so a code
@@ -62,14 +112,15 @@ the live trader untouched: the runtime still reads `prompt_versions`; the graph 
   rows, the event calendar's dates and score) is never policy: only its constant header is a node,
   and the `constrains` edge points at the rule that consumes it (`DA.code.event_calendar →
   DA.directives.strategy.event_gate`).
-- **Long-term memory rows** (owner `decider_memory`, dotted): the `decider_memory` table rows the
+- **Long-term memory rows** (owner `decider_memory`, Memory cards): the `decider_memory` table rows the
   Decider retrieves each cycle, snapshotted per version.
 - **Edges**: `subtype_of` (hierarchy), `includes` (runtime assembly), `related_to` (`[[wiki-links]]`
   and shared `#tags`), `cites` (tickers), `overlaps` (text similarity between a guideline and a
   code/memory block), `constrains` (code block → the rules it enforces).
 
-Polarity colours: hard gate (red), action (green), caution (yellow), identity/principle (purple),
-evidence/lessons (cyan), structure (grey).
+Behavioral polarity remains recorded as gate, action, caution, principle,
+evidence, structure or mixed; the current explorer colors cards by the stable
+display type above.
 
 ## Reading the graph: three layers (2026-09-16)
 
@@ -82,8 +133,9 @@ carries a **layer** and the tab shows one layer at a time (chips at the top of t
 | **Prompt scaffold** | the fixed prompt around the policy: the root, the two templates, the code-owned paragraphs the trader appends, the runtime-inputs note | root, template, code, data | no — code and templates |
 | **Cycle context** | what the Decider sees per cycle, never policy: long-term memory rows, world events and market factors, ticker references | ltm, factor, ticker, concept | no — rebuilt per read |
 
-Edges collapse to three kinds on the tab: **part of** (hierarchy), **feeds** (prompt assembly,
-code block → rule, world factor → rule) and **related** (links, tags, overlaps, tickers).
+The backend retains its coarse `part_of`, `feeds` and `related` metadata. The
+explorer presents these as Structure, Flow and Reference families, preserving the
+specific canonical relation and its direction.
 
 The details panel opens with one line saying what the node is to the Decider ("Policy · gate in
 strategy directives — compiled into the system prompt · served 46× / cited 20× in 90d · read last
@@ -172,8 +224,8 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    the scorecard, the timeline glyphs and the RLHF concordance label keep working.
 4. **Per-guideline human approval on the tab.** Proposals awaiting review show file cards with
    the diff, the drafter's claims and the critic's verdict; every supporting file has a checkbox,
-   the primary cannot be unchecked. Proposed additions appear as dotted green ghost nodes on the
-   graph, edited guidelines get a dotted ring, removals a red one; clicking one shows the proposed
+   the primary cannot be unchecked. Proposed additions appear as cards with proposal status and
+   version-change outlines; clicking one shows the proposed
    diff in the details panel.
 5. **Apply = mint → activate → materialize.** `POST …/proposals/<id>/apply {approved: [ids]}`
    re-applies the approved files on the active version, inserts the `prompt_versions` row
@@ -227,8 +279,8 @@ every historical version, so the graph remains a byte-exact mirror of the databa
 3. **Hit log** (`policy_graph_hits`, one row per guideline per run: `served` with its route,
    `cited` with ticker and action). The node panel shows hits per window — 7d / 30d / 90d / 1y,
    cited over served, win rate of the closed trades the guideline drove — and the routes that
-   carried it into the prompt; on the graph, nodes grow with their 90-day citations and wear a
-   badge with the 30-day count. `citations.backfill_hits_from_decisions` fills `unserved` rows
+   carried it into the prompt. Explorer cards keep a fixed size and show last-cycle usage and
+   the 30-day citation count in their footer. `citations.backfill_hits_from_decisions` fills `unserved` rows
    for decisions made before the log existed.
 
 ## Decision paths (bottom of the tab)

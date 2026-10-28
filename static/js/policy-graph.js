@@ -8,25 +8,9 @@
 (() => {
   'use strict';
 
-  const WIDTH = 900;
-  const HEIGHT = 560;
   const API = '/api/policy-graph';
   const LS_AGENT = 'pg.agent';
   const LS_VERSION = 'pg.version';
-
-  // Mirrors policy_graph.model.COLORS — polarity table + root + code ring.
-  const COLORS = {
-    root: '#42c9ff',
-    structure: '#7f8ca6',
-    gate: '#ff5f73',
-    action: '#29d697',
-    caution: '#fadb5f',
-    principle: '#b28dff',
-    evidence: '#4dd0e1',
-    mixed: '#9aa7c7',
-    code_ring: '#ff9f43',
-    ref: '#7f8ca6'
-  };
 
   const AGENTS = [
     { agent_type: 'DeciderAgent', label: 'Decider', prefix: 'DA' },
@@ -36,7 +20,6 @@
   ];
   const AGENT_TYPES = new Set(AGENTS.map(a => a.agent_type));
   // World events & market factors (owner 'world'): read-time nodes rebuilt from the run log, never files.
-  const WORLD_COLOR = '#f2f4f8';
   const FACTOR_KIND_LABEL = { regime: 'market regime', fomc: 'FOMC decision', cpi: 'CPI print', jobs: 'jobs report', other: 'scheduled event', earnings: 'earnings date' };
 
   const ACTOR_LABEL = {
@@ -45,15 +28,6 @@
     human: 'human',
     claude_code: 'Claude Code',
     rl_loop: 'RL loop'
-  };
-  const POLARITY_LABEL = {
-    gate: 'hard gate',
-    action: 'action',
-    caution: 'caution',
-    principle: 'identity / principle',
-    evidence: 'evidence',
-    structure: 'structure',
-    mixed: 'mixed'
   };
   const FIELD_LABEL = {
     system_prompt: 'system prompt',
@@ -78,9 +52,6 @@
     example_of: 'example of',
     negative_example_of: 'negative example of'
   };
-  const LINK_DISTANCE = { subtype_of: 90, includes: 60, related_to: 140, cites: 110, overlaps: 160, constrains: 160, enforced_by: 160, triggers: 150 };
-  const LINK_STRENGTH = { subtype_of: 0.7, includes: 0.5, related_to: 0.15, cites: 0.1, overlaps: 0.15, constrains: 0.15, enforced_by: 0.15, triggers: 0.12 };
-
   const state = {
     agent: null,
     version: null,
@@ -97,7 +68,11 @@
     lastRun: false,                   // dim what the Decider did not read on its latest cycle
     pathsSource: 'route',             // the flow's left column: 'route' (graph query) or 'factor' (world events)
     showRefs: false,
-    highlightChanges: true,
+    highlightChanges: false,
+    search: '',
+    typeFilter: '',
+    graphMode: 'structure',
+    edgeGroups: new Set(['hierarchy', 'flow', 'reference']),
     nodeCache: new Map(),
     diffAgainst: null,
     similarity: new Map(),
@@ -224,39 +199,6 @@
 
   function rootId() { return state.payload?.root_id || `${agentMeta(state.agent).prefix}.root`; }
 
-  function depthOf(node) {
-    if (typeof node === 'object' && node && Number.isFinite(node.depth)) return node.depth;
-    const id = typeof node === 'object' && node ? node.id : node;
-    const value = String(id || '');
-    if (value === rootId()) return 0;
-    return Math.max(1, value.split('.').length - 1);
-  }
-
-  function childrenFor(id, nodes) {
-    if (!id) return [];
-    return nodes.filter(node => node.id !== id && (node.parent === id || String(node.id).startsWith(`${id}.`)));
-  }
-  function hasChildren(node, nodes) { return childrenFor(node.id, nodes).length > 0; }
-
-  function isRef(node) {
-    const t = String(node.node_type || '').toLowerCase();
-    return t === 'ticker' || t === 'concept';
-  }
-
-  function hitBoost(node) {
-    const h = node && node.hits;
-    if (!h) return 0;
-    const n = Number(h.cited_90d || 0);
-    return n > 0 ? Math.min(6, 1.5 * Math.log2(n + 1)) : 0;
-  }
-
-  function nodeRadius(node, nodes) {
-    if (node.id === rootId() || String(node.node_type).toLowerCase() === 'root') return 14;
-    if (isRef(node)) return 4;
-    const base = hasChildren(node, nodes) ? 10 : 7;
-    return base + hitBoost(node);
-  }
-
   function hitsLabel(node) {
     const h = node && node.hits;
     if (!h) return '';
@@ -343,28 +285,7 @@
       `<details class="pg-plain-original"><summary>Original text</summary>${renderMarkdown(body, node)}</details></div>`;
   }
 
-  function nodeLabel(node) {
-    return truncate(node.title || node.id || '?', 26);
-  }
-
-  // Polarity table + root/ref colour; owner modifiers are strokes, not colours.
-  function nodeColor(node) {
-    if (node.id === rootId() || String(node.node_type).toLowerCase() === 'root') return COLORS.root;
-    if (isRef(node)) return COLORS.ref;
-    if (node.owner === 'world') return WORLD_COLOR;
-    const polarity = String(node.polarity || '').toLowerCase();
-    return COLORS[polarity] || COLORS.mixed;
-  }
-
-  function nodeDash(node) {
-    if (node.owner === 'code') return '4 2';
-    if (node.owner === 'decider_memory') return '1 3';
-    if (node.owner === 'world') return '2 2';
-    return null;
-  }
-  function nodeFill(node) {
-    return node.owner === 'default-file' || node.owner === 'proposal' ? 'var(--surface)' : 'var(--card)';
-  }
+  function nodeColor(node) { return nodePresentation(node).color; }
 
   function lineagePath(id, nodes) {
     const byId = new Map(nodes.map(n => [n.id, n]));
@@ -377,37 +298,6 @@
       cur = cur.parent && cur.parent !== cur.id ? byId.get(cur.parent) : null;
     }
     return path.reverse();
-  }
-
-  function ancestorChain(id, nodes) {
-    const byId = new Map(nodes.map(n => [n.id, n]));
-    const chain = new Set();
-    let cur = byId.get(id);
-    while (cur && cur.parent && cur.parent !== cur.id) {
-      if (chain.has(cur.parent)) break;
-      chain.add(cur.parent);
-      cur = byId.get(cur.parent);
-    }
-    return chain;
-  }
-
-  function descendantSet(id, nodes) {
-    const byParent = new Map();
-    nodes.forEach(n => {
-      if (!n.parent) return;
-      if (!byParent.has(n.parent)) byParent.set(n.parent, []);
-      byParent.get(n.parent).push(n.id);
-    });
-    const out = new Set();
-    const stack = [id];
-    while (stack.length) {
-      const cur = stack.pop();
-      (byParent.get(cur) || []).forEach(child => {
-        if (!out.has(child)) { out.add(child); stack.push(child); }
-      });
-    }
-    nodes.forEach(n => { if (n.id !== id && String(n.id).startsWith(`${id}.`)) out.add(n.id); });
-    return out;
   }
 
   // ★ backfillParentEdges — root parametrised, synthetic subtype_of edges.
@@ -955,7 +845,7 @@
 
     const target = openNode || state.pendingNode || previousSelected;
     state.pendingNode = null;
-    if (target && payload.nodes?.some(n => n.id === target)) applySelection(target);
+    if (target && payload.nodes?.some(n => n.id === target)) applySelection(target, { focus: true });
     else applySelection(null);
 
     rememberVersion();
@@ -977,261 +867,277 @@
     if (lab) lab.href = '/prompt-evolution';
   }
 
-  // ------------------------------------------------------------------ render graph (★)
-  function linkClass(edge) {
-    const type = edgeType(edge);
-    return EDGE_KIND_LABEL[type] ? type : 'subtype_of';
-  }
+  // ------------------------------------------------------------------ policy explorer
+  function nodePresentation(node) { return window.PolicyGraphSchema.nodeView(node); }
+  function edgePresentation(edge) { return window.PolicyGraphSchema.edgeView(edge); }
 
-  function laneX(node) {
-    const field = node.field || '';
-    if (node.owner === 'world') return WIDTH * 0.12;
-    if (node.owner === 'code' || node.owner === 'decider_memory' || node.owner === 'runtime') return WIDTH / 2;
-    if (field === 'system_prompt' || field === 'user_prompt_template') return WIDTH * 0.18;
-    if (field === 'strategy_directives') return WIDTH / 2;
-    if (field === 'soul' || field === 'memory') return WIDTH * 0.82;
-    return WIDTH / 2;
-  }
-
-  function laneY(node) {
-    if (node.owner === 'world') return 70;
-    if (node.owner === 'code' || node.owner === 'decider_memory' || node.owner === 'runtime') return HEIGHT - 70;
-    return 60 + depthOf(node) * 95;
+  function cardTitleLines(title, width) {
+    const max = Math.max(15, Math.floor((width - 28) / 7));
+    const words = String(title || '').split(/\s+/);
+    const lines = [''];
+    words.forEach(word => {
+      const current = lines[lines.length - 1];
+      if (current && (current + ' ' + word).length > max && lines.length < 2) lines.push(word);
+      else lines[lines.length - 1] = current ? current + ' ' + word : word;
+    });
+    return lines.slice(0, 2).map(line => truncate(line, max));
   }
 
   function renderGraph(payload) {
     const wrap = qs('#pgSvgWrap');
     if (!wrap) return;
     if (view.simulation) { view.simulation.stop(); view.simulation = null; }
-    if (!window.d3) {
-      wrap.innerHTML = '<div class="pe-error">Graph library failed to load — the compiled prompt links still work.</div>';
-      view.svg = null; view.nodes = null; view.links = null;
+    view.allNodes = (payload.nodes || []).map(node => ({ ...node }));
+    const ids = new Set(view.allNodes.map(n => n.id));
+    view.allLinks = (payload.edges || []).map(edge => ({ ...edge,
+      sourceId: edgeSource(edge), targetId: edgeTarget(edge), kind: edgeType(edge)
+    })).filter(e => ids.has(e.sourceId) && ids.has(e.targetId));
+    view.focusId = null;
+    wrap.scrollTop = 0;
+    if (!view.resizeObserver && window.ResizeObserver) {
+      view.resizeObserver = new ResizeObserver(entries => {
+        const width = Math.round(entries[0]?.contentRect.width || 0);
+        if (width && width !== view.measuredWidth) {
+          view.measuredWidth = width;
+          window.requestAnimationFrame(drawExplorer);
+        }
+      });
+      view.resizeObserver.observe(wrap);
+    }
+    drawExplorer();
+  }
+
+  function connectionLayout(nodes, links, selected, width) {
+    const center = nodes.find(n => n.id === selected);
+    if (!center) return window.PolicyGraphSchema.groupedLayout(nodes, width, { cardHeight: 94 });
+    const neighbors = nodes.filter(n => n.id !== selected);
+    const cardWidth = Math.min(224, width - 48), cardHeight = 94, gap = 22;
+    const cards = [];
+    let height;
+    if (width >= 760) {
+      const left = neighbors.filter((_, i) => i % 2 === 0), right = neighbors.filter((_, i) => i % 2 === 1);
+      height = Math.max(370, Math.max(left.length, right.length) * (cardHeight + gap) + 60);
+      cards.push({ id: selected, node: center, view: nodePresentation(center), x: (width - cardWidth) / 2,
+        y: (height - cardHeight) / 2, width: cardWidth, height: cardHeight });
+      [left, right].forEach((list, side) => list.forEach((n, i) => cards.push({ id: n.id, node: n,
+        view: nodePresentation(n), x: side ? width - 24 - cardWidth : 24,
+        y: 30 + i * (cardHeight + gap), width: cardWidth, height: cardHeight })));
+    } else {
+      const columns = Math.max(1, Math.min(2, Math.floor((width - 48 + gap) / (cardWidth + gap))));
+      const rowWidth = columns * cardWidth + (columns - 1) * gap;
+      cards.push({ id: selected, node: center, view: nodePresentation(center), x: (width - cardWidth) / 2,
+        y: 30, width: cardWidth, height: cardHeight });
+      neighbors.forEach((n, i) => cards.push({ id: n.id, node: n, view: nodePresentation(n),
+        x: (width - rowWidth) / 2 + (i % columns) * (cardWidth + gap),
+        y: 205 + Math.floor(i / columns) * (cardHeight + gap), width: cardWidth, height: cardHeight }));
+      height = Math.max(360, 205 + Math.ceil(neighbors.length / columns) * (cardHeight + gap) + 24);
+    }
+    return { width, height, cards, groups: [] };
+  }
+
+  function drawExplorer() {
+    const wrap = qs('#pgSvgWrap');
+    if (!wrap || !state.payload) return;
+    if (!window.d3 || !window.PolicyGraphSchema) {
+      wrap.innerHTML = '<div class="pe-error">Graph library unavailable. The compiled policy links still work.</div>';
       return;
     }
-    wrap.innerHTML = `<svg id="pgSvg" viewBox="0 0 ${WIDTH} ${HEIGHT}" role="img" aria-label="${esc(payload.title || 'Policy graph')}"></svg>`;
-
-    const allNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
-    const nodes = allNodes.map(node => ({ ...node }));
-    const nodeSet = new Set(nodes.map(n => n.id));
-    const links = (Array.isArray(payload.edges) ? payload.edges : [])
-      .map(edge => ({ ...edge, source: edgeSource(edge), target: edgeTarget(edge), sourceId: edgeSource(edge), targetId: edgeTarget(edge), kind: edgeType(edge) }))
-      .filter(edge => nodeSet.has(edge.sourceId) && nodeSet.has(edge.targetId));
-
-    const svg = d3.select('#pgSvg');
-    const viewport = svg.append('g').attr('class', 'pg-viewport');
-    const zoom = d3.zoom().scaleExtent([0.15, 4]).on('zoom', event => viewport.attr('transform', event.transform));
-    svg.call(zoom);
-    svg.on('click', () => applySelection(null));
-    view.svg = svg; view.viewport = viewport; view.zoom = zoom;
-
-    viewport.append('rect').attr('width', WIDTH).attr('height', HEIGHT).attr('rx', 14).attr('fill', 'var(--surface)');
-
-    const neighborMap = new Map();
-    nodes.forEach(node => neighborMap.set(node.id, new Set([node.id])));
-    links.forEach(link => {
-      neighborMap.get(link.sourceId)?.add(link.targetId);
-      neighborMap.get(link.targetId)?.add(link.sourceId);
-    });
-    view.neighborMap = neighborMap;
-
-    const link = viewport.append('g').attr('class', 'pg-links')
-      .selectAll('line').data(links).join('line')
-      .attr('class', edge => `pg-link ${linkClass(edge)} k-${edge.edge_kind || 'related'}${edge.proposed ? ' proposed' : ''}`);
-    link.append('title').text(edge => `${EDGE_KIND_LABEL[edge.kind] || edge.kind}${edge.via ? ` via ${edge.via}` : ''}${edge.confidence !== null && edge.confidence !== undefined && edge.kind === 'overlaps' ? ` · ${Math.round(Number(edge.confidence) * 100)} % similar` : ''}`);
-
-    const node = viewport.append('g').attr('class', 'pg-nodes')
-      .selectAll('g').data(nodes).join('g')
-      .attr('class', d => {
-        const cls = ['pg-node', d.id === payload.root_id || hasChildren(d, allNodes) ? 'parent-node' : 'leaf-node'];
-        if (d.status === 'inert') cls.push('is-inert');
-        if (d.ghost) cls.push(`pg-ghost-${d.ghost}`);
-        return cls.join(' ');
-      })
-      .attr('data-id', d => d.id)
-      .attr('tabindex', 0)
-      .attr('role', 'button')
-      .attr('aria-label', d => `${d.id}: ${d.title || d.id}`)
-      .call(d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended));
-
-    node.append('circle').attr('class', 'pg-ring').attr('r', d => nodeRadius(d, allNodes) + 4);
-    node.filter(d => d.owner === 'code').append('circle')
-      .attr('class', 'pg-owner-ring')
-      .attr('r', d => nodeRadius(d, allNodes) + 3)
-      .attr('fill', 'none').attr('stroke', COLORS.code_ring).attr('stroke-width', 1.2).attr('opacity', 0.85);
-    node.filter(d => d.owner === 'world').append('circle')
-      .attr('class', 'pg-owner-ring')
-      .attr('r', d => nodeRadius(d, allNodes) + 3)
-      .attr('fill', 'none').attr('stroke', WORLD_COLOR).attr('stroke-width', 1).attr('stroke-dasharray', '1 2').attr('opacity', 0.7);
-    node.append('circle').attr('class', 'pg-core')
-      .attr('r', d => nodeRadius(d, allNodes))
-      .attr('fill', d => nodeFill(d))
-      .attr('stroke', d => nodeColor(d))
-      .attr('stroke-width', 2.4)
-      .attr('stroke-dasharray', d => nodeDash(d));
-    node.append('text')
-      .attr('y', d => nodeRadius(d, allNodes) + 13)
-      .attr('text-anchor', 'middle')
-      .attr('font-size', d => isRef(d) ? 9 : 11)
-      .text(d => nodeLabel(d));
-    node.append('title').text(d => `${d.title || d.id}\n${d.id}${hitsLabel(d) ? `\n${hitsLabel(d)}` : ''}`);
-    node.filter(d => Number(d.hits?.cited_30d || 0) > 0).append('text')
-      .attr('class', 'pg-hit-badge')
-      .attr('y', d => -(nodeRadius(d, allNodes) + 4))
-      .attr('text-anchor', 'middle')
-      .text(d => `${d.hits.cited_30d}`);
-
-    node.on('mouseover', (_, d) => highlight(d.id))
-      .on('mouseout', clearHighlight)
-      .on('focus', (_, d) => highlight(d.id))
-      .on('blur', clearHighlight)
-      .on('click', (event, d) => { event.stopPropagation(); applySelection(d.id); })
-      .on('keydown', (event, d) => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); applySelection(d.id); }
+    const schema = window.PolicyGraphSchema;
+    const width = Math.max(240, Math.floor(wrap.clientWidth || 900));
+    const all = view.allNodes || [];
+    const candidate = all.filter(nodeMatchesFilter);
+    const focus = state.graphMode === 'connections' && state.selected;
+    let nodes = candidate;
+    let links = [];
+    if (focus) {
+      const ids = new Set(candidate.map(n => n.id));
+      ids.add(state.selected);
+      links = (view.allLinks || []).filter(e => (e.sourceId === state.selected || e.targetId === state.selected)
+        && ids.has(e.sourceId) && ids.has(e.targetId) && state.edgeGroups.has(edgePresentation(e).group));
+      const neighbors = new Set([state.selected]);
+      links.forEach(e => { neighbors.add(e.sourceId); neighbors.add(e.targetId); });
+      nodes = all.filter(n => neighbors.has(n.id));
+    }
+    const layout = focus ? connectionLayout(nodes, links, state.selected, width)
+      : schema.groupedLayout(nodes, width, { cardHeight: 94, gap: 16, padding: 22,
+          includeGroups: state.typeFilter === 'group' });
+    const height = Math.max(360, Math.ceil(layout.height));
+    const scrollTop = wrap.scrollTop;
+    wrap.innerHTML = '';
+    if (!layout.cards.length) {
+      wrap.innerHTML = '<div class="pg-map-empty"><strong>No matching guidelines</strong><p>Try another search or include a different layer or node type.</p><button type="button" class="pe-btn secondary pg-btn-small" id="pgClearGraphFilters">Clear search and type filters</button></div>';
+      qs('#pgClearGraphFilters')?.addEventListener('click', () => {
+        state.search = ''; state.typeFilter = ''; state.fields.clear();
+        qs('#pgGraphSearch').value = ''; qs('#pgTypeSelect').value = ''; qs('#pgFieldSelect').value = '';
+        applyFilters();
       });
-
-    const charge = nodes.length > 80 ? -180 : -260;
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.id)
-        .distance(edge => LINK_DISTANCE[edge.kind] ?? 110)
-        .strength(edge => LINK_STRENGTH[edge.kind] ?? 0.3))
-      .force('charge', d3.forceManyBody().strength(charge))
-      .force('center', d3.forceCenter(WIDTH / 2, HEIGHT / 2))
-      .force('collide', d3.forceCollide().radius(d => nodeRadius(d, allNodes) + (isRef(d) ? 12 : hasChildren(d, allNodes) ? 34 : 22)))
-      .force('y', d3.forceY(d => laneY(d)).strength(0.12))
-      .force('x', d3.forceX(d => laneX(d)).strength(0.05));
-    if (nodes.some(isRef)) {
-      simulation.force('radial', d3.forceRadial(d => isRef(d) ? 250 : 0, WIDTH / 2, HEIGHT / 2).strength(d => isRef(d) ? 0.4 : 0));
+      view.nodes = null; view.links = null; view.layout = layout;
+      renderExplorerChrome(0, links.length, candidate.length);
+      return;
     }
-
-    simulation.on('tick', () => {
-      link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    const svg = d3.select(wrap).append('svg').attr('id', 'pgSvg')
+      .attr('viewBox', `0 0 ${width} ${height}`).attr('width', width).attr('height', height)
+      .style('height', `${height}px`).attr('role', 'img').attr('aria-label', focus
+        ? `Connections to ${nodePresentation(all.find(n => n.id === state.selected)).title}`
+        : `${layout.cards.length} guidelines grouped by policy role`);
+    svg.append('title').text(focus ? 'Focused guideline relationships' : 'Policy knowledge graph overview');
+    svg.append('desc').text('Consistent node cards identify type, title and usage. Select a card to trace directed relationships.');
+    const defs = svg.append('defs');
+    Object.entries(schema.EDGE_GROUPS).forEach(([key, meta]) => {
+      defs.append('marker').attr('id', `pg-arrow-${key}`).attr('viewBox', '0 -4 8 8')
+        .attr('refX', 8).attr('refY', 0).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,-3L7,0L0,3').attr('fill', meta.color);
     });
-
-    view.nodes = node; view.links = link; view.simulation = simulation; view.visibleKey = null;
-    applyChangeClasses();
-    applyFilters();
-
-    if (state.pendingPulse) {
-      const { added, changed } = state.pendingPulse;
-      state.pendingPulse = null;
-      let didPulse = false;
-      const trigger = () => {
-        if (didPulse) return;
-        didPulse = true;
-        pulseNodes(added, 'pulse-new');
-        pulseNodes(changed, 'pulse-changed');
-      };
-      simulation.on('end.pulse', trigger);
-      window.setTimeout(trigger, 900);
+    const viewport = svg.append('g').attr('class', 'pg-viewport');
+    const zoom = d3.zoom().scaleExtent([0.75, 2.5]).filter(event => event.type !== 'wheel' || event.ctrlKey || event.metaKey)
+      .on('zoom', event => viewport.attr('transform', event.transform));
+    svg.call(zoom).on('dblclick.zoom', null);
+    const byId = new Map(layout.cards.map(c => [c.id, c]));
+    const neighborMap = new Map(layout.cards.map(c => [c.id, new Set([c.id])]));
+    links.forEach(e => { neighborMap.get(e.sourceId)?.add(e.targetId); neighborMap.get(e.targetId)?.add(e.sourceId); });
+    view.neighborMap = neighborMap;
+    const group = viewport.append('g').attr('class', 'pg-map-groups').selectAll('g').data(layout.groups || []).join('g');
+    group.append('text').attr('class', 'pg-group-title').attr('x', d => d.x).attr('y', d => d.y + 14).text(d => d.label);
+    group.append('text').attr('class', 'pg-group-count').attr('x', d => d.x + d.width).attr('y', d => d.y + 14)
+      .attr('text-anchor', 'end').text(d => `${d.count} ${d.count === 1 ? 'node' : 'nodes'}`);
+    group.append('line').attr('class', 'pg-group-rule').attr('x1', d => d.x).attr('x2', d => d.x + d.width)
+      .attr('y1', d => d.y + 25).attr('y2', d => d.y + 25);
+    function edgePath(edge, index) {
+      const a = byId.get(edge.sourceId), b = byId.get(edge.targetId);
+      if (!a || !b) return '';
+      const ax = a.x + a.width / 2, ay = a.y + a.height / 2;
+      const bx = b.x + b.width / 2, by = b.y + b.height / 2;
+      if (width < 760) {
+        const down = by > ay;
+        const y1 = a.y + (down ? a.height : 0), y2 = b.y + (down ? 0 : b.height);
+        const cy = (y1 + y2) / 2 + ((index % 3) - 1) * 5;
+        return `M${ax},${y1} C${ax},${cy} ${bx},${cy} ${bx},${y2}`;
+      }
+      const right = bx > ax;
+      const x1 = a.x + (right ? a.width : 0), x2 = b.x + (right ? 0 : b.width);
+      const cx = (x1 + x2) / 2 + ((index % 3) - 1) * 7;
+      return `M${x1},${ay} C${cx},${ay} ${cx},${by} ${x2},${by}`;
     }
-
-    function highlight(id) {
-      const neighbors = neighborMap.get(id) || new Set([id]);
-      node.classed('hover-dim', d => !neighbors.has(d.id)).classed('hover-trace', d => neighbors.has(d.id));
-      link.classed('hover-dim', d => d.sourceId !== id && d.targetId !== id).classed('hover-trace', d => d.sourceId === id || d.targetId === id);
-    }
-    function clearHighlight() {
-      node.classed('hover-dim hover-trace', false);
-      link.classed('hover-dim hover-trace', false);
-    }
-    function dragstarted(event, d) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      d.fx = d.x; d.fy = d.y;
-    }
-    function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
-    function dragended(event, d) {
-      if (!event.active) simulation.alphaTarget(0);
-      d.fx = null; d.fy = null;
-    }
+    const link = viewport.append('g').attr('class', 'pg-links').selectAll('path').data(links).join('path')
+      .attr('class', d => `pg-link pg-edge-${edgePresentation(d).group}`)
+      .attr('data-source', d => d.sourceId).attr('data-target', d => d.targetId)
+      .attr('data-edge-type', d => edgePresentation(d).type).attr('d', edgePath)
+      .style('stroke', d => edgePresentation(d).color).style('stroke-dasharray', d => edgePresentation(d).dash)
+      .attr('marker-end', d => edgePresentation(d).directed ? `url(#pg-arrow-${edgePresentation(d).group})` : null);
+    link.append('title').text(d => {
+      const type = edgePresentation(d);
+      const source = byId.get(d.sourceId)?.view.title || d.sourceId;
+      const target = byId.get(d.targetId)?.view.title || d.targetId;
+      return `${type.label}\n${source} ${type.directed ? '→' : '↔'} ${target}\n${d.sourceId} · ${d.targetId}`;
+    });
+    const node = viewport.append('g').attr('class', 'pg-nodes').selectAll('g').data(layout.cards).join('g')
+      .attr('class', c => `pg-node leaf-node${c.node.ghost ? ` pg-ghost-${c.node.ghost}` : ''}`)
+      .attr('data-id', c => c.id).attr('data-node-type', c => c.view.type)
+      .attr('transform', c => `translate(${c.x},${c.y})`).style('--pg-type-color', c => c.view.color)
+      .attr('tabindex', 0).attr('role', 'button').attr('aria-pressed', c => c.id === state.selected ? 'true' : 'false')
+      .attr('aria-label', c => `${c.view.typeLabel}: ${c.view.title}. ${hitsLabel(c.node)}`);
+    node.append('rect').attr('class', 'pg-ring').attr('x', -3).attr('y', -3).attr('rx', 10)
+      .attr('width', c => c.width + 6).attr('height', c => c.height + 6);
+    node.append('rect').attr('class', 'pg-core').attr('rx', 8).attr('width', c => c.width).attr('height', c => c.height);
+    node.append('rect').attr('class', 'pg-type-bar').attr('x', 0).attr('y', 12).attr('width', 3).attr('rx', 1)
+      .attr('height', c => c.height - 24);
+    node.append('text').attr('class', 'pg-card-type').attr('x', 14).attr('y', 19).text(c => c.view.typeLabel.toUpperCase());
+    node.filter(c => c.view.statusLabel !== 'Current').append('text').attr('class', 'pg-card-status')
+      .attr('x', c => c.width - 12).attr('y', 19).attr('text-anchor', 'end').text(c => c.view.statusLabel);
+    node.append('text').attr('class', 'pg-card-title').attr('x', 14).attr('y', 39).each(function(c) {
+      const text = d3.select(this);
+      cardTitleLines(c.view.title, c.width).forEach((line, i) => text.append('tspan').attr('x', 14).attr('dy', i ? 17 : 0).text(line));
+    });
+    const last = state.payload?.last_run?.served;
+    const usageTracked = c => layerOf(c.node) === 'policy' || ['code', 'decider_memory'].includes(c.node.owner);
+    node.append('circle').attr('class', c => `pg-card-state${last && usageTracked(c) && c.id in last ? ' is-read' : ''}`)
+      .attr('cx', 17).attr('cy', 78).attr('r', 2.5);
+    node.append('text').attr('class', 'pg-card-foot').attr('x', 26).attr('y', 82).text(c => {
+      const count = Number(c.node.hits?.cited_30d || 0);
+      const use = c.view.features.proposed ? 'Awaiting review' : last && usageTracked(c)
+        ? (c.id in last ? 'Read last cycle' : 'Not read last cycle') : c.view.sourceLabel;
+      return `${use}${count ? ` · ${count} cited` : ''}`;
+    });
+    node.append('title').text(c => `${c.view.typeLabel} · ${c.view.title}\n${c.id}\n${c.view.sourceLabel} · ${c.view.statusLabel}\n${window.PolicyGraphSchema.snippet(c.node.body, 220)}`);
+    node.on('click', (event, c) => { event.stopPropagation(); applySelection(c.id, { focus: true }); })
+      .on('keydown', (event, c) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); applySelection(c.id, { focus: true }); }
+        if (event.key === 'Escape') applySelection(null);
+      }).on('mouseover focus', (_, c) => {
+        link.classed('hover-trace', d => d.sourceId === c.id || d.targetId === c.id)
+          .classed('hover-dim', d => d.sourceId !== c.id && d.targetId !== c.id);
+      }).on('mouseout blur', () => link.classed('hover-trace hover-dim', false));
+    node.classed('selected', c => c.id === state.selected);
+    if (state.lastRun && last) node.classed('is-unread', c => usageTracked(c) && !c.view.structural && !(c.id in last));
+    // Keep existing version-change presentation, operating on canonical node data.
+    node.classed('pg-changed-added', c => state.highlightChanges && c.node.change === 'added')
+      .classed('pg-changed-changed', c => state.highlightChanges && ['changed', 'whitespace', 'renamed', 'source_changed'].includes(c.node.change));
+    view.svg = svg; view.viewport = viewport; view.zoom = zoom; view.nodes = node; view.links = link;
+    view.cardById = byId; view.layout = layout;
+    renderExplorerChrome(layout.cards.length, links.length, candidate.length);
+    const center = byId.get(state.selected);
+    if (focus && center && view.focusId !== state.selected) wrap.scrollTop = Math.max(0, center.y + center.height / 2 - wrap.clientHeight / 2);
+    else wrap.scrollTop = scrollTop;
+    view.focusId = state.selected;
   }
 
-  // ★ pulseNodes — 2.4 s, green for new, amber for changed.
-  function pulseNodes(ids, cls = 'pulse-new') {
-    if (!ids?.size || !view.nodes) return;
-    const circles = view.nodes.select('circle.pg-core').filter(d => ids.has(d.id));
-    if (circles.empty()) return;
-    circles.classed(cls, true);
-    window.setTimeout(() => circles.classed(cls, false), 2400);
+  function renderExplorerChrome(count, edgeCount, matching) {
+    const schema = window.PolicyGraphSchema;
+    const focus = state.graphMode === 'connections' && state.selected;
+    const total = (view.allNodes || []).filter(n => !nodePresentation(n).structural).length;
+    const summary = qs('#pgGraphSummary');
+    if (summary) summary.textContent = focus ? `${plural(count, 'node')} · ${plural(edgeCount, 'relationship')}` : `${count} of ${total} nodes`;
+    document.querySelectorAll('#pgGraphMode [data-mode]').forEach(b => {
+      const active = b.dataset.mode === (focus ? 'connections' : 'structure');
+      b.classList.toggle('is-active', active); b.setAttribute('aria-pressed', String(active));
+    });
+    const strip = qs('#pgGraphFocus');
+    if (strip) strip.hidden = !focus;
+    if (focus) qs('#pgGraphFocusText').textContent = nodePresentation((view.allNodes || []).find(n => n.id === state.selected)).title;
+    const filter = qs('#pgEdgeFilter');
+    if (filter) {
+      filter.hidden = !focus;
+      filter.innerHTML = Object.entries(schema.EDGE_GROUPS).map(([key, meta]) =>
+        `<button type="button" data-edge-group="${key}" aria-pressed="${state.edgeGroups.has(key)}"><i class="pg-edge-key" style="--edge-color:${meta.color};border-top-style:${meta.dash ? 'dashed' : 'solid'}"></i>${esc(meta.label)}</button>`).join('');
+      filter.querySelectorAll('[data-edge-group]').forEach(b => b.addEventListener('click', () => {
+        const key = b.dataset.edgeGroup;
+        if (state.edgeGroups.has(key)) state.edgeGroups.delete(key); else state.edgeGroups.add(key);
+        drawExplorer();
+        renderLegend(state.payload);
+      }));
+    }
+    const hint = qs('#pgGraphHint');
+    if (hint) hint.textContent = focus
+      ? 'One-hop relationships in the selected layers. Arrowheads show direction; dotted lines show references. Ctrl/⌘ + scroll to zoom.'
+      : 'Same-size cards · color = node type · footer = last-cycle usage and 30-day citations. Select a node to trace its relationships.';
   }
 
-  function applyChangeClasses() {
-    if (!view.nodes) return;
-    const on = state.highlightChanges;
-    view.nodes
-      .classed('pg-changed-added', d => on && d.change === 'added')
-      .classed('pg-changed-changed', d => on && (d.change === 'changed' || d.change === 'whitespace'))
-      .classed('pg-changed-renamed', d => on && d.change === 'renamed')
-      .classed('pg-source-changed', d => on && d.change === 'source_changed');
-  }
-
+  function applyChangeClasses() { drawExplorer(); }
   function resetZoom() {
-    if (!view.svg || !view.zoom || !view.nodes) return;
-    const bounds = [];
-    view.nodes.filter(d => nodeMatchesFilter(d)).each(function(d) {
-      if (!Number.isFinite(d.x) || !Number.isFinite(d.y)) return;
-      const b = this.getBBox();
-      bounds.push([d.x + b.x, d.y + b.y, d.x + b.x + b.width, d.y + b.y + b.height]);
-    });
-    if (!bounds.length) return;
-    const minX = d3.min(bounds, b => b[0]), minY = d3.min(bounds, b => b[1]);
-    const maxX = d3.max(bounds, b => b[2]), maxY = d3.max(bounds, b => b[3]);
-    const scale = Math.min(2, (WIDTH - 48) / Math.max(1, maxX - minX), (HEIGHT - 48) / Math.max(1, maxY - minY));
-    const transform = d3.zoomIdentity.translate(WIDTH / 2, HEIGHT / 2).scale(scale)
-      .translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
-    view.svg.transition().duration(200).call(view.zoom.transform, transform);
+    if (view.svg && view.zoom) view.svg.call(view.zoom.transform, d3.zoomIdentity);
+    const wrap = qs('#pgSvgWrap');
+    const center = view.cardById?.get(state.selected);
+    if (wrap) wrap.scrollTop = state.graphMode === 'connections' && center
+      ? Math.max(0, center.y + center.height / 2 - wrap.clientHeight / 2) : 0;
   }
 
-  // ------------------------------------------------------------------ legend (rows only for kinds present)
+  // ------------------------------------------------------------------ shared visual vocabulary
   function renderLegend(payload) {
     const legend = qs('#pgLegend');
-    if (!legend) return;
-    const nodes = payload.nodes || [];
-    const present = new Set();
-    nodes.forEach(n => {
-      const layer = layerOf(n);
-      present.add(layer);
-      if (layer === 'policy') present.add(`pol:${n.polarity || 'mixed'}`);
-      if (n.owner === 'code') present.add('code');
-      if (n.node_type === 'template') present.add('template');
-      if (n.owner === 'decider_memory') present.add('ltm');
-      if (n.owner === 'world') present.add('world');
-      if (isRef(n)) present.add('ref');
-      if (n.owner === 'default-file') present.add('inherited');
-      if (n.ghost) present.add('proposed');
-    });
-    const dot = (color, mod) => `<i class="${mod || ''}" style="color:${color};background:${mod === 'hollow' ? 'var(--surface)' : color}"></i>`;
-    const groups = [];
-    if (present.has('policy')) {
-      const pol = [['gate', 'hard gate', COLORS.gate], ['action', 'action', COLORS.action], ['caution', 'caution', COLORS.caution],
-        ['principle', 'identity / principle', COLORS.principle], ['evidence', 'evidence & lessons', COLORS.evidence],
-        ['mixed', 'mixed', COLORS.mixed], ['structure', 'structure', COLORS.structure]]
-        .filter(([k]) => present.has(`pol:${k}`)).map(([, label, color]) => `<span>${dot(color)}${esc(label)}</span>`);
-      if (present.has('inherited')) pol.push(`<span>${dot(COLORS.principle, 'hollow')}inherited from the default file</span>`);
-      if (present.has('proposed')) pol.push(`<span>${dot(COLORS.action, 'ghost')}proposed change awaiting your review</span>`);
-      groups.push(`<div class="pg-legend-group"><strong>Policy</strong> <span class="pg-muted">— the .md guidelines compiled into the Decider's prompt, coloured by what they do:</span> ${pol.join(' ')}</div>`);
+    if (!legend || !window.PolicyGraphSchema) return;
+    const schema = window.PolicyGraphSchema;
+    const cards = view.layout?.cards || [];
+    const counts = new Map();
+    cards.forEach(c => counts.set(c.view.type, (counts.get(c.view.type) || 0) + 1));
+    legend.innerHTML = Object.entries(schema.TYPES).filter(([key]) => counts.has(key)).map(([key, meta]) =>
+      `<span><i class="pg-type-key" style="background:${meta.color}"></i>${esc(meta.label)} <span class="pg-muted">${counts.get(key)}</span></span>`).join('');
+    const select = qs('#pgTypeSelect');
+    if (select) {
+      const present = new Set((payload.nodes || []).map(n => nodePresentation(n).type));
+      select.innerHTML = '<option value="">All node types</option>' + Object.entries(schema.TYPES)
+        .filter(([key]) => present.has(key)).map(([key, meta]) => `<option value="${key}">${esc(meta.label)}</option>`).join('');
+      select.value = state.typeFilter;
     }
-    if (present.has('scaffold')) {
-      const sc = [];
-      if (present.has('template') || true) sc.push(`<span>${dot(COLORS.structure)}root, templates, runtime inputs</span>`);
-      if (present.has('code')) sc.push(`<span>${dot(COLORS.code_ring, 'dashed')}code-owned prompt text (fixed by the repository)</span>`);
-      groups.push(`<div class="pg-legend-group"><strong>Prompt scaffold</strong> <span class="pg-muted">— the fixed prompt around the policy:</span> ${sc.join(' ')}</div>`);
-    }
-    if (present.has('context')) {
-      const cx = [];
-      if (present.has('ltm')) cx.push(`<span>${dot(COLORS.evidence, 'dotted')}memory row (injected when relevant)</span>`);
-      if (present.has('world')) cx.push(`<span>${dot(WORLD_COLOR, 'dotted')}world event / market factor (from the run log)</span>`);
-      if (present.has('ref')) cx.push(`<span>${dot(COLORS.ref)}ticker reference</span>`);
-      groups.push(`<div class="pg-legend-group"><strong>Cycle context</strong> <span class="pg-muted">— what the Decider sees per cycle, not policy:</span> ${cx.join(' ')}</div>`);
-    }
-    const kinds = new Set((payload.edges || []).map(e => e.edge_kind || ({ subtype_of: 'part_of', includes: 'feeds', constrains: 'feeds', enforced_by: 'feeds', triggers: 'feeds' }[edgeType(e)] || 'related')));
-    const edgeRows = [
-      ['part_of', 'part of'],
-      ['feeds', 'feeds the Decider: prompt assembly, code block → rule, world factor → rule'],
-      ['related', 'related: link, shared tag, overlap, ticker'],
-    ].filter(([k]) => kinds.has(k)).map(([k, label]) => `<span><i class="pg-legend-line ${k}"></i>${esc(label)}</span>`);
-    if (edgeRows.length) groups.push(`<div class="pg-legend-group"><strong>Edges</strong> ${edgeRows.join(' ')}</div>`);
-    legend.innerHTML = groups.join('');
   }
 
   function renderRemoved(payload) {
@@ -1256,10 +1162,16 @@
 
   // ------------------------------------------------------------------ filters (layers)
   function nodeMatchesFilter(node) {
-    if (node.id === rootId()) return true;
+    if (node.id === state.selected && state.graphMode === 'connections') return true;
     const layer = layerOf(node);
     if (!state.layers.has(layer)) return false;
-    if (layer === 'policy' && state.fields.size && node.node_type !== 'field' && !state.fields.has(node.field)) return false;
+    if (layer === 'policy' && state.fields.size && !state.fields.has(node.field)) return false;
+    if (state.typeFilter && nodePresentation(node).type !== state.typeFilter) return false;
+    const query = state.search.trim().toLowerCase();
+    if (query) {
+      const text = [node.id, node.title, node.body, ...(node.tags || []), ...(node.tickers || [])].join(' ').toLowerCase();
+      if (!text.includes(query)) return false;
+    }
     return true;
   }
 
@@ -1267,32 +1179,14 @@
     document.querySelectorAll('#pgFieldFilter [data-layer]').forEach(btn => {
       const on = state.layers.has(btn.dataset.layer);
       btn.classList.toggle('is-active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.setAttribute('aria-pressed', String(on));
     });
-    document.querySelectorAll('#pgFieldFilter [data-field]').forEach(btn => {
-      const on = state.fields.has(btn.dataset.field);
-      btn.classList.toggle('is-active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btn.disabled = !state.layers.has('policy');
-    });
+    const field = qs('#pgFieldSelect');
+    if (field) { field.disabled = !state.layers.has('policy'); field.value = state.fields.size === 1 ? [...state.fields][0] : ''; }
     const lrBox = qs('#pgLastRun');
     if (lrBox) lrBox.checked = Boolean(state.lastRun);
-    if (!view.nodes) return;
-    const visible = new Set();
-    view.nodes.each(d => { if (nodeMatchesFilter(d)) visible.add(d.id); });
-    view.nodes.classed('is-hidden', d => !visible.has(d.id));
-    view.links.classed('is-hidden', d => !(visible.has(d.sourceId) && visible.has(d.targetId)));
-    const lr = state.lastRun && state.payload && state.payload.last_run && state.payload.last_run.served;
-    view.nodes.classed('is-unread', d => Boolean(lr) && d.id !== rootId() && d.node_type !== 'field' && d.node_type !== 'template'
-      && (layerOf(d) === 'policy' || d.owner === 'code' || d.owner === 'decider_memory') && !(d.id in lr));
-    // Hidden layers must not push the visible policy off the canvas.
-    const visibleKey = [...visible].sort().join('|');
-    if (view.simulation && view.visibleKey !== visibleKey) {
-      view.visibleKey = visibleKey;
-      view.simulation.nodes(view.nodes.data().filter(d => visible.has(d.id)));
-      view.simulation.force('link').links(view.links.data().filter(d => visible.has(d.sourceId) && visible.has(d.targetId)));
-      view.simulation.on('end.fit', () => { resetZoom(); view.simulation.on('end.fit', null); }).alpha(0.4).restart();
-    }
+    drawExplorer();
+    if (state.payload) renderLegend(state.payload);
   }
 
   function toggleLayer(key) {
@@ -1305,45 +1199,34 @@
     applyFilters();
   }
 
-  // ------------------------------------------------------------------ selection (★)
-  function applySelection(id) {
-    state.selected = id || null;
-    if (view.nodes) {
-      view.nodes.classed('selected ancestor descendant dimmed', false);
-      view.links.classed('ancestor-edge descendant-edge dimmed', false);
-    }
-    const nodes = state.payload?.nodes || [];
-    if (!id) {
+  // Selection is a view operation; canonical graph and policy remain intact.
+  function applySelection(id, { focus = false } = {}) {
+    const node = (state.payload?.nodes || []).find(n => n.id === id);
+    state.selected = node ? node.id : null;
+    if (!node) {
+      state.graphMode = 'structure';
       qs('#pgPanelEmpty').hidden = false;
       qs('#pgPanelBody').hidden = true;
-      writeHash();
-      return;
+    } else {
+      if (focus) {
+        state.graphMode = 'connections';
+        // Search finds the anchor; its query/type must not hide the anchor's
+        // cross-type relationships after selection.
+        state.search = ''; state.typeFilter = ''; state.fields.clear();
+        if (qs('#pgGraphSearch')) qs('#pgGraphSearch').value = '';
+        if (qs('#pgFieldSelect')) qs('#pgFieldSelect').value = '';
+      }
+      openPanel(node);
     }
-    const ancestors = ancestorChain(id, nodes);
-    const descendants = descendantSet(id, nodes);
-    const related = new Set([id, ...ancestors, ...descendants]);
-    if (view.nodes) {
-      view.nodes
-        .classed('selected', d => d.id === id)
-        .classed('ancestor', d => ancestors.has(d.id))
-        .classed('descendant', d => descendants.has(d.id))
-        .classed('dimmed', d => !related.has(d.id));
-      view.links
-        .classed('ancestor-edge', d => (ancestors.has(d.sourceId) && (d.targetId === id || ancestors.has(d.targetId))) || (ancestors.has(d.targetId) && (d.sourceId === id || ancestors.has(d.sourceId))))
-        .classed('descendant-edge', d => (descendants.has(d.sourceId) || d.sourceId === id) && (descendants.has(d.targetId) || d.targetId === id))
-        .classed('dimmed', d => !(related.has(d.sourceId) && related.has(d.targetId)));
-    }
-    const node = nodes.find(n => n.id === id);
-    if (node) openPanel(node);
+    drawExplorer();
+    if (state.payload) renderLegend(state.payload);
     writeHash();
   }
 
   // ------------------------------------------------------------------ details panel
   function typeSentence(node) {
-    const type = kindOf(node) || String(node.node_type || 'guideline');
-    const pol = POLARITY_LABEL[node.polarity] || node.polarity || 'mixed';
-    const src = node.polarity_source === 'authored' ? 'authored' : 'derived';
-    return `${type} · ${pol} (${src})`;
+    const meta = nodePresentation(node);
+    return `${meta.typeLabel} · stored as ${node.node_type || 'guideline'}`;
   }
 
   function changeSentence(node, payload, detail) {
@@ -1451,7 +1334,7 @@
       : node.compiled === 'effective-only' ? 'used at runtime, not stored in the version'
         : 'never compiled into the prompt';
     let text;
-    if (status === 'inert') text = 'Not executed at runtime — only the soul is injected';
+    if (status === 'inert') text = 'Historical evidence — check last-cycle usage for inclusion';
     else if (status === 'inactive') text = node.owner === 'code' ? 'inactive for this version' : 'inactive row';
     else if (status === 'read-only') text = 'read-only';
     else if (status === 'generated') text = 'generated';
@@ -1475,7 +1358,7 @@
     const kicker = qs('#pgNodeId');
     kicker.textContent = node.id;
     kicker.style.setProperty('--node-color', nodeColor(node));
-    qs('#pgNodeTitle').textContent = node.title || node.id;
+    qs('#pgNodeTitle').textContent = nodePresentation(node).title;
 
     const crumbs = qs('#pgCrumbs');
     const lineage = lineagePath(node.id, payload.nodes || []);
@@ -1935,7 +1818,12 @@
     const nodeId = String(id || '');
     if (!nodeId || !state.payload) return false;
     if (!(state.payload.nodes || []).some(n => n.id === nodeId)) return false;
-    applySelection(nodeId);
+    const target = state.payload.nodes.find(n => n.id === nodeId);
+    state.layers.add(layerOf(target));
+    state.fields.clear(); state.typeFilter = ''; state.search = '';
+    if (qs('#pgGraphSearch')) qs('#pgGraphSearch').value = '';
+    applySelection(nodeId, { focus: true });
+    applyFilters();
     qs('#pgGraphCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   }
@@ -2602,6 +2490,20 @@
       loadGraph(state.agent, state.version, { keepSelection: true });
     });
     qs('#pgFit')?.addEventListener('click', resetZoom);
+    qs('#pgGraphSearch')?.addEventListener('input', event => {
+      state.search = event.target.value; state.graphMode = 'structure'; applyFilters();
+    });
+    qs('#pgTypeSelect')?.addEventListener('change', event => { state.typeFilter = event.target.value; applyFilters(); });
+    qs('#pgFieldSelect')?.addEventListener('change', event => {
+      state.fields = new Set(event.target.value ? [event.target.value] : []); applyFilters();
+    });
+    document.querySelectorAll('#pgGraphMode [data-mode]').forEach(btn => btn.addEventListener('click', () => {
+      if (btn.dataset.mode === 'structure') { state.graphMode = 'structure'; drawExplorer(); renderLegend(state.payload); return; }
+      if (!state.selected) { toast('Select a guideline card to explore its connections.', 'info'); return; }
+      state.graphMode = 'connections'; drawExplorer(); renderLegend(state.payload);
+    }));
+    qs('#pgGraphBack')?.addEventListener('click', () => applySelection(null));
+    qs('#pgGraphInspect')?.addEventListener('click', () => qs('#pgPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     document.querySelectorAll('#pgFieldFilter [data-layer]').forEach(btn => btn.addEventListener('click', () => toggleLayer(btn.dataset.layer)));
     document.querySelectorAll('#pgFieldFilter [data-field]').forEach(btn => btn.addEventListener('click', () => toggleField(btn.dataset.field)));
     qs('#pgLastRun')?.addEventListener('change', event => { state.lastRun = Boolean(event.target.checked); applyFilters(); });

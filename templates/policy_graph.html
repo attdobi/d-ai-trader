@@ -30,7 +30,7 @@
           <option value="effective">Full effective policy</option>
           <option value="stored">Stored guidelines only</option>
         </select>
-        <label class="pg-check"><input type="checkbox" id="pgHighlightChanges" checked /> Keep changes vs previous version highlighted</label>
+        <label class="pg-check"><input type="checkbox" id="pgHighlightChanges" /> Highlight changes vs previous version</label>
         <label class="pg-check"><input type="checkbox" id="pgShowRefs" /> Show references</label>
         <label class="pg-check" title="Grey out every guideline the graph query did not serve on the Decider's latest cycle (from the hit log)"><input type="checkbox" id="pgLastRun" /> Dim what the Decider did not read last cycle</label>
         <span class="pg-links">
@@ -65,32 +65,41 @@
 
   <!-- Card 2: graph + details panel -->
   <section class="pe-card" id="pgGraphCard">
+    <div class="pg-explorer-head">
+      <div><span class="pg-eyebrow">DYNAMIC KNOWLEDGE GRAPH</span><h2>Policy explorer</h2><p class="pg-muted">Browse the policy, then select a node to trace its connections.</p></div>
+      <div id="pgGraphSummary" class="pg-explorer-summary" aria-live="polite"></div>
+    </div>
     <div class="pg-layout">
       <div class="pg-main">
         <div id="pgToolbar" class="pg-toolbar">
+          <div class="pg-explorer-tools">
+            <label class="pg-search"><span class="pg-sr-only">Search guidelines</span><input id="pgGraphSearch" type="search" placeholder="Search rules, lessons, tickers…" autocomplete="off" /></label>
+            <div id="pgGraphMode" class="pg-view-switch" role="group" aria-label="Graph view"><button type="button" data-mode="structure" class="is-active" aria-pressed="true">Overview</button><button type="button" data-mode="connections" aria-pressed="false">Connections</button></div>
+            <button type="button" id="pgFit" class="pe-btn secondary pg-btn-small">Reset view</button>
+          </div>
           <div id="pgFieldFilter" class="pg-field-filter" role="group" aria-label="Layers to show">
-            <span class="pg-filter-label">Show</span>
+            <span class="pg-filter-label">Layers</span>
             <button type="button" class="pg-chip-filter pg-chip-layer is-active" data-layer="policy" title="The .md guidelines compiled into the Decider's prompt: strategy directives (gates), soul (identity), memory (lessons, diary)">Policy</button>
             <button type="button" class="pg-chip-filter pg-chip-layer" data-layer="scaffold" title="The fixed prompt around the policy: the two templates, the code-owned paragraphs, the runtime inputs">Prompt scaffold</button>
             <button type="button" class="pg-chip-filter pg-chip-layer" data-layer="context" title="What the Decider sees per cycle, not policy: long-term memory rows, world events &amp; market factors, ticker references">Cycle context</button>
-            <span class="pg-filter-label pg-filter-sep">within policy</span>
-            <button type="button" class="pg-chip-filter" data-field="strategy_directives" title="Strategy directives — the numbered gates">Gates</button>
-            <button type="button" class="pg-chip-filter" data-field="soul" title="Soul — identity and principles">Soul</button>
-            <button type="button" class="pg-chip-filter" data-field="memory" title="Memory — lessons, patterns, mistakes, diary">Memory</button>
+            <label class="pg-filter-select"><span class="pg-sr-only">Policy section</span><select id="pgFieldSelect" aria-label="Policy section"><option value="">All sections</option><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></select></label>
+            <label class="pg-filter-select"><span class="pg-sr-only">Node type</span><select id="pgTypeSelect" aria-label="Node type"><option value="">All node types</option></select></label>
           </div>
-          <button type="button" id="pgFit" class="pe-btn secondary pg-btn-small" title="Reset zoom and pan">Reset zoom</button>
         </div>
+        <div id="pgGraphFocus" class="pg-focus-strip" hidden><button type="button" id="pgGraphBack">← All nodes</button><span id="pgGraphFocusText"></span><button type="button" id="pgGraphInspect">Read guideline ↓</button></div>
+        <div id="pgEdgeFilter" class="pg-edge-filter" role="group" aria-label="Relationship types" hidden></div>
         <div id="pgSvgWrap" class="pg-canvas" aria-label="Interactive policy graph">
           <svg id="pgSvg" viewBox="0 0 900 560" role="img" aria-label="Policy graph"></svg>
         </div>
+        <p id="pgGraphHint" class="pg-graph-hint">Cards share a consistent size. Color identifies node type; the footer shows usage.</p>
         <div id="pgLegend" class="pg-legend"></div>
         <div id="pgRemoved" class="pg-removed"></div>
       </div>
 
       <aside id="pgPanel" class="pg-panel" aria-live="polite">
         <div id="pgPanelEmpty">
-          <h3>Guideline details</h3>
-          <p class="pg-muted">Three layers: <strong>Policy</strong> is the set of .md guidelines compiled into the Decider's prompt (gates, soul, lessons); <strong>Prompt scaffold</strong> is the fixed text around it; <strong>Cycle context</strong> is what the Decider sees per cycle. Click a guideline to read it in plain lines; tick "Dim what the Decider did not read" to see the routing.</p>
+          <h3>Explore a guideline</h3>
+          <p class="pg-muted">Choose a card to inspect its source, current status, original text and relationship types. Structural containers are represented by the section headings in Overview.</p>
         </div>
         <div id="pgPanelBody" hidden>
           <button type="button" id="pgPanelClear" class="pg-clear" aria-label="Clear selection and return to the full graph">Clear selection</button>
@@ -586,10 +595,95 @@
   .pg-controls > * { flex: 0 1 auto; }
   .pg-meta-grid { grid-template-columns: 1fr; }
 }
+
+/* Policy explorer: consistent cards and focused, typed relationships. */
+.pg-explorer-head { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 20px; }
+.pg-eyebrow { font-size: 10px; letter-spacing: .14em; color: var(--accent); font-weight: 700; }
+.pg-explorer-head h2 { margin: 5px 0 6px; font-size: 23px; letter-spacing: -.03em; }
+.pg-explorer-head p { margin: 0; max-width: 580px; }
+.pg-explorer-summary { color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
+.pg-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.pg-toolbar { display: grid; gap: 14px; margin-bottom: 16px; }
+.pg-explorer-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.pg-search { flex: 1 1 240px; }
+.pg-search input { width: 100%; min-width: 0; border: 1px solid rgba(156,180,215,.22); border-radius: 8px; padding: 10px 12px; background: #0b1526; color: var(--text); font: inherit; font-size: 13px; }
+.pg-search input::placeholder { color: #8d9bb2; }
+.pg-view-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid rgba(156,180,215,.2); border-radius: 9px; background: #0a1424; }
+.pg-view-switch button, .pg-focus-strip button { border: 0; background: transparent; color: #a6b4ca; font: inherit; font-size: 12px; font-weight: 600; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+.pg-view-switch button.is-active { color: #e8f6ff; background: #20364f; }
+.pg-field-filter { align-items: center; gap: 8px; }
+.pg-filter-select select { border: 1px solid rgba(156,180,215,.2); background: #0b1526; color: #c0cce0; border-radius: 7px; font: inherit; font-size: 12px; padding: 6px 24px 6px 9px; max-width: 100%; }
+.pg-chip-filter { border-radius: 7px; padding: 5px 10px; }
+.pg-focus-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0 14px; border-top: 1px solid rgba(156,180,215,.12); font-size: 13px; }
+.pg-focus-strip[hidden], .pg-edge-filter[hidden] { display: none; }
+.pg-focus-strip > span { flex: 1 1 180px; color: #dce8fa; font-weight: 600; }
+.pg-focus-strip button { padding: 5px 8px; color: #72d7fb; }
+.pg-edge-filter { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px; align-items: center; }
+.pg-edge-filter button { display: inline-flex; gap: 6px; align-items: center; border: 0; background: transparent; padding: 3px 0; color: var(--text); font-size: 11px; cursor: pointer; }
+.pg-edge-filter button[aria-pressed="false"] { opacity: .4; }
+.pg-edge-key { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--edge-color); }
+.pg-canvas { background: #0a1423; border: 1px solid rgba(156,180,215,.15); border-radius: 10px; min-height: 360px; max-height: 660px; overflow: auto; scrollbar-gutter: stable; }
+.pg-canvas svg { display: block; height: auto; min-height: 360px; cursor: default; }
+.pg-canvas svg:active { cursor: default; }
+.pg-node text { stroke: none; paint-order: normal; fill: #e6edf8; font-size: 13px; }
+.pg-node .pg-core { fill: #101e31; stroke: #294057; stroke-width: 1; transition: stroke .15s ease, fill .15s ease; }
+.pg-node .pg-type-bar { fill: var(--pg-type-color); }
+.pg-node text.pg-card-type { fill: var(--pg-type-color); font-size: 11px; font-weight: 700; letter-spacing: .05em; }
+.pg-node text.pg-card-status { fill: #8fa1b9; font-size: 10.5px; font-weight: 500; }
+.pg-node text.pg-card-title { font-size: 13px; font-weight: 600; }
+.pg-node text.pg-card-foot { fill: #91a3bc; font-size: 11px; font-weight: 400; }
+.pg-node.leaf-node text { opacity: 1; }
+.pg-node .pg-card-state { fill: #6e819a; }
+.pg-node .pg-card-state.is-read { fill: #42c5a4; }
+.pg-node.selected .pg-core { stroke: var(--pg-type-color); stroke-width: 2; fill: #192b41; filter: none; }
+.pg-node.hover-trace .pg-core, .pg-node:focus .pg-core { stroke: var(--pg-type-color); fill: #15263c; }
+.pg-node.dimmed { opacity: .42; }
+.pg-node .pg-ring { stroke: none; fill: none; }
+.pg-node.pg-changed-added .pg-ring { stroke: var(--success); stroke-width: 2; }
+.pg-node.pg-changed-changed .pg-ring, .pg-node.pg-changed-renamed .pg-ring { stroke: var(--warning); stroke-width: 2; }
+.pg-node.pg-ghost-add .pg-core, .pg-node.pg-ghost-edit .pg-core { stroke-dasharray: 4 3; }
+.pg-node.pg-ghost-remove .pg-card-title { text-decoration: line-through; }
+.pg-link { fill: none; stroke-width: 1.25px; opacity: .65; }
+.pg-link.hover-trace { stroke-width: 2.5px; opacity: 1; }
+.pg-link.hover-dim { opacity: .14; }
+.pg-group-title { fill: #dbe6f7; font-size: 13px; font-weight: 650; letter-spacing: -.01em; }
+.pg-group-count { fill: #7f91ad; font-size: 11px; }
+.pg-group-rule { stroke: #203048; stroke-width: 1; }
+.pg-map-empty { padding: 46px 24px; text-align: center; font-size: 13px; color: var(--muted); }
+.pg-graph-hint { margin: 9px 0 0; font-size: 11px; color: #8193ae; line-height: 1.5; }
+.pg-legend { gap: 10px 18px; margin-top: 12px; font-size: 11px; }
+.pg-legend .pg-type-key { width: 7px; height: 13px; border-radius: 2px; border: 0; }
+.pg-panel { min-height: 0; max-height: none; background: #0b1627; border-radius: 10px; padding: 16px 18px; }
+#pgPanel, #pgGraphCard { scroll-margin-top: 100px; }
+.pg-panel #pgPanelEmpty h3 { font-size: 14px; margin: 0 0 6px; }
+.pg-panel #pgPanelEmpty p { margin: 0; font-size: 12px; max-width: 900px; }
+.pg-panel h3 { margin-top: 8px; }
+.pg-meta-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pg-meta-grid .pg-meta-wide { grid-column: 1 / -1; }
+.pg-paths-grid > div, .pg-header-row > *, .pg-controls { min-width: 0; }
+@media (max-width: 640px) {
+  .pg-explorer-head { align-items: flex-start; gap: 10px; }
+  .pg-explorer-head h2 { font-size: 20px; }
+  .pg-explorer-summary { font-size: 11px; white-space: normal; max-width: 100px; }
+  .pg-search { flex-basis: 100%; }
+  .pg-view-switch { flex: 1 1 auto; }
+  .pg-view-switch button { flex: 1 1 auto; }
+  .pg-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pg-canvas { max-height: 600px; }
+  .pg-agent-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 100%; border-radius: 8px; }
+  .pg-controls { max-width: 100%; }
+  .pg-controls .pg-links { max-width: 100%; min-width: 0; }
+  .pg-controls .pg-select { max-width: 100%; }
+}
+@media (max-width: 480px) {
+  #pgPanel, #pgGraphCard { scroll-margin-top: 140px; }
+}
+@media (prefers-reduced-motion: reduce) { .pg-node *, .pg-node { transition: none !important; animation: none !important; } }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/policy-graph-schema.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph.js') }}"></script>
 {% endblock %}
