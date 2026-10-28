@@ -70,16 +70,17 @@
    "FA.memory"
   ]
  },
- "node_count": 17,
- "edge_count": 22,
+ "node_count": 18,
+ "edge_count": 24,
  "code": {
-  "sha": "8b3436cc3cbb",
-  "dir": "../_code/8b3436cc3cbb",
+  "sha": "f1f7e2716819",
+  "dir": "../_code/f1f7e2716819",
   "git_sha": "baseline",
   "fires": {
    "FA.code.system_base": true,
    "FA.code.base_instructions": true,
-   "FA.code.json_format": true
+   "FA.code.json_format": true,
+   "FA.code.opportunity_charter": true
   }
  },
  "ltm": {

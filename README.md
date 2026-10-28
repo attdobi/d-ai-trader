@@ -19,7 +19,7 @@ An **episode** is one trading cycle. A **policy update** is normally a new row i
 
 | Writer | When | Gate |
 |---|---|---|
-| **Weekly feedback** (`feedback_agent.py`) | Thursday 20:30 ET | None. It replaces the `Latest Feedback Reminder` section of the directives with this week's 2 to 4 numbered gates, adds the same gates to memory as a dated diary entry, then activates the new version. |
+| **Weekly feedback** (`feedback_agent.py`) | Thursday 20:30 ET | A deterministic opportunity-policy lint quarantines obvious blanket regime or macro-window entry bans. Otherwise it replaces the `Latest Feedback Reminder` section with this week's 2 to 4 numbered gates and adds them to memory before activation. It still has no LLM critic gate. |
 | **Prompt Lab** (`/prompt-evolution`) | On demand | Generator, then critic verdict, then human approve or reject |
 | **Policy-graph proposals** (`policy_graph/proposals.py`) | On demand | A patch of at most 3 guideline files, then critic per file, then human approval per guideline |
 | **Operator versions** (`policy_graph/operator.py`) | By hand | Hand-authored patches get the same validation and critic record as a drafted proposal. Maintenance versions skip both and are labelled `maintenance` in their description and the activation log. |
@@ -523,6 +523,7 @@ Schwab refresh tokens expire after about 7 days. On `refresh_token_authenticatio
 - **Per-cycle caps (live)** — `DAILY_BUY_CAP` buys and `DAILY_TICKET_CAP` sells. Pilot mode (`DAI_ONE_TRADE_MODE=1`) lowers the buy cap to one and leaves sells alone.
 - **Mode and read-only flags** — orders are placed only in `real_world`; `DAI_SCHWAB_READONLY=1` blocks them.
 - **Market hours** — no execution outside 9:30–16:00 ET on weekdays.
+- **Opportunity policy** (`policy_safety.py`) — a code-owned charter keeps selective entries available in falling or volatile markets: RISK-OFF permits at most one half-size qualifying buy, and a macro window permits at most one half-size buy subject to the stricter active stop and setup rules. A regime label or event flag alone cannot veto every candidate. Missing setup evidence, priced kills, earnings, quarantine and cash/position limits still apply; the policy never forces a trade. Obvious blanket entry bans are blocked at prompt activation, weekly feedback propagation, direct feedback injection and long-term memory retrieval. The lint recognizes known imperative forms; it does not prove arbitrary prose consistent.
 - **Position and total-investment caps** (`MAX_POSITION_VALUE` / `MAX_POSITION_FRACTION`, `MAX_TOTAL_INVESTMENT` / `MAX_TOTAL_INVESTMENT_FRACTION`, each the larger of the floor and the fraction of account value) — enforced in `process_buy_decisions` for live and simulation: a buy is cut so the position's market value after the buy stays within the position cap (counting what is already held) and total invested stays within the total cap; buys earlier in the same cycle count. Account value is the Schwab snapshot already fetched this cycle in live mode, otherwise the holdings table. If the cap book cannot be built, buys size as before and the log says so in one line. `safety_checks.py` applies the same rule on the `trading_interface.execute_trade_decisions` path.
 
 ### Emergency stop
@@ -559,6 +560,45 @@ Measured from `api_usage` on the live config over the 30 days to 2026-10-04 (cal
 | Company extraction | Luna | 90 | $0.12 |
 
 Decider calls include the citation-repair pass. Spend scales with cadence and model choice.
+
+### GPT-6 model mix (verified October 28, 2026)
+
+Use explicit model IDs; the historical `sol`, `terra` and `luna` aliases continue to select GPT-5.6. GPT-6/6.1 models now use the existing reasoning, vision, JSON and replay paths correctly. Configuration defaults remain unchanged.
+
+```dotenv
+DAI_MODEL_SUMMARIZER=gpt-6-luna
+DAI_MODEL_COMPANY=gpt-6-luna
+DAI_MODEL_DECIDER=gpt-6.1-sol
+DAI_MODEL_FEEDBACK=gpt-6.1-sol
+DAI_MODEL_CRITIC=gpt-6.1-sol
+DAI_MODEL_EVOLUTION=gpt-6.1-sol
+```
+
+Keep Summarizer/Company at low reasoning and Decider/Feedback/Critic/Evolution at high. Evolution uses the Feedback reasoning profile. Restart the trader and dashboard after changing model overrides; keep the live `-H` config hash pinned to retain its history.
+
+The local dashboard's seven-day window on October 28 showed **$4.00** at the previous configured prices. Repricing the same calls at current standard rates gives **$3.78** for the old mix, **$3.05** for Sol decisions/learning plus Luna extraction, or **$2.24** with Terra as the Decider instead. The corresponding 30-day estimates are $10.41 for the recommended mix and $6.76 for the Terra alternative. The seven-day query starts at midnight seven calendar days earlier and includes manual Prompt Lab work; these are workload estimates, not invoice totals. Token generation can change with the model, and the recorder currently omits cached-input discounts and cache-write charges.
+
+Standard input/output prices per million tokens: GPT-6.1 Sol **$2/$10**, GPT-6.1 Terra **$1/$5**, GPT-6 Luna **$0.10/$0.50**. The old GPT-5.6 Sol rate in `model_pricing.json` was corrected from $5/$30 to **$4/$20**. Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing), [Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). Read-only model metadata requests confirmed the local account can access Sol and Luna. Compatibility tests use fake clients; live generation quality and latency remain unmeasured.
+
+### October 28 cash-hold investigation
+
+The live config's 78 captured main Decider calls included 54 RISK-OFF calls, 11 with BUY decisions. Old blanket-veto memories 24 and 33 were active but absent from all 78 captured prompts. They were stale hazards, not the demonstrated cause of this entire sample. October 26–28 had 14 logged cycles and zero buys.
+
+The latest actual prompt contained conflicting macro policies: the event-calendar block allowed one half-size buy, while the active event directive, reminders, diary and served long-term memories said to pass every candidate in a macro window. The Decider explicitly cited this veto for otherwise qualifying GM and PYPL. Feedback v14 separately reintroduced a blanket RISK-OFF pause from six losing campaigns. Other cash decisions cited independent stop geometry, earnings, extension or correlation failures; removing a market-wide veto does not make those setups valid or establish future profitability.
+
+The audited opportunity repair creates new prompt versions and retires contradictory long-term memories. Existing versions, trade records and raw feedback remain available for review. It preserves the active D≤1.3% priced-kill gate and other execution limits; a four-trade retrospective comparison is insufficient to justify removing that control. New code guards require a process restart, while activated database policy is read each cycle.
+
+Applied on October 28: **Decider v58 → v59**, **Feedback v14 → v15**; LTM rows **24, 33, 39, 42** deactivated without deleting their contents. The activation events and original memory states share batch `f602bb7e9b0a46a38ec5797c6cd589aa` in `prompt_activation_events` and `opportunity_policy_repairs`. All four active graph snapshots were verified byte-for-byte against Postgres; repeating the repair proposes no changes.
+
+```bash
+# Review only; pin reviewed versions with --expect DeciderAgent=N --expect FeedbackAgent=N.
+./dai/bin/python repair_opportunities.py --config-hash 9ea09b9as
+# Add --apply to commit the reviewed correction. No broker or model calls are made.
+# Read original memory states and policy references:
+./dai/bin/python repair_opportunities.py --config-hash 9ea09b9as --show-backup f602bb7e9b0a46a38ec5797c6cd589aa
+```
+
+The default repair is a dry-run. Apply uses a single transaction, locks and stale-version checks, and records `actor=codex_operator`, `action=operator_policy_repair`; this is an explicit operator strategy correction, not a maintenance update or an LLM critic approval. Undo cannot bypass validation to restore the blanket bans; use the journal to author a reviewed rollback version.
 
 ---
 

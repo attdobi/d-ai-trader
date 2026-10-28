@@ -59,13 +59,15 @@ def _create_engine():
             # Force an early connection so failures happen on startup instead of mid-run
             with primary_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            print(f"🗄️  Using database: {DEFAULT_DB_URI}")
+            backend = getattr(getattr(primary_engine, "dialect", None), "name", "configured")
+            print(f"🗄️  Using database backend: {backend}")
             return primary_engine
         except OperationalError as exc:
-            print(f"⚠️  Failed to connect to primary database '{DEFAULT_DB_URI}': {exc}")
-            print(f"   ➜ Falling back to local SQLite database at {FALLBACK_DB_URI}")
+            # URLs and driver errors can include passwords or connection parameters.
+            print(f"⚠️  Primary database connection failed ({type(exc).__name__})")
+            print("   ➜ Falling back to SQLite")
     fallback_engine = create_engine(FALLBACK_DB_URI, pool_pre_ping=True)
-    print(f"🗄️  Using fallback database: {FALLBACK_DB_URI}")
+    print("🗄️  Using fallback database backend: sqlite")
     return fallback_engine
 
 engine = _create_engine()
@@ -142,18 +144,10 @@ DAILY_BUY_CAP = int(os.getenv("DAILY_BUY_CAP", "3"))
 MIN_ENTRY_SPACING_MIN = int(os.getenv("MIN_ENTRY_SPACING_MIN", "45"))
 REENTRY_COOLDOWN_MIN = int(os.getenv("REENTRY_COOLDOWN_MIN", "240"))
 
-# Optional: print masked key for debugging if requested
+# Optional presence check; credential values must never enter logs.
 try:
     if os.getenv("PRINT_OPENAI_KEY"):
-        # Mask first 6 and last 4 characters unless PRINT_OPENAI_KEY=full
-        if api_key:
-            if os.getenv("PRINT_OPENAI_KEY").lower() == "full":
-                masked = api_key
-            else:
-                masked = f"{api_key[:6]}...{api_key[-4:]} (len={len(api_key)})"
-        else:
-            masked = None
-        print(f"[config] OPENAI_API_KEY present={bool(api_key)} key={masked}")
+        print(f"[config] OPENAI_API_KEY present={bool(api_key)}")
 except Exception:
     pass
 
@@ -183,16 +177,23 @@ openai.api_key = api_key
 #     • NOT RECOMMENDED for production trading yet
 #
 # GPT-5.6 FAMILY (Aug 2026 — three price/capability tiers, all vision-capable):
-#   - gpt-5.6-sol:   flagship ($5/$30 per 1M — same price as gpt-5.5, stronger)
+#   - gpt-5.6-sol:   flagship ($4/$20 per 1M)
 #   - gpt-5.6-terra: mid tier ($2/$12) — near-Sol on reasoning benchmarks
 #   - gpt-5.6-luna:  budget tier ($0.20/$1.20) — cheaper than gpt-5.4-mini
 #   Aliases accepted: sol / terra (or tera) / luna; bare "gpt-5.6" → Sol
 #   (matches OpenAI's own alias). Reasoning suffixes work: -m terra-high.
+# GPT-6/6.1 models are accepted by full ID; short tier aliases remain on 5.6.
+# Rates live in model_pricing.json. Defaults change only when explicitly configured.
 #
 # Note: o1/o3 models NOT supported (no system messages or JSON mode)
 GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
 _VALID_GPT_MODELS = [
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -303,6 +304,12 @@ def _normalize_model_name(model_name):
     lookup_key = raw_input.lower()
     normalized = _MODEL_ALIASES.get(lookup_key, lookup_key)
     return raw_input, normalized
+
+
+def _is_reasoning_model(model_name):
+    """GPT-5 and GPT-6 use the reasoning request and response paths."""
+    name = (model_name or "").lower()
+    return name in {"gpt-5", "gpt-6"} or name.startswith(("gpt-5.", "gpt-5-", "gpt-6.", "gpt-6-"))
 
 
 def _announce_model(model_name: str):
@@ -436,7 +443,7 @@ REASONING_LEVEL_TOKEN_LIMITS = {
     "medium": 6000,
     "high": 12000,
     "xhigh": 20000,
-    "max": 32000,   # GPT-5.6 only (clamped to xhigh on older models)
+    "max": 32000,   # GPT-5.6 and GPT-6 (clamped to xhigh on older models)
 }
 # Reasoning levels are per LLM agent. Note there is intentionally NO "momentum"
 # profile: the momentum recap is pure Python over the Yahoo Finance API
@@ -513,19 +520,18 @@ def get_agent_reasoning_level(agent_name: str) -> str:
 
 
 def get_reasoning_token_cap(agent_name: str, model_name: str, default_cap: int) -> int:
-    """Map reasoning level to a token cap when using GPT-5 reasoning models."""
-    if not model_name or not model_name.lower().startswith("gpt-5"):
+    """Map reasoning level to a token cap for GPT-5/6 reasoning models."""
+    if not _is_reasoning_model(model_name):
         return default_cap
     level = get_agent_reasoning_level(agent_name)
     return REASONING_LEVEL_TOKEN_LIMITS.get(level, REASONING_LEVEL_TOKEN_LIMITS["medium"])
 
 def get_reasoning_params(agent_name: str, model_name: str) -> dict:
-    """Return OpenAI reasoning payload when supported (GPT-5 series)."""
+    """Return OpenAI reasoning payload for GPT-5/6 models."""
     if not model_name:
         return {}
     model_lower = model_name.lower()
-    # Apply to GPT-5 variants (5.2/5.4/etc.).
-    if not model_lower.startswith("gpt-5"):
+    if not _is_reasoning_model(model_name):
         return {}
     if env_first("DAI_DISABLE_REASONING_PARAM", "0").strip().lower() in {"1", "true", "yes"}:
         return {}
@@ -539,22 +545,22 @@ def get_reasoning_params(agent_name: str, model_name: str) -> dict:
         "medium": "medium",
         "high": "high",
         "xhigh": "xhigh",
-        "max": "max",        # GPT-5.6 family only
+        "max": "max",        # GPT-5.6 and GPT-6 families
     }
     reasoning_effort = level_map.get(level, level)
     valid_levels = {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
     if reasoning_effort not in valid_levels:
         reasoning_effort = "medium"
-    # "max" effort only exists on the GPT-5.6 family; clamp for older models
+    # "max" effort exists on GPT-5.6 and GPT-6; clamp for older models
     # so the API doesn't reject the payload.
-    if reasoning_effort == "max" and not model_lower.startswith("gpt-5.6"):
+    if reasoning_effort == "max" and not model_lower.startswith(("gpt-5.6", "gpt-6")):
         reasoning_effort = "xhigh"
     return {"reasoning_effort": reasoning_effort}
 
 
 def append_reasoning_guidance(system_prompt: str, agent_name: str, model_name: str) -> str:
-    """Append hidden reasoning instruction to the system prompt for GPT-5 requests."""
-    if not model_name or not model_name.lower().startswith("gpt-5"):
+    """Append hidden reasoning instruction to the system prompt for GPT-5/6 requests."""
+    if not _is_reasoning_model(model_name):
         return system_prompt
     level = get_agent_reasoning_level(agent_name)
     if not level:
@@ -822,11 +828,11 @@ def _is_gpt5_model(model_name):
     import re
     model_lower = model_name.lower()
     
-    # Models that use max_completion_tokens (GPT-4o series and GPT-5)
+    # Models that use max_completion_tokens (GPT-4o series and GPT-5/6)
     # Exclude gpt-4-turbo which still uses the old max_tokens
     # Note: GPT-5 also doesn't support custom temperature (reasoning model behavior)
     new_model_patterns = [
-        r'^gpt-5([.-].*)?$',     # gpt-5, gpt-5.1, gpt-5-mini, etc.
+        r'^gpt-[56]([.-].*)?$',  # gpt-5/6 families, including gpt-6.1-sol
         r'^gpt-4o(-.*)?$',       # gpt-4o, gpt-4o-mini, etc.
         r'^chatgpt-4o(-.*)?$',   # chatgpt-4o-latest, etc.
     ]
@@ -852,17 +858,15 @@ def get_model_token_params(model_name, max_tokens_value):
 def get_model_temperature_params(model_name, temperature_value):
     """
     Get the correct temperature parameter for different OpenAI models.
-    GPT-5 models only support temperature=1.0 (default), like reasoning models.
+    Reasoning requests omit custom temperature on GPT-5/6 models.
     GPT-4o and earlier support custom temperature.
     """
     if not model_name:
         return {"temperature": temperature_value}
     
-    model_lower = model_name.lower()
-    
-    # GPT-5 series doesn't support custom temperature (only default 1.0)
-    if model_lower.startswith('gpt-5'):
-        return {}  # Don't send temperature parameter for GPT-5
+    # Omit temperature for reasoning requests, including GPT-6.
+    if _is_reasoning_model(model_name):
+        return {}
     else:
         # GPT-4o, GPT-4-turbo, and earlier models support custom temperature
         return {"temperature": temperature_value}
@@ -964,7 +968,6 @@ class PromptManager:
                     model_name = get_agent_model(agent_name)
                 if not model_name:
                     raise ValueError("No GPT model configured")
-                model_lower = model_name.lower()
                 decider_agent = (agent_name == "DeciderAgent")
                 # Summarizer & Feedback still benefit from json_object coercion; Decider relies on prompt rules.
                 requires_json = (agent_name in {"SummarizerAgent", "FeedbackAgent"})
@@ -973,12 +976,12 @@ class PromptManager:
                 reasoning_params = get_reasoning_params(agent_name, model_name) if allow_reasoning_payload else {}
                 
                 # ============================================
-                # PARALLEL PATH 1: GPT-5 (Reasoning Model)
+                # PARALLEL PATH 1: GPT-5/6 (Reasoning Models)
                 # ============================================
-                if model_lower.startswith('gpt-5'):
+                if _is_reasoning_model(model_name):
                     print(f"🤖 Using {model_name} (REASONING MODEL) for {agent_name}")
                     
-                    # GPT-5 config: Simple messages, no extra fluff
+                    # Reasoning models preserve image inputs and use the agent's token budget.
                     messages = [
                         {"role": "system", "content": effective_system_prompt}
                     ]
@@ -997,20 +1000,19 @@ class PromptManager:
                     else:
                         messages.append({"role": "user", "content": prompt})
                     
-                    # GPT-5 parameters: Lots of tokens, NO temperature
+                    # Reasoning requests omit sampling parameters.
                     token_cap = get_reasoning_token_cap(agent_name, model_name, 12000 if decider_agent else 6000)
                     api_params = {
                         "model": model_name,
                         "messages": messages,
-                        "max_completion_tokens": token_cap  # GPT-5 needs lots for reasoning
-                        # No temperature - GPT-5 only supports default (1.0)
+                        "max_completion_tokens": token_cap
                     }
                     if reasoning_params:
                         api_params.update(reasoning_params)
                         print(f"🧠 Reasoning effort for {agent_name or 'UnknownAgent'}: {reasoning_params.get('reasoning_effort')}")
                     if requires_json:
                         api_params["response_format"] = {"type": "json_object"}
-                    print(f"📊 GPT-5 Token limit: {token_cap} (reasoning={reasoning_level})")
+                    print(f"📊 Reasoning token limit: {token_cap} (reasoning={reasoning_level})")
                 
                 # ============================================
                 # PARALLEL PATH 2: GPT-4o (Standard Vision Model)
@@ -1095,48 +1097,47 @@ class PromptManager:
                 finish_reason = choice.finish_reason
                 content = choice.message.content
                 try:  # replay record for the caller (decider_inputs); never affects the call
-                    _gpt5_path = model_lower.startswith('gpt-5')
+                    _reasoning_path = _is_reasoning_model(model_name)
                     self._tls.last_reply = {
                         "agent": agent_name, "model": model_name,
-                        "reasoning_effort": (reasoning_params or {}).get("reasoning_effort") if _gpt5_path else None,
-                        "system_prompt": effective_system_prompt if _gpt5_path else base_system_prompt,
+                        "reasoning_effort": (reasoning_params or {}).get("reasoning_effort") if _reasoning_path else None,
+                        "system_prompt": effective_system_prompt if _reasoning_path else base_system_prompt,
                         "user_prompt": prompt, "content": content, "finish_reason": finish_reason,
                     }
                 except Exception:
                     pass
                 response_model = model_name
-                response_model_lower = model_lower
                 
                 # ============================================
                 # Response Handling - Separate Paths
                 # ============================================
                 
-                # GPT-5 response handling
-                if response_model_lower.startswith('gpt-5'):
-                    print(f"🔍 GPT-5 Response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
+                # GPT-5/6 response handling
+                if _is_reasoning_model(response_model):
+                    print(f"🔍 {response_model} response: finish_reason='{finish_reason}', content_length={len(content) if content else 0}")
                     
-                    # GPT-5 specific: 'length' means reasoning tokens exhausted
+                    # A truncated reasoning reply must never be accepted as a complete decision.
                     if finish_reason == "length":
-                        print(f"⚠️  GPT-5 hit token limit during reasoning!")
+                        print(f"⚠️  {response_model} hit token limit during reasoning!")
                         print(f"💡 Use GPT-4o instead for reliable results")
                         if retries < max_retries - 1:
                             retries += 1
                             time.sleep(2)
                             continue
-                        return {"error": f"GPT-5 exhausted reasoning tokens. Switch to GPT-4o.", "agent": agent_name}
+                        return {"error": f"{response_model} exhausted reasoning tokens.", "agent": agent_name}
                     
                     if not content or finish_reason != "stop":
-                        print(f"⚠️  GPT-5 failed: finish_reason={finish_reason}")
+                        print(f"⚠️  {response_model} failed: finish_reason={finish_reason}")
                         if retries < max_retries - 1:
                             retries += 1
                             time.sleep(2)
                             continue
-                        return {"error": f"GPT-5 failed: {finish_reason}", "agent": agent_name}
+                        return {"error": f"{response_model} failed: {finish_reason}", "agent": agent_name}
 
                     normalized_content = content.strip() if content else ""
                     if decider_agent and normalized_content in {"[]", "{}"} and not model_override:
                         fallback_model = os.getenv("DAI_DECIDER_FALLBACK_MODEL", "gpt-4.1")
-                        print(f"⚠️  GPT-5 returned empty decisions. Falling back to {fallback_model} for DeciderAgent.")
+                        print(f"⚠️  {response_model} returned empty decisions. Falling back to {fallback_model} for DeciderAgent.")
                         fallback_prompt = prompt + "\n\nFAILSAFE: Provide at least one HOLD decision if no trades qualify. JSON array output is mandatory."
                         return self.ask_openai(
                             fallback_prompt,

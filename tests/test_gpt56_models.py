@@ -161,7 +161,7 @@ def test_max_effort_token_cap(monkeypatch):
 def test_gpt56_pricing_rates_present(monkeypatch):
     cfg = _cfg(monkeypatch)
     pricing = cfg.load_model_pricing()
-    assert pricing["gpt-5.6-sol"] == {"input": 5.00, "output": 30.00}
+    assert pricing["gpt-5.6-sol"] == {"input": 4.00, "output": 20.00}
     assert pricing["gpt-5.6-terra"] == {"input": 2.00, "output": 12.00}
     assert pricing["gpt-5.6-luna"] == {"input": 0.20, "output": 1.20}
 

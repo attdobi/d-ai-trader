@@ -1,15 +1,15 @@
 {
  "config_hash": "9ea09b9as",
- "version": 14,
- "prompt_version_id": 654,
+ "version": 15,
+ "prompt_version_id": 662,
  "source_sha256": {
-  "system_prompt": "38df3f83384e6627ab2463efba788c8090c18e8fcbec3104d74e4cd9c52cc2a3",
+  "system_prompt": "79ba7924e24998a73688e66e2240e296292864c91cd1324aa3cbb4c3c480a1cd",
   "user_prompt_template": "e1dd528e3ccf4f175a42fd16ecafd5f631df9a2690fde6651d5b6df290f17a96",
   "strategy_directives": "67f0a572a77e60f2ce874e8387604ad12972d2014902bbbc871959689a5500dd",
-  "soul": "f3a81a0e964aadbdad2b924232d8248b63d9f742fb374ad0e1d3e11200b8c018",
-  "memory": "97af3d4075ac49a5822afaec6e252465ead57f62bf9ffa3eb487660932672908"
+  "soul": "95af7715ce8c727625799012a2d472ac4258c60d7f5899f5dd351a4d3ebcbf3f",
+  "memory": "2c5da58d885b02c819dbbaf1a224da7a0ad008a3a79c659eda454946fcf9f657"
  },
- "code_sha": "8b3436cc3cbb",
+ "code_sha": "f1f7e2716819",
  "ltm_sha": "4f53cda18c2b",
  "builder_version": 1
 }

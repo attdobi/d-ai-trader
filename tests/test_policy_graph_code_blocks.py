@@ -52,6 +52,9 @@ def _assign_target(n) -> str:
 def extract_from_source() -> list:
     """[(id, text)] in CODE_BLOCKS order, read from the trader source with ast."""
     found = {}
+    for n in ast.walk(_parse("policy_safety.py")):
+        if _assign_target(n) == "OPPORTUNITY_CHARTER":
+            found["opportunity_charter"] = _render(n.value)
 
     # decider_agent.ask_decision_agent
     ask = _func(_parse("decider_agent.py"), "ask_decision_agent")
@@ -132,10 +135,13 @@ def extract_from_source() -> list:
         ("DA.code.recency_provenance", prompt_adds[6]),
         ("DA.code.guideline_citations", prompt_adds[7]),
         ("DA.code.json_fallback", template_adds[0]),
+        ("DA.code.opportunity_charter", found["opportunity_charter"]),
         ("SA.code.feedback_suffix", found["feedback_suffix"]),
+        ("SA.code.opportunity_charter", found["opportunity_charter"]),
         ("FA.code.system_base", found["FEEDBACK_SYSTEM_BASE"]),
         ("FA.code.base_instructions", found["FEEDBACK_BASE_INSTRUCTIONS"]),
         ("FA.code.json_format", found["FEEDBACK_JSON_FORMAT"]),
+        ("FA.code.opportunity_charter", found["opportunity_charter"]),
     ]
     return ordered
 
@@ -151,7 +157,7 @@ def test_code_blocks_match_source_verbatim():
 
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 21
+    assert len(ids) == len(set(ids)) == 24
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title
@@ -233,7 +239,7 @@ def test_code_nodes_conditions():
     assert by_id["DA.code.json_fallback"].extra["fires"] is True
 
 
-@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 1), ("FeedbackAgent", "FA", 3),
+@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 2), ("FeedbackAgent", "FA", 4),
                                                 ("CompanyExtractionAgent", "CA", 0)])
 def test_code_nodes_other_agents(agent, prefix, count):
     nodes = code_nodes(agent, {}, is_margin_account=False)

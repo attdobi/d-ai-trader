@@ -72,6 +72,7 @@ from pathlib import Path
 from policy_graph.routes import register_policy_graph_routes
 from cash_flow_routes import register_cash_flow_routes
 from policy_graph.prompts import CRITIC_DOCTRINE, CRITIC_OUTPUT_CANDIDATE, GATE_STYLE
+from policy_safety import OPPORTUNITY_CHARTER
 from shared.review_window import fetch_review_window
 
 # Configuration
@@ -4350,7 +4351,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'Decider is not given (a candidate that demanded a "quoted entry reference and fixed kill" nothing '
                     'supplied locked the system in cash on 2026-09-02). Do not hedge rules into "consider prospectively '
                     'testing" language; state the trigger, the action and the falsification metric.\n\n'
-                    + GATE_STYLE + '\n\n'
+                    + GATE_STYLE + '\n\n' + OPPORTUNITY_CHARTER + '\n\n'
                     'CRITICAL RULES YOU MUST PRESERVE (never remove, weaken, or dilute these):\n'
                     '1. The "GROUND TRUTH" block in strategy_directives that forces decisions to match actual holdings. '
                     'HOLD and SELL are ONLY valid for tickers the agent currently owns. '

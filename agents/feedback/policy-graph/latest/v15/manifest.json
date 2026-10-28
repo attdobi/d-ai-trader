@@ -1,0 +1,148 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 15,
+ "root_id": "FA.root",
+ "prompt_version_id": 662,
+ "created_at": "2026-10-28T09:38:30.469921",
+ "created_by": "codex_operator",
+ "actor_kind": "codex_operator",
+ "description": "Operator policy correction: reconcile selective half-size regime/macro entries; preserve candidate-level stops, earnings exclusions and account rails",
+ "is_active": true,
+ "materialized_by": "operator_policy_repair",
+ "source_sha256": {
+  "system_prompt": "79ba7924e24998a73688e66e2240e296292864c91cd1324aa3cbb4c3c480a1cd",
+  "user_prompt_template": "e1dd528e3ccf4f175a42fd16ecafd5f631df9a2690fde6651d5b6df290f17a96",
+  "strategy_directives": "67f0a572a77e60f2ce874e8387604ad12972d2014902bbbc871959689a5500dd",
+  "soul": "95af7715ce8c727625799012a2d472ac4258c60d7f5899f5dd351a4d3ebcbf3f",
+  "memory": "2c5da58d885b02c819dbbaf1a224da7a0ad008a3a79c659eda454946fcf9f657"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.anti_hallucination",
+   "FA.directives.audit_order",
+   "FA.directives.audit_order.n1",
+   "FA.directives.audit_order.regime",
+   "FA.directives.audit_order.entry_geometry",
+   "FA.directives.audit_order.re_entry",
+   "FA.directives.audit_order.payoff",
+   "FA.directives.audit_order.n6",
+   "FA.directives.audit_order.n7",
+   "FA.directives.audit_order.n8",
+   "FA.directives.audit_order.n9",
+   "FA.directives.audit_order.event_risk"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.ranked_leak_priority",
+   "FA.soul.ranked_leak_priority.kill_filter_evidence",
+   "FA.soul.ranked_leak_priority.n2",
+   "FA.soul.rule_style"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.log.2026_06_20",
+   "FA.memory.log.2026_06_24",
+   "FA.memory.log.2026_06_25",
+   "FA.memory.log.2026_08_04",
+   "FA.memory.log.2026_08_21",
+   "FA.memory.log.2026_09_01",
+   "FA.memory.log.2026_09_02_meta",
+   "FA.memory.log.2026_09_02_meta_2",
+   "FA.memory.log.2026_09_02_meta_3",
+   "FA.memory.log.2026_09_02_meta_4",
+   "FA.memory.log.2026_09_20",
+   "FA.memory.log.2026_10_12",
+   "FA.memory.log.2026_10_28"
+  ]
+ },
+ "node_count": 65,
+ "edge_count": 116,
+ "code": {
+  "sha": "f1f7e2716819",
+  "dir": "../_code/f1f7e2716819",
+  "git_sha": "ca38e139",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true,
+   "FA.code.opportunity_charter": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 14,
+  "lineage_version": 15,
+  "activation": {
+   "event_id": 72,
+   "created_at": "2026-10-28T09:38:30.469921",
+   "action": "operator_policy_repair",
+   "actor": "codex_operator",
+   "from_version": 14,
+   "batch_id": "f602bb7e9b0a46a38ec5797c6cd589aa",
+   "reason": "Operator policy correction: reconcile selective half-size regime/macro entries; preserve candidate-level stops, earnings exclusions and account rails"
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 4,
+  "removed": 1,
+  "renamed": 1,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 14
+ },
+ "kind": "policy",
+ "history": []
+}

@@ -123,6 +123,57 @@ def test_set_active_switches_version_and_records_event(pm_env):
     assert events[0].actor == "feedback_agent"
 
 
+@pytest.mark.parametrize("agent,field,rule", [
+    ("DeciderAgent", "strategy_directives", "IF INDEX REGIME=RISK-OFF, PASS every new buy; otherwise fall through."),
+    ("FeedbackAgent", "soul", "IF INDEX REGIME is RISK-OFF THEN pass. Otherwise next gate."),
+    ("DeciderAgent", "memory", "IF EVENT CALENDAR shows MACRO WINDOW: YES THEN pass. Otherwise next gate."),
+])
+def test_blanket_veto_cannot_deactivate_current_policy(pm_env, agent, field, rule):
+    pm, engine = pm_env
+    _add_version(engine, agent, 1, active=True)
+    _add_version(engine, agent, 2)
+    with engine.begin() as conn:
+        conn.execute(text(f"UPDATE prompt_versions SET {field}=:rule WHERE version=2"), {"rule": rule})
+    with pytest.raises(ValueError, match="opportunity charter"):
+        with engine.begin() as conn:
+            pm.set_active_prompt_version(conn, agent, CFG, 2, action="apply", actor="prompt_lab")
+    assert _active_version(engine, agent) == 1
+    assert _events(engine) == []
+
+
+def test_selective_macro_allowance_keeps_candidate_kill_gate(pm_env):
+    pm, engine = pm_env
+    _add_version(engine, "DeciderAgent", 1, active=True)
+    _add_version(engine, "DeciderAgent", 2)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE prompt_versions SET strategy_directives=:rule WHERE version=2
+        """), {"rule": "IF MACRO WINDOW: YES THEN half size. IF D >1.3% THEN pass."})
+        pm.set_active_prompt_version(conn, "DeciderAgent", CFG, 2, action="apply", actor="prompt_lab")
+    assert _active_version(engine, "DeciderAgent") == 2
+    assert len(_events(engine)) == 1
+
+
+def test_undo_cannot_partially_restore_a_batch_with_a_blanket_veto(pm_env):
+    pm, engine = pm_env
+    for agent in ("SummarizerAgent", "DeciderAgent"):
+        _add_version(engine, agent, 1, active=True)
+        _add_version(engine, agent, 2)
+    # Represent a legacy bad policy already active before safeguards existed.
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE prompt_versions SET strategy_directives=:rule
+            WHERE agent_type='DeciderAgent' AND version=1
+        """), {"rule": "IF INDEX REGIME is RISK-OFF THEN pass."})
+        for agent in ("SummarizerAgent", "DeciderAgent"):
+            pm.set_active_prompt_version(conn, agent, CFG, 2, action="operator_policy_repair", batch_id="repair")
+    with pytest.raises(ValueError, match="opportunity charter"):
+        pm.undo_last_prompt_activation(CFG)
+    for agent in ("SummarizerAgent", "DeciderAgent"):
+        assert _active_version(engine, agent) == 2
+    assert len(_events(engine)) == 2
+
+
 def test_set_active_noop_when_target_already_active(pm_env):
     pm, engine = pm_env
     _add_version(engine, "DeciderAgent", 13, active=True)

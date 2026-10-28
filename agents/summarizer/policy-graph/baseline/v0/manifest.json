@@ -76,14 +76,15 @@
    "SA.memory.log.2026_09_02_edge"
   ]
  },
- "node_count": 24,
- "edge_count": 31,
+ "node_count": 25,
+ "edge_count": 33,
  "code": {
-  "sha": "8b3436cc3cbb",
-  "dir": "../_code/8b3436cc3cbb",
+  "sha": "f1f7e2716819",
+  "dir": "../_code/f1f7e2716819",
   "git_sha": "baseline",
   "fires": {
-   "SA.code.feedback_suffix": true
+   "SA.code.feedback_suffix": true,
+   "SA.code.opportunity_charter": true
   }
  },
  "ltm": {

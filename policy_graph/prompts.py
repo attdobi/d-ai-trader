@@ -7,6 +7,8 @@ Keep the doctrine text in one place so both gates judge by the same bar.
 """
 from __future__ import annotations
 
+from policy_safety import OPPORTUNITY_CHARTER
+
 CRITIC_DOCTRINE = (
     'You are the trust-region gate of a reinforcement-learning loop for an autonomous 1-5 day '
     'swing trading system (Schwab cash account, ~$400-$700 tickets, <=5 positions). A candidate '
@@ -45,6 +47,7 @@ CRITIC_DOCTRINE = (
     'before blaming the change. Judge the evidence in front of you; never approve merely because you '
     'predict the human will.\n\n'
 )
+CRITIC_DOCTRINE += '\n\n' + OPPORTUNITY_CHARTER + '\n\n'
 
 CRITIC_OUTPUT_CANDIDATE = (
     'Return ONLY valid JSON: {"verdict": "approve" | "reject", "reason": one to three sentences citing '
@@ -129,5 +132,6 @@ DRAFTER_SYSTEM = (
     'test, the number, and the action; drop everything else. A rule the style_warnings flag (too long, parenthetical, '
     'two conditions, no falsification metric) will be rejected.'
 )
+DRAFTER_SYSTEM += '\n\n' + OPPORTUNITY_CHARTER
 
 __all__ = ["CRITIC_DOCTRINE", "CRITIC_OUTPUT_CANDIDATE", "CRITIC_OUTPUT_FILES", "DRAFTER_SYSTEM", "GATE_STYLE"]

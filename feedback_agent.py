@@ -17,6 +17,7 @@ from sqlalchemy import text
 from config import engine, PromptManager, session, openai, GPT_MODEL, get_agent_model, get_model_token_params, get_model_temperature_params, get_current_config_hash, MODEL_TEMPERATURE, append_reasoning_guidance, get_agent_reasoning_level, get_reasoning_token_cap, get_reasoning_params
 import yfinance as yf
 import pandas as pd
+from policy_safety import feedback_policy_violations, opportunity_system_prompt
 
 # Performance thresholds
 SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant
@@ -77,7 +78,7 @@ def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label
     # Honor DAI_MODEL_FEEDBACK (per-agent override); falls back to the global
     # -m model. Previously hardcoded GPT_MODEL, which silently ignored the env.
     model_name = get_agent_model(agent_label)
-    effective_system = append_reasoning_guidance(system_prompt, agent_label, model_name)
+    effective_system = opportunity_system_prompt(append_reasoning_guidance(system_prompt, agent_label, model_name))
     token_cap = get_reasoning_token_cap(agent_label, model_name, base_max_tokens)
     token_params = get_model_token_params(model_name, token_cap)
     temperature_params = get_model_temperature_params(model_name, MODEL_TEMPERATURE)
@@ -726,6 +727,13 @@ class TradeOutcomeTracker:
 
         print(f"🔄 Config {config_hash} is in AUTO mode - appending feedback reminder (approved policy preserved)")
 
+        # The feedback record is already archived by the caller. Quarantine the
+        # entire automatic batch before either agent's version or LTM is written.
+        # Direct feedback injection has the same guard in the Decider.
+        if feedback_policy_violations(feedback):
+            print(f"⚠️ Feedback #{feedback_id} retained for review; automatic policy/memory updates skipped: blanket regime/macro entry veto")
+            return
+
         try:
             for agent_type, fb_key, rules_key in (
                 ("SummarizerAgent", "summarizer_feedback", "summarizer_rules"),
@@ -1363,7 +1371,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             feedback_id = self._store_ai_feedback_response(
                 agent_type=agent_type,
                 user_prompt=user_prompt,
-                system_prompt=effective_system_prompt,
+                system_prompt=api_params["messages"][0]["content"],
                 ai_response=ai_response,
                 context_data=context_data,
                 performance_metrics=performance_metrics,

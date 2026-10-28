@@ -1,0 +1,12 @@
+{
+ "code_sha": "f1f7e2716819",
+ "git_sha": "ca38e139",
+ "kind": "code",
+ "sha": "f1f7e2716819",
+ "node_ids": [
+  "FA.code.system_base",
+  "FA.code.base_instructions",
+  "FA.code.json_format",
+  "FA.code.opportunity_charter"
+ ]
+}

@@ -47,6 +47,7 @@ from config import (
 )
 import yfinance as yf
 from feedback_agent import TradeOutcomeTracker
+from policy_safety import blanket_entry_vetoes, opportunity_system_prompt, safe_feedback_context
 from shared.ticker_normalize import normalize_ticker
 from shared.run_context import RunContext
 from shared.market_clock import MarketClock
@@ -2646,6 +2647,7 @@ OUTPUT (STRICT)
                     feedback_context = str(decider_feedback)
             elif decider_feedback:
                 feedback_context = str(decider_feedback)
+            feedback_context = safe_feedback_context(decider_feedback)
     except Exception as feedback_err:
         feedback_context = f"Unable to load recent feedback: {feedback_err}"
         print(f"⚠️  Failed to build decider feedback context: {feedback_err}")
@@ -2891,6 +2893,9 @@ OUTPUT (STRICT)
         _mem_cfg = get_current_config_hash()
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
         _mem_rows, _ltm_tail = _router_memory_rows(_router, get_relevant_memories(_mem_cfg, tickers=_mem_tks))
+        # Legacy rules stay in the database for audit but cannot override the
+        # current selective entry policy or be logged as served/citable.
+        _mem_rows = [m for m in _mem_rows if not blanket_entry_vetoes(m.get("content"))]
         _ltm_tag = None
         try:
             from policy_graph.assembly import health_tag as _ltm_health_tag
@@ -3059,6 +3064,10 @@ OUTPUT (STRICT)
         # the router's kept AND routed-out entries / memory rows stay citable (their ids are in the tail lines)
         _GUIDELINE_IDS_STASH[run_id] |= set(_router.routable_ids())
 
+
+    # Both graph and flat policy paths meet here. Keep the code-owned charter in
+    # the exact system prompt persisted for replay and sent to the model.
+    system_prompt = opportunity_system_prompt(system_prompt)
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
     prompt_preview_tail = int(os.getenv("DAI_PROMPT_DEBUG_TAIL", "5000"))

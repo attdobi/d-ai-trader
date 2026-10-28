@@ -12,7 +12,7 @@
  "actor_kind": "human",
  "description": "v29 Summarizer (auto) · feedback#1263 · success 20.0% · 25 trades · 2026-10-28 15:26 UTC",
  "is_active": true,
- "materialized_by": "prompt_lab",
+ "materialized_by": "codex_operator_verified",
  "source_sha256": {
   "system_prompt": "83d7a8664bf1ef6a9c1a4a8bd40503f810aa25a02bce09a8320a3d05119e3f35",
   "user_prompt_template": "41610a99e264f00342e58e300dcbe87cbf7e8e956139797c860f59013db1cd5d",
@@ -91,14 +91,15 @@
    "SA.memory.log.2026_10_28_entry_geometry"
   ]
  },
- "node_count": 43,
- "edge_count": 60,
+ "node_count": 44,
+ "edge_count": 62,
  "code": {
-  "sha": "8b3436cc3cbb",
-  "dir": "../_code/8b3436cc3cbb",
-  "git_sha": "2e2fac3b",
+  "sha": "f1f7e2716819",
+  "dir": "../_code/f1f7e2716819",
+  "git_sha": "ca38e139",
   "fires": {
-   "SA.code.feedback_suffix": true
+   "SA.code.feedback_suffix": true,
+   "SA.code.opportunity_charter": true
   }
  },
  "ltm": {
@@ -121,7 +122,28 @@
    "batch_id": "401dc6a966c74b41870898d745b3676f",
    "reason": "v29 Summarizer (auto) · feedback#1263 · success 20.0% · 25 trades · 2026-10-28 15:26 UTC"
   },
-  "review": null
+  "review": {
+   "review_id": 44,
+   "created_at": "2026-10-28T08:26:42.272590",
+   "from_version": 28,
+   "to_version": 29,
+   "critic_verdict": "approve",
+   "critic_confidence": 0.9,
+   "critic_auto": false,
+   "critic_reason": "This is one attributable Summarizer-format change targeting the top ranked leak: unpriced 20d-only losers lost $130.36 across 16 trades. The supplied INDEX REGIME and watchlist fields provide SPY/QQQ and ticker 20d data when shown, while the required not_shown label prevents fabrication; completeness is trivially auditable over 20 summaries.",
+   "human_verdict": "approve",
+   "human_sections": {
+    "approved": [
+     "system_prompt",
+     "memory"
+    ],
+    "rejected": []
+   },
+   "human_agrees_critic": true,
+   "realized_winrate_delta": null,
+   "realized_pnl": null,
+   "outcome_measured_at": null
+  }
  },
  "delta_vs_prev": {
   "added": 1,

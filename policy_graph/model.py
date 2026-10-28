@@ -198,6 +198,7 @@ POLARITY_OVERRIDES = {
     "code.justification_detail": "structure", "code.considered_setups": "structure", "code.cash_playbook": "caution",
     "code.index_regime": "gate", "code.watchlist_header": "action", "code.quarantine_line": "gate",
     "code.event_calendar": "gate",
+    "code.opportunity_charter": "principle",
     "code.lessons_header": "structure", "code.recent_activity_header": "structure", "code.json_fallback": "structure",
     "code.feedback_suffix": "structure", "code.system_base": "structure", "code.base_instructions": "structure",
     "code.json_format": "structure", "ltm": "evidence", "runtime": "structure",

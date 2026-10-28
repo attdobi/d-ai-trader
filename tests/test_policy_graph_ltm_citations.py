@@ -35,12 +35,12 @@ def mem(monkeypatch):
 def test_lessons_block_carries_each_rows_citation_tag(mem):
     plain = mem.format_long_term_memory(ROWS)
     # without a tag the block is unchanged: each row is exactly the graph node's body
-    header = "# LESSONS (long-term memory — hard rules earned from P&L; OBEY them):"
+    header = "# LESSONS (long-term evidence — subordinate to the active policy and opportunity charter):"
     assert plain == "\n".join([header] + [format_memory_line(r) for r in ROWS])
     health = {"DA.ltm.18": {"7d": {"cited": 1}, "30d": {"cited": 2}, "90d": {"cited": 5}}}
     tagged = mem.format_long_term_memory(ROWS, cite_tag=lambda m: health_tag(f"DA.ltm.{m['id']}", health))
     lines = tagged.splitlines()
-    assert lines[0].startswith("# LESSONS (long-term memory")
+    assert lines[0].startswith("# LESSONS (long-term evidence")
     assert lines[1] == format_memory_line(ROWS[0]) + " ⟨DA.ltm.18 · cited 7d/30d/90d: 1/2/5⟩"
     assert tagged.endswith("Second line. ⟨DA.ltm.4⟩")
     # a failing tag never breaks the block

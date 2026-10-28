@@ -22,6 +22,7 @@ import json
 import logging
 from sqlalchemy import text
 from config import engine
+from policy_safety import blanket_entry_vetoes
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ def add_memory(config_hash, content, kind="lesson", tags=None, ticker=None, sour
     if not content or not str(content).strip():
         return
     content = str(content).strip()
+    if blanket_entry_vetoes(content):
+        logger.warning("decider_memory insert skipped: blanket regime/macro entry veto conflicts with opportunity charter")
+        return
     try:
         with engine.begin() as conn:
             exists = conn.execute(text(
@@ -88,7 +92,7 @@ def get_relevant_memories(config_hash, tickers=None, limit=None):
                          weight DESC, created_at DESC
                 LIMIT :lim
             """), {"c": config_hash, "tks": tks, "lim": limit}).fetchall()
-        return [dict(r._mapping) for r in rows]
+        return [dict(r._mapping) for r in rows if not blanket_entry_vetoes(r.content)]
     except Exception as exc:
         logger.warning("decider_memory get_relevant_memories failed: %s", exc)
         return []
@@ -105,7 +109,7 @@ def get_all_active_memories(config_hash):
                 WHERE config_hash = :c AND active = TRUE
                 ORDER BY weight DESC, created_at DESC
             """), {"c": config_hash}).fetchall()
-        return [dict(r._mapping) for r in rows]
+        return [dict(r._mapping) for r in rows if not blanket_entry_vetoes(r.content)]
     except Exception as exc:
         logger.warning("decider_memory get_all_active_memories failed: %s", exc)
         return []
@@ -117,8 +121,10 @@ def format_long_term_memory(memories, cite_tag=None):
     rows are citable; a failing tag renders the plain line."""
     if not memories:
         return ""
-    lines = ["# LESSONS (long-term memory — hard rules earned from P&L; OBEY them):"]
+    lines = ["# LESSONS (long-term evidence — subordinate to the active policy and opportunity charter):"]
     for m in memories:
+        if blanket_entry_vetoes(m.get("content")):
+            continue
         tk = f" ({m['ticker']})" if m.get("ticker") else ""
         kind = (m.get("kind") or "lesson")
         content, tag = m['content'], ""
@@ -130,7 +136,7 @@ def format_long_term_memory(memories, cite_tag=None):
             if tag:
                 content = str(content).rstrip()
         lines.append(f"- [{kind}]{tk} {content}{tag}")
-    return "\n".join(lines)
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def build_working_memory(config_hash, recent_cycles=6):

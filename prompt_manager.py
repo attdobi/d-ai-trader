@@ -337,7 +337,7 @@ def set_active_prompt_version(conn, agent_type, config_hash, version, *,
 
     if version is not None:
         target_exists = conn.execute(text("""
-            SELECT 1
+            SELECT system_prompt, user_prompt_template, strategy_directives, soul, memory
             FROM prompt_versions
             WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
             LIMIT 1
@@ -346,6 +346,11 @@ def set_active_prompt_version(conn, agent_type, config_hash, version, *,
             raise ValueError(
                 f"{agent_type} v{version} does not exist for config {config_hash}"
             )
+        # All writers (weekly feedback, Prompt Lab, graph proposals and manual
+        # saves) share this boundary. A learned market-wide veto must not
+        # silently replace the operator's selective-entry policy.
+        from policy_safety import validate_policy_opportunities
+        validate_policy_opportunities(agent_type, dict(target_exists._mapping))
 
     if from_version == version:
         # Effective active version is unchanged — no event — but still
@@ -425,6 +430,12 @@ def undo_last_prompt_activation(config_hash, *, actor="dashboard", conn=None):
                 batch_id=new_batch,
             ))
         except ValueError as exc:
+            from policy_safety import PolicyOpportunityError
+            if isinstance(exc, PolicyOpportunityError):
+                # Roll back the entire batch when undo would reinstate the
+                # cash lock. Do not misreport this as a missing old row or
+                # leave the other agents partially reverted.
+                raise
             # The previously-active version row no longer exists; report it
             # instead of failing the rest of the batch.
             reverted.append({"agent_type": event.agent_type, "error": str(exc), "changed": False})

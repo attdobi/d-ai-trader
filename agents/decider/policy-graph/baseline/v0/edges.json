@@ -128,6 +128,14 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
+  "source_node_id": "DA.code.opportunity_charter",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
   "source_node_id": "DA.code.quarantine_line",
   "target_node_id": "DA.memory.lessons.reentry_quarantine",
   "edge_type": "constrains",
@@ -873,6 +881,15 @@
   "provenance": "derived:assembly",
   "version": "DeciderAgent.baseline.v0",
   "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.opportunity_charter",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "system_tail"
  },
  {
   "source_node_id": "DA.template.user",

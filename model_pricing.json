@@ -1,6 +1,12 @@
 {
   "_comment": "USD per 1,000,000 tokens. Fill in YOUR OpenAI rates from https://openai.com/api/pricing/ . 'input' = prompt tokens, 'output' = completion + reasoning tokens (reasoning bills at the output rate). Token counts are captured exactly; only these rates are user-supplied, so cost re-prices instantly when you edit this file. No restart needed — it's re-read per request.",
-  "gpt-5.6-sol": {"input": 5.00, "output": 30.00},
+  "_verified": "OpenAI standard short-context rates checked 2026-10-28: https://developers.openai.com/api/docs/pricing . Estimates omit cached-input discounts and cache-write charges because those token counts are not recorded.",
+  "gpt-6.1-sol": {"input": 2.00, "output": 10.00},
+  "gpt-6.1-terra": {"input": 1.00, "output": 5.00},
+  "gpt-6-astra": {"input": 10.00, "output": 50.00},
+  "gpt-6-sol": {"input": 2.00, "output": 10.00},
+  "gpt-6-luna": {"input": 0.10, "output": 0.50},
+  "gpt-5.6-sol": {"input": 4.00, "output": 20.00},
   "gpt-5.6-terra": {"input": 2.00, "output": 12.00},
   "gpt-5.6-luna": {"input": 0.20, "output": 1.20},
   "gpt-5.5": {"input": 5.00, "output": 30.00},

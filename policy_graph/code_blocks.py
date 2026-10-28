@@ -20,6 +20,7 @@ import json
 from collections import namedtuple
 
 from .model import AGENT_PREFIX, Node, POLARITY_OVERRIDES
+from policy_safety import OPPORTUNITY_CHARTER
 
 CodeBlock = namedtuple("CodeBlock", "id title text source_file source_symbol condition position constrains")
 
@@ -195,7 +196,7 @@ _EVENT_CALENDAR_HEADER = (
 )
 
 # ----------------------------------------------------------------------------- decider_memory.py
-_LESSONS_HEADER = "# LESSONS (long-term memory — hard rules earned from P&L; OBEY them):"
+_LESSONS_HEADER = "# LESSONS (long-term evidence — subordinate to the active policy and opportunity charter):"
 _RECENT_ACTIVITY_HEADER = ("# RECENT ACTIVITY (short-term working memory — your last few cycles; do NOT repeat "
                            "mistakes or churn what you just did):\n")
 
@@ -292,14 +293,20 @@ CODE_BLOCKS: list = [
     CodeBlock("DA.code.json_fallback", "JSON output fallback", _JSON_FALLBACK,
               "decider_agent.py", f"{_DA_ASK}:user_prompt_template+=",
               "'JSON' not in user_prompt_template.upper()", "user_template_tail", []),
+    CodeBlock("DA.code.opportunity_charter", "OPPORTUNITY CHARTER", OPPORTUNITY_CHARTER,
+              "policy_safety.py", "opportunity_system_prompt", None, "system_tail", []),
     CodeBlock("SA.code.feedback_suffix", "PERFORMANCE FEEDBACK", _FEEDBACK_SUFFIX,
               "main.py", "get_openai_summary:feedback_context", None, "system_tail", []),
+    CodeBlock("SA.code.opportunity_charter", "OPPORTUNITY CHARTER", OPPORTUNITY_CHARTER,
+              "policy_safety.py", "opportunity_system_prompt", None, "system_tail", []),
     CodeBlock("FA.code.system_base", "Feedback system prompt (code)", _FA_SYSTEM_BASE,
               "feedback_agent.py", "_generate_ai_feedback:FEEDBACK_SYSTEM_BASE", None, "system_base", []),
     CodeBlock("FA.code.base_instructions", "Feedback base instructions (code)", _FA_BASE_INSTRUCTIONS,
               "feedback_agent.py", "_generate_ai_feedback:FEEDBACK_BASE_INSTRUCTIONS", None, "user_prompt_head", []),
     CodeBlock("FA.code.json_format", "Feedback JSON format (code)", _FA_JSON_FORMAT,
               "feedback_agent.py", "_generate_ai_feedback:FEEDBACK_JSON_FORMAT", None, "user_prompt_tail", []),
+    CodeBlock("FA.code.opportunity_charter", "OPPORTUNITY CHARTER", OPPORTUNITY_CHARTER,
+              "policy_safety.py", "OPPORTUNITY_CHARTER", None, "system_tail", []),
 ]
 
 CODE_SHA: str = hashlib.sha256(

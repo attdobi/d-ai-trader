@@ -350,6 +350,7 @@ def initialize_database():
         '''))
 
 def get_openai_summary(agent_name, html_content, image_paths):
+    from policy_safety import opportunity_system_prompt, safe_feedback_context
     def _safe_format_template(template, values):
         sentinel_map = {}
         safe_template = template
@@ -418,6 +419,7 @@ Return a JSON object with:
                     except:
                         pass
                 
+                summarizer_feedback = safe_feedback_context(summarizer_feedback)
                 feedback_context = f"\nPERFORMANCE FEEDBACK: {summarizer_feedback}\nIncorporate this guidance to improve analysis quality."
     except Exception as e:
         print(f"Failed to get summarizer feedback: {e}")
@@ -503,7 +505,7 @@ Most financial news websites still show headlines and articles even with popups 
         prompt += "\n\n" + "\n".join(screenshot_instructions)
     
     # Use versioned system prompt with feedback context
-    system_prompt = system_prompt_template + f"\n\n{feedback_context}"
+    system_prompt = opportunity_system_prompt(system_prompt_template + f"\n\n{feedback_context}")
     
     print(f"🖼️ {agent_name}: passing {len(valid_image_paths)} image(s) to OpenAI")
     if valid_image_paths:

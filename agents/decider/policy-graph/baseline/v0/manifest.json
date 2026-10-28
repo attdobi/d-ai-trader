@@ -97,11 +97,11 @@
    "DA.memory.log.2026_09_02_regime"
   ]
  },
- "node_count": 70,
- "edge_count": 122,
+ "node_count": 71,
+ "edge_count": 124,
  "code": {
-  "sha": "8b3436cc3cbb",
-  "dir": "../_code/8b3436cc3cbb",
+  "sha": "f1f7e2716819",
+  "dir": "../_code/f1f7e2716819",
   "git_sha": "baseline",
   "fires": {
    "DA.code.crowd_fade": false,
@@ -120,7 +120,8 @@
    "DA.code.confirmation_policy": true,
    "DA.code.recency_provenance": true,
    "DA.code.guideline_citations": true,
-   "DA.code.json_fallback": false
+   "DA.code.json_fallback": false,
+   "DA.code.opportunity_charter": true
   }
  },
  "ltm": {

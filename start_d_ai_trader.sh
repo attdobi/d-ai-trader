@@ -11,13 +11,21 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-t TRADING_MODE] [-c CADENCE] 
   -p, --port            Dashboard port (default: 8080)
   -m, --model           Global AI model (default: gpt-5.6-terra); the per-agent
                         DAI_MODEL_* keys in .env still decide each agent's model.
+                        GPT-6/6.1 models (full IDs, input/output per 1M tokens):
+                          • gpt-6.1-sol   - balanced reasoning, $2/$10
+                          • gpt-6.1-terra - fast visual/text tasks, $1/$5
+                          • gpt-6-astra   - highest capability, $10/$50
+                          • gpt-6-sol     - earlier Sol, $2/$10
+                          • gpt-6-luna    - high-volume tasks, $0.10/$0.50
+                        The short sol/terra/luna aliases still select GPT-5.6.
+
                         GPT-5.6 family (Aug 2026 — all vision-capable):
-                          • gpt-5.6-sol   (alias: sol)   - flagship, $5/$30 per 1M
+                          • gpt-5.6-sol   (alias: sol)   - flagship, $4/$20 per 1M
                           • gpt-5.6-terra (alias: terra) - mid tier, $2/$12 (default)
                           • gpt-5.6-luna  (alias: luna)  - budget, $0.20/$1.20
                           • bare "gpt-5.6" → Sol (matches OpenAI's alias)
 
-                        GPT-5 reasoning models:
+                        GPT-5/6 reasoning models:
                           • gpt-5.5 / gpt-5.4 / gpt-5.2 / gpt-5.1 / gpt-5
                           • Append a reasoning-effort suffix to set the
                             effort for summarizer/decider/feedback agents:
@@ -25,7 +33,8 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-t TRADING_MODE] [-c CADENCE] 
                               -m gpt-5.5-med
                               -m gpt-5.6-sol-high
                               -m gpt-5.6-terra-xhigh
-                              -m gpt-5.6-sol-max   (max: GPT-5.6 only)
+                              -m gpt-6.1-sol-high
+                              -m gpt-6-astra-max   (max: GPT-5.6 and GPT-6)
 
                         Older models (gpt-4o, gpt-4o-mini, gpt-4.1) are still accepted.
                         Note: o1/o3 models NOT supported
