@@ -582,6 +582,33 @@ Schwab refresh tokens expire after about 7 days. On `refresh_token_authenticatio
 
 ## Learning map
 
+**Arrange by → Market themes** groups rules and linked cases by Iran/geopolitics,
+oil/energy, technology, AI, semiconductors, memory manufacturing, electric vehicles
+and general policy. Each association identifies direct text, exact-version cited
+evidence or a curated issuer-exposure reference. The **Text similarity** toggle
+keeps the frozen embedding coordinates. Theme regions are descriptive; the page
+does not claim a validated BUY/PASS decision boundary. Theme counts are bounded
+display observations and do not change quality denominators or trading behavior.
+
+The Decisions router has now passed two saved-context probes. The latest used
+six saved summaries with approved v60, kept 7/8 optional memories beside 58 pinned
+nodes, and cost **$0.00180445**. It uses the summaries' **text**, not original
+screenshot pixels; the six summarizers perform vision upstream. It remains in
+shadow and has produced **$0 realized token savings**. New comparisons capture
+matched full-prompt token estimates, router overhead and potential net input
+savings; cache-adjusted savings and quality impact stay unknown. At $2/million
+uncached Sol input tokens, that probe fee needs at least 903 removed tokens to
+break even. See [router economics and verification](docs/DECISIONS_ROUTER.md).
+
+Quality currently combines closed-trade P&L/win-rate associations and a separate
+prospective paper specification: next-session open to session 1/3/5 close, minus
+10 bps each side, with BUY precision, winner recall, loss FPR, expectancy, coverage
+and Wilson intervals. The prospective ledger currently has **zero rows**: these
+rates are unknown, and no routed-vs-full quality comparison has been established.
+The existing trader must load the new code to begin live shadow/candidate capture;
+restarting only the preview does not load it. Keep routing activation behind
+matched comparisons and later independent outcomes. [Measurement conventions](docs/LEARNING_MAP.md)
+
 **Policy Graph → Learning map** connects exact rule revisions, reviews and cited
 cases through a fixed local embedding projection. Its opportunity ledger records
 supplied candidates before decisions and marks paper outcomes at 1/3/5 sessions.

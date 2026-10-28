@@ -28,7 +28,8 @@ def submit_shadow(scorer, *args, log=print, **kwargs):
 
 
 def record_when_ready(job, engine, config_hash, prompt_version, run_id, *,
-                      served_ids=(), local_result=None, source_input_id=None, recorder=None, log=print):
+                      served_ids=(), local_result=None, source_input_id=None, prompt_capture=None,
+                      recorder=None, log=print):
     """Attach an audit writer and return immediately, including on slow APIs."""
     if job is None:
         return
@@ -42,8 +43,15 @@ def record_when_ready(job, engine, config_hash, prompt_version, run_id, *,
             else:
                 write = recorder
             result = future.result()  # the callback runs only after completion
+            extra = {}
+            if prompt_capture is not None:
+                from .economics import measure, unavailable
+                try:
+                    extra["economics"] = measure(prompt_capture, result)
+                except Exception as exc:
+                    extra["economics"] = unavailable("Frozen prompt comparison failed: " + type(exc).__name__)
             write(engine, config_hash, prompt_version, run_id, result,
-                  served_ids=actual_ids, local_result=local_result, source_input_id=source_input_id)
+                  served_ids=actual_ids, local_result=local_result, source_input_id=source_input_id, **extra)
         except Exception as exc:
             # Remote/driver exception strings can contain sensitive values.
             log(f"Decisions comparison audit unavailable ({type(exc).__name__})")

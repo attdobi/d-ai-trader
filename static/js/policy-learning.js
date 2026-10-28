@@ -84,10 +84,64 @@
     return {x:[Math.min(...points.map(n=>Number(n.x))),Math.max(...points.map(n=>Number(n.x)))], y:[Math.min(...points.map(n=>Number(n.y))),Math.max(...points.map(n=>Number(n.y)))]};
   }
 
+  const marketThemes = item => [...new Set(list(item?.market_themes).map(String).filter(Boolean))].length ? [...new Set(list(item.market_themes).map(String).filter(Boolean))] : ['general'];
+  const inMarketTheme = (item, theme) => !theme || marketThemes(item).includes(theme);
+  const themeCatalog = data => list(data?.theme_catalog).length ? list(data.theme_catalog) : [{id:'general',label:'General policy',description:'No market topic recorded.'}];
+  function themePosition(id, theme, box) {
+    // Category positions are a readable grid, separate from stored embeddings.
+    // The layout receives the whole version before display filters are applied.
+    const index=list(box.member_ids).indexOf(String(id));
+    if(index>=0) {
+      const columns=box.point_columns,cellWidth=(box.width-40)/columns;
+      return {x:box.x+20+(index%columns+.5)*cellWidth,y:box.y+64+Math.floor(index/columns)*54};
+    }
+    // Backward-compatible placement when no membership list is available.
+    const hash = text => {let n=2166136261;for(const c of String(text)){n^=c.charCodeAt(0);n=Math.imul(n,16777619);}return n>>>0;};
+    const angle=hash(`${theme}:${id}`)/4294967296*Math.PI*2;
+    const radius=Math.sqrt(hash(`${id}:${theme}:radius`)/4294967296)*.94;
+    return {x:box.x+box.width/2+Math.cos(angle)*radius*Math.max(12,box.width/2-24),
+      y:box.y+48+(box.height-60)/2+Math.sin(angle)*radius*Math.max(12,(box.height-70)/2)};
+  }
+  function themeLayout(catalog, width, landmarks=[]) {
+    const membership=theme=>[...new Set(list(landmarks).filter(n=>marketThemes(n).includes(theme.id)).map(n=>String(n.id)))].sort();
+    const rows=list(catalog).map(theme=>({...theme,member_ids:membership(theme)})).sort((a,b)=>{
+      const priority=group=>group.member_ids.length>12||(group.id==='general'&&group.member_ids.length>4)?2:group.member_ids.length?1:0;
+      return priority(b)-priority(a); // Stable ties retain the catalog order.
+    });
+    const columns=width>=1100?3:width>=560?2:1,gap=12,fullWidth=width-32;
+    const cellWidth=(fullWidth-gap*(columns-1))/columns,groups=[];
+    let column=0,y=14,rowHeight=0;
+    const flush=()=>{if(column){y+=rowHeight+gap;column=0;rowHeight=0;}};
+    for(const theme of rows) {
+      const member_ids=theme.member_ids;
+      const wide=member_ids.length>12||(theme.id==='general'&&member_ids.length>4);
+      if(wide)flush();
+      const groupWidth=wide?fullWidth:cellWidth;
+      const point_columns=Math.max(1,Math.min(member_ids.length,Math.floor((groupWidth-40)/108)));
+      const height=member_ids.length?Math.max(150,64+Math.ceil(member_ids.length/point_columns)*54):94;
+      groups.push({...theme,x:16+column*(cellWidth+gap),y,width:groupWidth,height,member_ids,point_columns});
+      if(wide){y+=height+gap;}else{column++;rowHeight=Math.max(rowHeight,height);if(column===columns)flush();}
+    }
+    flush();
+    return {width,height:y+13,groups};
+  }
+  function themeEvidenceLabel(node, themeId) {
+    const evidence=list(node?.theme_evidence).filter(e=>!themeId||e.theme_id===themeId);
+    const direct=evidence.some(e=>e.source==='direct_text'),linked=evidence.some(e=>e.source==='cited_case');
+    return direct&&linked?'Mentioned in rule text and linked by cited cases':direct?'Mentioned in rule text':linked?'Linked through version-matched cited cases':'No explicit market topic recorded';
+  }
+  function caseThemeEvidenceLabel(item, themeId) {
+    const evidence=list(item?.theme_evidence).filter(e=>e.theme_id===themeId),reference=evidence.some(e=>e.source==='ticker_reference'),context=evidence.some(e=>e.source==='case_context');
+    if(themeId==='general')return 'No explicit topic in saved context or issuer reference';
+    if(reference&&context)return 'Saved context and curated issuer exposure; topic association does not verify an event';
+    if(reference)return 'Curated issuer/industry exposure; no cycle catalyst or event inferred';
+    return 'Matched saved context; topic association does not verify an event';
+  }
+
   function mount(win) {
     const $ = s => document.querySelector(s);
     if (!$('#plLearning')) return;
-    const state = {active:false, lens:'evolution', data:null, agent:null, version:null, index:0, search:'', theme:'', showRetired:true, selected:null, caseId:null, horizon:3, seq:0, controller:null, timer:null, loadingKey:null, replayPreview:null, previewSeq:0, replayBusy:false, jobId:null, pollTimer:null, pollCount:0, pollErrors:0, reduced:win.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false};
+    const state = {active:false, lens:'evolution', layout:'themes', marketTheme:'', data:null, agent:null, version:null, index:0, search:'', theme:'', showRetired:true, selected:null, caseId:null, horizon:3, seq:0, controller:null, timer:null, loadingKey:null, replayPreview:null, previewSeq:0, replayBusy:false, jobId:null, pollTimer:null, pollCount:0, pollErrors:0, reduced:win.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false};
     const agentFromPage = () => new URLSearchParams(location.hash.slice(1)).get('agent') || document.querySelector('#pgAgentSwitch .is-active')?.dataset.agent || 'DeciderAgent';
     const versionFromPage = () => Number($('#pgVersion')?.value || new URLSearchParams(location.hash.slice(1)).get('v'));
     const versions = () => list(state.data?.versions).filter(v=>finite(v.version)).slice().sort((a,b)=>Number(a.version)-Number(b.version));
@@ -152,11 +206,12 @@
     function render() {
       const themes=new Map();list(state.data?.landmarks).forEach(n=>list(n.tags).forEach(tag=>themes.set(String(tag),(themes.get(String(tag))||0)+1)));
       const themeOptions=[...themes.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,16);
-      $('#plTheme').innerHTML='<option value="">All themes</option><optgroup label="Policy sections"><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></optgroup>'+(themeOptions.length?`<optgroup label="Recorded themes">${themeOptions.map(([tag])=>`<option value="tag:${esc(tag)}">#${esc(tag.replace(/^#/,''))}</option>`).join('')}</optgroup>`:'');
+      $('#plTheme').innerHTML='<option value="">All policy sections</option><optgroup label="Policy sections"><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></optgroup>'+(themeOptions.length?`<optgroup label="Recorded policy tags">${themeOptions.map(([tag])=>`<option value="tag:${esc(tag)}">#${esc(tag.replace(/^#/,''))}</option>`).join('')}</optgroup>`:'');
       $('#plTheme').value=state.theme;if($('#plTheme').value!==state.theme)state.theme='';
+      const marketOptions='<option value="">All market themes</option>'+themeCatalog(state.data).map(t=>`<option value="${esc(t.id)}">${esc(t.label)}</option>`).join('');
+      for(const id of ['#plMarketTheme','#plEvidenceTheme']){$(id).innerHTML=marketOptions;$(id).value=state.marketTheme;}
+      if($('#plMarketTheme').value!==state.marketTheme)state.marketTheme='';
       renderTimeline();renderMap();renderInspector();renderEvidence();renderReplays();configureReplayForm();
-      const projection=state.data?.projection||{};
-      $('#plProjectionNote').textContent=(projection.note || 'Fixed coordinates describe text similarity. They do not represent expected return or the Decider’s full decision surface.') + (projection.pending?` ${projection.pending} text revisions await coordinates and are not plotted.`:'');
       $('#plNotes').innerHTML=list(state.data?.notes).map(note=>`<p>${esc(note)}</p>`).join('');
     }
     function renderTimeline() {
@@ -194,43 +249,77 @@
     function matches(n) {
       const schema=typeView(n); if(schema.structural) return false;
       if(state.theme && (state.theme.startsWith('tag:')?!list(n.tags).map(String).includes(state.theme.slice(4)):n.field!==state.theme)) return false;
-      const text=`${n.id} ${n.title} ${n.body} ${list(n.tags).join(' ')}`.toLowerCase();
+      if(!inMarketTheme(n,state.marketTheme)) return false;
+      const text=`${n.id} ${n.title} ${n.body} ${list(n.tags).join(' ')} ${marketThemes(n).map(id=>themeCatalog(state.data).find(t=>t.id===id)?.label||id).join(' ')}`.toLowerCase();
       return !state.search || text.includes(state.search.toLowerCase());
+    }
+    function renderThemeSummary() {
+      const catalog=themeCatalog(state.data),theme=catalog.find(t=>t.id===state.marketTheme);
+      const currentNodes=getSnapshot().points;
+      const populated=catalog.filter(t=>currentNodes.some(n=>marketThemes(n).includes(t.id)));
+      const summary=theme ? `${theme.label}: ${number(theme.case_count,0)} displayed saved observations · ${number(theme.assessed_count,0)} assessed · ${number(theme.matured_count,0)} matured at 3 sessions. These are bounded display counts, not theme quality rates. ${theme.description||''}` : `${populated.length} themes contain guidelines in this version. A guideline can appear in multiple groups; general controls stay in General policy.`;
+      $('#plThemeSummary').innerHTML=`<p>${esc(summary)}</p><p class="pl-boundary-note"><span>Decision boundary: not validated</span> These regions group recorded topics. Testing a BUY/PASS boundary requires matched routed/full decisions and later outcomes; colors do not estimate profitability.</p>`;
     }
     function renderMap() {
       const target=$('#plMap');if(!state.data || !state.active || state.lens!=='evolution') return;
       const focusedKey=target.contains(document.activeElement)?document.activeElement?.dataset?.landmarkKey:null;
       const s=getSnapshot(), points=s.points.filter(matches), retired=state.showRetired?s.retired.filter(matches):[];
-      const visible=[...points,...retired].filter(n=>finite(n.x)&&finite(n.y));
-      const bounds=extent(state.data.landmarks,state.data.projection); // Frozen projection domain never refits as new revisions arrive.
-      const width=Math.max(200,Math.floor(target.clientWidth||650)),height=Math.max(400,Math.min(560,width*.7));
-      const project=n=>({x:35+(Number(n.x)-bounds.x[0])/(bounds.x[1]-bounds.x[0]||1)*(width-70),y:35+(Number(n.y)-bounds.y[0])/(bounds.y[1]-bounds.y[0]||1)*(height-85)});
-      $('#plMapCount').textContent=`${points.length} current · ${retired.length} retired`;
+      const themed=state.layout==='themes',catalog=themeCatalog(state.data);
+      const width=Math.max(320,Math.floor(target.clientWidth||650));
+      const grouping=themeLayout(catalog,width,[...s.points,...s.retired].filter(n=>!typeView(n).structural)),height=themed?grouping.height:Math.max(400,Math.min(560,width*.7));
+      const bounds=extent(state.data.landmarks,state.data.projection);
+      const project=(n,themeId)=>themed?themePosition(n.id,themeId,grouping.groups.find(g=>g.id===themeId)):{x:35+(Number(n.x)-bounds.x[0])/(bounds.x[1]-bounds.x[0]||1)*(width-70),y:35+(Number(n.y)-bounds.y[0])/(bounds.y[1]-bounds.y[0]||1)*(height-85)};
+      const visible=[...points,...retired].filter(n=>themed||finite(n.x)&&finite(n.y));
+      const marks=visible.flatMap(node=>themed?marketThemes(node).filter(id=>grouping.groups.some(g=>g.id===id)).map(themeId=>({node,themeId})): [{node,themeId:null}]);
+      $('#plMapCount').textContent=`${points.length} current · ${retired.length} retired${themed&&marks.length>visible.length?' · multi-theme rules repeat':''}`;
       const types=new Map();points.forEach(n=>{const v=typeView(n);types.set(v.typeLabel,{color:v.color,count:(types.get(v.typeLabel)?.count||0)+1});});
       if($('#plTypeKey'))$('#plTypeKey').innerHTML=[...types.entries()].map(([label,v])=>`<span><i style="background:${esc(v.color)}"></i>${esc(label)} ${v.count}</span>`).join('');
-      if(!visible.length) {target.innerHTML=empty('No landmarks in this view.','Choose another version, theme or search. A policy with no text revisions has no map points.');return;}
-      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('height',String(height));svg.setAttribute('role','group');svg.setAttribute('aria-label',`Policy learning landscape for version ${current()?.version}. Select a landmark to inspect its history.`);
+      renderThemeSummary();
+      const projection=state.data.projection||{};
+      $('#plProjectionNote').textContent=themed?'Descriptive category layout. Topic labels come from explicit text or version-matched cited observations; inspect a rule to see its provenance. Positions inside a category are for legibility, not embeddings or a learned trading surface.':(projection.note||'Fixed coordinates describe text similarity, not expected return or the Decider’s full decision surface.')+(projection.pending?` ${projection.pending} revisions await compatible coordinates and are not plotted in this arrangement.`:'');
+      if(!marks.length&&!themed) {target.innerHTML=empty('No landmarks in this view.','Choose another version, market theme, policy section or search.');return;}
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('height',String(height));svg.setAttribute('role','group');svg.setAttribute('aria-label',`${themed?'Market-theme groups':'Text-similarity landscape'} for policy version ${current()?.version}. Select a rule to inspect its history.`);
       const ns=(tag,attrs={},text)=>{const el=document.createElementNS(svg.namespaceURI,tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,String(v));if(text!==undefined)el.textContent=text;return el;};
-      for(let x=35;x<width-20;x+=65)svg.append(ns('line',{class:'pl-grid',x1:x,y1:25,x2:x,y2:height-35}));
-      for(let y=35;y<height-30;y+=65)svg.append(ns('line',{class:'pl-grid',x1:25,y1:y,x2:width-25,y2:y}));
-      if(state.showRetired)for(const t of s.trails.filter(t=>matches(t.to))){const a=project(t.from),b=project(t.to);if(![a.x,a.y,b.x,b.y].every(Number.isFinite))continue;svg.append(ns('path',{class:'pl-trail',d:`M${a.x},${a.y} L${b.x},${b.y}`}));svg.append(ns('circle',{cx:a.x,cy:a.y,r:3,fill:'#ab905c',opacity:.45}));}
+      if(themed) {
+        for(const group of grouping.groups) {
+          const muted=state.marketTheme&&state.marketTheme!==group.id,box=ns('g',{class:`pl-theme-group${muted?' is-muted':''}`,'data-market-theme':group.id});
+          box.append(ns('rect',{x:group.x,y:group.y,width:group.width,height:group.height,rx:10}));
+          box.append(ns('text',{class:'pl-theme-title',x:group.x+12,y:group.y+21},short(group.label,Math.max(12,Math.floor((group.width-24)/6.3)))));
+          const count=points.filter(n=>marketThemes(n).includes(group.id)).length;
+          box.append(ns('text',{class:'pl-theme-count',x:group.x+12,y:group.y+38},`${count} shown nodes · ${number(group.case_count,0)} saved cases`));
+          if(!count)box.append(ns('text',{class:'pl-theme-empty',x:group.x+group.width/2,y:group.y+group.height/2+16,'text-anchor':'middle'},'No matching guidelines here'));
+          svg.append(box);
+        }
+      } else {
+        for(let x=35;x<width-20;x+=65)svg.append(ns('line',{class:'pl-grid',x1:x,y1:25,x2:x,y2:height-35}));
+        for(let y=35;y<height-30;y+=65)svg.append(ns('line',{class:'pl-grid',x1:25,y1:y,x2:width-25,y2:y}));
+        if(state.showRetired)for(const t of s.trails.filter(t=>matches(t.to))){const a=project(t.from),b=project(t.to);if(![a.x,a.y,b.x,b.y].every(Number.isFinite))continue;svg.append(ns('path',{class:'pl-trail',d:`M${a.x},${a.y} L${b.x},${b.y}`}));svg.append(ns('circle',{cx:a.x,cy:a.y,r:3,fill:'#ab905c',opacity:.45}));}
+      }
       const labelPoints=new Set(points.filter(n=>n.lifecycle!=='unchanged').slice(0,4).map(revisionKey));
       if(!labelPoints.size)points.slice(0,3).forEach(n=>labelPoints.add(revisionKey(n)));
       const labelBoxes=[];
       function addLabel(g,p,title) {
-        const text=short(title,width<450?22:30),w=text.length*6,anchor=p.x>width*.65?'end':'start';
+        const text=short(title,width<450?19:28),w=text.length*6,anchor=p.x>width*.65?'end':'start';
         for(const dy of [-13,25,-29,41]) {
           const x=anchor==='end'?-14:14,left=anchor==='end'?p.x+x-w:p.x+x,box={left,right:left+w,top:p.y+dy-11,bottom:p.y+dy+3};
           if(box.left<5||box.right>width-5||box.top<5||box.bottom>height-25||labelBoxes.some(b=>box.left<b.right+5&&box.right>b.left-5&&box.top<b.bottom+3&&box.bottom>b.top-3))continue;
           labelBoxes.push(box);g.append(ns('text',{class:'pl-point-label',x,y:dy,'text-anchor':anchor},text));break;
         }
       }
-      for(const n of visible){const p=project(n),v=typeView(n),key=revisionKey(n);const selected=key===state.selected;const g=ns('g',{class:`pl-point pl-${n.lifecycle}${selected?' is-selected':''}`,transform:`translate(${p.x},${p.y})`,role:'button',tabindex:0,'aria-label':`${v.typeLabel}: ${v.title}. ${n.lifecycle} in version ${current()?.version}`,'aria-pressed':selected?'true':'false','data-landmark-key':key});g.append(ns('circle',{class:'pl-hit',r:14,fill:'transparent'}));g.append(ns('circle',{class:'pl-selection',r:12}));g.append(ns('circle',{class:'pl-lifecycle',r:9}));g.append(ns('circle',{class:'pl-mark',r:5.5,fill:v.color}));g.append(ns('title',{},`${v.title}\n${n.id}\n${n.lifecycle} · ${v.typeLabel}`));if(labelPoints.has(key)||selected)addLabel(g,p,v.title);const select=()=>{state.selected=key;stopPlayback();renderMap();renderInspector();};g.addEventListener('click',select);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select();}});svg.append(g);}
-      svg.append(ns('text',{class:'pl-axis-label',x:width-25,y:height-13,'text-anchor':'end'},'FIXED TEXT-SIMILARITY COORDINATES'));
+      for(const {node:n,themeId} of marks){const p=project(n,themeId),v=typeView(n),key=revisionKey(n);const selected=key===state.selected,themeName=catalog.find(t=>t.id===themeId)?.label;const g=ns('g',{class:`pl-point pl-${n.lifecycle}${selected?' is-selected':''}`,transform:`translate(${p.x},${p.y})`,role:'button',tabindex:0,'aria-label':`${v.typeLabel}: ${v.title}. ${n.lifecycle} in version ${current()?.version}${themeName?'. Theme: '+themeName:''}`,'aria-pressed':selected?'true':'false','data-landmark-key':key});g.append(ns('circle',{class:'pl-hit',r:14,fill:'transparent'}));g.append(ns('circle',{class:'pl-selection',r:12}));g.append(ns('circle',{class:'pl-lifecycle',r:9}));g.append(ns('circle',{class:'pl-mark',r:5.5,fill:v.color}));g.append(ns('title',{},`${v.title}\n${n.id}\n${n.lifecycle} · ${v.typeLabel}${themeName?'\n'+themeName+': '+themeEvidenceLabel(n,themeId):''}`));if(themed){const box=grouping.groups.find(group=>group.id===themeId),limit=Math.max(10,Math.min(26,Math.floor((box.width-40)/box.point_columns/6.3)-2));g.append(ns('text',{class:'pl-point-label pl-theme-point-label',x:0,y:20,'text-anchor':'middle'},short(v.title,limit)));}else if(labelPoints.has(key)||selected)addLabel(g,p,v.title);const select=()=>{state.selected=key;stopPlayback();renderMap();renderInspector();};g.addEventListener('click',select);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();select();}});svg.append(g);}
+      svg.append(ns('text',{class:'pl-axis-label',x:width-25,y:height-8,'text-anchor':'end'},themed?'TOPIC GROUPS · DESCRIPTIVE LAYOUT':'FIXED TEXT-SIMILARITY COORDINATES'));
       target.replaceChildren(svg);
       if(focusedKey)[...target.querySelectorAll('[data-landmark-key]')].find(g=>g.dataset.landmarkKey===focusedKey)?.focus();
     }
     function reviewText(value) { if(value===true)return 'Approved';if(value===false)return 'Rejected';return value===null||value===undefined||value===''?'Not recorded':String(value); }
+    function membershipHTML(item, caseContext=false) {
+      const catalog=themeCatalog(state.data);
+      return '<div class="pl-topic-badges">'+marketThemes(item).map(id=>{
+        const label=catalog.find(t=>t.id===id)?.label||id;
+        const note=caseContext?caseThemeEvidenceLabel(item,id):themeEvidenceLabel(item,id);
+        return `<span class="pl-topic-badge"><strong>${esc(label)}</strong><small>${esc(note)}</small></span>`;
+      }).join('')+'</div>';
+    }
     function renderInspector() {
       const panel=$('#plInspector'),all=list(state.data?.landmarks),node=all.find(n=>revisionKey(n)===state.selected);
       if(!node){panel.innerHTML='<span class="pg-eyebrow">SELECT A LANDMARK</span><h3>Every rule has a history.</h3><p class="pg-muted">Choose a point to read its exact text, compare revisions, and inspect the cases and reviews connected to it.</p>';return;}
@@ -238,7 +327,7 @@
       const cases=casesFor(state.data).filter(c=>cited(c).includes(node.id));
       const reviews=list(state.data?.reviews).filter(r=>Number(r.to_version)===currentVersion);
       const diff=previous&&revisionKey(previous)!==revisionKey(node)?lineDiff(previous.body,node.body):null;
-      panel.innerHTML=`<div class="pl-type-line"><span style="color:${esc(v.color)}">${esc(v.typeLabel)}</span><span>${esc(lifecycle)}</span></div><h3>${esc(v.title)}</h3><p class="pl-node-id">${esc(node.id)}</p><div class="pl-text-block">${esc(node.body || 'No text recorded.')}</div>${diff?`<details open><summary>Exact text change from previous version</summary><div class="pl-diff">${diff.map(l=>`<span class="${l.kind}">${esc(l.kind==='added'?'+ ':l.kind==='removed'?'− ':'  ')}${esc(l.text)}</span>`).join('')}</div></details>`:''}${previous&&!diff&&revisionKey(previous)!==revisionKey(node)?`<details><summary>Previous exact text</summary><div class="pl-text-block">${esc(previous.body)}</div></details>`:''}<h4>Review of v${esc(currentVersion)}</h4>${reviews.length?reviews.map(r=>`<p class="pl-type-line"><span>Critic: ${esc(reviewText(r.critic_verdict))}</span><span>Human: ${esc(reviewText(r.human_verdict))}</span></p>`).join(''):'<p class="pl-footnote">No review record for this version. This does not imply approval.</p>'}<h4>Linked opportunity observations · ${cases.length}</h4>${cases.length?`<div class="pl-mini-list">${cases.slice(0,6).map(c=>`<button type="button" class="pl-case-link" data-case-id="${esc(c.id)}">${esc(c.ticker)} · ${esc(c.action || 'Not assessed')}<small>${esc(dateText(c.observed_at))} · policy v${esc(c.prompt_version ?? 'unknown')}</small></button>`).join('')}</div><p class="pl-footnote">Linked by citations, across recorded versions. These associations do not establish the rule’s individual effect.</p>`:'<p class="pl-footnote">No candidate observations cite this guideline yet.</p>'}<button type="button" class="pl-button" id="plOpenGraphNode">Open in policy explorer ↗</button>`;
+      panel.innerHTML=`<div class="pl-type-line"><span style="color:${esc(v.color)}">${esc(v.typeLabel)}</span><span>${esc(lifecycle)}</span></div><h3>${esc(v.title)}</h3><p class="pl-node-id">${esc(node.id)}</p><div class="pl-text-block">${esc(node.body || 'No text recorded.')}</div>${diff?`<details open><summary>Exact text change from previous version</summary><div class="pl-diff">${diff.map(l=>`<span class="${l.kind}">${esc(l.kind==='added'?'+ ':l.kind==='removed'?'− ':'  ')}${esc(l.text)}</span>`).join('')}</div></details>`:''}${previous&&!diff&&revisionKey(previous)!==revisionKey(node)?`<details><summary>Previous exact text</summary><div class="pl-text-block">${esc(previous.body)}</div></details>`:''}<h4>Market themes · source of the association</h4>${membershipHTML(node)}<h4>Review of v${esc(currentVersion)}</h4>${reviews.length?reviews.map(r=>`<p class="pl-type-line"><span>Critic: ${esc(reviewText(r.critic_verdict))}</span><span>Human: ${esc(reviewText(r.human_verdict))}</span></p>`).join(''):'<p class="pl-footnote">No review record for this version. This does not imply approval.</p>'}<h4>Linked opportunity observations · ${cases.length}</h4>${cases.length?`<div class="pl-mini-list">${cases.slice(0,6).map(c=>`<button type="button" class="pl-case-link" data-case-id="${esc(c.id)}">${esc(c.ticker)} · ${esc(c.action || 'Not assessed')}<small>${esc(dateText(c.observed_at))} · policy v${esc(c.prompt_version ?? 'unknown')}</small></button>`).join('')}</div><p class="pl-footnote">Linked by citations, across recorded versions. These associations do not establish the rule’s individual effect.</p>`:'<p class="pl-footnote">No candidate observations cite this guideline yet.</p>'}<button type="button" class="pl-button" id="plOpenGraphNode">Open in policy explorer ↗</button>`;
       panel.querySelectorAll('[data-case-id]').forEach(b=>b.addEventListener('click',()=>{state.caseId=b.dataset.caseId;setLens('evidence');renderEvidence();$('#plEvidence').scrollIntoView({block:'start',behavior:'auto'});}));
       $('#plOpenGraphNode')?.addEventListener('click',()=>openExplorer(node.id,currentVersion));
     }
@@ -251,14 +340,15 @@
     function metric(label,value,note) {return `<div class="pl-metric"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></div>`;}
     function renderEvidence() {
       if(!state.data)return;
-      const cases=casesFor(state.data),m=horizonMetrics();
+      const allCases=casesFor(state.data),cases=allCases.filter(c=>inMarketTheme(c,state.marketTheme)),m=horizonMetrics();
       const first=(...names)=>names.map(n=>m[n]).find(v=>v!==null&&v!==undefined);
       const uncertainty=(denominator,interval)=>`n=${number(denominator)}${Array.isArray(interval)&&interval.every(finite)?` · 95% interval ${rate(interval[0])}–${rate(interval[1])}`:''}`;
       $('#plEvidenceMetrics').innerHTML=[metric('Bought winners · precision',rate(first('precision','win_rate')),`Profitable BUYs / BUYs excluding break-even · ${uncertainty(m.buy_denominator,m.precision_interval)}`),metric('Winner recall',rate(first('winner_recall','recall')),`Winners bought / eligible winners · ${uncertainty(m.winner_denominator,m.recall_interval)}`),metric('Loss false-positive rate',rate(first('false_positive_rate','fpr')),`Losing candidates bought / eligible losers · ${uncertainty(m.loser_denominator,m.fpr_interval)}`),metric('Net paper expectancy',finite(first('expectancy_pct','mean_net_return_pct','net_expectancy_pct'))?returnText(first('expectancy_pct','mean_net_return_pct','net_expectancy_pct')):'—',`${state.horizon}-session horizon · declared costs`)].join('');
-      const pending=cases.filter(c=>!outcomeFor(c,state.horizon)||outcomeFor(c,state.horizon).status!=='matured').length;
-      const history=cases.filter(c=>c.coverage==='historical_decision_log').length;
-      $('#plCoverageNote').textContent=`${number(m.episodes)} prospective episodes · ${number(m.assessed)} assessed · ${number(m.matured)} matured · ${number(m.unmatured)} awaiting outcomes. ${history} historical decision-log observations are shown as evidence and excluded from recall. `+(state.data.opportunities?.coverage_note||'')+' '+(m.note || state.data.opportunities?.note || `${cases.length} observations shown; ${pending} pending or unavailable at this horizon. Unknown evidence is not a loss or a PASS.`);
-      $('#plCases').innerHTML=cases.length?cases.map(c=>{const o=outcomeFor(c,state.horizon),ret=o?.status==='matured'?o.net_return_pct:null;return `<button type="button" class="pl-case-row${String(c.id)===String(state.caseId)?' is-selected':''}" data-case-id="${esc(c.id)}"><span><strong>${esc(c.ticker)}</strong><small>v${esc(c.prompt_version ?? '?')}</small></span><span>${esc(dateText(c.observed_at))}<small>${esc(String(c.coverage||'Coverage unknown').replaceAll('_',' '))}</small></span><span>${esc(c.action || 'Not assessed')}<small>Model action</small></span><span class="pl-return ${finite(ret)?(Number(ret)>=0?'positive':'negative'):''}">${esc(c.coverage==='historical_decision_log'&&!o?'Not measured':returnText(ret))}<small>Paper · ${state.horizon}s</small></span></button>`;}).join(''):empty('The opportunity ledger starts prospectively.','New cycles will record eligible candidates before the model decides. Outcomes remain pending until their declared trading-session horizon matures. Historical chosen trades cannot reconstruct missed opportunities.');
+      const pending=allCases.filter(c=>!outcomeFor(c,state.horizon)||outcomeFor(c,state.horizon).status!=='matured').length;
+      const history=allCases.filter(c=>c.coverage==='historical_decision_log').length;
+      const displayScope=state.marketTheme?`Showing ${cases.length} of ${allCases.length} displayed observations for ${themeCatalog(state.data).find(t=>t.id===state.marketTheme)?.label||state.marketTheme}. The quality metrics above describe the full prospective cohort, not this theme subset. `:'Quality metrics describe the full prospective cohort. ';
+      $('#plCoverageNote').textContent=displayScope+`${number(m.episodes)} prospective episodes · ${number(m.assessed)} assessed · ${number(m.matured)} matured · ${number(m.unmatured)} awaiting outcomes. ${history} historical decision-log observations are shown as evidence and excluded from recall. `+(state.data.opportunities?.coverage_note||'')+' '+(m.note || state.data.opportunities?.note || `${allCases.length} observations available; ${pending} pending or unavailable at this horizon. Unknown evidence is not a loss or a PASS.`);
+      $('#plCases').innerHTML=cases.length?cases.map(c=>{const o=outcomeFor(c,state.horizon),ret=o?.status==='matured'?o.net_return_pct:null;return `<button type="button" class="pl-case-row${String(c.id)===String(state.caseId)?' is-selected':''}" data-case-id="${esc(c.id)}"><span><strong>${esc(c.ticker)}</strong><small>v${esc(c.prompt_version ?? '?')}</small></span><span>${esc(dateText(c.observed_at))}<small>${esc(String(c.coverage||'Coverage unknown').replaceAll('_',' '))}</small></span><span>${esc(c.action || 'Not assessed')}<small>Model action</small></span><span class="pl-return ${finite(ret)?(Number(ret)>=0?'positive':'negative'):''}">${esc(c.coverage==='historical_decision_log'&&!o?'Not measured':returnText(ret))}<small>Paper · ${state.horizon}s</small></span></button>`;}).join(''):empty(state.marketTheme?'No saved observations match this theme.':'The opportunity ledger starts prospectively.','New cycles will record eligible candidates before the model decides. Outcomes remain pending until their declared trading-session horizon matures. Historical chosen trades cannot reconstruct missed opportunities.');
       $('#plCases').querySelectorAll('[data-case-id]').forEach(b=>b.addEventListener('click',()=>{state.caseId=b.dataset.caseId;renderEvidence();}));
       renderCaseInspector(cases.find(c=>String(c.id)===String(state.caseId)));
     }
@@ -274,7 +364,7 @@
     function renderCaseInspector(c) {
       const panel=$('#plCaseInspector');if(!c){panel.innerHTML='<span class="pg-eyebrow">CASE DETAILS</span><h3>A setup at a point in time.</h3><p class="pg-muted">Select an observation to see its action, coverage, recorded features, cited rules and paper outcomes.</p>';return;}
       const features=c.features||c.features_json||{},outcome=outcomeFor(c,state.horizon),rules=cited(c);
-      panel.innerHTML=`<span class="pg-eyebrow">RECORDED OPPORTUNITY</span><h3>${esc(c.ticker)} · ${esc(c.action || 'Not assessed')}</h3><p class="pl-node-id">${esc(dateText(c.observed_at))} · input ${esc(c.input_id ?? c.source_input_id ?? 'not linked')}</p><p>${esc(c.reason || c.decision_reason || 'No model rationale recorded.')}</p><dl class="pl-data"><div><dt>Policy at decision</dt><dd>v${esc(c.prompt_version ?? 'unknown')}</dd></div><div><dt>Coverage</dt><dd>${esc(String(c.coverage||'Unknown').replaceAll('_',' '))}</dd></div><div><dt>Reference price</dt><dd>${esc(c.reference_price ?? c.price ?? 'Unknown')}</dd></div><div><dt>Price source</dt><dd>${esc(c.price_source || c.reference_source || 'Unknown')}</dd></div></dl><h4>Paper outcome · ${state.horizon} sessions</h4><p>${outcome?.status==='matured'?`${esc(returnText(outcome.net_return_pct))} net assumed return`:c.coverage==='historical_decision_log'?'Not measured — historical chosen decisions do not reconstruct prospective opportunity outcomes.':`${esc(outcome?.status || 'Pending')} — awaiting valid entry and horizon bars`}</p>${outcome?detailGrid({entry_session:outcome.entry_date,exit_session:outcome.exit_date,paper_entry_price:outcome.entry_price,paper_exit_price:outcome.exit_price,cost_per_side_bps:outcome.side_cost_bps,maximum_adverse_move:finite(outcome.mae_pct)?returnText(outcome.mae_pct):null,maximum_favorable_move:finite(outcome.mfe_pct)?returnText(outcome.mfe_pct):null}):''}<h4>Decision-time features</h4>${Object.keys(features).length?detailGrid(features):'<p class="pl-footnote">Not recorded</p>'}<h4>Cited rules</h4>${rules.length?`<div class="pl-mini-list">${rules.map(id=>ruleReference(c,id)).join('')}</div>`:'<p class="pl-footnote">No guideline citation recorded.</p>'}<p class="pl-footnote">The model action is not an execution confirmation. Paper outcomes do not include portfolio sizing or actual fills.</p>`;
+      panel.innerHTML=`<span class="pg-eyebrow">RECORDED OPPORTUNITY</span><h3>${esc(c.ticker)} · ${esc(c.action || 'Not assessed')}</h3><p class="pl-node-id">${esc(dateText(c.observed_at))} · input ${esc(c.input_id ?? c.source_input_id ?? 'not linked')}</p><p>${esc(c.reason || c.decision_reason || 'No model rationale recorded.')}</p><dl class="pl-data"><div><dt>Policy at decision</dt><dd>v${esc(c.prompt_version ?? 'unknown')}</dd></div><div><dt>Coverage</dt><dd>${esc(String(c.coverage||'Unknown').replaceAll('_',' '))}</dd></div><div><dt>Reference price</dt><dd>${esc(c.reference_price ?? c.price ?? 'Unknown')}</dd></div><div><dt>Price source</dt><dd>${esc(c.price_source || c.reference_source || 'Unknown')}</dd></div></dl><h4>Paper outcome · ${state.horizon} sessions</h4><p>${outcome?.status==='matured'?`${esc(returnText(outcome.net_return_pct))} net assumed return`:c.coverage==='historical_decision_log'?'Not measured — historical chosen decisions do not reconstruct prospective opportunity outcomes.':`${esc(outcome?.status || 'Pending')} — awaiting valid entry and horizon bars`}</p>${outcome?detailGrid({entry_session:outcome.entry_date,exit_session:outcome.exit_date,paper_entry_price:outcome.entry_price,paper_exit_price:outcome.exit_price,cost_per_side_bps:outcome.side_cost_bps,maximum_adverse_move:finite(outcome.mae_pct)?returnText(outcome.mae_pct):null,maximum_favorable_move:finite(outcome.mfe_pct)?returnText(outcome.mfe_pct):null}):''}<h4>Market themes</h4>${membershipHTML(c,true)}<h4>Decision-time features</h4>${Object.keys(features).length?detailGrid(features):'<p class="pl-footnote">Not recorded</p>'}<h4>Cited rules</h4>${rules.length?`<div class="pl-mini-list">${rules.map(id=>ruleReference(c,id)).join('')}</div>`:'<p class="pl-footnote">No guideline citation recorded.</p>'}<p class="pl-footnote">The model action is not an execution confirmation. Paper outcomes do not include portfolio sizing or actual fills.</p>`;
       panel.querySelectorAll('[data-rule-id]').forEach(b=>b.addEventListener('click',()=>{const node=list(state.data.landmarks).find(n=>n.id===b.dataset.ruleId&&versionsOf(n).includes(Number(c.prompt_version)));if(!node){openExplorer(b.dataset.ruleId,c.prompt_version);return;}const i=versions().findIndex(v=>Number(v.version)===Number(c.prompt_version));if(i>=0)state.index=i;state.selected=revisionKey(node);setLens('evolution');renderTimeline();renderMap();renderInspector();}));
     }
     function renderReplays() {
@@ -374,6 +464,15 @@
     $('#plPlay').addEventListener('click',startPlayback);
     $('#plSearch').addEventListener('input',e=>{state.search=e.target.value.trim();renderMap();});
     $('#plTheme').addEventListener('change',e=>{state.theme=e.target.value;renderMap();});
+    $('#plLayout').addEventListener('change',e=>{state.layout=e.target.value==='similarity'?'similarity':'themes';renderMap();});
+    function setMarketTheme(value) {
+      state.marketTheme=themeCatalog(state.data).some(t=>t.id===value)?value:'';
+      for(const id of ['#plMarketTheme','#plEvidenceTheme'])$(id).value=state.marketTheme;
+      const selected=list(state.data?.landmarks).find(n=>revisionKey(n)===state.selected);
+      if(selected&&!inMarketTheme(selected,state.marketTheme))state.selected=null;
+      renderMap();renderInspector();renderEvidence();
+    }
+    for(const id of ['#plMarketTheme','#plEvidenceTheme'])$(id).addEventListener('change',e=>setMarketTheme(e.target.value));
     $('#plShowRetired').addEventListener('change',e=>{state.showRetired=e.target.checked;renderMap();});
     $('#plHorizon').addEventListener('change',e=>{state.horizon=Number(e.target.value);renderEvidence();});
     $('#plRefresh')?.addEventListener('click',()=>load(true));
@@ -387,5 +486,5 @@
     document.addEventListener('visibilitychange',()=>{if(document.hidden){stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;}else if(state.jobId)pollReplay();});
     setView(new URLSearchParams(location.hash.slice(1)).get('view')==='learning',false);
   }
-  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,mount};
+  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,marketThemes,inMarketTheme,themeCatalog,themePosition,themeLayout,themeEvidenceLabel,caseThemeEvidenceLabel,mount};
 }));

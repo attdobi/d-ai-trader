@@ -259,7 +259,8 @@ def _evidence(engine, config_hash, *, days=90, limit=500):
                           "run_id": item["run_id"], "ticker": ticker, "observed_at": service._iso(item["decided_at"]),
                           "prompt_version": item["prompt_version"], "regime": context.get("regime"),
                           "action": str(decision.get("action") or decision.get("verdict") or "UNSPECIFIED").upper(),
-                          "reason": reason[:1600], "cited": sorted(set(str(i) for i in cited + list(inline))),
+                          "reason": reason[:1600], "signals": str(decision.get("signals") or "")[:1600],
+                          "cited": sorted(set(str(i) for i in cited + list(inline))),
                           "coverage": "historical_decision_log", "eligible_for_recall": False, "outcomes": {}})
     return cases[:limit]
 
@@ -300,8 +301,12 @@ def learning_payload(engine, config_hash, agent, version=None, *, repo_root, is_
             except (learning_replay.ReplayError, ValueError):
                 pass
         evidence = _evidence(engine, config_hash, days=days)
+    from .themes import annotate as annotate_themes
+    theme_catalog, theme_method = annotate_themes(
+        landmarks, [opportunities.get("cases") or [], evidence], config_hash=config_hash)
     return {"schema_version": FORMAT, "agent": agent, "selected_version": selected,
             "projection": projected, "versions": versions, "landmarks": landmarks,
+            "theme_catalog": theme_catalog, "theme_method": theme_method,
             "reviews": reviews, "evidence": evidence, "opportunities": opportunities, "replays": replays,
             "notes": ["Policy text comes from versioned prompt rows. Mutable long-term memory is excluded from historical landmarks.",
                       "Citation links are associations; they do not establish a rule's causal contribution to P&L.",

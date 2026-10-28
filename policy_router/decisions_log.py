@@ -55,7 +55,7 @@ def ensure_schema(engine) -> None:
 
 
 def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result, *, local_result=None,
-                  served_ids=(), source_input_id=None, source_kind="live", decided_at=None) -> int:
+                  served_ids=(), source_input_id=None, source_kind="live", decided_at=None, economics=None) -> int:
     """Append one comparison, including unavailable/failed providers, atomically."""
     if source_kind not in ("live", "replay"):
         raise ValueError("source_kind must be live or replay")
@@ -87,6 +87,8 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         "disagreements": sum(n["local_choice"] != n["decisions_choice"] for n in comparable),
         "actual_prompt_changed": False,
     }
+    if economics is not None:
+        comparison["economics"] = economics
     usage = result.usage or {}
     params = {
         "cfg": config_hash, "run": run_id, "version": prompt_version, "input_id": source_input_id,
@@ -119,6 +121,14 @@ def _row_public(row, *, nodes: bool = False) -> dict:
     raw_nodes = json.loads(data.pop("nodes_json") or "[]")
     data.update(json.loads(data.pop("comparison_json") or "{}"))
     data["pinned_ids"] = json.loads(data.pop("pinned_json") or "[]")
+    from .economics import unavailable
+    data.setdefault("economics", unavailable())
+    data["selection"] = {
+        "pinned_ids": data["pinned_ids"],
+        "selected_ids": [n["node_id"] for n in raw_nodes if n.get("decisions_choice") == "include"],
+        "skipped_ids": [n["node_id"] for n in raw_nodes if n.get("decisions_choice") == "exclude"],
+        "actual_optional_ids": [n["node_id"] for n in raw_nodes if n.get("served_in_prompt")],
+    }
     data["request_attempted"] = bool(data["request_attempted"])
     at = data.get("decided_at")
     data["decided_at"] = at.isoformat() if hasattr(at, "isoformat") else at
@@ -133,7 +143,9 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
            "totals": {"runs": 0, "ok": 0, "fallback": 0, "request_attempts": 0,
                       "cost_usd": None, "known_cost_usd": None, "unknown_cost_calls": 0,
                       "live_runs": 0, "replay_runs": 0, "input_tokens": 0,
-                      "cached_input_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0},
+                      "cached_input_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0,
+                      "economics_captured_runs": 0, "economics_unavailable_runs": 0,
+                      "realized_input_savings_usd": 0.0},
            "note": "Shadow comparison only; no prompt changes or realized savings."}
     try:
         with engine.connect() as conn:
@@ -159,6 +171,11 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     totals["replay_runs"] = sum(r["source_kind"] == "replay" for r in rows)
     for key in ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens"):
         totals[key] = sum(int(r[key] or 0) for r in rows)
+    captured = [r for r in out["runs"] if r["economics"].get("status") == "estimated"]
+    totals["economics_captured_runs"] = len(captured)
+    totals["economics_unavailable_runs"] = len(rows) - len(captured)
+    totals["realized_input_savings_usd"] = 0.0
+    totals["economics_note"] = "Bounded recent comparisons. Potential savings require frozen captures; replay and live runs remain identified. Shadow has zero realized input savings."
     return out
 
 

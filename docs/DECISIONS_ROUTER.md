@@ -120,6 +120,65 @@ For example, a $0.001 router request would need to remove 500 uncached Sol input
 tokens just to offset its cost at $2/million; cached Sol inputs change that
 comparison. Measure actual total cost and decision quality before claiming a win.
 
+### Full-prompt economics
+
+New live comparisons freeze the graph, cycle context, health annotations, memory
+rows/order, exact system/user text, citation index and client reasoning guidance
+before the Decider call. The audit worker renders three matched inputs: actually
+served, all optional candidates, and the Decisions-selected proposal. The actual
+reconstruction must match byte for byte or the economics report is unavailable.
+Only counts/hashes and selected/skipped IDs are added to `comparison_json`; raw
+prompts are not added to the hosted-router ledger.
+
+`policy_router/economics.py` uses a verified, already-cached `o200k_base` vocabulary
+through tiktoken. It never downloads a tokenizer during a cycle; without that
+cache, its UTF-8/4 fallback is explicitly labeled. These are full-text estimates,
+not measured provider framing or a claim about an undocumented model tokenizer.
+The configured primary Decider model is recorded separately from provider usage.
+
+Potential gross savings = estimated removed **input** tokens × the Decider's
+uncached input rate. Potential net input savings subtract the router's recorded
+API cost and may be negative. No output/reasoning reduction is assumed. Cache-
+adjusted dollars stay unknown; a cache-heavy Decider request can save less than
+the uncached estimate. Shadow realized savings are always **$0** and its router
+fee is incremental spend. Historical comparisons without a frozen snapshot stay
+unavailable; current policy is never substituted into an old cost measurement.
+
+The Router panel shows these estimates and complete JSON ID lists for pinned,
+selected, skipped and actually served optional nodes. A selection probability is
+relevance, not the chance that a trade wins. Theme filters never change routing.
+
+### October 28 verification
+
+Local Postgres initially contained only the earlier saved-input probe, with no
+forward live Decisions rows. The running process predated the new instrumentation;
+the local `.env` setting alone did not reload its imported code. Both the local
+router's latest logged run and the hosted adapter remain **shadow**. No provider
+activation or live-trader restart is part of this visualization/measurement change.
+
+A second single paid probe used the six summaries from source input **150** and
+the current approved **v60** policy. This deliberately combines saved v59 market
+context with current policy; it is labeled replay and is not an exact historical
+prompt recreation. It returned a valid complete predicate/selection result in
+**1,376 ms**, keeping **7 of 8 optional memories** beside **58 pinned nodes**.
+It reported **14,823 input tokens**, including **12,886 30-minute cache-write
+tokens**, no cache reads, and an estimated fee of **$0.00180445**. No trading
+Decider call or order was made. The earlier probe cost $0.002996075.
+
+At the configured Sol uncached input rate of $2/million, the second router fee
+requires removing at least **903 input tokens** just to break even. It omitted
+only one short memory, so a small optional pool should not be assumed economical.
+Its full-prompt economics remain unavailable because no contemporaneous production
+capture exists for this mixed-policy probe. Future instrumented live comparisons
+will measure matched text; neither probe establishes quality preservation.
+
+The prospective opportunity ledger currently has **zero rows**, so paper recall,
+FPR and their uncertainty are unknown, not zero or perfect. Closed-trade P&L and
+win-rate associations still exist; they are not the counterfactual quality loss
+from excluding a guideline. Live capture and its scheduled outcome maintenance
+require the existing trader to load the new code. Never start a second trader to
+collect these measurements.
+
 The six October 28 Luna summarizer calls averaged $0.001782 each; their summary
 stamps and API usage records matched. The first Sol decision cycle cost $0.085089:
 $0.073656 main decision, $0.010596 citation repair and $0.000837 extraction. The

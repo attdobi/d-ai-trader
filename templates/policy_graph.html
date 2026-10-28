@@ -79,9 +79,12 @@
       <div class="pl-version-row"><p id="plVersionDescription"></p><span id="plVersionChanges"></span></div>
       <div class="pl-map-tools">
         <label class="pl-search"><span class="pg-sr-only">Search learning landmarks</span><input id="plSearch" type="search" placeholder="Find a rule, lesson or theme…" autocomplete="off" /></label>
-        <select id="plTheme" aria-label="Learning map policy section"><option value="">All themes</option><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></select>
+        <label class="pl-select-label">Arrange by<select id="plLayout" aria-label="Learning map arrangement"><option value="themes">Market themes</option><option value="similarity">Text similarity</option></select></label>
+        <label class="pl-select-label">Market theme<select id="plMarketTheme" aria-label="Learning map market theme"><option value="">All market themes</option></select></label>
+        <label class="pl-select-label">Policy section<select id="plTheme" aria-label="Learning map policy section"><option value="">All policy sections</option><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></select></label>
         <label class="pl-checkbox"><input id="plShowRetired" type="checkbox" checked /> Show changes from previous version</label>
       </div>
+      <div id="plThemeSummary" class="pl-theme-summary" aria-live="polite"></div>
       <div class="pl-map-layout">
         <div class="pl-map-frame">
           <div id="plMap" class="pl-map" aria-label="Policy learning landscape"></div>
@@ -94,6 +97,7 @@
     </div>
     <div id="plEvidence" role="tabpanel" hidden>
       <div class="pl-panel-heading"><div><h3>Which opportunities did we learn from?</h3><p class="pg-muted">Each observation keeps its decision-time context and policy version. Paper returns use a declared horizon and cost assumption; they are separate from realized trades.</p></div><label class="pl-horizon">Paper horizon <select id="plHorizon" aria-label="Paper outcome horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label></div>
+      <label class="pl-select-label pl-evidence-theme">Show observations for<select id="plEvidenceTheme" aria-label="Opportunity evidence market theme"><option value="">All market themes</option></select></label>
       <div id="plEvidenceMetrics" class="pl-metrics"></div>
       <p id="plCoverageNote" class="pl-footnote"></p>
       <div class="pl-evidence-layout"><div id="plCases" class="pl-case-list"></div><aside id="plCaseInspector" class="pl-inspector"><span class="pg-eyebrow">CASE DETAILS</span><h3>A setup at a point in time.</h3><p class="pg-muted">Select an observation to see its action, coverage, recorded features, cited rules and paper outcomes.</p></aside></div>
@@ -114,7 +118,7 @@
       </form>
       <div id="plReplays" class="pl-replays"></div>
     </div>
-    <details class="pl-methods"><summary>How to read this map</summary><div><p>Nearby policy landmarks have similar text. Their positions stay fixed across the version playback. Color identifies the existing node type; rings identify version changes. Text similarity does not estimate profit.</p><p>The opportunity ledger records a bounded candidate universe. Recall and false-positive rate require matured, assessed cases from that universe. Unobserved, unassessed and pending cases stay visible as missing evidence.</p><p>Policy citations and co-occurring outcomes show association. An individual rule's incremental effect requires a paired policy comparison and independent future evaluation. No smooth profitability boundary is inferred from this map.</p><div id="plNotes"></div></div></details>
+    <details class="pl-methods"><summary>How to read this map</summary><div><p>Market themes group rules by explicit topic mentions or version-matched cited observations. One rule may appear in several groups; general rules remain labeled general. A theme describes recorded context, not whether a geopolitical event or company claim is true. The inspector distinguishes a direct text match from a linked case.</p><p>Text similarity preserves the original frozen coordinates across filters and version playback. Nearby landmarks have similar text. In both arrangements color identifies node type and rings identify version changes. Neither arrangement is the Decider’s learned decision boundary or a profitability estimate.</p><p>The opportunity ledger records a bounded candidate universe. Recall and false-positive rate require matured, assessed cases from that universe. Unobserved, unassessed and pending cases stay visible as missing evidence. Theme filters change the displayed observations; the full-cohort quality metrics remain explicitly labeled.</p><p>Policy citations and co-occurring outcomes show association. An individual rule's incremental effect requires a paired policy comparison and independent future evaluation. A validated BUY/PASS boundary also needs matched full-versus-routed decisions and later outcomes; no smooth boundary is inferred here.</p><div id="plNotes"></div></div></details>
   </section>
 
   <!-- Card 1b: proposals — the loop edits the graph, you approve per guideline -->
@@ -227,6 +231,8 @@
       <h3>OpenAI Decisions · shadow comparison</h3>
       <p id="pgDecisionsNote" class="pg-muted">No comparison recorded yet. Shadow selections do not change the prompt or place trades.</p>
       <div id="pgDecisionsStats" class="pg-router-stats"></div>
+      <div id="pgDecisionsEconomics" class="pg-router-stats" aria-label="Router token and cost comparison"></div>
+      <p class="pg-muted">Summarizers read the screenshots. This router receives their text and structured cycle context, without screenshot pixels. Standing controls stay pinned. Shadow selections do not reduce the actual Decider input.</p>
       <details id="pgDecisionsDetails" hidden><summary>Compare guideline selections</summary>
         <div id="pgDecisionsRows" class="pg-comparison-rows"></div>
       </details>
@@ -754,6 +760,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph-schema.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/router-economics.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
 {% endblock %}

@@ -122,6 +122,10 @@ def test_payload_empty_evidence_is_not_zero_performance(db, tmp_path):
     assert result["opportunities"]["cases"] == [] and result["replays"]["runs"] == []
     assert result["opportunities"]["metrics_by_horizon"]["3"]["recall"] is None
     assert result["evidence"] == []
+    assert result["theme_method"]["id"] == "market_themes_v1"
+    assert {theme["id"] for theme in result["theme_catalog"]} >= {"geopolitics_iran", "energy_oil", "ai", "memory_manufacturing", "electric_vehicles"}
+    assert all(theme["case_count"] == 0 for theme in result["theme_catalog"])
+    assert all(node["market_themes"] == ["general"] for node in result["landmarks"])
     with pytest.raises(service.NotFound):
         L.learning_payload(db, "test", "DeciderAgent", 999, repo_root=tmp_path, embedder=Offline())
     with pytest.raises(service.BadRequest):
@@ -144,6 +148,27 @@ def test_historical_evidence_never_exposes_raw_prompts_and_is_not_recall_coverag
     assert not any(n["eligible_for_recall"] for n in cases)
     assert "private" not in json.dumps(cases)
     assert L._evidence(db, "other") == []
+
+
+def test_payload_links_market_topics_to_same_version_without_changing_quality_or_projection(db, tmp_path):
+    from policy_graph import inputs
+    inputs.ensure_schema(db)
+    iid = inputs.record_input(db, "test", run_id="market-r1", prompt_version=1,
+                              system_prompt="private", user_prompt="private", context={"regime": "MIXED"})
+    rule_id = "DA.directives.strategy.regime_gate"
+    inputs.record_reply(db, iid, {"considered": [{"ticker": "MU", "verdict": "reject",
+        "why": "No qualifying entry", "signals": "DRAM pricing and HBM demand supplied.", "cited": [rule_id]}]})
+    first = L.learning_payload(db, "test", "DeciderAgent", 2, repo_root=tmp_path, embedder=Offline())
+    old, newer = sorted((n for n in first["landmarks"] if n["id"] == rule_id), key=lambda n:n["first_version"])
+    assert old["market_themes"] == ["general"]
+    assert "memory_manufacturing" in newer["linked_market_themes"]
+    assert newer["direct_market_themes"] == []
+    assert "HBM" in first["evidence"][0]["signals"]
+    assert first["opportunities"]["metrics"]["recall"] is None
+    second = L.learning_payload(db, "test", "DeciderAgent", 1, repo_root=tmp_path, embedder=Offline())
+    assert first["projection"]["id"] == second["projection"]["id"]
+    assert {(n["key"], n["x"], n["y"]) for n in first["landmarks"]} == {(n["key"], n["x"], n["y"]) for n in second["landmarks"]}
+    assert first["opportunities"]["metrics"] == second["opportunities"]["metrics"]
 
 
 def test_route_validates_input_and_disables_cache(db, tmp_path, monkeypatch):

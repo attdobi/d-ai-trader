@@ -2290,12 +2290,14 @@
   function renderDecisionsComparison(data) {
     const note = qs('#pgDecisionsNote'), stats = qs('#pgDecisionsStats');
     const details = qs('#pgDecisionsDetails'), rows = qs('#pgDecisionsRows');
+    const economics = qs('#pgDecisionsEconomics');
     if (!note || !stats || !details || !rows) return;
     const last = data.last_cycle || null, total = data.totals || {};
     note.textContent = (data.note || 'No Decisions shadow comparison recorded yet. The actual prompt remains unchanged.')
       + (last?.source_kind === 'replay' ? ' Latest result replays saved input; it is not forward trading evidence.' : '')
       + (last && last.note ? ` Last result: ${last.note}` : '');
-    if (!last) { stats.innerHTML = ''; details.hidden = true; rows.innerHTML = ''; return; }
+    if (!last) { stats.innerHTML = ''; if(economics)economics.innerHTML=''; details.hidden = true; rows.innerHTML = ''; return; }
+    if(economics)economics.innerHTML=window.DAIRouterEconomics?.render(last.economics)||'';
     const tile = (key, value, sub) => `<div class="pg-router-stat"><div class="k">${esc(key)}</div><div class="v">${esc(value)}</div><div class="s">${esc(sub)}</div></div>`;
     const dollars = n => n === null || n === undefined ? '—' : `$${Number(n).toFixed(5)}`;
     stats.innerHTML = tile(last.source_kind === 'replay' ? 'Saved-cycle replay' : 'Live shadow comparison', last.status || 'unknown', `${fmtPT(last.decided_at)} · policy v${last.prompt_version ?? '?'} · ${last.model || data.model || ''}`)
@@ -2307,6 +2309,7 @@
     const probability = p => p === null || p === undefined ? '—' : Number(p).toFixed(2);
     const choice = c => c === 'include' ? 'keep' : c === 'exclude' ? 'omit' : '—';
     rows.innerHTML = `<p class="pg-muted">Run ${esc(last.run_id || '')}. Both columns are proposed selections; the final column records the actual prompt. Relevance probabilities are estimates, not calibrated trade-success probabilities.</p>`
+      + `<details><summary>Planned node-selection JSON</summary><pre>${esc(JSON.stringify(window.DAIRouterEconomics?.selectionFor(last)||{},null,2))}</pre><p class="pg-muted">Pinned and selected IDs form the proposed subgraph. Skipped IDs are optional context. These are relevance choices, not BUY/SELL instructions.</p></details>`
       + `<table><thead><tr><th>Guideline</th><th>Local p / choice</th><th>Decisions p / choice</th><th>Actually read</th></tr></thead><tbody>${nodes.map(n => `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button></td><td>${esc(probability(n.local_p))} / ${choice(n.local_choice)}</td><td>${esc(probability(n.decisions_p))} / ${choice(n.decisions_choice)}</td><td>${n.served_in_prompt ? 'yes' : 'no'}</td></tr>`).join('')}</tbody></table>`;
     rows.querySelectorAll('[data-node-id]').forEach(button => button.addEventListener('click', () => pgOpenNode(button.dataset.nodeId)));
   }

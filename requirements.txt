@@ -8,6 +8,7 @@ pandas>=2.1.4
 numpy>=1.26              # policy_router (logistic model, embeddings); already installed with pandas
 python-dotenv>=1.0.1
 openai>=1.40.0
+tiktoken>=0.14,<1  # Optional cached BPE estimates; router never downloads vocabulary during a cycle
 
 # Scraping
 selenium>=4.25.0

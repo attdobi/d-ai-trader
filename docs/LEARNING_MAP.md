@@ -11,6 +11,29 @@ text, the previous revision's line diff, critic/human review and cited cases.
 Structural containers and mutable long-term memory reconstructions are excluded
 from this historical landscape. Citations remain associations, not causal P&L.
 
+### Market themes and the decision boundary
+
+The default **Arrange by → Market themes** groups guidelines into Iran/geopolitics,
+oil/energy, technology, AI, semiconductors, memory manufacturing, electric vehicles
+and general policy. Market-theme and policy-section filters are separate. One
+guideline can belong to several groups; repeated points are the same revision,
+not additional rules. Empty groups remain visible rather than inventing lessons.
+
+The inspector identifies three sources: explicit words in the rule, a case citing
+that exact rule/version, or a curated issuer/industry exposure reference. The last
+is not evidence of a current catalyst: an oil ticker does not establish an Iran
+event, and prompt MEMORY does not mean memory-chip manufacturing. Topic matching
+is deterministic and versioned in `policy_graph/themes.py`; it adds no hosted call.
+Counts describe bounded saved observations, not all-market coverage or causal P&L.
+
+**Text similarity** retains the original frozen embedding/PCA coordinates. Theme
+arrangement uses descriptive category regions; positions inside a category aid
+legibility. Neither layout is the Decider's learned BUY/PASS decision surface.
+The interface explicitly labels the boundary unvalidated. A meaningful empirical
+surface needs prospective decision-time cases, assessed BUY/PASS labels, later
+outcomes, coverage and uncertainty, and matched full/routed decisions. Do not fit
+one to selected winners or use the map coordinates as a trading rule.
+
 The existing local Nomic service supplies cached embeddings over loopback. A PCA
 basis, reference identities and point coordinates are frozen in the ignored local
 artifact `agents/<agent>/policy-router/<config>/learning-projection.json`. Future
@@ -61,6 +84,10 @@ opportunities; FPR is losing BUYs / all losing assessed opportunities. Break-eve
 cases are separate. Coverage, maturity, sample sizes and Wilson intervals remain
 visible. Net expectancy and normalized dollars per $1,000 are paper diagnostics,
 not realized portfolio P&L, portfolio returns, drawdown or all-market recall.
+This next-session benchmark also does not reproduce an actual entry before an
+after-close earnings release: its entry may occur after the earnings gap. Evaluate
+held-through earnings exposure separately using actual fills and a declared event
+horizon; retain the paper benchmark as its own measurement.
 
 The existing trader schedule launches bounded maintenance at **17:15 ET** in a
 separate worker. Failed sources rotate through the queue so they cannot starve
@@ -125,3 +152,10 @@ adapter pins `https://api.openai.com/v1`, bounds output/time, disables retries a
 uses no tools or model fallback. Tables are additive and configuration-scoped.
 Raw replay requests remain in the local database. Presentation endpoints omit raw
 prompts and raw replies.
+
+The themed-map/router-observability release passed **1,617 tests, with 1 skipped**.
+Checks include dense-theme layout, same-version citation links, frozen projection
+preservation, full-cohort metric preservation, matched prompt reconstruction,
+offline tokenizer behavior, negative router economics and unavailable historical
+captures. Browser verification used the read-only preview on port 8083. No policy
+activation, live-trader restart or order was part of this change.

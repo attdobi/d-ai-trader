@@ -2969,7 +2969,8 @@ OUTPUT (STRICT)
         if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
             _assembled = _graph_assemble_system_prompt(
                 prompt_data, prompt_version, run_id, **_ctx_lists,
-                override=(_router.assembly_override() if _router_active else None))
+                override=(_router.assembly_override() if _router_active else None),
+                audit_capture=(_decisions_shadow if _decisions_shadow.get("job") is not None else None))
             if _assembled is not None:
                 system_prompt, _graph_served, _graph_index_text, _graph_rendered = _assembled
                 _policy_rendered = _graph_rendered
@@ -2982,6 +2983,8 @@ OUTPUT (STRICT)
     # The injected rows are guideline nodes (DA.ltm.<row id>): each is rendered with its ⟨id · record⟩
     # tag and listed in the GUIDELINE INDEX below so the Decider can cite it like any other rule.
     _ltm_injected = []
+    _ltm_prompt_span = (len(prompt), len(prompt))
+    _ltm_health = {}
     try:
         from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
         _mem_cfg = get_current_config_hash()
@@ -3008,7 +3011,9 @@ OUTPUT (STRICT)
         if _ltm_tail:
             _lt = (_lt + "\n" + _ltm_tail).strip()
         if _lt:
+            _ltm_prompt_start = len(prompt)
             prompt += "\n\n" + _lt
+            _ltm_prompt_span = (_ltm_prompt_start, len(prompt))
             _ltm_injected = [m for m in _mem_rows if isinstance(m, dict) and m.get("id")]
             # the injected rows are graph nodes (DA.ltm.<row id>): record them as served (route "ltm")
             try:
@@ -3151,8 +3156,11 @@ OUTPUT (STRICT)
                 _guideline_index_lines = _guideline_index_lines.rstrip("\n") + "\n" + "\n".join(_ltm_lines)
         except Exception as _li_exc:
             print(f"⚠️  Memory rows left out of the guideline index: {_li_exc}")
+    _index_prompt_span = (len(prompt), len(prompt))
     if _guideline_index_lines:
+        _index_prompt_start = len(prompt)
         prompt += "\n\nGUIDELINE INDEX (id — title):\n" + _guideline_index_lines
+        _index_prompt_span = (_index_prompt_start, len(prompt))
         _GUIDELINE_IDS_STASH[run_id] = {line.split(" — ", 1)[0] for line in _guideline_index_lines.splitlines()}
     else:
         _GUIDELINE_IDS_STASH.pop(run_id, None)
@@ -3231,9 +3239,27 @@ OUTPUT (STRICT)
             _actual_shadow_ids = ({s.node_id for s in _graph_served} if _graph_served is not None
                                   else set(_decisions_shadow.get("flat_ids") or ()))
             _actual_shadow_ids |= {f"DA.ltm.{m['id']}" for m in _ltm_injected if m.get("id")}
+            _prompt_capture = None
+            try:
+                from policy_router.economics import capture_prompt
+                from config import append_reasoning_guidance, load_model_pricing
+                _capture_model = get_agent_model("DeciderAgent")
+                _prompt_capture = capture_prompt(
+                    graph=_decisions_shadow.get("assembly"), system_prompt=system_prompt, user_prompt=prompt,
+                    actual_graph_ids={s.node_id for s in (_graph_served or [])}, actual_ltm_rows=_ltm_injected,
+                    ltm_rows=_decisions_shadow.get("ltm_rows") or {}, ltm_health=_ltm_health,
+                    ltm_span=_ltm_prompt_span, index_span=_index_prompt_span,
+                    actual_ltm_tail=locals().get("_ltm_tail") or "",
+                    eligible=_decisions_shadow.get("eligible") or {}, model=_capture_model,
+                    input_rate=(load_model_pricing().get(_capture_model) or {}).get("input"),
+                    token_cache_dir=os.getenv("TIKTOKEN_CACHE_DIR", os.getenv("DATA_GYM_CACHE_DIR")),
+                    client_suffix=append_reasoning_guidance("", "DeciderAgent", _capture_model))
+            except Exception as _capture_exc:
+                print(f"⚠️ Decisions prompt economics unavailable ({type(_capture_exc).__name__})")
             _record_shadow_ready(_decisions_shadow["job"], engine,
                                  _decisions_shadow["config_hash"], prompt_version, run_id,
-                                 served_ids=_actual_shadow_ids, local_result=_router, source_input_id=_input_id)
+                                 served_ids=_actual_shadow_ids, local_result=_router, source_input_id=_input_id,
+                                 prompt_capture=_prompt_capture)
         except Exception as _shadow_log_exc:
             print(f"⚠️ Decisions comparison logging skipped ({type(_shadow_log_exc).__name__})")
     ai_response = prompt_manager.ask_openai(
@@ -3741,7 +3767,9 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
             _shadow_settings = DecisionsSettings(
                 timeout_s=float(os.getenv("DAI_DECISIONS_TIMEOUT_S", "8")),
                 recall_target=settings.recall_target, ltm_limit=settings.ltm_limit)
-            shadow_sink.update(config_hash=_cfg, flat_ids={n.node_id for n in _eligible if n.kind != "ltm"})
+            shadow_sink.update(config_hash=_cfg, flat_ids={n.node_id for n in _eligible if n.kind != "ltm"},
+                               eligible={n.node_id: n.kind for n in _eligible},
+                               ltm_rows={f"DA.ltm.{m['id']}": dict(m) for m in ltm_rows if m.get("id")})
             shadow_sink["job"] = submit_shadow(
                 route_shadow_cycle, _shadow_settings, ctx, _eligible,
                 pinned_policy=_pinned_text, pinned_ids=[n.id for n in _pinned], today_ids=today_ids,
@@ -3770,7 +3798,7 @@ def _router_memory_rows(router, todays_rows):
 
 
 def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,
-                                  news=(), entities=(), trend=(), override=None):
+                                  news=(), entities=(), trend=(), override=None, audit_capture=None):
     """(system_prompt, served, index_text, rendered) built from the policy graph of the active version,
     or None when the graph is unavailable; `rendered` = {"soul", "directives", "memory"} as the model
     reads them this cycle. Records the served guidelines (with routes) in policy_graph_hits.
@@ -3790,7 +3818,7 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
     ctx = _Ctx(regime=regime or "", holdings=[t for t in holdings if t], watchlist=[t for t in watchlist if t],
                quarantined=list(quarantined or []), news=[t for t in news if t], entities=[t for t in entities if t],
-               trend=[t for t in trend if t])
+               trend=[t for t in trend if t], today=datetime.now())
     _ensure_hits(engine)
     ids = [n.id for n in _version.nodes.values() if n.owner in ("db", "default-file", "code")]
     try:
@@ -3799,6 +3827,11 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
         print(f"⚠️  Guideline health unavailable: {_h_exc}")
         health = {}
     out = _assemble(_version, ctx, health=health, override=override)
+    if audit_capture is not None:
+        from copy import deepcopy
+        audit_capture["assembly"] = {"version": deepcopy(_version), "context": deepcopy(ctx),
+                                     "health": deepcopy(health), "template": prompt_data["system_prompt"],
+                                     "override": deepcopy(override)}
     system_prompt = prompt_data["system_prompt"]
     if out.soul:
         system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{out.soul}"
