@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MODULES = ("policy_router", "policy_router.embed", "policy_router.features", "policy_router.model",
            "policy_router.select", "policy_router.llm_tier", "policy_router.labels", "policy_router.dataset",
            "policy_router.nodes", "policy_router.train", "policy_router.runtime", "policy_router.log",
-           "policy_router.panel")
+           "policy_router.panel", "policy_router.decisions", "policy_router.decisions_log",
+           "policy_router.shadow_bridge")
 
 
 def test_importing_the_package_never_imports_config():

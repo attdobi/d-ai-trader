@@ -31,6 +31,14 @@ from sqlalchemy import text
 MIN_CLOSED = 5
 SYNCED_REASON = "Schwab synced position"
 CLOCK_LABEL = "trade_outcomes.created_at (PT)"
+BREAK_EVEN_DOLLAR_MAX = 3.0
+
+
+def trade_outcome_kind(gain_pct, gain_amount) -> str:
+    """Dollar break-even classification shared by graph outcome reports."""
+    if abs(float(gain_amount or 0)) <= BREAK_EVEN_DOLLAR_MAX:
+        return "break_even"
+    return "win" if float(gain_pct or 0) > 0 else "loss"
 
 
 # ----------------------------------------------------------------------------- time helpers
@@ -109,10 +117,12 @@ def _stats(trades: list, start: Optional[datetime], end: Optional[datetime]) -> 
     n = len(sel)
     if n == 0:
         return {"n_closed": 0, "win_rate": None, "avg_pct": None, "total_pnl": 0.0}
-    wins = sum(1 for t in sel if t["pct"] > 0)
+    wins = sum(trade_outcome_kind(t["pct"], t["pnl"]) == "win" for t in sel)
+    losses = sum(trade_outcome_kind(t["pct"], t["pnl"]) == "loss" for t in sel)
     return {
         "n_closed": n,
-        "win_rate": round(wins / n, 4),
+        "wins": wins, "losses": losses, "break_even": n - wins - losses,
+        "win_rate": round(wins / (wins + losses), 4) if wins + losses else None,
         "avg_pct": round(mean(t["pct"] for t in sel), 4),
         "total_pnl": round(sum(t["pnl"] for t in sel), 2),
     }
@@ -234,5 +244,5 @@ NO_ATTRIBUTION = {"outcome": None, "reason": "no direct trade attribution"}
 
 __all__ = [
     "version_window", "version_bounds", "load_activation_events", "load_closed_trades",
-    "to_datetime", "iso", "MIN_CLOSED", "SYNCED_REASON", "CLOCK_LABEL", "NO_ATTRIBUTION",
+    "to_datetime", "iso", "trade_outcome_kind", "MIN_CLOSED", "SYNCED_REASON", "CLOCK_LABEL", "NO_ATTRIBUTION",
 ]

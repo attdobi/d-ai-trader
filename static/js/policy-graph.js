@@ -114,7 +114,7 @@
   };
 
   // Live d3 selections for the current render (null before the first render).
-  const view = { svg: null, viewport: null, zoom: null, nodes: null, links: null, simulation: null, neighborMap: new Map() };
+  const view = { svg: null, viewport: null, zoom: null, nodes: null, links: null, simulation: null, visibleKey: null, neighborMap: new Map() };
 
   // ------------------------------------------------------------------ helpers
   function qs(selector) { return document.querySelector(selector); }
@@ -753,7 +753,11 @@
       const a = t.average || {};
       const pctOf = r => (r === null || r === undefined) ? '—' : `${Math.round(Number(r) * 100)}%`;
       const routes = Object.entries(l.routes || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k} ${v}`).join(', ');
-      notes.push(`graph query (last run v${l.prompt_version ?? '?'} ${fmtPT(l.decided_at)}): served ${l.served} guidelines, ${l.dropped} not shown · ${Number(l.chars_served || 0).toLocaleString()} of ${Number(l.chars_full || 0).toLocaleString()} chars (${pctOf(l.ratio)})${routes ? ` · routes ${routes}` : ''} · ${t.runs}-run average ${pctOf(a.ratio)} of the full text, ${Math.round(a.served || 0)} served / ${Math.round(a.dropped || 0)} not shown`);
+      const measured = l.chars_basis === 'rendered_full_v1'
+        ? `${Number(l.chars_served || 0).toLocaleString()} of ${Number(l.chars_full || 0).toLocaleString()} rendered chars (${pctOf(l.ratio)})`
+        : `${Number(l.chars_served || 0).toLocaleString()} rendered chars · legacy raw baseline ${Number(l.chars_full || 0).toLocaleString()} chars; annotation overhead makes these counts incomparable`;
+      const average = a.chars_basis === 'rendered_full_v1' ? ` · ${t.runs}-run rendered-text average ${pctOf(a.ratio)}` : '';
+      notes.push(`graph query (last run v${l.prompt_version ?? '?'} ${fmtPT(l.decided_at)}): served ${l.served} guidelines, ${l.dropped} not shown · ${measured}${routes ? ` · routes ${routes}` : ''}${average}`);
     }
     const existing = meta.querySelector('.pg-timeline-note');
     if (existing) existing.remove();
@@ -1015,7 +1019,7 @@
 
     const svg = d3.select('#pgSvg');
     const viewport = svg.append('g').attr('class', 'pg-viewport');
-    const zoom = d3.zoom().scaleExtent([0.55, 4]).on('zoom', event => viewport.attr('transform', event.transform));
+    const zoom = d3.zoom().scaleExtent([0.15, 4]).on('zoom', event => viewport.attr('transform', event.transform));
     svg.call(zoom);
     svg.on('click', () => applySelection(null));
     view.svg = svg; view.viewport = viewport; view.zoom = zoom;
@@ -1104,7 +1108,7 @@
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
-    view.nodes = node; view.links = link; view.simulation = simulation;
+    view.nodes = node; view.links = link; view.simulation = simulation; view.visibleKey = null;
     applyChangeClasses();
     applyFilters();
 
@@ -1162,8 +1166,20 @@
   }
 
   function resetZoom() {
-    if (!view.svg || !view.zoom) return;
-    view.svg.transition().duration(350).call(view.zoom.transform, d3.zoomIdentity);
+    if (!view.svg || !view.zoom || !view.nodes) return;
+    const bounds = [];
+    view.nodes.filter(d => nodeMatchesFilter(d)).each(function(d) {
+      if (!Number.isFinite(d.x) || !Number.isFinite(d.y)) return;
+      const b = this.getBBox();
+      bounds.push([d.x + b.x, d.y + b.y, d.x + b.x + b.width, d.y + b.y + b.height]);
+    });
+    if (!bounds.length) return;
+    const minX = d3.min(bounds, b => b[0]), minY = d3.min(bounds, b => b[1]);
+    const maxX = d3.max(bounds, b => b[2]), maxY = d3.max(bounds, b => b[3]);
+    const scale = Math.min(2, (WIDTH - 48) / Math.max(1, maxX - minX), (HEIGHT - 48) / Math.max(1, maxY - minY));
+    const transform = d3.zoomIdentity.translate(WIDTH / 2, HEIGHT / 2).scale(scale)
+      .translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
+    view.svg.transition().duration(200).call(view.zoom.transform, transform);
   }
 
   // ------------------------------------------------------------------ legend (rows only for kinds present)
@@ -1269,6 +1285,14 @@
     const lr = state.lastRun && state.payload && state.payload.last_run && state.payload.last_run.served;
     view.nodes.classed('is-unread', d => Boolean(lr) && d.id !== rootId() && d.node_type !== 'field' && d.node_type !== 'template'
       && (layerOf(d) === 'policy' || d.owner === 'code' || d.owner === 'decider_memory') && !(d.id in lr));
+    // Hidden layers must not push the visible policy off the canvas.
+    const visibleKey = [...visible].sort().join('|');
+    if (view.simulation && view.visibleKey !== visibleKey) {
+      view.visibleKey = visibleKey;
+      view.simulation.nodes(view.nodes.data().filter(d => visible.has(d.id)));
+      view.simulation.force('link').links(view.links.data().filter(d => visible.has(d.sourceId) && visible.has(d.targetId)));
+      view.simulation.on('end.fit', () => { resetZoom(); view.simulation.on('end.fit', null); }).alpha(0.4).restart();
+    }
   }
 
   function toggleLayer(key) {
@@ -1584,7 +1608,7 @@
     if (f.closed) {
       const pnl = Number(f.pnl || 0);
       const recent = (f.recent || []).map(r => `${r.ticker} ${Number(r.gain_pct) >= 0 ? '+' : ''}${Number(r.gain_pct).toFixed(1)}%`).join(' · ');
-      quality = `<div class="pg-cites"><strong>${plural(f.closed, 'closed trade')} entered under it</strong> · win rate ${esc(pct(f.win_rate))} (${f.wins}W/${f.losses}L) · P&amp;L ${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
+      quality = `<div class="pg-cites"><strong>${plural(f.closed, 'closed trade')} entered under it</strong> · win rate ${esc(pct(f.win_rate))} (${f.wins}W/${f.losses}L/${f.break_even || 0}BE) · P&amp;L ${pnl >= 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
     } else {
       quality = '<div class="pg-muted">No closed trade was entered while this factor was active (entries are matched to the cycle of their cited BUY).</div>';
     }
@@ -1619,7 +1643,7 @@
         const o = r.outcome;
         const delta = o.winrate_delta !== null && o.winrate_delta !== undefined ? `${Number(o.winrate_delta) >= 0 ? '+' : '−'}${Math.abs(Math.round(Number(o.winrate_delta) * 100))} pts` : '—';
         return `<tr><td>v${esc(r.version)}${r.change && r.change !== 'same' ? ` <span class="pg-muted">(${esc(r.change)})</span>` : ''}</td><td>${esc(o.n_closed ?? 0)}</td><td>${esc(o.measurable ? pct(o.win_rate) : `— (${o.n_closed ?? 0} < 5)`)}</td><td>${esc(o.measurable ? delta : '—')}</td></tr>`;
-      }).join('')}</tbody><caption>version-level signal, not per-guideline</caption></table>`;
+      }).join('')}</tbody><caption>Version-level association; win rate excludes the ±$3 break-even band.</caption></table>`;
     } else if (payload.agent_type !== 'DeciderAgent') {
       table = '<p class="pg-muted">No direct trade attribution for this agent.</p>';
     }
@@ -1629,7 +1653,7 @@
     if (hw && ['7d', '30d', '90d', '1y'].some(w => (hw[w]?.cited || hw[w]?.served))) {
       const cells = ['7d', '30d', '90d', '1y'].map(w => {
         const x = hw[w] || {};
-        const wr = x.closed ? ` · ${pct(x.win_rate)} (${x.wins}W/${x.closed - x.wins}L)` : '';
+        const wr = x.closed ? ` · ${pct(x.win_rate)} (${x.wins}W/${x.losses ?? (x.closed - x.wins)}L/${x.break_even || 0}BE)` : '';
         return `<td><strong>${esc(x.cited || 0)}</strong><span class="pg-muted"> / ${esc(x.served || 0)}</span>${esc(wr)}</td>`;
       }).join('');
       const routes = Object.entries(hw.routes || {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(' · ');
@@ -1639,9 +1663,9 @@
       const acts = Object.entries(c.by_action || {}).map(([a, n]) => `${n} ${a}`).concat(c.rejections ? [`${c.rejections} rejected setup${c.rejections === 1 ? '' : 's'}`] : []).join(', ');
       const wr = c.win_rate !== null && c.win_rate !== undefined ? pct(c.win_rate) : '—';
       const pnl = Number.isFinite(Number(c.pnl)) ? `${Number(c.pnl) >= 0 ? '+' : '−'}$${Math.abs(Number(c.pnl)).toFixed(0)}` : '—';
-      const avg = c.avg_gain_pct !== null && c.avg_gain_pct !== undefined ? `${Number(c.avg_gain_pct) >= 0 ? '+' : ''}${Number(c.avg_gain_pct).toFixed(2)}%` : '—';
-      const recent = (c.recent_closed || []).slice(0, 5).map(r => `${r.ticker} ${Number(r.gain_pct) >= 0 ? '+' : ''}${Number(r.gain_pct).toFixed(1)}%`).join(' · ');
-      cites = `<div class="pg-cites"><strong>Cited by ${plural(c.decisions, 'decision')}</strong>${acts ? ` (${esc(acts)})` : ''} · ${plural(c.closed, 'closed trade')}${c.closed ? ` · win rate ${esc(wr)} (${c.wins}W/${c.losses}L) · avg ${esc(avg)} · P&amp;L ${esc(pnl)}` : ''}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
+      const avg = c.avg_gain_pct !== null && c.avg_gain_pct !== undefined ? `${Number(c.avg_gain_pct) >= 0 ? '+' : ''}${(Number(c.avg_gain_pct) * 100).toFixed(2)}%` : '—';
+      const recent = (c.recent_closed || []).slice(0, 5).map(r => `${r.ticker} ${Number(r.gain_pct) >= 0 ? '+' : ''}${(Number(r.gain_pct) * 100).toFixed(1)}%`).join(' · ');
+      cites = `<div class="pg-cites"><strong>Cited by ${plural(c.decisions, 'decision')}</strong>${acts ? ` (${esc(acts)})` : ''} · ${plural(c.closed, 'closed trade')}${c.closed ? ` · win rate ${esc(wr)} (${c.wins}W/${c.losses}L/${c.break_even || 0}BE) · avg ${esc(avg)} · P&amp;L ${esc(pnl)}` : ''}${recent ? `<div class="pg-muted">${esc(recent)}</div>` : ''}</div>`;
     }
     const note = !cites && detail.attribution_note ? `<p class="pg-muted">${esc(detail.attribution_note)}</p>` : '';
     box.innerHTML = `<h4>History &amp; health</h4>${bits.length ? `<div>${esc(bits.join(' · '))}</div>` : '<div class="pg-muted">No history recorded for this guideline.</div>'}${cites}${table}${note}`;
@@ -2278,11 +2302,11 @@
       return;
     }
     const wr = data.win_rate !== null && data.win_rate !== undefined ? ` · win rate ${pct(data.win_rate)}` : '';
-    summary.textContent = `${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')}${data.rejections_cited ? ` · ${plural(data.rejections_cited, 'cited rejection')}` : ''} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${wr} · since ${fmtDateOnly(data.since)}`;
+    summary.textContent = `All policy versions · ${plural(data.runs || 0, 'cycle')} · ${plural(data.decisions_cited || 0, 'cited decision')}${data.rejections_cited ? ` · ${plural(data.rejections_cited, 'cited rejection')}` : ''} · ${plural(data.closed_cited || 0, 'closed trade')} with citations${data.break_even ? ` (${data.break_even} break-even)` : ''}${wr} · since ${fmtDateOnly(data.since)}`;
     renderPathFlowFor(flow, data);
     const bits = [];
     if ((f.cited_unserved || []).length) {
-      bits.push(`<div><strong>Cited but not served</strong> (the graph query missed them): ${f.cited_unserved.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))} ×${g.cited}</button>`).join(' ')}</div>`);
+      bits.push(`<div><strong>Citations without a served record</strong> (may include historical logging gaps; not proof the query missed them): ${f.cited_unserved.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))} ×${g.cited}</button>`).join(' ')}</div>`);
     }
     if ((f.served_never_cited || []).length) {
       bits.push(`<div><strong>Served but never cited</strong> (${f.served_never_cited_total} guidelines): ${f.served_never_cited.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))}</button>`).join(' ')}</div>`);
@@ -2330,9 +2354,11 @@
       (data.effective_mode ? 'set by DAI_POLICY_ROUTER' : 'no routed cycle logged');
     const tiles = [`<div class="pg-router-stat"><div class="k">Mode</div><div class="v">${esc(modeLabel)}</div><div class="s">${esc(modeSub)}</div></div>`];
     if (art) {
-      const cls = art.certified ? 'ok' : 'warn';
-      tiles.push(`<div class="pg-router-stat"><div class="k">Held-out recall</div><div class="v ${cls}">${pct(art.heldout_recall, 1)}</div>`
-        + `<div class="s">target ${pct(art.target, 0)} · ${art.certified ? ('certified' + (art.criterion === 'beats_today' ? ' (beats today\'s prompt)' : art.criterion === 'target' ? ' (meets the target)' : '')) : 'not certified'} · today's prompt ${pct(art.today_recall, 1)}`
+      const trainingOnlyThreshold = ['outer_training_citation_pairs', 'explicit'].includes(art.theta_source);
+      const cls = art.certified && trainingOnlyThreshold ? 'ok' : 'warn';
+      tiles.push(`<div class="pg-router-stat"><div class="k">Historical proxy recall</div><div class="v ${cls}">${pct(art.heldout_recall, 1)}</div>`
+        + `<div class="s">target ${pct(art.target, 0)} · ${art.certified ? ((trainingOnlyThreshold ? 'historically certified' : 'legacy certification') + (art.criterion === 'beats_today' ? ' (beats baseline)' : art.criterion === 'target' ? ' (meets target)' : '')) : 'not certified'} · baseline ${pct(art.today_recall, 1)}`
+        + `${trainingOnlyThreshold ? '' : ' · historical threshold used all cycles; not a clean forward evaluation'}`
         + `${art.recall_ceiling !== null && art.recall_ceiling !== undefined ? ` · best possible under the memory cap ${pct(art.recall_ceiling, 1)}` : ''}</div></div>`);
       tiles.push(`<div class="pg-router-stat"><div class="k">Served per cycle (held out)</div><div class="v">${kChars(art.chars_selected)} chars</div>`
         + `<div class="s">today ${kChars(art.chars_today)} of ${kChars(art.chars_routable)} routable · ${art.chars_reduction_vs_today !== null && art.chars_reduction_vs_today !== undefined ? `${art.chars_reduction_vs_today >= 0 ? 'saves' : 'adds'} ${pct(Math.abs(art.chars_reduction_vs_today), 0)}` : '—'}</div></div>`);
@@ -2343,10 +2369,13 @@
     }
     if (sh && sh.runs) {
       const rec = sh.cited ? `${pct(sh.recall, 0)} (${sh.router_kept} of ${sh.cited})` : 'nothing cited yet';
-      tiles.push(`<div class="pg-router-stat"><div class="k">Shadow recall, last ${plural(sh.runs, 'cycle')}</div><div class="v">${esc(rec)}</div>`
-        + `<div class="s">diary entries and memory rows the Decider cited that the router kept${sh.cited ? ` · today's prompt kept ${sh.today_kept}` : ''} · avg ${kChars(sh.avg_chars_selected)} vs today ${kChars(sh.avg_chars_today)} chars</div></div>`);
+      const retired = (sh.citation_context || []).filter(r => r.active === false);
+      const retiredMisses = retired.reduce((n, r) => n + Number(r.cited || 0) - Number(r.router_kept || 0), 0);
+      tiles.push(`<div class="pg-router-stat"><div class="k">Raw citation retention · ${plural(sh.runs, 'cycle')}</div><div class="v">${esc(rec)}</div>`
+        + `<div class="s">explicit citations retained; not a trade-quality score${sh.cited ? ` · actual prompt retained ${sh.today_kept}` : ''}${retiredMisses ? ` · ${retiredMisses} excluded citations belong to memories retired since those cycles (${esc(retired.map(r => r.node_id).join(', '))})` : ''} · avg ${kChars(sh.avg_chars_selected)} vs actual ${kChars(sh.avg_chars_today)} chars</div></div>`);
     }
     stats.innerHTML = tiles.join('');
+    renderDecisionsComparison(data.decisions || {});
     const nodes = (last && last.nodes) || [];
     if (sub) sub.textContent = last ? `${fmtPT(last.decided_at)} · ${last.backend || ''}${last.expected_recall !== null && last.expected_recall !== undefined ? ` · expected recall ${pct(last.expected_recall, 1)}` : ''}${last.note ? ` · ${last.note}` : ''}` : '';
     if (!nodes.length) {
@@ -2360,12 +2389,36 @@
         + `<button type="button" class="id" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button>`
         + `<div class="bar"><span style="width:${(p * 100).toFixed(1)}%"></span></div>`
         + `<span class="p">${p.toFixed(2)}</span>`
-        + `<span class="choice ${inc ? 'include' : 'exclude'}">${inc ? 'include' : 'exclude'}</span>`
-        + `<span class="served ${n.served_in_prompt ? 'yes' : ''}">${n.served_in_prompt ? 'in prompt' : 'not in prompt'}</span></div>`;
+        + `<span class="choice ${inc ? 'include' : 'exclude'}">${inc ? 'yes' : 'no'}</span>`
+        + `<span class="served ${n.served_in_prompt ? 'yes' : ''}">${n.served_in_prompt ? 'yes' : 'no'}</span></div>`;
     }).join('');
     bars.querySelectorAll('.id[data-node-id]').forEach(btn => btn.addEventListener('click', () => {
       if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
     }));
+  }
+
+  function renderDecisionsComparison(data) {
+    const note = qs('#pgDecisionsNote'), stats = qs('#pgDecisionsStats');
+    const details = qs('#pgDecisionsDetails'), rows = qs('#pgDecisionsRows');
+    if (!note || !stats || !details || !rows) return;
+    const last = data.last_cycle || null, total = data.totals || {};
+    note.textContent = (data.note || 'No Decisions shadow comparison recorded yet. The actual prompt remains unchanged.')
+      + (last?.source_kind === 'replay' ? ' Latest result replays saved input; it is not forward trading evidence.' : '')
+      + (last && last.note ? ` Last result: ${last.note}` : '');
+    if (!last) { stats.innerHTML = ''; details.hidden = true; rows.innerHTML = ''; return; }
+    const tile = (key, value, sub) => `<div class="pg-router-stat"><div class="k">${esc(key)}</div><div class="v">${esc(value)}</div><div class="s">${esc(sub)}</div></div>`;
+    const dollars = n => n === null || n === undefined ? '—' : `$${Number(n).toFixed(5)}`;
+    stats.innerHTML = tile(last.source_kind === 'replay' ? 'Saved-cycle replay' : 'Live shadow comparison', last.status || 'unknown', `${fmtPT(last.decided_at)} · policy v${last.prompt_version ?? '?'} · ${last.model || data.model || ''}`)
+      + tile('Router API cost', dollars(last.cost_usd), `${Number(last.input_tokens || 0).toLocaleString()} input tokens · ${Number(last.latency_ms || 0).toLocaleString()} ms`)
+      + tile('Proposed routable context', `${kChars(last.chars_selected)} chars`, `${kChars(last.chars_today)} chars actually served · hypothetical; excludes pinned policy`)
+      + tile('Comparisons in window', String(total.runs ?? (data.runs || []).length), `${total.live_runs || 0} live · ${total.replay_runs || 0} replay · ${total.ok || 0} completed · ${total.fallback || 0} fell back · ${dollars(total.known_cost_usd ?? total.cost_usd)} ${total.unknown_cost_calls ? 'known subtotal' : 'total'}${total.unknown_cost_calls ? ` · ${total.unknown_cost_calls} cost unknown` : ''}`);
+    const nodes = last.nodes || [];
+    details.hidden = !nodes.length;
+    const probability = p => p === null || p === undefined ? '—' : Number(p).toFixed(2);
+    const choice = c => c === 'include' ? 'keep' : c === 'exclude' ? 'omit' : '—';
+    rows.innerHTML = `<p class="pg-muted">Run ${esc(last.run_id || '')}. Both columns are proposed selections; the final column records the actual prompt. Relevance probabilities are estimates, not calibrated trade-success probabilities.</p>`
+      + `<table><thead><tr><th>Guideline</th><th>Local p / choice</th><th>Decisions p / choice</th><th>Actually read</th></tr></thead><tbody>${nodes.map(n => `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button></td><td>${esc(probability(n.local_p))} / ${choice(n.local_choice)}</td><td>${esc(probability(n.decisions_p))} / ${choice(n.decisions_choice)}</td><td>${n.served_in_prompt ? 'yes' : 'no'}</td></tr>`).join('')}</tbody></table>`;
+    rows.querySelectorAll('[data-node-id]').forEach(button => button.addEventListener('click', () => pgOpenNode(button.dataset.nodeId)));
   }
 
   // The one flow: left column by route (what pulled the guideline into the prompt) or by world factor
@@ -2413,7 +2466,7 @@
       const wr = f.win_rate === null || f.win_rate === undefined ? '—' : pct(f.win_rate);
       const pnl = Number(f.pnl || 0);
       const nodeId = `${(state.payload && state.payload.prefix) || 'DA'}.factor.${f.key}`;
-      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(nodeId)}" title="${esc(nodeId)}">${esc(truncate(f.label, 30))}</button><div class="pg-muted">${esc(FACTOR_KIND_LABEL[f.kind] || f.kind)}</div></td><td>${esc(f.cycles)}</td><td>${esc(acts || '—')}</td><td>${esc(f.closed)}${f.closed ? ` <span class="pg-muted">(${f.wins}W/${f.losses}L)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(f.guidelines) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
+      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(nodeId)}" title="${esc(nodeId)}">${esc(truncate(f.label, 30))}</button><div class="pg-muted">${esc(FACTOR_KIND_LABEL[f.kind] || f.kind)}</div></td><td>${esc(f.cycles)}</td><td>${esc(acts || '—')}</td><td>${esc(f.closed)}${f.closed ? ` <span class="pg-muted">(${f.wins}W/${f.losses}L/${f.break_even || 0}BE)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(f.guidelines) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
     }).join('')}</tbody></table>`;
     table.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
       if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
@@ -2474,7 +2527,7 @@
     container.innerHTML = `<table><thead><tr><th>guideline</th><th>cited</th><th>closed</th><th>win rate</th><th>P&amp;L</th><th>co-cited on wins</th><th>on losses</th></tr></thead><tbody>${rows.map(r => {
       const wr = r.win_rate === null || r.win_rate === undefined ? '—' : pct(r.win_rate);
       const pnl = Number(r.pnl || 0);
-      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(r.id)}" title="${esc(r.id)}">${esc(truncate(r.title, 30))}</button></td><td>${esc(r.cited)}<span class="pg-muted">/${esc(r.served)}</span></td><td>${esc(r.closed)}${r.closed ? ` <span class="pg-muted">(${r.wins}W/${r.losses}L)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(r.co_on_wins) || '<span class="pg-muted">—</span>'}</div></td><td><div class="pg-co">${chips(r.co_on_losses) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
+      return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(r.id)}" title="${esc(r.id)}">${esc(truncate(r.title, 30))}</button></td><td>${esc(r.cited)}<span class="pg-muted">/${esc(r.served)}</span></td><td>${esc(r.closed)}${r.closed ? ` <span class="pg-muted">(${r.wins}W/${r.losses}L/${r.break_even || 0}BE)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(r.co_on_wins) || '<span class="pg-muted">—</span>'}</div></td><td><div class="pg-co">${chips(r.co_on_losses) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
     }).join('')}</tbody></table>`;
     container.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
       if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');

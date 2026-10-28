@@ -2856,12 +2856,14 @@ OUTPUT (STRICT)
     # embeddings (LM Studio, hard 5 s budget). Shadow logs the decision and serves today's prompt unchanged;
     # active (certified model only) serves the pinned policy plus the rows it keeps. Any failure → today's prompt.
     _router = None
+    _decisions_shadow = {}
     try:
         if _ctx_lists is None:
             raise RuntimeError(f"cycle context unavailable ({_ctx_error})")
         _router = _policy_router_cycle(
             prompt_version, run_id, **_ctx_lists,
-            parsed_summaries=parsed_summaries, event_block=((_event_ctx or {}).get("block") or ""))
+            parsed_summaries=parsed_summaries, event_block=((_event_ctx or {}).get("block") or ""),
+            shadow_sink=_decisions_shadow)
         if _router is not None:
             print(_router.summary_line())
     except Exception as _router_exc:
@@ -3118,6 +3120,18 @@ OUTPUT (STRICT)
     _input_id = _log_decider_input(
         config_hash, run_id, prompt_version, system_prompt=system_prompt, user_prompt=prompt,
         policy=_policy_rendered, context=_ctx_lists, ltm_ids=_ltm_injected)
+    # Comparison outputs never supply an assembly override or trade action.
+    if _decisions_shadow.get("job") is not None:
+        try:
+            from policy_router.shadow_bridge import record_when_ready as _record_shadow_ready
+            _actual_shadow_ids = ({s.node_id for s in _graph_served} if _graph_served is not None
+                                  else set(_decisions_shadow.get("flat_ids") or ()))
+            _actual_shadow_ids |= {f"DA.ltm.{m['id']}" for m in _ltm_injected if m.get("id")}
+            _record_shadow_ready(_decisions_shadow["job"], engine,
+                                 _decisions_shadow["config_hash"], prompt_version, run_id,
+                                 served_ids=_actual_shadow_ids, local_result=_router, source_input_id=_input_id)
+        except Exception as _shadow_log_exc:
+            print(f"⚠️ Decisions comparison logging skipped ({type(_shadow_log_exc).__name__})")
     ai_response = prompt_manager.ask_openai(
         prompt,
         system_prompt,
@@ -3566,7 +3580,7 @@ def _tickers_in_summaries(parsed_summaries):
 
 
 def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist, quarantined, news=(), entities=(),
-                         trend=(), parsed_summaries=(), event_block=""):
+                         trend=(), parsed_summaries=(), event_block="", shadow_sink=None):
     """The Jev-like policy router (policy_router/, DAI_POLICY_ROUTER=off|shadow|active, default shadow): a
     calibrated p(needed) and an include/exclude choice for every diary entry and long-term memory row of this
     cycle. Returns a RoutingResult (None when off). In shadow — and whenever the model is not certified, or on
@@ -3578,7 +3592,9 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
     _root = _Path(__file__).resolve().parent
     _cfg = get_current_config_hash()
     settings = _RSettings.from_mapping(os.environ, repo_root=_root, config_hash=_cfg)
-    if settings.mode == "off" or prompt_version is None:
+    _shadow_enabled = (str(os.getenv("DAI_DECISIONS_ROUTER", "off")).strip().lower() == "shadow"
+                       and shadow_sink is not None)
+    if (settings.mode == "off" and not _shadow_enabled) or prompt_version is None:
         return None
     from decider_memory import get_all_active_memories, get_relevant_memories
     from policy_graph import service as _pg_service
@@ -3598,6 +3614,30 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
     served_today, _dropped_today = _pg_select(_version, ctx.assembly_context())
     today_ids = {s.node_id for s in served_today}
     today_ids |= {f"DA.ltm.{m['id']}" for m in get_relevant_memories(_cfg, tickers=list(ctx.holdings)) if m.get("id")}
+    if _shadow_enabled:
+        try:
+            import config as _shadow_config
+            from policy_router.decisions import DecisionsSettings, route_shadow_cycle
+            from policy_router.shadow_bridge import submit_shadow
+            from policy_safety import OPPORTUNITY_CHARTER
+            _eligible = [n for n in nodes if n.kind in settings.routable and n.kind in ("entry", "ltm")
+                         and not blanket_entry_vetoes(n.text)]
+            _eligible_ids = {n.node_id for n in _eligible}
+            _pinned = [n for n in _version.nodes.values() if n.id not in _eligible_ids
+                       and n.owner in ("db", "default-file", "code")
+                       and n.node_type not in ("ticker", "data")]
+            _pinned.sort(key=lambda n: (str(n.field), int(n.order or 0), n.id))
+            _pinned_text = "\n\n".join(f"{n.id}\n{n.body}" for n in _pinned) + "\n\n" + OPPORTUNITY_CHARTER
+            _shadow_settings = DecisionsSettings(
+                timeout_s=float(os.getenv("DAI_DECISIONS_TIMEOUT_S", "8")),
+                recall_target=settings.recall_target, ltm_limit=settings.ltm_limit)
+            shadow_sink.update(config_hash=_cfg, flat_ids={n.node_id for n in _eligible if n.kind != "ltm"})
+            shadow_sink["job"] = submit_shadow(
+                route_shadow_cycle, _shadow_settings, ctx, _eligible,
+                pinned_policy=_pinned_text, pinned_ids=[n.id for n in _pinned], today_ids=today_ids,
+                api_key=_shadow_config.api_key)
+        except Exception as _shadow_exc:
+            print(f"⚠️ Decisions comparison skipped ({type(_shadow_exc).__name__})")
     result = _route_cycle(settings, ctx, nodes, today_ids=today_ids, log=print)
     if result is not None:
         result.extras["ltm_rows"] = {f"DA.ltm.{m['id']}": m for m in ltm_rows if m.get("id")}
@@ -3676,7 +3716,7 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
         from policy_graph.citations import record_run as _record_run
         _record_run(engine, _cfg, "DeciderAgent", int(prompt_version), run_id, served=len(out.served),
                     dropped=len(out.dropped), chars_full=out.chars_full, chars_served=out.chars_served,
-                    routes=routes, context=ctx.summary())
+                    routes=routes, context={**ctx.summary(), "chars_basis": "rendered_full_v1"})
     except Exception as _s_exc:
         print(f"⚠️  Could not log served guidelines: {_s_exc}")
     # the index the model cites from: every served guideline plus the code-owned blocks that fire

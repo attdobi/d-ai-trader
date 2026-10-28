@@ -27,6 +27,7 @@ from sqlalchemy import text
 
 from .lessons import ltm_node_id, ltm_title
 from .model import COMPILED_FIELDS, ID_RE, Version
+from .health import trade_outcome_kind
 
 CITE_RE = re.compile(r"\s*\[cites?:\s*([^\]]*)\]\s*$", re.I)
 MAX_CITES = 6
@@ -378,14 +379,15 @@ def citation_health(engine, config_hash: str, node_id: str, *, recent: int = 8) 
             ORDER BY sell_timestamp DESC
         """), {"h": config_hash, "synced": f"%{SYNCED_REASON}%"}).fetchall()
     closed = [r for r in rows if node_id in parse_cites(r[4])]
-    wins = sum(1 for r in closed if (r[2] or 0) > 0)
+    wins = sum(trade_outcome_kind(r[2], r[3]) == "win" for r in closed)
+    losses = sum(trade_outcome_kind(r[2], r[3]) == "loss" for r in closed)
     pnl = float(sum(float(r[3] or 0) for r in closed))
     pct = [float(r[2]) for r in closed if r[2] is not None]
     return {
         "node_id": node_id,
         "decisions": len(decisions), "by_action": by_action,
-        "closed": len(closed), "wins": wins, "losses": len(closed) - wins,
-        "win_rate": (wins / len(closed)) if closed else None,
+        "closed": len(closed), "wins": wins, "losses": losses, "break_even": len(closed) - wins - losses,
+        "decisive": wins + losses, "win_rate": (wins / (wins + losses)) if wins + losses else None,
         "avg_gain_pct": (sum(pct) / len(pct)) if pct else None,
         "pnl": pnl,
         "recent_decisions": [{"timestamp": (ts.isoformat() if hasattr(ts, "isoformat") else str(ts)),
@@ -563,9 +565,11 @@ def hit_counts(engine, config_hash: str, node_id: str, *, now=None) -> dict:
             if r[3]:
                 cited += 1
         win = [c for c in closed if c[0] is not None and c[0] >= since]
-        wins = sum(1 for c in win if (c[1] or 0) > 0)
+        wins = sum(trade_outcome_kind(c[1], c[2]) == "win" for c in win)
+        losses = sum(trade_outcome_kind(c[1], c[2]) == "loss" for c in win)
         out[label] = {"served": served, "cited": cited, "closed": len(win), "wins": wins,
-                      "win_rate": (wins / len(win)) if win else None,
+                      "losses": losses, "break_even": len(win) - wins - losses, "decisive": wins + losses,
+                      "win_rate": (wins / (wins + losses)) if wins + losses else None,
                       "pnl": float(sum(float(c[2] or 0) for c in win))}
     for r in rows:
         if r[3]:
@@ -607,7 +611,7 @@ def health_for_prompt(engine, config_hash: str, node_ids, *, now=None) -> dict:
     m = hit_map(engine, config_hash, now=now)
     with engine.connect() as conn:
         outcomes = conn.execute(text("""
-            SELECT sell_timestamp, gain_loss_percentage, original_reason FROM trade_outcomes
+            SELECT sell_timestamp, gain_loss_percentage, original_reason, gain_loss_amount FROM trade_outcomes
             WHERE config_hash = :h AND original_reason LIKE '%[cites:%' AND original_reason NOT LIKE :synced
         """), {"h": config_hash, "synced": f"%{SYNCED_REASON}%"}).fetchall()
     from .health import to_datetime
@@ -619,10 +623,10 @@ def health_for_prompt(engine, config_hash: str, node_ids, *, now=None) -> dict:
             continue
         for nid in parse_cites(r[2]):
             if nid in ids:
-                c = closed_by.setdefault(nid, [0, 0])
+                c = closed_by.setdefault(nid, [0, 0, 0, 0])
                 c[0] += 1
-                if (r[1] or 0) > 0:
-                    c[1] += 1
+                kind = trade_outcome_kind(r[1], r[3])
+                c[{"win": 1, "loss": 2, "break_even": 3}[kind]] += 1
     out = {}
     for nid in ids:
         h = m.get(nid)
@@ -633,7 +637,8 @@ def health_for_prompt(engine, config_hash: str, node_ids, *, now=None) -> dict:
         for w in ("7d", "30d", "90d"):
             entry[w] = {"cited": (h or {}).get(f"cited_{w}", 0)}
         if c:
-            entry["90d"].update({"closed": c[0], "wins": c[1], "win_rate": (c[1] / c[0]) if c[0] else None})
+            entry["90d"].update({"closed": c[0], "wins": c[1], "losses": c[2], "break_even": c[3],
+                                 "decisive": c[1] + c[2], "win_rate": (c[1] / (c[1] + c[2])) if c[1] + c[2] else None})
         out[nid] = entry
     return out
 
@@ -791,6 +796,13 @@ def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> 
     avg_dropped = sum(r[4] or 0 for r in rows) / n
     avg_full = sum(r[5] or 0 for r in rows) / n
     avg_out = sum(r[6] or 0 for r in rows) / n
+    def chars_basis(row):
+        try:
+            context = json.loads(row[8]) if isinstance(row[8], str) else (row[8] or {})
+        except (TypeError, ValueError):
+            context = {}
+        return context.get("chars_basis") or "legacy_mixed"
+    comparable_runs = sum(chars_basis(row) == "rendered_full_v1" for row in rows)
     route_totals: dict = {}
     for r in rows:
         try:
@@ -802,9 +814,12 @@ def run_stats(engine, config_hash: str, agent_type: str, *, limit: int = 30) -> 
         "runs": n,
         "latest": {"decided_at": iso(latest[0]), "prompt_version": latest[1], "run_id": latest[2], "served": latest[3],
                    "dropped": latest[4], "chars_full": latest[5], "chars_served": latest[6],
+                   "chars_basis": chars_basis(latest),
                    "ratio": (latest[6] / latest[5]) if latest[5] else None,
                    "routes": (json.loads(latest[7]) if latest[7] else {}), "context": (json.loads(latest[8]) if latest[8] else {})},
         "average": {"served": avg_served, "dropped": avg_dropped, "chars_full": avg_full, "chars_served": avg_out,
+                    "chars_basis": "rendered_full_v1" if comparable_runs == n else "mixed_or_legacy",
+                    "comparable_runs": comparable_runs,
                     "ratio": (avg_out / avg_full) if avg_full else None},
         "routes": route_totals,
     }

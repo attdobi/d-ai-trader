@@ -6,6 +6,7 @@ and the CLI (sqlite URL, fake transport)."""
 from __future__ import annotations
 
 import importlib.util
+import copy
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -233,7 +234,9 @@ def test_training_protocol_artifact_and_reports(world, tmp_path):
     assert art["label"]["mode"] == "marginal" and art["label"]["definition"] == T.MARGINAL_DEFINITION   # the default label
     assert art["certification"]["heldout_cycles"] == 5 and art["certification"]["train_cycles"] == 13
     assert set(rep["lowo_all"]["weeks"]) == {"2026-W37", "2026-W38", "2026-W39"}
-    assert rep["label"]["citation_pairs"] >= 18 and 0 < rep["label"]["theta"] <= 1
+    # One citation pair per training cycle; the five future cycles are excluded.
+    assert rep["label"]["citation_pairs"] == rep["label"]["theta_fit_pairs"] == 13
+    assert 0 < rep["label"]["theta"] <= 1
     stats = rep["label"]["stats"]
     assert stats["entry"]["similar"] > 0                                  # the regime entry echoed in reasons
     assert stats["ltm"]["ticker"] == 0
@@ -261,6 +264,38 @@ def test_plain_label_stays_available(world):
                      log=lambda *_: None)
     assert art["label"]["mode"] == "plain" and art["label"]["definition"] == T.LABEL_DEFINITION
     assert art["certification"]["label_mode"] == "plain" and rep["alternatives"] == {}
+
+
+def test_future_citation_pairs_cannot_change_the_training_label_threshold(world):
+    cycles = load_cycles(world["engine"], CFG, store_root=world["store"])
+    def train(rows):
+        embedder = EmbeddingClient("http://fake/v1", "fake-embed", transport=fakes.FakeEmbeddingsTransport())
+        return T.run(rows, embedder, config_hash=CFG, recall_target=.9,
+                     compare_labels=False, log=lambda *_: None)
+    first, _ = train(cycles)
+    cut = int(round(len(cycles) * .7))
+    changed = copy.deepcopy(cycles)
+    for cycle in changed[cut:]:
+        ident = next(iter(cycle.node_texts))
+        # Hundreds of exact matches would dominate an all-cycle median.
+        cycle.pairs = [(cycle.node_texts[ident], [ident])] * 100
+    second, report = train(changed)
+    assert second["label"]["theta"] == first["label"]["theta"]
+    assert second["label"]["theta_source"] == "outer_training_citation_pairs"
+    assert second["label"]["theta_fit_cycles"] == cut
+    assert second["label"]["theta_fit_last"] == cycles[cut - 1].decided_at.isoformat()
+    assert second["label"]["theta_fit_pairs"] == first["label"]["theta_fit_pairs"]
+    assert "historical proxy evidence" in T.report_markdown(report)
+
+
+def test_explicit_label_threshold_has_no_claim_of_a_fitted_training_threshold(world):
+    cycles = load_cycles(world["engine"], CFG, store_root=world["store"])
+    embedder = EmbeddingClient("http://fake/v1", "fake-embed", transport=fakes.FakeEmbeddingsTransport())
+    artifact, _ = T.run(cycles, embedder, config_hash=CFG, theta=.75, recall_target=.9,
+                        compare_labels=False, log=lambda *_: None)
+    assert artifact["label"]["theta"] == .75
+    assert artifact["label"]["theta_source"] == "explicit"
+    assert artifact["label"]["theta_fit_cycles"] == artifact["label"]["theta_fit_pairs"] == 0
 
 
 def test_certify_records_target_and_beats_today():

@@ -333,6 +333,8 @@ DAI_ROUTER_LLM_MODEL=               # optional chat model for the uncertain band
 DAI_ROUTER_RECALL_TARGET=0.98       # active needs an artifact certified at >= this held-out recall
 DAI_ROUTER_ROUTABLE=entry,ltm       # add "lesson" to let the router drop lessons too (needs its own certification)
 DAI_ROUTER_CERTIFY=either           # target (held-out recall >= target) | beats_today (recall >= today's prompt with fewer chars) | either
+DAI_DECISIONS_ROUTER=off            # off | shadow: separate hosted relevance comparison; never active routing
+DAI_DECISIONS_TIMEOUT_S=8           # request deadline; hosted comparison runs off the trading thread
 
 # Contrarian watchlist
 DAI_CONTRARIAN_ENABLED=1            # also: _UNIVERSE, _LIMIT, _MAX_EXT, _HALF_EXT, _CACHE_MIN
@@ -654,7 +656,7 @@ d-ai-trader/
 
 ### Where things stand (October 2026)
 
-- **The Jev-like policy router is built and certified, running in shadow.** `policy_router/` gives every diary entry and long-term memory row a calibrated p(needed) from the local LM Studio embedding model, and keeps the smallest set that preserves expected recall. On the newest 30 logged cycles it reached 97.4% held-out recall against 90.8% for today's fixed selection, while serving 23% fewer diary and memory characters (Brier 0.062). Gates, lessons, the soul and code-owned text are always served. It certified under the `beats_today` rule; the absolute 98% target is not yet met. Turn it on with `DAI_POLICY_ROUTER=active` after a week of live shadow logging, and add the 3090 chat model with `DAI_ROUTER_LLM_MODEL` when that machine is on LM Link.
+- **Compare policy routers in shadow.** The local embedding router retains its historical October 4 artifact, whose 97.4% proxy recall predates the held-out-label threshold fix; it is not a current forward-quality certificate. The new OpenAI Decisions adapter scores optional diary/memory relevance alongside it, records actual-versus-proposed context and endpoint-specific spend, and cannot alter the trading prompt. Keep standing rules pinned and evaluate useful omissions, retired-rule suppression, full prompt cost and behavior on untouched later cases before activation. [Design, review findings and rollout](docs/DECISIONS_ROUTER.md).
 - **Labels are now honest.** Memory rows are citable and rejected setups cite the guidelines that rejected them, so the router and the decision paths learn from rejections, not only from trades.
 - **Every Decider call is replayable** from `decider_inputs`, which unblocks the replay gate below.
 - **Realized P&L is still too slow to judge versions alone.** The last 30 days had 9 Decider versions in service and 29 closed trades, about three trades per version.

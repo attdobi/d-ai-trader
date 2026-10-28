@@ -78,6 +78,30 @@ def test_quality_and_co_citations(db):
     assert {r["id"]: r for r in rep365["quality"]}[PK]["closed"] == 3
 
 
+def test_path_outcomes_use_dollar_break_even_and_exclude_it_from_win_rate(db):
+    with db.begin() as conn:
+        for ticker, amount, gain in (("SMALLWIN", 2.5, 0.02), ("SMALLLOSS", -3.0, -0.02)):
+            conn.execute(text("""
+                INSERT INTO trade_outcomes(config_hash,ticker,sell_timestamp,gain_loss_percentage,gain_loss_amount,original_reason)
+                VALUES ('h',:ticker,:at,:gain,:amount,:reason)
+            """), {"ticker": ticker, "at": NOW, "gain": gain, "amount": amount, "reason": f"[cites: {PK}, {RG}]"})
+    report = P.path_report(db, "h", days=90, now=NOW)
+    pk = next(row for row in report["quality"] if row["id"] == PK)
+    assert (pk["closed"], pk["wins"], pk["losses"], pk["break_even"], pk["win_rate"]) == (4, 1, 1, 2, 0.5)
+    assert report["break_even"] == 2 and report["win_rate"] == 0.5
+    assert pk["co_on_wins"] == [{"id": RG, "title": RG, "count": 1}]
+    assert pk["co_on_losses"] == []
+    assert report["scope"] == "all_versions" and report["attribution"] == "association"
+    windows = C.hit_counts(db, "h", PK, now=NOW)
+    assert windows["90d"]["win_rate"] == 0.5 and windows["90d"]["break_even"] == 2
+    prompt = C.health_for_prompt(db, "h", [PK], now=NOW)[PK]["90d"]
+    assert (prompt["closed"], prompt["decisive"], prompt["break_even"], prompt["win_rate"]) == (4, 2, 2, 0.5)
+    # citation_health has an all-time window, including the older profitable trade.
+    health = C.citation_health(db, "h", PK)
+    assert health["wins"] == 2 and health["losses"] == 1 and health["break_even"] == 2
+    assert health["win_rate"] == pytest.approx(2 / 3)
+
+
 def test_empty_window(db):
     rep = P.path_report(db, "h", days=30, now=NOW + timedelta(days=100))
     assert rep["empty"] and "No cited decisions" in rep["note"] and rep["quality"] == []

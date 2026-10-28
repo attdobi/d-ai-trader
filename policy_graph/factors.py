@@ -34,7 +34,7 @@ from sqlalchemy import text
 
 from .health import iso, to_datetime
 from .model import AGENT_PREFIX, Edge, Node
-from .paths import _closed_rows, _hit_rows
+from .paths import _closed_rows, _hit_rows, outcome_kind
 
 FACTOR_SEGMENT = "factor"
 REGIME_LABELS = ("RISK-ON", "MIXED", "RISK-OFF")
@@ -251,8 +251,10 @@ def factor_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *,
 
     def _stats(rows):
         n = len(rows)
-        wins = sum(1 for c in rows if (c["gain_pct"] or 0) > 0)
-        return {"closed": n, "wins": wins, "losses": n - wins, "win_rate": (wins / n) if n else None,
+        wins = sum(outcome_kind(c) == "win" for c in rows)
+        losses = sum(outcome_kind(c) == "loss" for c in rows)
+        return {"closed": n, "wins": wins, "losses": losses, "break_even": n - wins - losses,
+                "win_rate": (wins / (wins + losses)) if wins + losses else None,
                 "pnl": round(sum(c["gain_amount"] for c in rows), 2),
                 "recent": [{"ticker": c["ticker"], "gain_pct": round(float(c["gain_pct"] or 0) * 100.0, 2), "at": iso(c["at"])}
                            for c in sorted(rows, key=lambda c: c["at"], reverse=True)[:5]]}
@@ -307,7 +309,8 @@ def _factor_body(f: dict) -> str:
     q = ""
     if f.get("closed"):
         wr = f"{round((f.get('win_rate') or 0) * 100)}%"
-        q = (f"\n- Closed trades entered under it: {f['closed']} ({f['wins']}W/{f['losses']}L), win rate {wr}, "
+        counts = f"{f['wins']}W/{f['losses']}L" + (f"/{f['break_even']}BE" if f.get('break_even') else "")
+        q = (f"\n- Closed trades entered under it: {f['closed']} ({counts}), win rate {wr}, "
              f"P&L {'+' if f['pnl'] >= 0 else '−'}${abs(f['pnl']):.0f}.")
     return (f"{head}\n- {when.capitalize()}.\n- Decisions while active: {acts} ({f.get('decisions', 0)} cited decisions"
             f"{', tickers ' + ', '.join(f['tickers']) if f.get('tickers') else ''}).\n- Guidelines cited: {guides}.{q}\n"

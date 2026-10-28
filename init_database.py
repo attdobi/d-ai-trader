@@ -878,6 +878,11 @@ def initialize_database() -> None:
         ensure_table(conn, stats, "policy_router_runs", _ROUTER_RUNS_DDL)
         for _ddl in _ROUTER_INDEXES:
             conn.execute(text(_ddl))
+        # Hosted relevance comparisons are separately audited and cannot become
+        # active routing. Their per-request tariff includes Decisions cache use.
+        from policy_router.decisions_log import DDL_POSTGRES as _COMPARISON_DDL, INDEX as _COMPARISON_INDEX
+        ensure_table(conn, stats, "policy_router_comparisons", _COMPARISON_DDL)
+        conn.execute(text(_COMPARISON_INDEX))
 
         # API cost / token-usage telemetry (one row per OpenAI call).
         ensure_table(

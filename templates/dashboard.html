@@ -240,7 +240,7 @@
 
 <script>
 (function() {
-  function fmtUsd(v) { return v ? ('$' + v.toFixed(v < 1 ? 4 : 2)) : '$0.00'; }
+  function fmtUsd(v) { return typeof v === 'number' ? ('$' + v.toFixed(v < 1 ? 4 : 2)) : 'Unknown'; }
   function fmtTok(v) { return (v || 0).toLocaleString(); }
   async function loadCost() {
     try {
@@ -251,7 +251,11 @@
         ' · ' + fmtTok(d.today.tokens) + ' tok · ' + d.today.calls + ' calls';
       document.getElementById('costWindow').textContent = 'last ' + d.window_days + ' days';
       const warn = document.getElementById('costPricingWarn');
-      if (!d.pricing_configured) {
+      if (d.cost_complete === false) {
+        warn.style.display = 'block';
+        warn.textContent = 'Some router requests have no confirmed usage. Known estimated spend: ' +
+          fmtUsd(d.known_total_cost) + '; ' + d.unknown_cost_calls + ' request(s) have unknown cost.';
+      } else if (!d.pricing_configured) {
         warn.style.display = 'block';
         warn.textContent = '⚠ Token counts are exact, but $ shows 0 until you set rates in model_pricing.json.';
       } else { warn.style.display = 'none'; }

@@ -1,5 +1,11 @@
 # Policy router
 
+**October 28 update:** [Decisions shadow comparison](DECISIONS_ROUTER.md) adds a
+hosted relevance scorer, separate audit/cost records and explicit live/replay
+provenance. It never changes the trading prompt. New training fits the implicit
+label threshold on the outer training partition only; the October 4 artifact and
+figures below predate this correction and are historical proxy measurements.
+
 A Jev-like decision model for the Decider's prompt. For every **routable** node of a cycle (diary
 entries and long-term memory rows by default, lessons opt in) it returns a typed decision:
 
@@ -132,7 +138,7 @@ The trainer always evaluates the other label under the same protocol and reports
 ## Training and certification
 
 ```
-python -m policy_router.train --config-hash 9ea09b9as --db-url postgresql:///adobi [--recall-target 0.98] [--label marginal|plain]
+python -m policy_router.train --config-hash <hash> --db-url "$DATABASE_URI" [--recall-target 0.98] [--label marginal|plain]
 ```
 
 The trainer reads the database read-only. It rebuilds each logged cycle from `policy_graph_runs`,

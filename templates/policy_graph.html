@@ -131,12 +131,36 @@
     <ul id="pgChangeList" class="pg-change-list"></ul>
   </section>
 
-  <!-- Card 4: decision paths (route → guideline → action → outcome) -->
+  <!-- Router status precedes the historical outcome tables. -->
+  <section class="pe-card" id="pgRouterCard" hidden>
+    <div class="pg-change-head">
+      <div>
+        <h2>Subgraph routing</h2>
+        <p class="pg-muted">Compare proposed diary and memory selections with what the Decider actually read. Gates, the opportunity charter, identity and code-owned limits stay pinned.</p>
+      </div>
+    </div>
+    <p id="pgRouterNote" class="pg-muted"></p>
+    <div id="pgRouterStats" class="pg-router-stats"></div>
+    <details class="pg-router-detail"><summary>Local router · last cycle <span class="pg-muted" id="pgRouterLastSub"></span></summary>
+      <div class="pg-router-row pg-router-head"><span>Guideline</span><span>Estimated relevance</span><span>p</span><span>Would keep</span><span>Actually read</span></div>
+      <div id="pgRouterBars" class="pg-router-bars"></div>
+    </details>
+    <section id="pgDecisionsComparison" class="pg-comparison">
+      <h3>OpenAI Decisions · shadow comparison</h3>
+      <p id="pgDecisionsNote" class="pg-muted">No comparison recorded yet. Shadow selections do not change the prompt or place trades.</p>
+      <div id="pgDecisionsStats" class="pg-router-stats"></div>
+      <details id="pgDecisionsDetails" hidden><summary>Compare guideline selections</summary>
+        <div id="pgDecisionsRows" class="pg-comparison-rows"></div>
+      </details>
+    </section>
+  </section>
+
+  <!-- Decision paths: associations across the selected date window. -->
   <section class="pe-card" id="pgPathsCard">
     <div class="pg-change-head">
       <div>
         <h2>Decision paths</h2>
-        <p class="pg-muted" id="pgPathsBlurb">How guidelines are actually used: which input pulled a guideline into the prompt, which guidelines the Decider cited, what it did, and how those trades closed. Switch the left column to see the same decisions by what the market put in front of the Decider (regime, FOMC / CPI / jobs windows, earnings dates).</p>
+        <p class="pg-muted" id="pgPathsBlurb">Historical citations across all policy versions in this date window. These are associations, not proof a guideline caused a result; co-cited P&amp;L repeats across guidelines. Current guideline titles are shown. Win rate excludes outcomes within the ±$3 break-even band.</p>
       </div>
       <label class="pg-check">Window
         <select id="pgPathsDays" class="pe-select pg-select" aria-label="Path window">
@@ -159,27 +183,14 @@
         <div id="pgPathsGaps" class="pg-paths-gaps"></div>
       </div>
       <div>
-        <h3 class="pg-paths-h">Path quality <span class="pg-muted">per guideline, over the closed trades it drove</span></h3>
+        <h3 class="pg-paths-h">Cited-trade outcomes <span class="pg-muted">associated with each guideline; all versions</span></h3>
         <div id="pgPathsQuality" class="pg-paths-quality"></div>
-        <h3 class="pg-paths-h">Factor quality <span class="pg-muted">per world factor, over the trades entered while it was active</span></h3>
+        <h3 class="pg-paths-h">Factor outcomes <span class="pg-muted">trades entered while each factor was active</span></h3>
         <div id="pgFactorsQuality" class="pg-paths-quality"></div>
       </div>
     </div>
   </section>
 
-  <!-- Card 5: policy router (a typed include / exclude decision per diary entry and memory row) -->
-  <section class="pe-card" id="pgRouterCard" hidden>
-    <div class="pg-change-head">
-      <div>
-        <h2>Router</h2>
-        <p class="pg-muted">Which diary entries and memory rows the Decider needs each cycle. A small local model gives each one a probability of being needed; gates, rules, the soul and the code-owned text are always shown.</p>
-      </div>
-    </div>
-    <p id="pgRouterNote" class="pg-muted"></p>
-    <div id="pgRouterStats" class="pg-router-stats"></div>
-    <h3 class="pg-paths-h">Last cycle <span class="pg-muted" id="pgRouterLastSub"></span></h3>
-    <div id="pgRouterBars" class="pg-router-bars"></div>
-  </section>
 </div>
 
 <style>
@@ -524,6 +535,8 @@
 .pg-paths-gaps { margin-top: 8px; font-size: 12px; color: #d5dcf0; display: flex; flex-direction: column; gap: 4px; }
 .pg-paths-gaps:empty { display: none; }
 .pg-paths-quality table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.pg-paths-quality { max-height: 360px; overflow: auto; margin-bottom: 18px; }
+.pg-paths-quality thead { position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .pg-paths-quality th, .pg-paths-quality td { padding: 4px 6px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
 .pg-paths-quality th { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .pg-paths-quality .pos { color: var(--success); }
@@ -541,6 +554,16 @@
 .pg-router-stat .v.ok { color: var(--success); }
 .pg-router-stat .v.warn { color: var(--warning); }
 .pg-router-bars { display: flex; flex-direction: column; gap: 3px; }
+.pg-router-detail { margin-top: 12px; }
+.pg-router-detail summary, .pg-comparison summary { cursor: pointer; font-weight: 600; margin-bottom: 12px; }
+.pg-router-detail .pg-router-bars { max-height: 330px; overflow: auto; }
+.pg-router-head { color: var(--muted); font-size: 10px !important; margin: 6px 0; }
+.pg-comparison { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.08); }
+.pg-comparison h3 { font-size: 16px; }
+.pg-comparison-rows { overflow: auto; max-height: 360px; }
+.pg-comparison-rows table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pg-comparison-rows th, .pg-comparison-rows td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); }
+.pg-comparison-rows th { position: sticky; top: 0; background: var(--surface); }
 .pg-router-row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(80px, 1fr) 44px 74px 70px; gap: 8px; align-items: center; font-size: 11.5px; }
 .pg-router-row .id { font-family: var(--font-mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--text); background: none; border: none; text-align: left; padding: 0; }
 .pg-router-row .id:hover { color: var(--accent); }

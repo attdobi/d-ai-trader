@@ -100,7 +100,7 @@ class Assembled:
     served: list                         # [Selected] in rendered order
     dropped: list                        # node ids left out of the rendering
     health_used: bool
-    chars_full: int = 0                  # stored soul + directives + memory (what the flat prompt carries)
+    chars_full: int = 0                  # all three fields rendered with the same citation/health tags
     chars_served: int = 0                # the rendered three fields (ids and records included)
 
     @property
@@ -265,7 +265,10 @@ def health_tag(node_id: str, health: Optional[dict]) -> str:
     o = h.get("90d") or {}
     if o.get("closed"):
         wr = o.get("win_rate")
-        parts.append(f"win {round(float(wr) * 100)}% n={o['closed']}" if wr is not None else f"n={o['closed']}")
+        count = o.get("decisive", o["closed"])
+        parts.append(f"win {round(float(wr) * 100)}% n={count}" if wr is not None else f"n={count}")
+        if o.get("break_even"):
+            parts.append(f"{o['break_even']} break-even")
     return " ⟨" + " · ".join(parts) + "⟩"
 
 
@@ -296,9 +299,12 @@ def assemble(version: Version, ctx: Context, *, health: Optional[dict] = None,
         why = ("routed out for this cycle's context" if override
                else "not tied to today's regime, holdings, watchlist, news or trends")
         mem = (mem + f"\n\nNot shown this cycle ({why}; still citable by id): {listed}").strip()
-    full = 0
-    for f in COMPILED_FIELDS:
-        full += sum(len(version.nodes[i].text) for i in _ordered_ids(version, f) if i in version.nodes)
+    # Compare like with like: both sides include the same per-guideline citation
+    # and health annotations. Raw stored bytes understated the full-prompt
+    # baseline and made an untrimmed prompt appear to use 112% of itself.
+    all_nodes = [Selected(i, "full", f) for f in COMPILED_FIELDS
+                 for i in _ordered_ids(version, f) if i in version.nodes]
+    full = sum(len(render_field(version, all_nodes, f, health)) for f in COMPILED_FIELDS)
     return Assembled(strategy_directives=sd, memory=mem, soul=soul, served=served, dropped=dropped,
                      health_used=bool(health), chars_full=full, chars_served=len(sd) + len(mem) + len(soul))
 

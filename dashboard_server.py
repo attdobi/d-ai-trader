@@ -2235,8 +2235,9 @@ def get_cost_usage():
     """API cost + token usage per day and per agent for the dashboard.
 
     Returns today's spend, a per-agent breakdown, and an N-day daily series.
-    Costs come from model_pricing.json (0 until you fill in your rates) but
-    token counts are always exact. ?days=N controls the window (default 14).
+    Chat estimates use current model_pricing.json rates. Decisions uses its
+    recorded endpoint/cache estimate; requests without usage have unknown cost.
+    ?days=N controls the window (default 14), starting at Pacific midnight.
     """
     try:
         config_hash = get_current_config_hash()
@@ -2250,23 +2251,27 @@ def get_cost_usage():
         priced_models = [m for m, r in pricing.items()
                          if isinstance(r, dict) and (r.get('input') or r.get('output'))]
 
+        from datetime import datetime as _datetime, timedelta as _timedelta
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        today = _datetime.now(_ZoneInfo('America/Los_Angeles')).date()
+        today_str = today.isoformat()
+        start_date = today - _timedelta(days=days)
+
         with engine.connect() as conn:
             # Group by (agent, model) so cost can be computed from CURRENT rates
             # at display time — editing model_pricing.json reprices all history.
             rows = conn.execute(text("""
-                SELECT agent_type, model, ts::date AS day,
+                SELECT agent_type, model, DATE(ts) AS day,
                        COUNT(*) AS calls,
                        COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                        COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens
                 FROM api_usage
-                WHERE config_hash = :h AND ts >= CURRENT_DATE - :days
-                GROUP BY agent_type, model, ts::date
-            """), {"h": config_hash, "days": days}).fetchall()
+                WHERE config_hash = :h AND ts >= :start
+                GROUP BY agent_type, model, DATE(ts)
+            """), {"h": config_hash, "start": start_date}).fetchall()
 
-        from datetime import date as _date
-        today_str = _date.today().isoformat()
         per_agent = {}
         daily_map = {}
         today_cost = today_tokens = today_calls = 0.0
@@ -2280,14 +2285,48 @@ def get_cost_usage():
             a['completion_tokens'] += int(r.completion_tokens)
             a['reasoning_tokens'] += int(r.reasoning_tokens)
             a['cost'] += cost
-            dkey = (r.day.isoformat() if r.day else None, r.agent_type)
+            day = r.day.isoformat() if hasattr(r.day, 'isoformat') else (str(r.day) if r.day else None)
+            dkey = (day, r.agent_type)
             dd = daily_map.setdefault(dkey, {'day': dkey[0], 'agent': r.agent_type, 'cost': 0.0, 'tokens': 0})
             dd['cost'] += cost
             dd['tokens'] += int(r.total_tokens)
-            if r.day and r.day.isoformat() == today_str:
+            if day == today_str:
                 today_cost += cost
                 today_tokens += int(r.total_tokens)
                 today_calls += int(r.calls)
+
+        # Hosted Decisions is billed at a different endpoint tariff. Its audit
+        # table is the sole source: never insert/reprice it as a Chat call too.
+        from api_cost_usage import DECISIONS_AGENT, decisions_daily_usage
+        router_usage = decisions_daily_usage(engine, config_hash, start_date)
+        unknown_cost_calls = unknown_token_calls = 0
+        today_unknown_cost = today_unknown_tokens = 0
+        for r in router_usage['daily']:
+            a = per_agent.setdefault(DECISIONS_AGENT, {
+                'agent': DECISIONS_AGENT, 'calls': 0, 'prompt_tokens': 0,
+                'completion_tokens': 0, 'reasoning_tokens': 0, 'known_cost': 0.0,
+                'cached_input_tokens': 0, 'cache_write_tokens': 0,
+                'unknown_cost_calls': 0, 'unknown_token_calls': 0,
+                'cost_basis': 'recorded Decisions estimate; cache reads/writes included; output free'})
+            for key in ('calls', 'prompt_tokens', 'completion_tokens', 'cached_input_tokens',
+                        'cache_write_tokens', 'unknown_cost_calls', 'unknown_token_calls'):
+                a[key] += r[key]
+            a['known_cost'] += r['known_cost']
+            a['cost'] = None if a['unknown_cost_calls'] else a['known_cost']
+            tokens = r['prompt_tokens'] + r['completion_tokens']
+            daily_map[(r['day'], DECISIONS_AGENT)] = {
+                'day': r['day'], 'agent': DECISIONS_AGENT, 'cost': r['cost'],
+                'known_cost': r['known_cost'], 'tokens': tokens,
+                'unknown_cost_calls': r['unknown_cost_calls'],
+                'unknown_token_calls': r['unknown_token_calls']}
+            unknown_cost_calls += r['unknown_cost_calls']
+            unknown_token_calls += r['unknown_token_calls']
+            if r['day'] == today_str:
+                today_cost += r['known_cost']
+                today_tokens += tokens
+                today_calls += r['calls']
+                today_unknown_cost += r['unknown_cost_calls']
+                today_unknown_tokens += r['unknown_token_calls']
 
         # Always show the full LLM-agent roster, even with zero calls this window
         # (e.g. FeedbackAgent runs weekly, so it's often idle for days).
@@ -2295,14 +2334,24 @@ def get_cost_usage():
             per_agent.setdefault(ag, {'agent': ag, 'calls': 0, 'prompt_tokens': 0,
                                       'completion_tokens': 0, 'reasoning_tokens': 0, 'cost': 0.0})
 
-        per_agent_list = sorted(per_agent.values(), key=lambda x: x['cost'], reverse=True)
+        per_agent_list = sorted(per_agent.values(), key=lambda x: x.get('known_cost', x['cost']) or 0,
+                                reverse=True)
+        known_total = sum(a.get('known_cost', a['cost']) or 0 for a in per_agent_list)
         return jsonify({
             'pricing_configured': bool(priced_models),
             'priced_models': priced_models,
             'window_days': days,
-            'today': {'cost': today_cost, 'tokens': int(today_tokens), 'calls': int(today_calls)},
+            'today': {'cost': None if today_unknown_cost else today_cost,
+                      'known_cost': today_cost, 'tokens': int(today_tokens), 'calls': int(today_calls),
+                      'unknown_cost_calls': today_unknown_cost, 'unknown_token_calls': today_unknown_tokens},
             'per_agent': per_agent_list,
-            'total_cost': sum(a['cost'] for a in per_agent_list),
+            'total_cost': None if unknown_cost_calls else known_total,
+            'known_total_cost': known_total,
+            'unknown_cost_calls': unknown_cost_calls,
+            'unknown_token_calls': unknown_token_calls,
+            'cost_complete': unknown_cost_calls == 0,
+            'usage_complete': unknown_token_calls == 0,
+            'decisions_usage_available': router_usage['available'],
             'daily': sorted(daily_map.values(), key=lambda x: x['day'] or ''),
         })
     except Exception as e:

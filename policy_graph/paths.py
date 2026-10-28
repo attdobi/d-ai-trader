@@ -28,11 +28,16 @@ from typing import Optional
 from sqlalchemy import text
 
 from .citations import SYNCED_REASON, parse_cites
-from .health import iso, to_datetime
+from .health import iso, to_datetime, trade_outcome_kind
 
 WINDOWS = (30, 90, 365)
 TOP_GUIDELINES = 14
 TOP_PAIRS = 3
+
+
+def outcome_kind(row: dict) -> str:
+    """Same dollar break-even band as feedback; no live-agent imports."""
+    return trade_outcome_kind(row.get("gain_pct"), row.get("gain_amount"))
 
 
 def _hit_rows(engine, config_hash: str, agent_type: str, since: datetime) -> list:
@@ -142,18 +147,26 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
 
     # quality
     wins_by: dict = {}
+    losses_by: dict = {}
+    break_even_by: dict = {}
     closed_by: dict = {}
     pnl_by: dict = {}
     co_win: dict = {}
     co_loss: dict = {}
     for c in closed:
-        win = (c["gain_pct"] or 0) > 0
+        kind = outcome_kind(c)
         for n in c["cites"]:
             closed_by[n] = closed_by.get(n, 0) + 1
             pnl_by[n] = pnl_by.get(n, 0.0) + c["gain_amount"]
-            if win:
+            if kind == "win":
                 wins_by[n] = wins_by.get(n, 0) + 1
-            bucket = co_win if win else co_loss
+            elif kind == "loss":
+                losses_by[n] = losses_by.get(n, 0) + 1
+            else:
+                break_even_by[n] = break_even_by.get(n, 0) + 1
+            if kind == "break_even":
+                continue
+            bucket = co_win if kind == "win" else co_loss
             for m in c["cites"]:
                 if m != n:
                     bucket.setdefault(n, {})
@@ -174,19 +187,25 @@ def path_report(engine, config_hash: str, agent_type: str = "DeciderAgent", *, d
     for n in sorted(set(cited_by) | set(closed_by), key=lambda n: (-(closed_by.get(n, 0)), -(cited_by.get(n, 0)), n)):
         cl = closed_by.get(n, 0)
         w = wins_by.get(n, 0)
+        losses = losses_by.get(n, 0)
         quality.append({
             "id": n, "title": titles.get(n, n), "cited": cited_by.get(n, 0), "served": served_by.get(n, 0),
-            "closed": cl, "wins": w, "losses": cl - w, "win_rate": (w / cl) if cl else None,
+            "closed": cl, "wins": w, "losses": losses, "break_even": break_even_by.get(n, 0),
+            "win_rate": (w / (w + losses)) if w + losses else None,
             "pnl": round(pnl_by.get(n, 0.0), 2),
             "co_cited": _top_pairs(co_dec, n), "co_on_wins": _top_pairs(co_win, n), "co_on_losses": _top_pairs(co_loss, n),
         })
 
     total_closed = len(closed)
-    total_wins = sum(1 for c in closed if (c["gain_pct"] or 0) > 0)
+    total_wins = sum(outcome_kind(c) == "win" for c in closed)
+    total_losses = sum(outcome_kind(c) == "loss" for c in closed)
     return {
         "agent_type": agent_type, "config_hash": config_hash, "days": days, "since": iso(since), "now": iso(now),
+        "scope": "all_versions", "attribution": "association",
+        "scope_note": "All policy versions in this window; current guideline titles are shown. Co-cited P&L is an association, not a causal effect, and must not be added across guidelines.",
         "runs": len(runs), "decisions_cited": len(decisions), "rejections_cited": len(rejections), "closed_cited": total_closed,
-        "win_rate": (total_wins / total_closed) if total_closed else None,
+        "win_rate": (total_wins / (total_wins + total_losses)) if total_wins + total_losses else None,
+        "break_even": total_closed - total_wins - total_losses,
         "frequency": {
             "routes": routes, "guidelines": [{"id": n, "title": titles.get(n, n), "cited": cited_by[n], "served": served_by.get(n, 0)} for n in top],
             "actions": actions, "flows_in": flows_in, "flows_out": flows_out,

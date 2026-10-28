@@ -10,7 +10,7 @@ DATABASE_URL=
 FALLBACK_DATABASE_URI=sqlite:///d_ai_trader.sqlite3
 
 # --- Required ---
-OPENAI_API_KEY=sk-proj-your_actual_api_key_here
+OPENAI_API_KEY=
 
 # --- Trading behavior ---
 TRADING_MODE=simulation
@@ -40,6 +40,9 @@ DAI_MODEL_TEMPERATURE=0.2
 # DAI_ROUTER_LLM_MODEL=
 # DAI_ROUTER_RECALL_TARGET=0.98
 # DAI_ROUTER_ROUTABLE=entry,ltm
+# Hosted Decisions comparison runs alongside the local router. No active mode.
+# DAI_DECISIONS_ROUTER=off
+# DAI_DECISIONS_TIMEOUT_S=8
 
 # --- Optional debug ---
 # PRINT_OPENAI_KEY=0

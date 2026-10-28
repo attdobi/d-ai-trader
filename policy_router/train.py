@@ -400,7 +400,12 @@ def run(cycles: list, embedder, *, config_hash: str, recall_target: float = 0.98
     t0 = time.monotonic()
     vec = embed_cycles(cycles, embedder, query_prefix=query_prefix, doc_prefix=doc_prefix, routable=routable)
     log(f"🧮 embedded {len(vec)} texts in {time.monotonic() - t0:.1f}s ({getattr(embedder, 'calls', '?')} requests)")
-    sims = citation_similarities(cycles, vec, query_prefix=query_prefix, doc_prefix=doc_prefix)
+    # Define the proxy label on the outer TRAINING partition only. Using test
+    # citations to tune theta changes the test's own target labels and leaks
+    # future evidence into the claimed held-out evaluation.
+    cut = max(1, min(len(cycles) - 1, int(round(len(cycles) * float(train_frac)))))
+    theta_cycles = cycles[:cut]
+    sims = citation_similarities(theta_cycles, vec, query_prefix=query_prefix, doc_prefix=doc_prefix)
     theta_used = float(theta) if theta is not None else theta_from_pairs(sims, implicit_quantile)
     lab_kw = dict(delta=delta, routable=routable, query_prefix=query_prefix, doc_prefix=doc_prefix)
     labels = label_cycles(cycles, vec, theta_used, mode=label_mode, **lab_kw)
@@ -440,6 +445,11 @@ def run(cycles: list, embedder, *, config_hash: str, recall_target: float = 0.98
     }
     definition, weakness = LABEL_TEXT[label_mode]
     label_meta = {"mode": label_mode, "delta": delta if label_mode == "marginal" else None, "theta": theta_used,
+                  "theta_source": "explicit" if theta is not None else "outer_training_citation_pairs",
+                  "theta_fit_cycles": 0 if theta is not None else len(theta_cycles),
+                  "theta_fit_pairs": 0 if theta is not None else len(sims),
+                  "theta_fit_last": None if theta is not None else theta_cycles[-1].decided_at.isoformat(),
+                  "inner_cv_note": "Fixed outer-training label definition; leave-one-week-out is not a forward-time evaluation.",
                   "quantile": implicit_quantile if theta is None else None,
                   "definition": definition, "weakness": weakness}
     artifact = {
@@ -507,6 +517,11 @@ def report_markdown(report: dict) -> str:
         f"Trained {report['trained_at']} on {report['cycles']} Decider cycles ({report['first'][:10]} → {report['last'][:10]}, "
         f"weeks {', '.join(report['weeks'])}). Routable kinds: {', '.join(report['routable'])}. Label: {L.get('mode', 'plain')}. "
         f"Model {report['model_version']}.",
+        "The proxy-label threshold is fitted on outer-training citation pairs only (or explicitly supplied) "
+        "and frozen before held-out labels are constructed. Inner leave-one-week-out folds share that fixed "
+        "training-defined target; they are not a forward-in-time validation. Older artifacts without "
+        "theta_source metadata used all-cycle threshold fitting and are historical proxy evidence, not "
+        "a clean forward certificate.",
         "",
         "## Verdict",
         "",

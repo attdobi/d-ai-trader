@@ -182,6 +182,15 @@ def test_assembled_sizes_and_context_summary(version):
         "regime": "MIXED", "holdings": 1, "watchlist": 0, "quarantined": 0, "news": 2, "entities": 0, "trend": 0}
 
 
+def test_untrimmed_render_has_same_full_and_served_char_count_with_health_tags(version):
+    health = {"DA.directives.strategy.priced_kill": {"90d": {"cited": 20, "closed": 12, "win_rate": 0.5}}}
+    override = {node_id: True for node_id, node in version.nodes.items() if node.node_type == "entry"}
+    out = A.assemble(version, A.Context(regime="MIXED"), health=health, override=override)
+    assert out.dropped == []
+    assert out.chars_served == out.chars_full
+    assert "win 50% n=12" in out.strategy_directives
+
+
 def test_run_log_and_stats(hits_db):
     now = datetime(2026, 9, 10, 12)
     C.record_run(hits_db, "h", "DeciderAgent", 23, "run1", served=30, dropped=4, chars_full=16000, chars_served=14800,
@@ -192,6 +201,13 @@ def test_run_log_and_stats(hits_db):
     assert st["runs"] == 2 and st["latest"]["run_id"] == "run2" and st["latest"]["served"] == 28
     assert abs(st["latest"]["ratio"] - 0.825) < 1e-9 and abs(st["average"]["ratio"] - 0.875) < 1e-9
     assert st["routes"] == {"core": 28, "news": 2, "trend": 1} and st["latest"]["context"] == {"regime": "MIXED"}
+    assert st["latest"]["chars_basis"] == "legacy_mixed"
+    assert st["average"]["comparable_runs"] == 0
+    C.record_run(hits_db, "h", "DeciderAgent", 23, "run3", served=30, dropped=0, chars_full=16000, chars_served=16000,
+                 routes={}, context={"chars_basis": "rendered_full_v1"}, decided_at=now + timedelta(hours=4))
+    st = C.run_stats(hits_db, "h", "DeciderAgent")
+    assert st["latest"]["chars_basis"] == "rendered_full_v1" and st["latest"]["ratio"] == 1
+    assert st["average"]["chars_basis"] == "mixed_or_legacy" and st["average"]["comparable_runs"] == 1
     assert C.run_stats(hits_db, "h", "SummarizerAgent") is None
 
 

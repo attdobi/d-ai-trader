@@ -221,14 +221,14 @@ def test_outcome_windows_use_trade_outcomes_created_at_and_exclude_synced(env):
     assert o20["win_rate"] == pytest.approx(4 / 6, abs=1e-3)
     assert o20["measurable"] is True
     assert o20["window"] == ["2026-08-27T10:00:00", "2026-09-02T14:57:21"]   # activation-event boundaries
-    assert o20["prior_win_rate"] == pytest.approx(0.4)
-    assert o20["winrate_delta"] == pytest.approx(4 / 6 - 0.4, abs=1e-3)
+    assert o20["prior_win_rate"] == pytest.approx(0.5)
+    assert o20["winrate_delta"] == pytest.approx(4 / 6 - 0.5, abs=1e-3)
     assert o20["clock"] == health.CLOCK_LABEL and o20["lineage_window"] is True
     o21 = by[21]["outcome"]
     assert o21["n_closed"] == 2 and o21["measurable"] is False and o21["winrate_delta"] is None
     assert o21["window"] == ["2026-09-02T14:57:21", None]
     o19 = by[19]["outcome"]
-    assert o19["n_closed"] == 5 and o19["win_rate"] == pytest.approx(0.4)
+    assert o19["n_closed"] == 5 and o19["break_even"] == 1 and o19["win_rate"] == pytest.approx(0.5)
     # Feedback agent: no direct attribution
     fb = service.list_versions(env["engine"], CFG, "FeedbackAgent", **env["common"])
     assert all(v["outcome"] is None for v in fb["versions"])
