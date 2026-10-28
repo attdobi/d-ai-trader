@@ -92,6 +92,54 @@ def _make_interface(module, *, trading_mode="simulation", schwab_enabled=False, 
     return interface
 
 
+@pytest.mark.parametrize("state", ["FILLED", "WORKING", "TIMEOUT"])
+def test_live_earnings_uses_capped_limit_and_reserves_ambiguous_orders(trading_interface_module, monkeypatch, state):
+    """Exercise the actual broker submission method with fake DB and broker transports."""
+    from datetime import datetime, timezone
+    from event_calendar import add_sessions
+    import earnings_strategy as es
+    from shared.market_clock import MarketClock
+    module, update_calls=trading_interface_module
+    interface=_make_interface(module,trading_mode="live",schwab_enabled=True)
+    es._TICKETS.clear()
+    now=datetime.now(timezone.utc)
+    day=add_sessions(now.astimezone(es.ET).date(),1).isoformat()
+    ctx={"as_of":now.isoformat(),"earnings_controls_version":1,"holdings_earnings":[],
+         "watchlist_earnings":[{"ticker":"MSFT","date":day,"sessions_to":1,"estimate":False,
+                               "source":"yfinance","fetched_at":now.isoformat()}]}
+    d={"action":"buy","ticker":"MSFT","amount_usd":900,"reason":"R1 setup;K:209;D:1%",
+       "strategy":"earnings_event","earnings_event":{"date":day,"hold_through":True,"gap_risk_accepted":True}}
+    assert not es.EventBook("test-config-hash",ctx,10000,2000).authorize(d,minimum=400)
+
+    class Connection:
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+        def execute(self,*args): return self
+        def mappings(self): return [dict(ticker="CASH",current_value=10000,reason="cash",shares=1,current_price=10000)]
+    monkeypatch.setattr(module,"engine",types.SimpleNamespace(connect=lambda:Connection()))
+    monkeypatch.setattr(sys.modules["config"],"MAX_POSITION_VALUE",2000,raising=False)
+    monkeypatch.setattr(sys.modules["config"],"MAX_POSITION_FRACTION",0,raising=False)
+    monkeypatch.setattr(sys.modules["decider_agent"],"get_current_price",lambda _:210.129,raising=False)
+    monkeypatch.setattr(sys.modules["decider_agent"],"_persist_execution_outcomes",lambda *a:None,raising=False)
+    monkeypatch.setattr(MarketClock,"is_market_open",lambda:True)
+    monkeypatch.setattr(es,"pending_orders",lambda *a,**k:[])
+    monkeypatch.setattr(es,"reserve_submission",lambda *a,**k:None)
+    orders=[]
+    def broker(**kwargs):
+        orders.append(kwargs)
+        if state=="TIMEOUT": raise TimeoutError("transport timeout after submission")
+        return dict(status="success",order_id="event-1",order_status=dict(status=state))
+    monkeypatch.setattr(module.schwab_client,"place_equity_order",broker,raising=False)
+    result=interface._execute_schwab_order(d)
+    assert orders==[dict(symbol="MSFT",quantity=2,instruction="BUY",order_type="LIMIT",price=210.12)]
+    assert result["status"]==("success" if state=="FILLED" else "working" if state=="WORKING" else "error")
+    assert not update_calls
+    assert es._TICKETS[d["_earnings_authorization"]]["submitted"]
+    replay=interface._execute_schwab_order(d)
+    assert replay["status"]=="error" and len(orders)==1
+    es._TICKETS.clear()
+
+
 def test_execute_simulation_trades_forwards_to_update_holdings(trading_interface_module):
     module, update_calls = trading_interface_module
     interface = _make_interface(module, trading_mode="simulation")

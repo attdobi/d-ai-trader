@@ -1,0 +1,133 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "9ea09b9as",
+ "version": 30,
+ "root_id": "SA.root",
+ "prompt_version_id": 666,
+ "created_at": "2026-10-28T14:45:32.204916",
+ "created_by": "codex_operator",
+ "actor_kind": "codex_operator",
+ "description": "Operator audit 2026-10-28: readable approved rules, evidence-grounded learning, and a capped pre-earnings strategy.",
+ "is_active": true,
+ "materialized_by": "operator_prompt_audit",
+ "source_sha256": {
+  "system_prompt": "5b7e36bb63ea4ee6eae445e93823cb5e8848ab0307f58f3d04657b73abd435e2",
+  "user_prompt_template": "c7684b9fb50f1457eb174ce43cf18f57e3bd5944f9764c5f214f68e19841c55f",
+  "strategy_directives": "a5a81f3f2b44c2b65e892da6b3cb0f2c185358db67d286d5c8360f3207eff69b",
+  "soul": "56a613b4397a12dc7a2510241de9989b57d1c1ce56705fe401900f9a4f20923f",
+  "memory": "042c3e7ecb4eb6bdebeea245cfcef4781151bcba34f45490ae2cdb643c390249"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.ground_truth",
+   "SA.directives.decider_uses",
+   "SA.directives.catalyst_provenance",
+   "SA.directives.event_opportunities",
+   "SA.directives.review_checks"
+  ],
+  "soul": [
+   "SA.soul",
+   "SA.soul.mission",
+   "SA.soul.principles",
+   "SA.soul.identity",
+   "SA.soul.core_philosophy",
+   "SA.soul.extraction_style"
+  ],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.source_quality.source_origin",
+   "SA.memory.source_quality.event_time",
+   "SA.memory.source_quality.promotion",
+   "SA.memory.extraction_patterns",
+   "SA.memory.extraction_patterns.pipeline",
+   "SA.memory.extraction_patterns.market_context",
+   "SA.memory.extraction_patterns.event_calendar",
+   "SA.memory.extraction_patterns.earnings",
+   "SA.memory.extraction_patterns.technical_only",
+   "SA.memory.extraction_patterns.ownership",
+   "SA.memory.evidence_provenance"
+  ]
+ },
+ "node_count": 32,
+ "edge_count": 37,
+ "code": {
+  "sha": "f42dce4ea4f4",
+  "dir": "../_code/f42dce4ea4f4",
+  "git_sha": "ccb9a1a4",
+  "fires": {
+   "SA.code.feedback_suffix": true,
+   "SA.code.opportunity_charter": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 29,
+  "lineage_version": 30,
+  "activation": {
+   "event_id": 76,
+   "created_at": "2026-10-28T14:45:32.204916",
+   "action": "operator_prompt_audit",
+   "actor": "codex_operator",
+   "from_version": 29,
+   "batch_id": "5f7573b808f64d80886de8617d13c66e",
+   "reason": "Operator audit 2026-10-28: readable approved rules, evidence-grounded learning, and a capped pre-earnings strategy."
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 12,
+  "changed": 13,
+  "removed": 17,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 29
+ },
+ "kind": "policy",
+ "history": []
+}

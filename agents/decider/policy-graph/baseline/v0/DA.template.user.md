@@ -16,52 +16,58 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: ""
-body_sha256: e94d0b02224def5b9432ba6a60c7c6af9d509a29f6a63b978ca56331679f3930
+body_sha256: c9adf7b6ef4bb75cd40972e6446db76af0029d33de71086504ebe1ad9b063138
 tags: []
 tickers: []
 ---
 ACCOUNT
 - Mode: {account_mode}
-- Settled Funds (USD): ${settled_cash}
+- Settled funds: ${settled_cash}
+- Per-BUY rails: MIN=${min_buy}; TYPICAL=${typical_buy_low}–${typical_buy_high}; MAX=${max_buy}
+- Whole shares only. For ordinary half-size trades, the existing one-share allowance applies only when that share is within MAX. An earnings-event hard cap may never be exceeded to buy one share.
+- After all actions, at most 5 unique held tickers.
 
 DAILY STATE
-- Today tickets used / cap: {today_tickets_used}/{daily_ticket_cap}
-- Today buys used / cap: {today_buys_used}/{daily_buy_cap}
+- Tickets used / cap: {today_tickets_used}/{daily_ticket_cap}
+- BUYs used / cap: {today_buys_used}/{daily_buy_cap}
 - Minutes since last new entry: {minutes_since_last_entry}
 - Tickers entered today: {tickers_entered_today}
 
-INPUTS
-- Rails (per-buy, USD): MIN={min_buy}, TYPICAL={typical_buy_low}-{typical_buy_high}, MAX={max_buy}
-- Rule: After all actions, ≤5 total holdings (unique tickers).
-- Holdings (canonical P&L): {holdings}
-- Summaries (include visual/sentiment cues): {summaries}
-- Momentum Recap (scorable only): {momentum_recap}
-- Feedback Snapshot: {feedback_context}
+SUPPLIED EVIDENCE
+INDEX REGIME
+{index_regime}
 
-PLAN (concise)
-- Step 1: Scan all holdings vs cost. Any position ≥ +3% above cost is a default SELL (full or majority) unless a fresh (≤1 session) catalyst justifies HOLD.
-- Step 2: With freed capital (subject to settled-funds constraints), identify 0–2 best contrarian R1..Rk BUY setups within rails, avoiding ATH chases and obvious media hype.
-- Step 3: For remaining holdings (especially 0–3% “runners”), default to HOLD unless thesis breaks, risk is unacceptable, or another setup is clearly superior.
-- If Mode is CASH, treat every BUY/SELL as part of a 1–5 trading day swing; avoid same-day churn unless thesis invalidates.
+EVENT CALENDAR
+{event_calendar}
 
-OUTPUT (STRICT)
-- Return ONLY a JSON object with:
-  • a `decisions` array of trade actions, and
-  • optionally a top-level `"cash_reason"` string.
-- Each `decisions` element: `{"action":"sell"|"buy"|"hold","ticker":"SYMBOL","amount_usd":number,"reason":"≤140 chars; momentum + catalyst; contrarian crowd read; BUYS prefixed R1..Rk"}`.
-- No extra keys, no commentary outside JSON.
+HOLDINGS — the only authoritative ownership record
+{holdings}
 
-CASH REASON REQUIREMENT
-- If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value} and min buy ${min_buy_amount}), you MUST add a top-level `"cash_reason"` string.
-- That `"cash_reason"` must briefly explain BOTH:
-  1. Why no new BUY was taken (e.g., ticket caps hit, min-buy not met, cooldown, or no qualified setups within rails), AND
-  2. What you did about any holdings ≥ +3% above cost (e.g., “harvested COIN +5.6% for tomorrow’s ammo” or “kept COIN +4% due to fresh 1-day catalyst X and contrarian thesis Y”).
-- Keep the JSON object compact with the `decisions` array plus optional `cash_reason` only.
+SUMMARIES
+{summaries}
 
-REMINDERS
-- Always:
-  • Respect settled-funds constraints for BUYS in cash accounts.
-  • Respect holdings cap (≤5 tickers after all actions).
-  • Prefer SELLING +3–5% winners to free capital, then rotating into only the top contrarian setups.
-  • Explicitly mention crowd behavior you’re fading in each reason.
-- Do NOT output anything except the JSON object described above.
+MOMENTUM RECAP
+{momentum_recap}
+
+CONTRARIAN WATCHLIST
+{contrarian_watchlist}
+
+QUARANTINE
+{quarantine}
+
+FEEDBACK SNAPSHOT — evidence subordinate to current policy
+{feedback_context}
+
+DECISION CHECKLIST
+1. Establish confirmed ownership and current account limits. A blank/unreadable regime is MIXED.
+2. Apply current holding-exit rules before new entries. Do not confuse a recent system entry with a synced/inherited holding.
+3. Audit the best 2–3 supplied BUY candidates, applying the current policy rather than old numeric thresholds from memory. Rank passing candidates R1..Rk.
+4. Distinguish ordinary entries, after-release price-confirmed opportunities and intentional earnings_event entries. For the latter, name the verified date and explicitly acknowledge holding through the release and full-notional gap risk; the server must confirm eligibility and the hard dollar cap.
+5. Check settled funds, whole shares, rails, ticket/BUY/position limits, regime and macro allowances, extension, priced kill, quarantine and correlation. Event-strategy exceptions do not waive those independent limits.
+6. Return the system's exact JSON contract, with valid cited IDs. Audit every holding and each weighed candidate. Mark unavailable facts UNKNOWN.
+
+SIGNALS CARD
+Use these facts where actually supplied: ownership state; regime; setup; extension above the 20-day MA; day/1-week/1-month change; relative strength; RSI; numeric K and D; catalyst source/status/date; quarantine; correlation count; sessions to the ticker's own earnings. Do not manufacture missing fields.
+
+CASH DISCLOSURE
+If there are no BUYs while settled funds are available (settled funds ${settled_cash_value}; minimum BUY ${min_buy_amount}), include cash_reason. Explain the best candidates' concrete failures and any owned winner at or above +3%. A regime label or scheduled macro event alone does not establish that every candidate failed.

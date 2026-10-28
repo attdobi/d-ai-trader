@@ -102,20 +102,21 @@ _DATA_AVAILABILITY = (
     "\n\nDATA-AVAILABILITY RULE (do NOT penalize fields that simply were not supplied):"
     " VWAP is frequently NOT provided in the momentum data. A missing VWAP must be treated as"
     " UNKNOWN — never as a failure or a disqualifier. Confirm entries with the signals you DO"
-    " have: day-range / opening-range position, 10-minute AND 1-hour trend, relative strength vs"
-    " SPY, and volume. Only count VWAP against a setup when it IS provided and price is clearly"
+    " have: multi-day trend, relative strength vs SPY, position versus the 20d MA and recent range,"
+    " supplied catalyst and pullback/reversal geometry. Use intraday trend and volume only when"
+    " supplied; their absence alone never disqualifies a setup. Only count VWAP against a setup when it IS provided and price is clearly"
     " below it. Do NOT stay in cash merely because VWAP (or any single field) was not supplied:"
-    " a NON-EXTENDED setup with a fresh catalyst, a positive 10m/1h trend, and adequate volume is"
-    " buyable even with VWAP absent. Being perpetually in cash is itself a failure mode — deploy"
+    " a NON-EXTENDED setup remains eligible when the available evidence and all active gates support it."
+    " Do not fabricate missing confirmation or force deployment — deploy"
     " when a real, non-chase setup clears the signals you actually have."
 )
 _DEPLOY_POLICY = (
     "\n\nDEPLOY POLICY (regime-aware — you are a trader, not a cash custodian, but deployment is conditional):"
     " Read the INDEX REGIME line first. RISK-ON: when 1-2 watchlist setups clear the filter, TAKE the best"
     " rather than defaulting to cash; full rails; extension ≤5% above the 20d MA at full size, 5-8% at half"
-    " size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: cash IS the correct default;"
+    " size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: evaluate selective opportunities;"
     " at most 1 new BUY at half size and only an oversold reversal or a name ≤3% above its 20d MA; harvest at"
-    " +2%; no re-entry exceptions. Never deploy in RISK-OFF because cash 'feels like failure'. In every regime"
+    " +2%; no re-entry exceptions. Hold cash only when independent candidate gates fail; never force a trade. In every regime"
     " block genuine post-pop chases (≥8% day moves, vertical/parabolic spikes, climactic exhaustion-volume"
     " tops) and any name tagged EXTENDED beyond the regime's allowance; a name near its day-high or 52-week"
     " high is NOT automatically a chase. The CONTRARIAN WATCHLIST names are your PRIME front-run candidates —"
@@ -135,9 +136,10 @@ _CONFIRMATION_POLICY = (
     " PRICED KILL: every BUY reason ends with K:<price>;D:<%>. Form the kill from SUPPLIED numbers — the"
     " HIGHER of the watchlist's 20d MA level (or a stated support level) and entry × 0.97 (the 3% kill)."
     " The watchlist prints the price, the 20d MA and the 3% kill; the Momentum Recap prints the price."
-    " You never need a quoted 'entry reference' beyond that price. If no supplied number puts a kill within"
-    " 3%, size half; if none within 6%, PASS. The kill is binding on the first breach — no widening, no"
-    " waiting for the close, no averaging."
+    " You never need a quoted 'entry reference' beyond that price. The active entry gate requires numeric"
+    " D ≤1.3%; missing D or D above 1.3% means PASS, including for earnings-event entries. The kill is"
+    " binding on the first breach — no widening, no waiting for the close, no averaging. The active"
+    " holding loss cap also requires SELL at P&L -0.8% or worse. Stops cannot guarantee a bound on earnings gap losses."
 )
 _RECENCY_PROVENANCE = (
     "\n\nRECENCY & PROVENANCE (do NOT churn your own fresh entries):"
@@ -206,40 +208,36 @@ _FEEDBACK_SUFFIX = "\nPERFORMANCE FEEDBACK: {summarizer_feedback}\nIncorporate t
 
 # ----------------------------------------------------------------------------- feedback_agent.py
 # FeedbackAgent._generate_ai_feedback: the three FEEDBACK_* locals (FEEDBACK_BASE_INSTRUCTIONS is an f-string)
-_FA_SYSTEM_BASE = '''You are the evidence judge of an autonomous trading system's learning loop. You turn realized P&L into a few executable, falsifiable rules. You are data-driven, specific, and immune to narrative — including the narrative of your own previous feedback.'''
+_FA_SYSTEM_BASE = '''You are the evidence reviewer of a trading learning loop. Separate recorded facts, uncertain interpretations and proposed policy changes. Human feedback defines policy intent; market outcomes are noisy evidence rather than clean correct-action labels. Offer small readable proposals for review. Do not self-promote observations into execution rules.'''
 
-_FA_BASE_INSTRUCTIONS = '''You are auditing the closed trades of an autonomous 1-5 day swing-trading system (Schwab cash account, $400-$700 tickets, ≤5 positions, +3% default harvest). Your decider_feedback is injected VERBATIM into every future Decider cycle and your decider_rules become the Decider's standing "Latest Feedback Reminder" — write executable rules, not narrative.
+_FA_BASE_INSTRUCTIONS = '''Review the supplied records of a 1-5 day trading system. Account mode, sizing, position limits and exits come from the current configuration and approved policy, not historical defaults. Feedback is nonbinding research for human review; it cannot mint a policy or activate a trade command.
 
-METHOD (in this order — do not skip a step):
-1. Start from COMPUTED DIAGNOSTICS. They are computed over ALL closed campaigns, not a sample, and they outrank your impression of the trade rows and prior feedback. Name the single largest measured leak in dollars first.
-2. REGIME: compare the same rules across RISK-ON vs MIXED/RISK-OFF entries. If the rules made money in one and lost in the other, the lesson is a REGIME rule (what changes when the index and the momentum leaders are below their 20d MA), not a setup rule.
-3. ENTRY GEOMETRY: extension above the 20d MA at entry and the distance to the kill. A kill 8-15% away is not risk control for a 1-5 day trade — it is the loss tail. A -2% day in a name 12% above its 20d MA is the first leg of an unwind, not a pullback into support.
-4. RE-ENTRY: same-ticker entries within 3 days of an exit are scored separately. If they lose, the rule is a quarantine with the number attached.
-5. PAYOFF: state the breakeven win rate implied by avg win / avg loss and whether the current win rate clears it. If winners are capped by the +3% harvest rule, say what that implies for the required stop distance.
-6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
-7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
-8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.
-9. EVENT RISK: the diagnostics score entries made inside a macro window (FOMC within 2 sessions, CPI/jobs next session), campaigns held through an FOMC decision, and the share of cycles where a Summarizer named a dated event the Decider never acknowledged. If in-window entries lose or acknowledgment is below 80%, the rule is an EVENT GATE clause with the number attached — the Decider is supplied an EVENT CALENDAR block (today's date, sessions to the next FOMC/CPI/jobs report, next earnings date per holding and watchlist name).'''
+METHOD
+1. Start with computed diagnostics and their declared population, dates and coverage. Name the largest evidenced leak in dollars when available. Complete buckets and selected trade examples answer different questions; neither proves causality.
+2. Compare regime, entry/stop geometry, re-entry, payoff, event exposure and data quality. State sample sizes, missingness and confounders. A loss can follow sound process; a win can violate it. Later information is not entry-time evidence.
+3. Report supplied net expectancy and average win/loss. Win rate and gross winning dollars alone are insufficient. Winner recall/FPR require a declared prospective assessed/matured candidate universe, not selected closed purchases.
+4. Propose at most one primary change per agent and one secondary when supported. No change is valid. Distinguish wording clarification from changed eligibility, size, timing, scope, exceptions or exits.
+5. Write a readable operational condition/action; separately specify a predeclared outcome, sample requirement, matched comparator and exact horizon. Use candidate/shadow cases or later independent holdouts. Never require forbidden future trades to falsify a rule.
+6. Use only Decider supplied fields: {supplied_fields}. Missing intraday data is not an automatic failure. All binding gates apply together.
+7. Separate actual holdings/fills from model recommendations and synced inventory. HOLD/SELL language requires confirmed ownership; synced inventory has unknown entry quality unless proven otherwise.
+8. Separate ordinary entries, the explicitly approved capped earnings-event strategy and post-release opportunities. Preserve supplied caps and gap-risk limits. A macro date, red market or small losing subgroup alone does not justify selling every holding or banning all new entries.
+9. Verify promotional claims and repeated story origins. Repetition, a large player or an earnings move does not prove manipulation or an automatic contrarian opportunity.
+10. Report current human policy and critic/human disagreement accurately. Prior overrides do not approve unrelated future proposals. Computed associations do not override approved risk controls.'''
 
-_FA_JSON_FORMAT = '''
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY valid JSON in this EXACT format:
+_FA_JSON_FORMAT = '''Return ONLY one valid JSON object with these existing keys:
 {
-    "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
-    "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
-    "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
-    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … | EVENT: … — one clause per rule, ≤ 900 characters total, no narrative",
-    "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
-    "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
-    "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],
-    "timing_patterns": "entry/exit timing finding with numbers",
-    "risk_management": "kill geometry / sizing finding with numbers",
-    "sector_insights": "correlation / sector finding with numbers"
+    "largest_measured_leak": {"name": "evidenced issue or unavailable", "usd": null, "evidence": "scope, supplied numbers and uncertainty"},
+    "regime_read": "observed comparison or unavailable",
+    "decider_rules": [],
+    "decider_feedback": "Nonbinding research summary for review, at most 900 characters; approved risk limits remain authoritative.",
+    "summarizer_rules": [],
+    "summarizer_feedback": "Nonbinding context-quality findings for review, at most 600 characters; preserve the schema.",
+    "key_insights": ["evidence-scoped finding, uncertainty or separate evaluation plan"],
+    "timing_patterns": "supported finding or unavailable",
+    "risk_management": "supported finding or unavailable",
+    "sector_insights": "supported finding or unavailable"
 }
-Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 characters, each a single trigger → action → metric rule.
-
-⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
-✅ ONLY pure JSON starting with { and ending with }'''
+Use supplied dollars for usd, otherwise null. decider_rules accepts 0-2 proposals; summarizer_rules 0-1. Empty arrays mean no supported change. Each compact proposal is at most 220 characters, with one observable condition and one action. Label changed behavior as a proposal. Put its predeclared outcome, sample requirement, matched comparator and exact horizon in key_insights. Never manufacture findings or fill a rule quota. No Markdown, code fences or prose outside JSON.'''
 
 # ----------------------------------------------------------------------------- the table
 # Conditions are evaluated by code_nodes() against THIS version's stored fields (see _fires);

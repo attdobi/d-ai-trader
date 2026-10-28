@@ -74,7 +74,8 @@ def test_block_carries_one_gap_line_right_under_macro():
 def test_block_unchanged_without_a_gap():
     ctx = ec.build_event_context(holdings=[], regime="MIXED", now_et=_et(2026, 10, 5), lookup_earnings=False)
     assert "CALENDAR GAP" not in ctx["block"]
-    assert len(ctx["block"].splitlines()) == 6
+    assert len(ctx["block"].splitlines()) == 7
+    assert "UPCOMING EARNINGS" in ctx["block"]
     assert ctx["block"].splitlines()[0] == ec.EVENT_CALENDAR_HEADER
 
 

@@ -353,7 +353,7 @@ def test_critic_outage_defers_to_human(env):
     assert out["files"][0]["critic"] is None
 
 
-def test_cosmetic_only_is_auto_rejected_without_a_critic_call(env):
+def test_readability_only_receives_critic_review_without_auto_rejection(env):
     version = v21(env)
     pk = version.nodes["DA.directives.strategy.priced_kill"]
     assert "every BUY ends with" in pk.body
@@ -361,9 +361,10 @@ def test_cosmetic_only_is_auto_rejected_without_a_critic_call(env):
                                              "primary": True, "falsified_if": "y", "what": "spacing"}]}
     llm = FakeLLM(payload)
     out = run(env, llm)
-    assert out["status"] == "review" and out["critic"]["auto"] is True and out["critic"]["verdict"] == "reject"
-    assert [c[0] for c in llm.calls] == ["drafter"]
+    assert out["status"] == "review" and out["critic"]["auto"] is False and out["critic"]["verdict"] == "approve"
+    assert [c[0] for c in llm.calls] == ["drafter", "critic"]
     assert out["files"][0]["kind"] == "minor"
+    assert any("decision equivalence" in item["warning"] for item in out["style"])
 
 
 def _add_version(engine, version, *, sd=None, memory=None, activate=True):

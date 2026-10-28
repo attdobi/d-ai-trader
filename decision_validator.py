@@ -12,6 +12,7 @@ This is critical for real-money trading - no AI hallucinations allowed!
 """
 
 import os
+import math
 from typing import List, Dict, Any, Tuple
 
 from shared.ticker_normalize import normalize_ticker
@@ -22,7 +23,8 @@ MAX_BUY_AMOUNT = float(os.getenv("DAI_MAX_BUY_AMOUNT", "4000"))
 class DecisionValidator:
     """Validates trading decisions to prevent hallucinations and errors"""
     
-    def __init__(self, current_holdings: List[Dict], available_cash: float, allow_sell_reuse: bool = True):
+    def __init__(self, current_holdings: List[Dict], available_cash: float, allow_sell_reuse: bool = True,
+                 earnings_book=None, earnings_minimum=None):
         """
         Initialize validator with current portfolio state
         
@@ -35,6 +37,8 @@ class DecisionValidator:
         self.holdings_map = {h['ticker'].upper(): h for h in current_holdings if h['ticker'] != 'CASH'}
         self.available_cash = available_cash
         self.allow_sell_reuse = allow_sell_reuse
+        self.earnings_book = earnings_book
+        self.earnings_minimum = MIN_BUY_AMOUNT if earnings_minimum is None else float(earnings_minimum)
         
         print(f"🛡️  Decision Validator Initialized:")
         print(f"   Current Holdings: {', '.join(sorted(self.current_tickers)) if self.current_tickers else 'NONE'}")
@@ -118,12 +122,35 @@ class DecisionValidator:
             # Rule 7: Amount validation for buys
             try:
                 amount = float(amount_usd)
-                if amount < MIN_BUY_AMOUNT:
-                    return False, f"Buy amount ${amount:.2f} too small (minimum ${MIN_BUY_AMOUNT:,.0f})"
+                if not math.isfinite(amount):
+                    return False, "Buy amount must be positive and finite"
+                if amount <= 0:
+                    return False, "Buy amount too small (minimum buy must be positive)"
+                from earnings_strategy import is_event, _event_rows, release_completed
+                strategy = str(decision.get('strategy') or 'standard').lower()
+                if strategy not in ('standard', 'earnings_event'):
+                    return False, "Unknown trading strategy"
+                minimum = MIN_BUY_AMOUNT
+                if is_event(decision):
+                    if self.earnings_book is None:
+                        return False, "Earnings-event runtime controls are unavailable"
+                    minimum = self.earnings_minimum
+                    amount = min(amount, self.earnings_book.cap)
+                elif self.earnings_book is not None:
+                    event = _event_rows(self.earnings_book.context).get(ticker) or {}
+                    sessions = event.get('sessions_to')
+                    if isinstance(sessions, (int, float)) and 0 <= sessions <= 5 and not release_completed(event):
+                        return False, "Earnings inside five sessions require the explicit capped earnings_event strategy"
+                if amount < minimum:
+                    return False, f"Buy amount ${amount:.2f} too small (minimum ${minimum:,.0f})"
                 if amount > MAX_BUY_AMOUNT:
                     return False, f"Buy amount ${amount:.2f} too large (maximum ${MAX_BUY_AMOUNT:,.0f})"
                 if amount > self.available_cash:
                     return False, f"Buy amount ${amount:.2f} exceeds available cash ${self.available_cash:.2f}"
+                if is_event(decision):
+                    why = self.earnings_book.authorize(decision, minimum=minimum)
+                    if why:
+                        return False, why
             except (ValueError, TypeError):
                 return False, f"Invalid amount_usd: {amount_usd}"
         

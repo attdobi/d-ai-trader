@@ -1446,9 +1446,13 @@ def execute_real_world_trade(decision):
             # amount ÷ price, and amount_usd is that exact cost, so re-deriving the
             # count from a fresh quote loses a share on any uptick/cent rounding.
             sized = decision.get('shares_override') or decision.get('shares')
-            result = trading_interface.execute_buy_order(
-                ticker, amount_usd, shares=int(sized) if sized else None
-            )
+            if decision.get('strategy') == 'earnings_event':
+                result = trading_interface.execute_buy_order(
+                    ticker, amount_usd, reason=decision.get('reason', ''),
+                    shares=int(sized) if sized else None, earnings_decision=decision)
+            else:
+                result = trading_interface.execute_buy_order(
+                    ticker, amount_usd, shares=int(sized) if sized else None)
         elif action == 'sell':
             # For sell orders, we need to determine shares from holdings
             current_holdings = fetch_holdings()
@@ -2063,6 +2067,18 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             cap_book = None
             print(f"⚠️  Position/total-investment caps unavailable ({exc}); sizing buys without them this cycle")
 
+    _earnings_holdings, _earnings_pending = None, None
+    if any(d.get('strategy') == 'earnings_event' for d in buy_decisions) and enforce_position_caps:
+        try:
+            from earnings_strategy import pending_orders
+            with engine.connect() as _ec:
+                _earnings_holdings = [dict(r) for r in _ec.execute(text(
+                    "SELECT ticker,current_value,shares,current_price,reason FROM holdings "
+                    "WHERE config_hash=:h AND is_active=TRUE AND ticker!='CASH'"), {'h':config_hash}).mappings()]
+            _earnings_pending = pending_orders(engine, config_hash)
+        except Exception:
+            _earnings_holdings, _earnings_pending = None, None
+
     with engine.begin() as conn:
         # Two separate figures: `available_cash` is the settled-funds BUY BUDGET
         # (gates order sizing); the CASH holdings row tracks TOTAL account cash.
@@ -2113,11 +2129,43 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             # total-investment caps; a larger ticket is cut to what the caps leave room for
             # (order_sizing.py). The sizing record below names what bound the ticket.
             _ws = None
+            if decision.get('strategy') == 'earnings_event' and not enforce_position_caps:
+                # Already executed by trading_interface: mirror the broker's
+                # actual shares rather than resize a fill using another quote.
+                from order_sizing import WholeShareSizing
+                if decision.get('execution_status') != 'filled' or not decision.get('executed_shares'):
+                    skipped_decisions.append({**decision, 'reason':'Earnings-event bookkeeping requires a confirmed broker fill'})
+                    continue
+                _ws = WholeShareSizing(int(decision['executed_shares']), 'confirmed earnings fill',
+                                       'broker-confirmed earnings-event quantity')
+                price = float(decision.get('executed_price') or price)
+            if decision.get('strategy') == 'earnings_event' and enforce_position_caps:
+                try:
+                    from earnings_strategy import execution_limit
+                    from order_sizing import WholeShareSizing
+                    if cap_book is None:
+                        raise ValueError('current account/position cap could not be verified')
+                    _eqty, _limit_price, _event_cap = execution_limit(
+                        decision, price, config_hash=config_hash, market_open=is_market_open(),
+                        account_value=cap_book.account_value, normal_position_cap=cap_book.position_limit,
+                        holdings=_earnings_holdings, pending=_earnings_pending)
+                    # Do not round a sub-share event allocation up. Its LIMIT
+                    # order is checked again against the broker quote below.
+                    _ws = WholeShareSizing(_eqty, 'earnings-event cap',
+                        f'{_eqty} share(s), capped earnings-event allocation ${_event_cap:.2f}', _event_cap)
+                except Exception as _event_size_exc:
+                    skipped_decisions.append({**decision, 'reason': f'Earnings-event entry blocked: {_event_size_exc}'})
+                    continue
             if cap_book is not None:
                 try:
-                    _ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT,
-                                                 min_buffer=MIN_BUFFER, caps=cap_book.caps_for(clean_ticker))
+                    _normal_ws = whole_share_allocation(amount, price, available_cash, max_buy=MAX_BUY_AMOUNT,
+                                                        min_buffer=MIN_BUFFER, caps=cap_book.caps_for(clean_ticker))
+                    if _ws is None or _normal_ws.shares < _ws.shares:
+                        _ws = _normal_ws
                 except Exception as exc:
+                    if decision.get('strategy') == 'earnings_event':
+                        skipped_decisions.append({**decision, 'reason':'Earnings-event ordinary position/cash sizing could not be verified'})
+                        continue
                     print(f"⚠️  {ticker}: position-cap sizing failed ({exc}); sizing without the caps")
                     _ws = None
             if _ws is None:
@@ -2164,6 +2212,18 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 continue
 
             actual_spent = round(shares * price, 2)
+            if decision.get('strategy') == 'earnings_event' and enforce_position_caps:
+                try:
+                    from earnings_strategy import execution_limit
+                    _checked_shares, _, _ = execution_limit({**decision, 'amount_usd':actual_spent, 'shares_override':shares}, price,
+                        config_hash=config_hash, market_open=is_market_open(),
+                        account_value=cap_book.account_value, normal_position_cap=cap_book.position_limit,
+                        holdings=_earnings_holdings, pending=_earnings_pending)
+                    if _checked_shares != shares:
+                        raise ValueError('final earnings quantity exceeds its authorized whole-share limit')
+                except Exception as _event_final_exc:
+                    skipped_decisions.append({**decision, 'reason':f'Earnings-event entry blocked: {_event_final_exc}'})
+                    continue
             if shares < requested_shares:
                 requested_value = round(requested_shares * price, 2)
                 print(
@@ -2213,6 +2273,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 # later buys (the safe side).
                 if cap_book is not None and (real_trade_success or decision.get('order_id')):
                     cap_book.record_buy(clean_ticker, actual_spent)
+                if decision.get('strategy') == 'earnings_event' and (real_trade_success or decision.get('order_id')):
+                    _earnings_pending = list(_earnings_pending or []) + [decision]
                 if not real_trade_success:
                     status = decision.get('execution_status', 'failed')
                     print(f"⛔ {ticker}: real order did not fill (status={status}) — "
@@ -2324,6 +2386,9 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 # decremented from its own (total-cash) value — not overwritten
                 # with the budget.
                 available_cash -= actual_spent
+                if decision.get('strategy') == 'earnings_event':
+                    _earnings_holdings = list(_earnings_holdings or []) + [
+                        {'ticker':clean_ticker, 'current_value':actual_spent, 'reason':reason}]
                 cash_row_balance = max(cash_row_balance - actual_spent, 0.0)
                 conn.execute(text("""
                     UPDATE holdings SET
@@ -2607,6 +2672,21 @@ OUTPUT (STRICT)
 
     company_entities = extract_companies_from_summaries(summaries_for_extraction)
     recap_entities, holdings_symbols = merge_holdings_into_recap_entities(company_entities, holdings)
+    # A scheduled catalyst can create an opportunity even without a news mention.
+    # Calendar rows supply dates; momentum supplies the separate entry evidence.
+    try:
+        from earnings_strategy import CORE_WATCHLIST
+        from event_calendar import next_earnings_date
+        _covered_earnings = {clean_ticker_symbol(e.get('symbol')) for e in recap_entities if isinstance(e, dict)}
+        for _symbol in CORE_WATCHLIST:
+            _event = next_earnings_date(_symbol, today=datetime.now(EASTERN_TIMEZONE).date(), engine=engine)
+            if isinstance(_event.get('sessions_to'), (int, float)) and 0 <= _event['sessions_to'] <= 5:
+                _canonical = clean_ticker_symbol(_symbol)
+                if _canonical not in _covered_earnings:
+                    recap_entities.append({'symbol': _canonical, 'company': 'upcoming earnings watchlist'})
+                    _covered_earnings.add(_canonical)
+    except Exception as _earnings_watch_exc:
+        print(f"⚠️ Upcoming earnings momentum coverage unavailable ({type(_earnings_watch_exc).__name__})")
     momentum_data, momentum_summary = build_momentum_recap(recap_entities)
     momentum_summary = append_momentum_coverage_gap(momentum_summary, momentum_data, holdings_symbols)
     print(f"📊 Momentum recap prepared for {len(momentum_data)} symbols")
@@ -2814,15 +2894,27 @@ OUTPUT (STRICT)
     _event_ctx = None
     try:
         from event_calendar import build_event_context, record_snapshot
+        from earnings_strategy import CORE_WATCHLIST, format_controls
+        from order_sizing import resolve_cap
+        _event_watchlist = list(dict.fromkeys(
+            [c.get('ticker') for c in _contra if isinstance(c, dict)]
+            + list(CORE_WATCHLIST)
+            + [clean_ticker_symbol(e.get('symbol')) for e in (company_entities or []) if isinstance(e, dict)]
+        ))[:40]
         _event_ctx = build_event_context(
             holdings=[(h.get("ticker") if hasattr(h, "get") else h["ticker"]) for h in stock_holdings],
-            watchlist=[c.get("ticker") for c in _contra if isinstance(c, dict)],
+            watchlist=_event_watchlist,
             regime=((locals().get("_regime") or {}).get("label")), engine=engine)
         if _event_ctx and _event_ctx.get("block"):
             prompt += "\n\n" + _event_ctx["block"]
             print(f"📅 Event calendar: score {_event_ctx['risk_score']}/100 ({_event_ctx['risk_level']}) | macro window: "
                   + (f"YES — {_event_ctx['macro_reason']}" if _event_ctx["macro_window"] else "no")
                   + f" | holdings reporting ≤2 sessions: {_event_ctx['allowance']['holdings_reporting_within_2']}")
+            _event_equity = settled_cash_prompt + sum(float(h.get('current_value') or 0) for h in stock_holdings)
+            _event_position_cap = resolve_cap(MAX_POSITION_VALUE, MAX_POSITION_FRACTION, _event_equity)
+            prompt += "\n\n" + format_controls(_event_ctx, stock_holdings, settled_cash_prompt,
+                                               _event_position_cap, config_hash=config_hash)
+            _event_ctx.setdefault('allowance', {})['earnings_controls_version'] = 1
             record_snapshot(engine, config_hash, run_id, _event_ctx)
     except Exception as _event_exc:
         print(f"⚠️  Event calendar skipped: {_event_exc}")
@@ -2981,20 +3073,21 @@ OUTPUT (STRICT)
         "\n\nDATA-AVAILABILITY RULE (do NOT penalize fields that simply were not supplied):"
         " VWAP is frequently NOT provided in the momentum data. A missing VWAP must be treated as"
         " UNKNOWN — never as a failure or a disqualifier. Confirm entries with the signals you DO"
-        " have: day-range / opening-range position, 10-minute AND 1-hour trend, relative strength vs"
-        " SPY, and volume. Only count VWAP against a setup when it IS provided and price is clearly"
+        " have: multi-day trend, relative strength vs SPY, position versus the 20d MA and recent range,"
+        " supplied catalyst and pullback/reversal geometry. Use intraday trend and volume only when"
+        " supplied; their absence alone never disqualifies a setup. Only count VWAP against a setup when it IS provided and price is clearly"
         " below it. Do NOT stay in cash merely because VWAP (or any single field) was not supplied:"
-        " a NON-EXTENDED setup with a fresh catalyst, a positive 10m/1h trend, and adequate volume is"
-        " buyable even with VWAP absent. Being perpetually in cash is itself a failure mode — deploy"
+        " a NON-EXTENDED setup remains eligible when the available evidence and all active gates support it."
+        " Do not fabricate missing confirmation or force deployment — deploy"
         " when a real, non-chase setup clears the signals you actually have."
     )
     prompt += (
         "\n\nDEPLOY POLICY (regime-aware — you are a trader, not a cash custodian, but deployment is conditional):"
         " Read the INDEX REGIME line first. RISK-ON: when 1-2 watchlist setups clear the filter, TAKE the best"
         " rather than defaulting to cash; full rails; extension ≤5% above the 20d MA at full size, 5-8% at half"
-        " size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: cash IS the correct default;"
+        " size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: evaluate selective opportunities;"
         " at most 1 new BUY at half size and only an oversold reversal or a name ≤3% above its 20d MA; harvest at"
-        " +2%; no re-entry exceptions. Never deploy in RISK-OFF because cash 'feels like failure'. In every regime"
+        " +2%; no re-entry exceptions. Hold cash only when independent candidate gates fail; never force a trade. In every regime"
         " block genuine post-pop chases (≥8% day moves, vertical/parabolic spikes, climactic exhaustion-volume"
         " tops) and any name tagged EXTENDED beyond the regime's allowance; a name near its day-high or 52-week"
         " high is NOT automatically a chase. The CONTRARIAN WATCHLIST names are your PRIME front-run candidates —"
@@ -3014,9 +3107,10 @@ OUTPUT (STRICT)
         " PRICED KILL: every BUY reason ends with K:<price>;D:<%>. Form the kill from SUPPLIED numbers — the"
         " HIGHER of the watchlist's 20d MA level (or a stated support level) and entry × 0.97 (the 3% kill)."
         " The watchlist prints the price, the 20d MA and the 3% kill; the Momentum Recap prints the price."
-        " You never need a quoted 'entry reference' beyond that price. If no supplied number puts a kill within"
-        " 3%, size half; if none within 6%, PASS. The kill is binding on the first breach — no widening, no"
-        " waiting for the close, no averaging."
+        " You never need a quoted 'entry reference' beyond that price. The active entry gate requires numeric"
+        " D ≤1.3%; missing D or D above 1.3% means PASS, including for earnings-event entries. The kill is"
+        " binding on the first breach — no widening, no waiting for the close, no averaging. The active"
+        " holding loss cap also requires SELL at P&L -0.8% or worse. Stops cannot guarantee a bound on earnings gap losses."
     )
     prompt += (
         "\n\nRECENCY & PROVENANCE (do NOT churn your own fresh entries):"
@@ -3776,11 +3870,36 @@ def store_trade_decisions(decisions, run_id):
     stock_holdings = [h for h in current_holdings if h['ticker'] != 'CASH']
     cash_balance = next((h['current_value'] for h in current_holdings if h['ticker'] == 'CASH'), 0)
 
+    # Model output cannot mint or replay the private runtime authorization.
+    for _decision in decisions if isinstance(decisions, list) else []:
+        if isinstance(_decision, dict):
+            _decision.pop('_earnings_authorization', None)
+            _decision.pop('earnings_event_controls', None)
+            _decision.pop('earnings_submission', None)
+            if isinstance(_decision.get('reason'), str):
+                _decision['reason'] = _decision['reason'].replace('[earnings_event]', '')
+            if str(_decision.get('strategy') or '').lower() == 'earnings_event':
+                for _field in ('order_id', 'execution_status', 'execution_error', 'executed_shares', 'executed_price', 'executed_amount'):
+                    _decision.pop(_field, None)
+            _decision['_earnings_run_id'] = run_id
+    _earnings_book = None
+    try:
+        from earnings_strategy import EventBook, load_run_context, pending_orders
+        from order_sizing import resolve_cap
+        _trusted_events = load_run_context(engine, config_hash, run_id)
+        _equity = float(cash_balance) + sum(float(h.get('current_value') or 0) for h in stock_holdings)
+        _normal_cap = resolve_cap(MAX_POSITION_VALUE, MAX_POSITION_FRACTION, _equity)
+        _earnings_book = EventBook(config_hash, _trusted_events, _equity, _normal_cap,
+                                  list(stock_holdings), pending_orders(engine, config_hash))
+    except Exception as _earnings_guard_exc:
+        print(f"⚠️ Earnings-event exception unavailable ({type(_earnings_guard_exc).__name__})")
+
     # Validate all decisions
     validator = DecisionValidator(
         stock_holdings,
         cash_balance,
-        allow_sell_reuse=IS_MARGIN_ACCOUNT
+        allow_sell_reuse=IS_MARGIN_ACCOUNT,
+        earnings_book=_earnings_book
     )
     validated_decisions, rejected_decisions = validator.validate_decisions(decisions)
 

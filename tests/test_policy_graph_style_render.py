@@ -27,10 +27,11 @@ def test_plain_style_warning_sentences():
 
 def test_every_style_check_warning_has_a_plain_sentence():
     dense = P.FileChange(id="DA.directives.strategy.x", action="add", primary=True, body=(
-        "9. EVENT GATE — read the block (every cycle). IF a THEN b. IF c THEN d (see above). " + "x" * 260))
-    lesson = P.FileChange(id="DA.memory.lessons.z", action="add", body="- **#tag — short.** (an aside) (another) " + "y" * 300)
+        "9. EVENT GATE — read (every cycle). IF a THEN b. IF c THEN d (see above). "
+        "IF e THEN f. IF g THEN h (one more). IF i THEN j. Falsified if returns fall. " + "x" * 620))
+    lesson = P.FileChange(id="DA.memory.lessons.z", action="add", body="- **#tag — short.** (an aside) (another) (third) " + "y" * 620)
     warnings = P.style_check([dense, lesson])
-    assert len(warnings) == 6
+    assert len(warnings) == 8
     for w in warnings:
         plain = P.plain_style_warning(w["warning"])
         assert plain[0].isupper() and plain.endswith(".")

@@ -295,10 +295,10 @@ class TradeOutcomeTracker:
     def analyze_recent_outcomes_for_config(self, config_hash, days_back=FEEDBACK_LOOKBACK_DAYS, skip_auto_prompts=False):
         """Analyze recent trade outcomes and generate feedback for a specific config.
 
-        When `skip_auto_prompts` is True, the feedback record is still written
-        to `agent_feedback`, but the AUTO-mode heuristic that mutates
-        strategy_directives/memory is bypassed. Use this when the caller plans
-        to evolve prompts manually (e.g. from the Prompt Lab UI).
+        Every review is archived in `agent_feedback`. `skip_auto_prompts` is a
+        compatibility flag that skips the pending-review notification; neither
+        value permits automatic policy changes. Prompt Lab can prepare a
+        separate change for explicit human review.
         """
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
@@ -332,7 +332,7 @@ class TradeOutcomeTracker:
                 if synthetic_feedback:
                     print(f"🔄 Generated feedback from decision patterns for config {config_hash}")
                     
-                    # Store feedback and auto-generate new prompts
+                    # Archive the evidence before marking it for review.
                     feedback_id = self._store_feedback_for_config(
                         days_back, 
                         decision_analysis.get('total_attempts', decision_analysis.get('total_decisions', 0)), 
@@ -343,12 +343,11 @@ class TradeOutcomeTracker:
                         config_hash
                     )
                     
-                    # Auto-generate improved prompts from this feedback
+                    # Retain compatibility with scheduled callers, without policy promotion.
                     if feedback_id and not skip_auto_prompts:
-                        print(f"🚀 Auto-generating improved prompts from decision pattern feedback...")
                         self._auto_generate_prompts_from_feedback_for_config(synthetic_feedback, feedback_id, config_hash)
                     elif feedback_id and skip_auto_prompts:
-                        print(f"⏭️  skip_auto_prompts=True — leaving prompts untouched (caller will evolve manually)")
+                        print("⏭️  Feedback archived; pending-review notification skipped")
 
                     return {
                         'feedback_generated': True,
@@ -358,16 +357,18 @@ class TradeOutcomeTracker:
                         'feedback_id': feedback_id
                     }
             else:
-                print(f"⚠️  No decisions found for config {config_hash} - generating basic feedback for AUTO mode prompt evolution")
+                print(f"⚠️  No decisions found for config {config_hash} - recording the evidence gap for review")
                 
-                # Even with no decisions, generate minimal feedback to trigger prompt evolution in AUTO mode
+                # Preserve a no-data observation without manufacturing a policy change.
                 if self._is_config_in_auto_mode(config_hash):
-                    print(f"🔄 Config {config_hash} is in AUTO mode - generating minimal feedback to evolve prompts from v0")
+                    print(f"🔄 Config {config_hash} is in AUTO mode - archiving a no-data review")
                     
                     minimal_feedback = {
-                        'summarizer_feedback': 'Focus on identifying clear trading catalysts and actionable market insights.',
-                        'decider_feedback': 'Continue aggressive day trading approach with proper position sizing and sell analysis.',
-                        'key_insights': ['No trading data yet', 'System initialization phase', 'Ready for prompt evolution']
+                        'summarizer_feedback': 'No new decision or trade evidence is available for this review; retain the approved extraction policy.',
+                        'decider_feedback': 'No new decision or trade evidence is available for this review; retain the approved trading policy and code-owned limits.',
+                        'summarizer_rules': [],
+                        'decider_rules': [],
+                        'key_insights': ['No trading data yet', 'No policy change supported by this review', 'Collect decision-time evidence before proposing a change']
                     }
                     
                     # Store minimal feedback
@@ -375,12 +376,11 @@ class TradeOutcomeTracker:
                         days_back, 0, 1.0, 0.0, {'total_decisions': 0}, minimal_feedback, config_hash
                     )
                     
-                    # Generate v1 prompts from v0 baseline
+                    # No-data reviews never manufacture new prompt versions.
                     if feedback_id and not skip_auto_prompts:
-                        print(f"🚀 Evolving prompts from v0 → v1 for AUTO mode config {config_hash}")
                         self._auto_generate_prompts_from_feedback_for_config(minimal_feedback, feedback_id, config_hash)
                     elif feedback_id and skip_auto_prompts:
-                        print(f"⏭️  skip_auto_prompts=True — leaving v0 baseline untouched")
+                        print("⏭️  No-data review archived; pending-review notification skipped")
                     
                     return {
                         'feedback_generated': True,
@@ -408,11 +408,11 @@ class TradeOutcomeTracker:
         feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
                                                     avg_profit, analysis, feedback, config_hash)
         
-        # Automatically create new prompts based on feedback for this config
+        # Feedback collection cannot supply its own policy approval.
         if not skip_auto_prompts:
             self._auto_generate_prompts_from_feedback_for_config(feedback, feedback_id, config_hash)
         else:
-            print(f"⏭️  skip_auto_prompts=True — feedback stored, prompts left for manual evolution")
+            print("⏭️  Feedback archived; pending-review notification skipped")
 
         return {
             "feedback_id": feedback_id,
@@ -570,8 +570,8 @@ class TradeOutcomeTracker:
                 "total_trades": total_trades,
                 "success_rate": success_rate,
                 "avg_profit": avg_profit,
-                "top_patterns": json.dumps(analysis["successful_reasons"]),
-                "under_patterns": json.dumps(analysis["unsuccessful_reasons"]),
+                "top_patterns": json.dumps(analysis.get("successful_reasons", [])),
+                "under_patterns": json.dumps(analysis.get("unsuccessful_reasons", [])),
                 "adjustments": json.dumps(feedback),
                 "summarizer_fb": json.dumps(feedback.get("summarizer_feedback", "")),
                 "decider_fb": json.dumps(feedback.get("decider_feedback", ""))
@@ -710,60 +710,25 @@ class TradeOutcomeTracker:
         return (base + "\n\n" + reminder_block).strip() if base else reminder_block
 
     def _auto_generate_prompts_from_feedback_for_config(self, feedback, feedback_id, config_hash):
-        """Weekly AUTO path: append the latest feedback reminder to each agent's
-        strategy directives and memory WITHOUT replacing the human-approved policy."""
-        # Check if this config is in FIXED mode - if so, don't auto-update prompts
-        if not self._is_config_in_auto_mode(config_hash):
-            with engine.connect() as conn:
-                config_result = conn.execute(text("""
-                    SELECT forced_prompt_version
-                    FROM run_configurations
-                    WHERE config_hash = :config_hash
-                """), {"config_hash": config_hash}).fetchone()
+        """Retain the already archived feedback for human review; never self-promote.
 
-                forced_version = config_result.forced_prompt_version if config_result else "unknown"
-                print(f"🔒 Config {config_hash} is in FIXED v{forced_version} mode - skipping auto-prompt updates")
-                return
+        The caller writes agent_feedback before reaching this compatibility hook.
+        AUTO schedules evidence collection, not permission to mint a policy or
+        activate a long-term trading command. Prompt Lab's reviewed apply path
+        remains the explicit way to change the deployed policy.
+        """
+        violations = feedback_policy_violations(feedback)
+        print(f"📝 Feedback #{feedback_id} retained for review; no policy or active-memory updates"
+              + (" (policy conflict flagged)" if violations else ""))
+        return {
+            "status": "pending_human_review",
+            "feedback_id": feedback_id,
+            "requires_human_review": True,
+            "policy_updated": False,
+            "active_memory_updated": False,
+            "policy_conflicts": violations,
+        }
 
-        print(f"🔄 Config {config_hash} is in AUTO mode - appending feedback reminder (approved policy preserved)")
-
-        # The feedback record is already archived by the caller. Quarantine the
-        # entire automatic batch before either agent's version or LTM is written.
-        # Direct feedback injection has the same guard in the Decider.
-        if feedback_policy_violations(feedback):
-            print(f"⚠️ Feedback #{feedback_id} retained for review; automatic policy/memory updates skipped: blanket regime/macro entry veto")
-            return
-
-        try:
-            for agent_type, fb_key, rules_key in (
-                ("SummarizerAgent", "summarizer_feedback", "summarizer_rules"),
-                ("DeciderAgent", "decider_feedback", "decider_rules"),
-            ):
-                if not (isinstance(feedback, dict) and (feedback.get(fb_key) or feedback.get(rules_key))):
-                    continue
-                reminder_block, rules = self._build_reminder_block(feedback, fb_key, rules_key)
-                # Versions are immutable: the new memory text goes INTO the new row before it is
-                # activated (until 2026-09-03 the active row's memory column was rewritten in place
-                # afterwards, so a version's text changed after its creation and the policy graph
-                # had to archive the earlier files under _prior/).
-                lessons_text = "\n".join(f"- {r}" for r in rules)
-                new_memory = self._next_memory_text(agent_type, lessons_text, config_hash)
-                self._update_strategy_directives_for_config(
-                    agent_type,
-                    reminder_block,
-                    f'Weekly feedback reminder appended (ID: {feedback_id}) — approved policy preserved',
-                    config_hash,
-                    memory=new_memory,
-                )
-                print(f"✅ Appended {agent_type} feedback reminder for config {config_hash}")
-                self._update_agent_memory(
-                    agent_type, lessons_text, config_hash, rules=rules, write_prompt_row=False,
-                )
-
-        except Exception as e:
-            print(f"❌ Error generating prompts for config {config_hash}: {e}")
-            import traceback
-            traceback.print_exc()
 
     def _update_strategy_directives_for_config(self, agent_type, reminder_block, description, config_hash,
                                                memory=None):
@@ -844,13 +809,12 @@ class TradeOutcomeTracker:
         return append_dated_section(current_memory, new_lessons, max_chars=cls.MAX_MEMORY_CHARS)
 
     def _update_agent_memory(self, agent_type, new_lessons, config_hash, rules=None, write_prompt_row=True):
-        """Record lessons in decider_memory and, unless `write_prompt_row` is False (the weekly
-        path, which writes memory into the NEW row instead), append them to the active row's memory."""
-        MAX_MEMORY_CHARS = self.MAX_MEMORY_CHARS
+        """Compatibility hook: archive research without rewriting active policy.
 
-        # Record decider lessons in the structured long-term store (decider_memory) — the
-        # source of truth the decider retrieves from by relevance. One row per rule so the
-        # retrieval budget carries executable rules, not truncated paragraphs. Best-effort.
+        Feedback-origin rows are inactive in add_memory. The legacy
+        write_prompt_row flag cannot supply human approval; reviewed Prompt Lab
+        apply is the policy promotion path.
+        """
         if agent_type == "DeciderAgent":
             try:
                 from decider_memory import add_memory
@@ -864,16 +828,7 @@ class TradeOutcomeTracker:
             except Exception as _dm_exc:
                 print(f"⚠️  decider_memory write skipped: {_dm_exc}")
 
-        if not write_prompt_row:
-            return
-        try:
-            updated_memory = self._next_memory_text(agent_type, new_lessons, config_hash)
-            self._update_memory_field(agent_type, updated_memory, config_hash)
-            print(f"🧠 Updated {agent_type} memory for config {config_hash[:8]}")
-        except Exception as e:
-            print(f"⚠️ Failed to update {agent_type} memory: {e}")
-            import traceback
-            traceback.print_exc()
+        return {"status": "pending_human_review", "active_memory_updated": False}
 
     def _compress_memory(self, memory_text, max_chars):
         return self._compress_memory_static(memory_text, max_chars)
@@ -1025,15 +980,7 @@ class TradeOutcomeTracker:
             return ""
 
     def _generate_ai_feedback(self, outcomes, success_rate, avg_profit, analysis, config_hash=None):
-        """Use AI to generate feedback for improving agent performance.
-
-        The decider_feedback string is injected VERBATIM into every future Decider cycle
-        (Feedback Snapshot) and decider_rules become the Decider's standing "Latest
-        Feedback Reminder", so the output is a compact, executable rule set — not the
-        3,000-character narrative the loop produced through Aug 2026. The prompt starts
-        from COMPUTED DIAGNOSTICS (feedback_diagnostics.py): population-level regime,
-        extension, re-entry and payoff numbers that outrank any 40-row sample.
-        """
+        """Generate archived research with uncertainty; human review promotes policy."""
         outcomes_summary = json.dumps({
             "total_trades": len(outcomes),
             "success_rate": success_rate,
@@ -1066,18 +1013,19 @@ class TradeOutcomeTracker:
             print(f"⚠️ Trade diagnostics unavailable: {_diag_exc}")
 
         # FIXED TEMPLATE COMPONENTS (never change)
-        FEEDBACK_BASE_INSTRUCTIONS = f'''You are auditing the closed trades of an autonomous 1-5 day swing-trading system (Schwab cash account, $400-$700 tickets, ≤5 positions, +3% default harvest). Your decider_feedback is injected VERBATIM into every future Decider cycle and your decider_rules become the Decider's standing "Latest Feedback Reminder" — write executable rules, not narrative.
+        FEEDBACK_BASE_INSTRUCTIONS = f'''Review the supplied records of a 1-5 day trading system. Account mode, sizing, position limits and exits come from the current configuration and approved policy, not historical defaults. Feedback is nonbinding research for human review; it cannot mint a policy or activate a trade command.
 
-METHOD (in this order — do not skip a step):
-1. Start from COMPUTED DIAGNOSTICS. They are computed over ALL closed campaigns, not a sample, and they outrank your impression of the trade rows and prior feedback. Name the single largest measured leak in dollars first.
-2. REGIME: compare the same rules across RISK-ON vs MIXED/RISK-OFF entries. If the rules made money in one and lost in the other, the lesson is a REGIME rule (what changes when the index and the momentum leaders are below their 20d MA), not a setup rule.
-3. ENTRY GEOMETRY: extension above the 20d MA at entry and the distance to the kill. A kill 8-15% away is not risk control for a 1-5 day trade — it is the loss tail. A -2% day in a name 12% above its 20d MA is the first leg of an unwind, not a pullback into support.
-4. RE-ENTRY: same-ticker entries within 3 days of an exit are scored separately. If they lose, the rule is a quarantine with the number attached.
-5. PAYOFF: state the breakeven win rate implied by avg win / avg loss and whether the current win rate clears it. If winners are capped by the +3% harvest rule, say what that implies for the required stop distance.
-6. ONE primary change per agent (plus at most one secondary). Every rule is trigger → action → falsification metric (which number, over how many trades, would prove it wrong). Do not soften a rule the diagnostics support into "consider prospectively testing" because the sample is small or because a critic objected earlier — state it, attach the metric, and let the next review falsify it.
-7. Never propose a gate on data the Decider is not supplied. SUPPLIED FIELDS: {supplied_fields}
-8. Separate synced/inherited inventory from strategy entries; never use HOLD/SELL language for tickers not confirmed as owned.
-9. EVENT RISK: the diagnostics score entries made inside a macro window (FOMC within 2 sessions, CPI/jobs next session), campaigns held through an FOMC decision, and the share of cycles where a Summarizer named a dated event the Decider never acknowledged. If in-window entries lose or acknowledgment is below 80%, the rule is an EVENT GATE clause with the number attached — the Decider is supplied an EVENT CALENDAR block (today's date, sessions to the next FOMC/CPI/jobs report, next earnings date per holding and watchlist name).'''
+METHOD
+1. Start with computed diagnostics and their declared population, dates and coverage. Name the largest evidenced leak in dollars when available. Complete buckets and selected trade examples answer different questions; neither proves causality.
+2. Compare regime, entry/stop geometry, re-entry, payoff, event exposure and data quality. State sample sizes, missingness and confounders. A loss can follow sound process; a win can violate it. Later information is not entry-time evidence.
+3. Report supplied net expectancy and average win/loss. Win rate and gross winning dollars alone are insufficient. Winner recall/FPR require a declared prospective assessed/matured candidate universe, not selected closed purchases.
+4. Propose at most one primary change per agent and one secondary when supported. No change is valid. Distinguish wording clarification from changed eligibility, size, timing, scope, exceptions or exits.
+5. Write a readable operational condition/action; separately specify a predeclared outcome, sample requirement, matched comparator and exact horizon. Use candidate/shadow cases or later independent holdouts. Never require forbidden future trades to falsify a rule.
+6. Use only Decider supplied fields: {supplied_fields}. Missing intraday data is not an automatic failure. All binding gates apply together.
+7. Separate actual holdings/fills from model recommendations and synced inventory. HOLD/SELL language requires confirmed ownership; synced inventory has unknown entry quality unless proven otherwise.
+8. Separate ordinary entries, the explicitly approved capped earnings-event strategy and post-release opportunities. Preserve supplied caps and gap-risk limits. A macro date, red market or small losing subgroup alone does not justify selling every holding or banning all new entries.
+9. Verify promotional claims and repeated story origins. Repetition, a large player or an earnings move does not prove manipulation or an automatic contrarian opportunity.
+10. Report current human policy and critic/human disagreement accurately. Prior overrides do not approve unrelated future proposals. Computed associations do not override approved risk controls.'''
 
         # MODIFIABLE COMPONENTS (updated based on context data)
         critic_lessons_block = ""
@@ -1087,7 +1035,7 @@ METHOD (in this order — do not skip a step):
 PROMPT-CHANGE REVIEW HISTORY (critic verdicts + human RLHF response):
 {critic_lessons}
 
-Read this for what SHIPPED and what it realized — not as a list of objections to satisfy. A critic's "the rows do not validate this" is not evidence against a rule the COMPUTED DIAGNOSTICS support: cite the diagnostic and keep the rule. Where the human overrode the critic, the human's direction stands. Keep each proposal to one testable change so realized deltas are attributable.'''
+Report what was approved, shipped and observed. Preserve current explicit human policy and record critic/human disagreement. A prior override does not approve an unrelated change. Diagnostic associations and selected examples do not prove causality; compare matched cases and later independent periods.'''
 
         diagnostics_section = f"\n\n{diagnostics_block}" if diagnostics_block else ""
 
@@ -1100,30 +1048,25 @@ Recent Trade Details (sample, for pattern illustration only):
 {json.dumps(recent_trades, indent=2)}{critic_lessons_block}
 
 ANALYSIS REQUIREMENTS:
-- Lead with the ranked leaks in dollars; every insight carries a number from the diagnostics.
-- Rules must be executable by the Decider from the supplied fields, with a falsification metric.
+- Lead with ranked evidenced leaks in dollars when supplied. Cite diagnostic numbers for quantitative claims; state unavailable rather than inventing a number.
+- Proposed rules use supplied fields. Separate their condition/action from a predeclared metric, sample, matched cohort and exact horizon.
 - Keep decider_feedback ≤ 900 characters and summarizer_feedback ≤ 600 characters — both are injected into live prompts.
-- Preserve rules that the diagnostics still support; retire rules the diagnostics contradict, and say which.'''
+- State supported or challenged hypotheses with uncertainty. Retaining current policy and proposing no change is valid; only explicit human review can promote changed behavior.'''
 
-        FEEDBACK_JSON_FORMAT = '''
-🚨 CRITICAL JSON REQUIREMENT:
-Return ONLY valid JSON in this EXACT format:
+        FEEDBACK_JSON_FORMAT = '''Return ONLY one valid JSON object with these existing keys:
 {
-    "largest_measured_leak": {"name": "one phrase", "usd": -123.0, "evidence": "one sentence with the numbers"},
-    "regime_read": "RISK-ON | MIXED | RISK-OFF — one sentence on what the regime did to the rules",
-    "decider_rules": ["trigger → action → falsification metric", "second rule", "optional third", "optional fourth"],
-    "decider_feedback": "REGIME: … | ENTRY: … | KILL: … | RE-ENTRY: … | HARVEST: … | EVENT: … — one clause per rule, ≤ 900 characters total, no narrative",
-    "summarizer_rules": ["trigger → what context to surface → metric", "optional second"],
-    "summarizer_feedback": "≤ 600 characters: the CONTEXT the Summarizer must surface next (index/leader regime, sector-ETF direction, extension/crowding of the names it headlines, scheduled-event risk, coordinated-coverage flags). Do not redesign its schema.",
-    "key_insights": ["five one-sentence findings, each carrying a number from the diagnostics"],
-    "timing_patterns": "entry/exit timing finding with numbers",
-    "risk_management": "kill geometry / sizing finding with numbers",
-    "sector_insights": "correlation / sector finding with numbers"
+    "largest_measured_leak": {"name": "evidenced issue or unavailable", "usd": null, "evidence": "scope, supplied numbers and uncertainty"},
+    "regime_read": "observed comparison or unavailable",
+    "decider_rules": [],
+    "decider_feedback": "Nonbinding research summary for review, at most 900 characters; approved risk limits remain authoritative.",
+    "summarizer_rules": [],
+    "summarizer_feedback": "Nonbinding context-quality findings for review, at most 600 characters; preserve the schema.",
+    "key_insights": ["evidence-scoped finding, uncertainty or separate evaluation plan"],
+    "timing_patterns": "supported finding or unavailable",
+    "risk_management": "supported finding or unavailable",
+    "sector_insights": "supported finding or unavailable"
 }
-Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 characters, each a single trigger → action → metric rule.
-
-⛔ NO explanatory text ⛔ NO markdown ⛔ NO code blocks
-✅ ONLY pure JSON starting with { and ending with }'''
+Use supplied dollars for usd, otherwise null. decider_rules accepts 0-2 proposals; summarizer_rules 0-1. Empty arrays mean no supported change. Each compact proposal is at most 220 characters, with one observable condition and one action. Label changed behavior as a proposal. Put its predeclared outcome, sample requirement, matched comparator and exact horizon in key_insights. Never manufacture findings or fill a rule quota. No Markdown, code fences or prose outside JSON.'''
 
         # COMBINE: Fixed template + Modifiable performance data + Fixed JSON format
         prompt = f'''{FEEDBACK_BASE_INSTRUCTIONS}
@@ -1132,7 +1075,7 @@ Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 cha
 
 {FEEDBACK_JSON_FORMAT}'''
 
-        FEEDBACK_SYSTEM_BASE = '''You are the evidence judge of an autonomous trading system's learning loop. You turn realized P&L into a few executable, falsifiable rules. You are data-driven, specific, and immune to narrative — including the narrative of your own previous feedback.'''
+        FEEDBACK_SYSTEM_BASE = '''You are the evidence reviewer of a trading learning loop. Separate recorded facts, uncertain interpretations and proposed policy changes. Human feedback defines policy intent; market outcomes are noisy evidence rather than clean correct-action labels. Offer small readable proposals for review. Do not self-promote observations into execution rules.'''
 
         # Inject feedback agent soul if available
         feedback_soul = ""
@@ -1148,11 +1091,11 @@ Limits: decider_rules 2-4 items and summarizer_rules 1-3 items, each ≤ 220 cha
         system_prompt = f'''{FEEDBACK_SYSTEM_BASE}{feedback_soul_section}
 
 CRITICAL INSTRUCTIONS:
-1. COMPUTED DIAGNOSTICS outrank the trade sample and outrank prior feedback. Cite them by number.
+1. Report diagnostics with population, period, sample sizes and uncertainty; selected rows are illustrations, not causal proof.
 2. Order of analysis: regime, entry geometry, re-entry, payoff, event windows — then rules.
-3. One primary change per agent with a falsification metric. No hedging language ("consider", "prospectively test", "not an automatic rejection"): a rule is a rule until falsified.
+3. At most one primary proposal per agent; no change is valid. Use matched candidate/shadow comparisons and later independent holdouts. Advice is nonbinding until human review.
 4. Every gate must be executable from the supplied fields.
-5. decider_feedback ≤ 900 characters, summarizer_feedback ≤ 600 characters, rules ≤ 220 characters each — they are injected into live prompts.
+5. Keep decider_feedback ≤ 900 characters, summarizer_feedback ≤ 600 characters and compact proposals ≤ 220 characters. Empty rule arrays are valid; evaluation plans belong in key_insights.
 6. Return ONLY the JSON object.'''
 
         try:
@@ -1252,6 +1195,16 @@ CRITICAL INSTRUCTIONS:
             # Use stored prompts
             user_prompt_template = active_prompt["user_prompt"]
             system_prompt = active_prompt["system_prompt"]
+            # The legacy manual path uses stored templates, unlike the weekly
+            # code-owned reviewer. Resolve its guideline placeholder as well.
+            directives = active_prompt.get("strategy_directives") or ""
+            if "{strategy_directives}" in system_prompt:
+                system_prompt = system_prompt.replace("{strategy_directives}", directives)
+            elif directives:
+                system_prompt += "\n\n## GUIDELINES\n" + directives
+            for key, title in (("soul", "AGENT IDENTITY"), ("memory", "LESSONS FROM EXPERIENCE")):
+                if active_prompt.get(key):
+                    system_prompt += f"\n\n## {title}\n" + active_prompt[key]
             
             # Format the user prompt with context data
             user_prompt = user_prompt_template.format(
@@ -1465,7 +1418,8 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         agent_type = _canonical_agent_type(agent_type)
 
         # Import here to avoid circular imports
-        from config import should_use_specific_prompt_version, get_prompt_version_config
+        from config import should_use_specific_prompt_version, get_prompt_version_config, get_current_config_hash
+        config_hash = get_current_config_hash()
         
         with engine.connect() as conn:
             # Check if we should use a specific version instead of the latest
@@ -1475,11 +1429,12 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                 
                 # Try to get the specific version first
                 result = conn.execute(text("""
-                    SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description
+                    SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description,
+                           strategy_directives, soul, memory
                     FROM prompt_versions
-                    WHERE agent_type = :agent_type AND version = :version
+                    WHERE agent_type = :agent_type AND version = :version AND config_hash = :config_hash
                     LIMIT 1
-                """), {"agent_type": agent_type, "version": forced_version})
+                """), {"agent_type": agent_type, "version": forced_version, "config_hash": config_hash})
                 
                 row = result.fetchone()
                 if row:
@@ -1489,17 +1444,17 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                         "system_prompt": row.system_prompt,
                         "prompt_version": row.prompt_version,
                         "version": row.prompt_version,  # Add both for compatibility
-                        "description": row.description
+                        "description": row.description,
+                        "strategy_directives": row.strategy_directives or "",
+                        "soul": row.soul or "", "memory": row.memory or "",
                     }
                 else:
                     print(f"⚠️  Version {forced_version} not found for {agent_type}, falling back to latest")
             
             # Get the active prompt from the prompt_versions table for current config
-            from config import get_current_config_hash
-            config_hash = get_current_config_hash()
-            
             result = conn.execute(text("""
-                SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description
+                SELECT user_prompt_template as user_prompt, system_prompt, version as prompt_version, description,
+                       strategy_directives, soul, memory
                 FROM prompt_versions
                 WHERE agent_type = :agent_type AND is_active = TRUE AND config_hash = :config_hash
                 ORDER BY version DESC
@@ -1515,11 +1470,13 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
                     "system_prompt": row.system_prompt,
                     "prompt_version": row.prompt_version,
                     "version": row.prompt_version,  # Add both for compatibility
-                    "description": row.description
+                    "description": row.description,
+                    "strategy_directives": row.strategy_directives or "",
+                    "soul": row.soul or "", "memory": row.memory or "",
                 }
             return None
     
-    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None, strategy_directives=None):
+    def save_prompt_version(self, agent_type, user_prompt, system_prompt, description="", created_by="system", triggered_by_feedback_id=None, strategy_directives=None, soul=None, memory=None):
         """Save a new version of prompts for an agent type"""
         from prompt_manager import create_new_prompt_version
         
@@ -1538,9 +1495,10 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             agent_type=mapped_agent_type,
             system_prompt=system_prompt,
             user_prompt_template=user_prompt,
-            description=f"{description} (Auto-generated from feedback)",
+            description=description,
             created_by=created_by,
             strategy_directives=strategy_directives,
+            soul=soul, memory=memory,
         )
         
         print(f"✅ Created new prompt version for {mapped_agent_type} (ID: {prompt_id})")

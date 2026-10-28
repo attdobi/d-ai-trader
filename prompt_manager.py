@@ -54,77 +54,45 @@ def _build_prompt_payload(agent_type, row):
     return payload
 
 def initialize_config_prompts(config_hash):
-    """Initialize v0 baseline prompts for a new config"""
-    print(f"🔧 Initializing v0 baseline prompts for config {config_hash[:8]}")
-    
-    with engine.connect() as conn:
-        # Check if config already has prompts
-        existing = conn.execute(text("""
-            SELECT COUNT(*) as count
-            FROM prompt_versions
-            WHERE config_hash = :config_hash
-        """), {"config_hash": config_hash}).fetchone()
-        
-        if existing.count > 0:
-            print(f"  ⚠️  Config {config_hash[:8]} already has {existing.count} prompts")
-            return False
-        
-        # Get global v0 baseline prompts
-        baseline_result = conn.execute(text("""
-            SELECT agent_type, system_prompt, user_prompt_template, strategy_directives, soul, memory
-            FROM prompt_versions
-            WHERE version = 0 AND (config_hash = 'global' OR config_hash IS NULL)
-            ORDER BY agent_type
-        """))
-        
-        baseline_prompts = list(baseline_result)
-        if not baseline_prompts:
-            raise ValueError("No global v0 baseline prompts found!")
+    """Seed an empty config from the published defaults or shipped latest graph.
 
-        # DAI_POLICY_SEED=latest: a new config starts from the shipped latest policy graph
-        # (agents/<dir>/policy-graph/latest) instead of the code defaults.
-        seeded = {}
-        try:
-            from pathlib import Path as _Path
-            from config import env_first as _env_first
-            from policy_graph.seed import normalize_mode as _norm, seed_rows as _seed_rows
-            _mode = _norm(_env_first("DAI_POLICY_SEED", "default"))
-            if _mode == "latest":
-                defaults = {p.agent_type: {
-                    "system_prompt": p.system_prompt, "user_prompt_template": p.user_prompt_template,
-                    "strategy_directives": p.strategy_directives or "", "soul": getattr(p, 'soul', '') or '',
-                    "memory": getattr(p, 'memory', '') or '',
-                    "description": f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
-                } for p in baseline_prompts}
-                seeded = _seed_rows("latest", _Path(__file__).resolve().parent, defaults)
-                _summary = ", ".join(f"{a} {r['seed']}" for a, r in seeded.items())
-                print(f"  🌱 Policy seed: shipped latest graph ({_summary})")
-        except Exception as _seed_exc:
-            print(f"  ⚠️ Could not read the shipped latest policy graph, using code defaults: {_seed_exc}")
-            seeded = {}
-        
-        # Create config-specific v0 prompts
-        with engine.begin() as write_conn:
-            for prompt in baseline_prompts:
-                row = seeded.get(prompt.agent_type) or {}
-                write_conn.execute(text("""
-                    INSERT INTO prompt_versions
-                    (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
-                    VALUES (:agent_type, 0, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, :created_by, TRUE, :config_hash)
-                """), {
-                    "agent_type": prompt.agent_type,
-                    "system_prompt": row.get("system_prompt") or prompt.system_prompt,
-                    "user_prompt_template": row.get("user_prompt_template") or prompt.user_prompt_template,
-                    "strategy_directives": row.get("strategy_directives", prompt.strategy_directives),
-                    "soul": row.get("soul", getattr(prompt, 'soul', '') or ''),
-                    "memory": row.get("memory", getattr(prompt, 'memory', '') or ''),
-                    "description": row.get("description") or f"v0 Baseline for config {config_hash[:8]} - auto-initialized",
-                    "created_by": ("seed_latest" if row.get("seed") == "latest" else "auto_init"),
-                    "config_hash": config_hash,
-                })
-                print(f"  ✅ Created {prompt.agent_type} v0 ({row.get('seed', 'default')})")
-        
-        return True
+    Global v0 rows are immutable historical snapshots and may predate the
+    current release. They are not the source for a fresh configuration.
+    Existing configurations are never re-seeded.
+    """
+    from pathlib import Path
+    from initialize_prompts import DEFAULT_PROMPTS
+    from policy_graph.model import AGENT_PREFIX, FIELDS
+    from policy_graph.seed import normalize_mode, seed_rows
+
+    defaults = {agent: {
+        **{field: (DEFAULT_PROMPTS[agent].get(field) or "") for field in FIELDS},
+        "description": DEFAULT_PROMPTS[agent].get("description") or "Published baseline for a new configuration",
+    } for agent in AGENT_PREFIX}
+    try:
+        from config import env_first
+        mode = normalize_mode(env_first("DAI_POLICY_SEED", "default"))
+    except ImportError:
+        mode = "default"
+    seeded = seed_rows(mode, Path(__file__).resolve().parent, defaults)
+    with engine.begin() as conn:
+        existing = conn.execute(text("""
+            SELECT COUNT(*) FROM prompt_versions WHERE config_hash=:config_hash
+        """), {"config_hash": config_hash}).scalar_one()
+        if existing:
+            print(f"  ↪ Config {config_hash[:8]} already has prompt history; left unchanged")
+            return False
+        for agent, row in seeded.items():
+            conn.execute(text("""
+                INSERT INTO prompt_versions
+                (agent_type,version,system_prompt,user_prompt_template,strategy_directives,soul,memory,
+                 description,created_by,is_active,config_hash)
+                VALUES (:agent,0,:system_prompt,:user_prompt_template,:strategy_directives,:soul,:memory,
+                        :description,:created_by,TRUE,:config_hash)
+            """), {**row, "agent": agent, "config_hash": config_hash})
+    print(f"  ✅ Initialized four agents for config {config_hash[:8]} from {mode} policy")
+    return True
+
 
 def get_active_prompt(agent_type):
     """Get the currently active prompt for an agent type and config"""
@@ -473,98 +441,28 @@ def get_prompt_activation_history(config_hash, limit=50, conn=None):
     ]
 
 def create_new_prompt_version(agent_type, system_prompt, user_prompt_template, description, created_by="system", strategy_directives=None, soul=None, memory=None):
-    """Create a new prompt version for the current config, reusing version numbers when possible"""
+    """Append a new immutable version for the current config and audit activation."""
     agent_type = _canonical_agent_type(agent_type)
     from config import get_current_config_hash
     config_hash = get_current_config_hash()
-    
     with engine.begin() as conn:
-        # Check if we should reuse version numbers (when resetting from v0)
-        current_active = conn.execute(text("""
-            SELECT version
-            FROM prompt_versions
-            WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
-        """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-        
-        # If currently at v0, reuse v1 instead of creating v4, v5, etc.
-        if current_active and current_active.version == 0:
-            # We're evolving from v0, so use v1 (overwrite if it exists)
-            target_version = 1
-            print(f"🔄 Evolving from v0 → reusing v{target_version} for {agent_type}")
-        else:
-            # Get the next version number for this config
-            result = conn.execute(text("""
-                SELECT COALESCE(MAX(version), 0) + 1 as next_version
-                FROM prompt_versions
-                WHERE agent_type = :agent_type AND config_hash = :config_hash
-            """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
-            
-            target_version = result.next_version
-            print(f"📈 Creating new version v{target_version} for {agent_type}")
-        
-        # Check if target version already exists - if so, update it; if not, insert it.
-        # Rows are written inactive; activation goes through the audited
-        # switchboard below so the change lands in prompt_activation_events.
-        existing_version = conn.execute(text("""
-            SELECT id FROM prompt_versions
-            WHERE agent_type = :agent_type AND config_hash = :config_hash AND version = :version
-        """), {"agent_type": agent_type, "config_hash": config_hash, "version": target_version}).fetchone()
-
-        if existing_version:
-            # Update existing version
-            conn.execute(text("""
-                UPDATE prompt_versions
-                SET system_prompt = :system_prompt,
-                    user_prompt_template = :user_prompt_template,
-                    strategy_directives = :strategy_directives,
-                    soul = :soul,
-                    memory = :memory,
-                    description = :description,
-                    created_by = :created_by,
-                    created_at = CURRENT_TIMESTAMP
-                WHERE id = :id
-            """), {
-                "system_prompt": system_prompt,
-                "user_prompt_template": user_prompt_template,
-                "strategy_directives": strategy_directives,
-                "soul": soul or "",
-                "memory": memory or "",
-                "description": description,
-                "created_by": created_by,
-                "id": existing_version.id
-            })
-            prompt_id = existing_version.id
-            print(f"✅ Updated {agent_type} v{target_version} for config {config_hash[:8]} (overwritten)")
-        else:
-            # Insert new version
-            result = conn.execute(text("""
-                INSERT INTO prompt_versions
-                (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
-                VALUES (:agent_type, :version, :system_prompt, :user_prompt_template, :strategy_directives, :soul, :memory, :description, :created_by, FALSE, :config_hash)
-                RETURNING id, version
-            """), {
-                "agent_type": agent_type,
-                "version": target_version,
-                "system_prompt": system_prompt,
-                "user_prompt_template": user_prompt_template,
-                "strategy_directives": strategy_directives,
-                "soul": soul or "",
-                "memory": memory or "",
-                "description": description,
-                "created_by": created_by,
-                "config_hash": config_hash
-            })
-
-            new_prompt = result.fetchone()
-            prompt_id = new_prompt.id
-            print(f"✅ Created {agent_type} v{new_prompt.version} for config {config_hash[:8]} (new)")
-
-        set_active_prompt_version(
-            conn, agent_type, config_hash, target_version,
-            action="save", actor=created_by, reason=description,
-        )
-
-    # Committed: let agents/<dir>/policy-graph/latest/ follow the new active
-    # version (an overwrite of the same version number counts too — its bytes moved).
+        target_version = conn.execute(text("""
+            SELECT COALESCE(MAX(version),0)+1 FROM prompt_versions
+            WHERE agent_type=:agent_type AND config_hash=:config_hash
+        """), {"agent_type": agent_type, "config_hash": config_hash}).scalar_one()
+        prompt_id = conn.execute(text("""
+            INSERT INTO prompt_versions
+            (agent_type,version,system_prompt,user_prompt_template,strategy_directives,soul,memory,
+             description,created_by,is_active,config_hash)
+            VALUES (:agent_type,:version,:system_prompt,:user_prompt_template,:strategy_directives,:soul,:memory,
+                    :description,:created_by,FALSE,:config_hash) RETURNING id
+        """), {
+            "agent_type": agent_type, "version": target_version,
+            "system_prompt": system_prompt, "user_prompt_template": user_prompt_template,
+            "strategy_directives": strategy_directives, "soul": soul or "", "memory": memory or "",
+            "description": description, "created_by": created_by, "config_hash": config_hash,
+        }).scalar_one()
+        set_active_prompt_version(conn, agent_type, config_hash, target_version,
+                                  action="save", actor=created_by, reason=description)
     refresh_latest_policy_graph(config_hash, [agent_type], materialized_by="save")
     return prompt_id

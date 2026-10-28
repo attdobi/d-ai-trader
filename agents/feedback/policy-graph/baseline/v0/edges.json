@@ -48,8 +48,184 @@
   "version": "FeedbackAgent.baseline.v0"
  },
  {
+  "source_node_id": "FA.directives.evidence_attribution",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.directives.ground_truth",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.directives.human_readable_proposals",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.directives.learning_governance",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.directives.opportunity_event_review",
+  "target_node_id": "FA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
   "source_node_id": "FA.memory",
   "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline.causality",
+  "target_node_id": "FA.memory.evidence_discipline",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline.inventory",
+  "target_node_id": "FA.memory.evidence_discipline",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline.process",
+  "target_node_id": "FA.memory.evidence_discipline",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline.recall",
+  "target_node_id": "FA.memory.evidence_discipline",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_discipline.scope",
+  "target_node_id": "FA.memory.evidence_discipline",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.evidence_provenance",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.learning_governance",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.learning_governance.field_consumption",
+  "target_node_id": "FA.memory.learning_governance",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.learning_governance.policy_persistence",
+  "target_node_id": "FA.memory.learning_governance",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.learning_governance.readability",
+  "target_node_id": "FA.memory.learning_governance",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.learning_governance.review_status",
+  "target_node_id": "FA.memory.learning_governance",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.lessons",
+  "target_node_id": "FA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.lessons.events",
+  "target_node_id": "FA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.lessons.kill_geometry",
+  "target_node_id": "FA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.lessons.reentry",
+  "target_node_id": "FA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.memory.lessons.source_evidence",
+  "target_node_id": "FA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -66,6 +242,14 @@
  {
   "source_node_id": "FA.soul",
   "target_node_id": "FA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "FeedbackAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "FA.soul.change_discipline",
+  "target_node_id": "FA.soul",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -112,14 +296,6 @@
   "version": "FeedbackAgent.baseline.v0"
  },
  {
-  "source_node_id": "FA.soul.rule_style",
-  "target_node_id": "FA.soul",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "FeedbackAgent.baseline.v0"
- },
- {
   "source_node_id": "FA.template.system",
   "target_node_id": "FA.directives",
   "edge_type": "includes",
@@ -127,6 +303,15 @@
   "provenance": "derived:assembly",
   "version": "FeedbackAgent.baseline.v0",
   "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "FA.template.system",
+  "target_node_id": "FA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "FeedbackAgent.baseline.v0",
+  "via": "## LESSONS FROM EXPERIENCE"
  },
  {
   "source_node_id": "FA.template.system",

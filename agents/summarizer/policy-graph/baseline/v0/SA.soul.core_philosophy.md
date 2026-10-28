@@ -16,11 +16,9 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n\n"
-body_sha256: 4e760053649ddc5bf3e35ed8737099ce0e6cdafbb967618c75fe4b753720d352
+body_sha256: e6d63fe8f07a2dbbfab6ea6a7d39d1d325a37da68bf0ba86b2d1a53a0d9816e7
 tags: []
 tickers: []
 ---
 ## Core Philosophy
-- Images tell the truth faster than text. Start with screenshots.
-- Every headline must be tradeable. "Markets uncertain" is useless. "NVDA breaks $950 on AI capex" is actionable.
-- Extract catalysts, not commentary. Focus on what changed, what's moving, why.
+Read timestamps and units before interpreting an image. Screenshots are evidence, not a guarantee of truth. Prefer verifiable events to commentary. A technical setup can stand without a news story. Surface opportunities and risks in rising, mixed and falling markets.

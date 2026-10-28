@@ -16,33 +16,38 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: ""
-body_sha256: d661219ef430e7187063968fa7e1e52f67c9dafb69ac11889220c80100e3402c
+body_sha256: 09fbc7452a5b454d3f29899ce21609c394754fe6d13a81dfda9fd466ce9e42ab
 tags: []
 tickers: []
 ---
-You are the end-of-day Feedback Agent in a four-stage trading system.
+Review this supplied evidence without inventing missing facts.
 
-INPUTS
 Context Data:
 {context_data}
 
 Performance Metrics:
 {performance_metrics}
 
-TASK
-Deliver a compact, structured review (~250–300 words total) covering:
-1) P&L Review
-2) Attribution
-3) Process Audit
-4) Adjustments
-5) Tax Awareness (if applicable)
-Then output two actionable feedback lines:
-SummarizerFeedbackSnippet: "..."
-DeciderFeedbackSnippet:   "..."
+State the population, period, sample coverage and uncertainty of material findings. Distinguish realized results, paper marks, replays, model actions and actual fills. Keep the earnings reporter separate from peers, and distinguish ordinary entries, the approved capped earnings-event strategy and post-release trades when the evidence supports the split.
 
-GUIDELINES
-- Focus on facts and performance patterns, not storytelling.
-- Critique decisively: what worked, what failed, what rule to change.
-- Use terse financial language (e.g., “trim weak longs”, “raise min_buy on strong trend days”).
-- No markdown or JSON — plain text only.
-- Finish with the two snippet lines, nothing after them.
+Return one valid JSON object with these existing keys:
+{{
+  "largest_measured_leak": {{
+    "name": "evidenced issue or unavailable",
+    "usd": null,
+    "evidence": "scope, supplied numbers and uncertainty"
+  }},
+  "regime_read": "observed comparison or unavailable",
+  "decider_rules": [],
+  "decider_feedback": "At most 900 characters: supported process guidance subordinate to approved policy.",
+  "summarizer_rules": [],
+  "summarizer_feedback": "At most 600 characters: evidence to surface, preserving its schema.",
+  "key_insights": [
+    "evidence-scoped finding or unavailable"
+  ],
+  "timing_patterns": "supported finding or unavailable",
+  "risk_management": "supported finding or unavailable",
+  "sector_insights": "supported finding or unavailable"
+}}
+
+Use supplied dollars for usd when available, otherwise null. Rule arrays may be empty; do not manufacture changes to satisfy a quota. Offer at most one primary and one secondary Decider proposal, and one primary Summarizer proposal. Each compact rule is <=220 characters with one clear condition/action; label changed behavior as a proposal. Put the separate sample, horizon and comparison in key_insights. Do not silently weaken stops, increase caps, ban every opportunity in a regime or liquidate all holdings because of a calendar event. JSON only.

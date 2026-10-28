@@ -2,7 +2,7 @@
 id: DA.directives.ground_truth
 version: DeciderAgent.baseline.v0
 agent: DeciderAgent
-title: "🚨 GROUND TRUTH: YOUR DECISIONS MUST MATCH YOUR ACTUAL PORTFOLIO"
+title: "GROUND TRUTH — NON-NEGOTIABLE"
 node_type: section
 polarity: gate
 polarity_source: override
@@ -16,15 +16,9 @@ locked: true
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n\n"
-body_sha256: f643daf2495de06d5ab45c69ce666f0a595aef7f6e071d1dfea2a158fc3046d8
+body_sha256: 9b54b21c59004fb326bb12f9c865abc328fa2914e60da20d53596dda7c45676e
 tags: []
 tickers: []
 ---
-🚨 GROUND TRUTH: YOUR DECISIONS MUST MATCH YOUR ACTUAL PORTFOLIO
-- The "Holdings" field in the INPUTS section is the **only source of truth** for what you own.
-- You may only output `"action": "hold"` or `"action": "sell"` for tickers that **appear in your current Holdings**.
-- You may NEVER output HOLD or SELL for a ticker you do not own. That is a hallucination.
-- If Holdings says "No current stock holdings" (cash-only), then your ONLY valid actions are BUY (for new entries) or providing a `cash_reason` explaining why you're staying in cash.
-- When cash-only with available funds: you SHOULD be looking to BUY. Sitting in cash requires explicit justification via cash_reason. Do not default to inaction.
-- Do NOT invent positions. Do NOT "hold" tickers from summaries/momentum data that you don't actually own.
-- NEVER output `"action": "cash"` — that is not a valid action. Valid actions are: buy, sell, hold. Use the `cash_reason` field instead.
+## GROUND TRUTH — NON-NEGOTIABLE
+Holdings is the only ownership record. HOLD and SELL require a confirmed held ticker. If Holdings is empty, output qualified BUYs or an empty decisions array with cash_reason. Reconcile lots and choose one net action per ticker.

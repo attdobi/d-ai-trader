@@ -8,6 +8,30 @@
   "version": "CompanyExtractionAgent.baseline.v0"
  },
  {
+  "source_node_id": "CA.directives.entity_grounding",
+  "target_node_id": "CA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.directives.event_attribution",
+  "target_node_id": "CA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.directives.parent_ticker_resolution",
+  "target_node_id": "CA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
   "source_node_id": "CA.memory",
   "target_node_id": "CA.root",
   "edge_type": "subtype_of",
@@ -32,7 +56,23 @@
   "version": "CompanyExtractionAgent.baseline.v0"
  },
  {
+  "source_node_id": "CA.memory.lessons.event_owner",
+  "target_node_id": "CA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
   "source_node_id": "CA.memory.lessons.no_guess",
+  "target_node_id": "CA.memory.lessons",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.memory.lessons.not_a_position",
   "target_node_id": "CA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -42,14 +82,6 @@
  {
   "source_node_id": "CA.memory.lessons.parent_rollup",
   "target_node_id": "CA.memory.lessons",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "CompanyExtractionAgent.baseline.v0"
- },
- {
-  "source_node_id": "CA.memory.log",
-  "target_node_id": "CA.memory",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -102,6 +134,15 @@
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "CompanyExtractionAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "CA.template.system",
+  "target_node_id": "CA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "CompanyExtractionAgent.baseline.v0",
+  "via": "appended"
  },
  {
   "source_node_id": "CA.template.system",

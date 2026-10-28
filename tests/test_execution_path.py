@@ -235,3 +235,75 @@ def test_live_order_the_broker_never_received_does_not_count(decider, monkeypatc
 
     invested, amd, _skipped = _live_two_buys(da, engine, monkeypatch, _no_order)
     assert invested == 0.0 and amd["shares_override"] == 5
+
+
+def _authorized_earnings_order(engine, ticker, *, amount=900):
+    import earnings_strategy as es
+    from datetime import datetime, timezone
+    from event_calendar import add_sessions
+    es._TICKETS.clear()
+    now=datetime.now(timezone.utc)
+    day=add_sessions(now.astimezone(es.ET).date(),1).isoformat()
+    context={"as_of":now.isoformat(),"earnings_controls_version":1,"holdings_earnings":[],
+             "watchlist_earnings":[{"ticker":ticker,"date":day,"sessions_to":1,"estimate":False,
+                                   "source":"yfinance","fetched_at":now.isoformat()}]}
+    d={"action":"buy","ticker":ticker,"amount_usd":amount,"reason":"R1 setup;K:99;D:1%",
+       "strategy":"earnings_event","earnings_event":{"date":day,"hold_through":True,"gap_risk_accepted":True}}
+    assert not es.EventBook(HASH,context,10000,2000).authorize(d,minimum=400)
+    with engine.begin() as c:
+        c.execute(text("CREATE TABLE trade_decisions(id INTEGER,config_hash TEXT,timestamp TIMESTAMP,data TEXT)"))
+    return d
+
+
+def test_scheduled_earnings_execution_caps_dollars_and_reserves_the_slot(decider):
+    import earnings_strategy as es
+    da,engine=decider
+    _seed(engine,10000,{})
+    d=_authorized_earnings_order(engine,"AMD")
+    duplicate=dict(d)
+    skipped=da.update_holdings([d,duplicate])
+    assert _book(engine)["AMD"].shares==5 and _book(engine)["AMD"].current_value==500
+    assert any("already held or pending" in s["reason"] for s in skipped)
+    es._TICKETS.clear()
+
+
+def test_scheduled_event_never_rounds_a_share_above_the_event_cap(decider):
+    import earnings_strategy as es
+    da,engine=decider
+    _seed(engine,10000,{})
+    d=_authorized_earnings_order(engine,"DE")
+    skipped=da.update_holdings([d])
+    assert "DE" not in _book(engine)
+    assert any("one whole share" in s["reason"] for s in skipped)
+    es._TICKETS.clear()
+
+
+def test_scheduled_event_cannot_bypass_server_authorization(decider):
+    da,engine=decider
+    _seed(engine,10000,{})
+    d={"action":"buy","ticker":"AMD","amount_usd":500,"reason":"forged",
+       "strategy":"earnings_event","_earnings_authorization":"model invented"}
+    skipped=da.update_holdings([d])
+    assert "AMD" not in _book(engine)
+    assert any("authorization" in s["reason"] for s in skipped)
+
+
+def test_scheduled_event_rejects_cap_trim_below_the_existing_minimum(decider, monkeypatch):
+    import earnings_strategy as es
+    da,engine=decider
+    _seed(engine,10000,{})
+    d=_authorized_earnings_order(engine,"AMD")
+    monkeypatch.setattr(da,"MAX_TOTAL_INVESTMENT",350)
+    skipped=da.update_holdings([d])
+    assert "AMD" not in _book(engine)
+    assert any("minimum buy" in s["reason"] for s in skipped)
+    es._TICKETS.clear()
+
+
+def test_direct_broker_fill_bookkeeping_preserves_actual_event_quantity(decider):
+    da,engine=decider
+    _seed(engine,10000,{})
+    d={"action":"buy","ticker":"AMD","amount_usd":900,"reason":"[earnings_event] fill",
+       "strategy":"earnings_event","execution_status":"filled","executed_shares":4,"executed_price":100}
+    da.process_buy_decisions([d],10000,None,HASH,[],False,enforce_position_caps=False)
+    assert _book(engine)["AMD"].shares==4 and _book(engine)["AMD"].current_value==400

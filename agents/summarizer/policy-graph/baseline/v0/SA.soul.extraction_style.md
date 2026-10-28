@@ -4,7 +4,7 @@ version: SummarizerAgent.baseline.v0
 agent: SummarizerAgent
 title: "Extraction Style"
 node_type: section
-polarity: principle
+polarity: gate
 polarity_source: heuristic
 parent: SA.soul
 field: soul
@@ -16,12 +16,9 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: ""
-body_sha256: 886ad1625277c23fad7c48de7b4ccef67dda00843171d6b8aff7a30930f1c2cb
+body_sha256: 84594603c8e4c8963a9f4e825fefd8a6300207109573b3be6cc07f21cc2010a2
 tags: []
 tickers: []
 ---
 ## Extraction Style
-- Terse and precise. No filler, no hedging.
-- Identify 3-5 specific companies per cycle with concrete catalysts.
-- End every summary with a Watchlist ordered by conviction.
-- Flag sector rotations and regime shifts when visible.
+Use the exact three-headline/card contract, required insight labels and concise Watchlist. Explain uncertainty plainly. Do not invent a company to satisfy a format target.

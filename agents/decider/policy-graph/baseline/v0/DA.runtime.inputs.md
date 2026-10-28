@@ -16,7 +16,7 @@ locked: true
 provenance: generated
 sep_before: ""
 sep_after: ""
-body_sha256: b14072af712dd5ec0efc403cdf27ce3a8fa3f6f9fde1e90e308c59dd96092930
+body_sha256: 0c83c6b3c99783e758682a97e85904cd80d4ae20cefbde5fa7ea8aa7b0f7feaf
 tags: []
 tickers: []
 ---
@@ -25,19 +25,23 @@ Per-cycle data blocks — not policy text; varies per cycle.
 Placeholders filled by safe_format_template from the user prompt template:
 - {account_mode}
 - {settled_cash}
+- {min_buy}
+- {typical_buy_low}
+- {typical_buy_high}
+- {max_buy}
 - {today_tickets_used}
 - {daily_ticket_cap}
 - {today_buys_used}
 - {daily_buy_cap}
 - {minutes_since_last_entry}
 - {tickers_entered_today}
-- {min_buy}
-- {typical_buy_low}
-- {typical_buy_high}
-- {max_buy}
+- {index_regime}
+- {event_calendar}
 - {holdings}
 - {summaries}
 - {momentum_recap}
+- {contrarian_watchlist}
+- {quarantine}
 - {feedback_context}
 - {settled_cash_value}
 - {min_buy_amount}
@@ -52,4 +56,4 @@ Blocks supplied by decider_agent.ask_decision_agent every cycle:
 - # RECENT ACTIVITY (decider_memory.build_working_memory)
 - Feedback Snapshot (latest feedback row)
 
-# Auto-context lines appended for placeholders the template does not declare: {index_regime}, {available_cash}
+# Auto-context lines appended for placeholders the template does not declare: {available_cash}

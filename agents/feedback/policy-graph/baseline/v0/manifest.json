@@ -14,11 +14,11 @@
  "is_active": true,
  "materialized_by": "baseline",
  "source_sha256": {
-  "system_prompt": "bdc4eeedb30aafdeaf0ca77b2cef3364784dc85cf7023247dc5276d40232fece",
-  "user_prompt_template": "d661219ef430e7187063968fa7e1e52f67c9dafb69ac11889220c80100e3402c",
-  "strategy_directives": "25adfa26cb3788baa7992e0cd0c2c7a0ef79a32b4688c8e7d3884bee8161c495",
-  "soul": "bd39fad5bc6610161c7e5b73c3c510843fdcb316bbbdc7c1a46224c0ce52486f",
-  "memory": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  "system_prompt": "dd273d3ea81be60df4ade9aaea9a1286477a788baf967940365986ef77bc41d8",
+  "user_prompt_template": "09fbc7452a5b454d3f29899ce21609c394754fe6d13a81dfda9fd466ce9e42ab",
+  "strategy_directives": "60975b9f6374d143a01a93a9566a01f7c4514913819efa981af06d4a5a3c72f5",
+  "soul": "8d4cde67331e1a166867ddd018de1324e15fee3ab04d33a3b61274c3b2c3486b",
+  "memory": "8f0b6c93a827e64883a40f5bf553bc48bb09f654aca67fe7f60a598305129033"
  },
  "fields": {
   "system_prompt": {
@@ -43,7 +43,7 @@
   },
   "memory": {
    "stored_null": false,
-   "stored_empty": true,
+   "stored_empty": false,
    "inherited": false
   }
  },
@@ -55,7 +55,12 @@
    "FA.template.user"
   ],
   "strategy_directives": [
-   "FA.directives"
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.evidence_attribution",
+   "FA.directives.opportunity_event_review",
+   "FA.directives.human_readable_proposals",
+   "FA.directives.learning_governance"
   ],
   "soul": [
    "FA.soul",
@@ -64,17 +69,34 @@
    "FA.soul.identity",
    "FA.soul.core_philosophy",
    "FA.soul.review_style",
-   "FA.soul.rule_style"
+   "FA.soul.change_discipline"
   ],
   "memory": [
-   "FA.memory"
+   "FA.memory",
+   "FA.memory.evidence_discipline",
+   "FA.memory.evidence_discipline.scope",
+   "FA.memory.evidence_discipline.causality",
+   "FA.memory.evidence_discipline.process",
+   "FA.memory.evidence_discipline.inventory",
+   "FA.memory.evidence_discipline.recall",
+   "FA.memory.lessons",
+   "FA.memory.lessons.kill_geometry",
+   "FA.memory.lessons.reentry",
+   "FA.memory.lessons.events",
+   "FA.memory.lessons.source_evidence",
+   "FA.memory.learning_governance",
+   "FA.memory.learning_governance.field_consumption",
+   "FA.memory.learning_governance.policy_persistence",
+   "FA.memory.learning_governance.review_status",
+   "FA.memory.learning_governance.readability",
+   "FA.memory.evidence_provenance"
   ]
  },
- "node_count": 18,
- "edge_count": 24,
+ "node_count": 40,
+ "edge_count": 47,
  "code": {
-  "sha": "f1f7e2716819",
-  "dir": "../_code/f1f7e2716819",
+  "sha": "f42dce4ea4f4",
+  "dir": "../_code/f42dce4ea4f4",
   "git_sha": "baseline",
   "fires": {
    "FA.code.system_base": true,
@@ -93,7 +115,7 @@
  },
  "lineage": null,
  "delta_vs_prev": {
-  "added": 11,
+  "added": 33,
   "changed": 0,
   "removed": 0,
   "renamed": 0,

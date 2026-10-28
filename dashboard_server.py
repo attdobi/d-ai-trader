@@ -188,192 +188,39 @@ def _refresh_holdings_with_quotes(holdings):
 
 
 def _ensure_v0_prompt(conn, agent_type, config_hash, prompt_payload):
-    """Ensure the v0 prompt for the given agent/config matches code defaults.
+    """Create a missing reset baseline without changing any historical version.
 
-    Content-only sync: the v0 row keeps whatever activation state it had
-    (activation changes must go through prompt_manager.set_active_prompt_version
-    so they are audited and undoable).
+    Reset reactivates an existing v0 through the audited switchboard. Current
+    release defaults seed a new config; they never replace an older config's
+    baseline, its row ID, or related legacy-table history.
     """
-    if not prompt_payload:
+    if not prompt_payload or agent_type == "feedback_analyzer":
         return
-    if agent_type == "feedback_analyzer":
-        # Legacy alias of FeedbackAgent — same payload is synced under the
-        # canonical name; writing alias rows would recreate migrated cruft.
-        return
-
+    existing = conn.execute(text("""
+        SELECT id FROM prompt_versions
+        WHERE agent_type=:agent_type AND version=0
+          AND (config_hash=:config_hash OR (:config_hash='global' AND config_hash IS NULL))
+        LIMIT 1
+    """), {"agent_type": agent_type, "config_hash": config_hash}).fetchone()
+    if existing:
+        return existing.id
     system_prompt = prompt_payload.get("system_prompt")
     user_prompt = prompt_payload.get("user_prompt_template") or prompt_payload.get("user_prompt")
-    strategy_directives = prompt_payload.get("strategy_directives", "")
-    soul = prompt_payload.get("soul", "")
-    memory = prompt_payload.get("memory", "")
-    description = prompt_payload.get("description")
-
     if not system_prompt or not user_prompt:
         return
-
-    delete_params = {
-        "agent_type": agent_type,
-        "config_hash": config_hash,
-    }
-
-    def _delete_rows(table_name, template):
-        conn.execute(text(template), delete_params)
-
-    def _insert_row(table_name, insert_sql):
-        values = {
-            "agent_type": agent_type,
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "description": description,
-            "config_hash": 'global' if config_hash == "global" else config_hash,
-        }
-        if ":strategy_directives" in insert_sql:
-            values["strategy_directives"] = strategy_directives
-        if ":soul" in insert_sql:
-            values["soul"] = soul
-        if ":memory" in insert_sql:
-            values["memory"] = memory
-        if ":is_active" in insert_sql:
-            values["is_active"] = v0_was_active
-        conn.execute(text(insert_sql), values)
-
-    # Base table — capture the row's activation state before the
-    # delete+reinsert so the content sync never steals the active flag
-    # from an evolved version (or resurrects a deliberately dormant v0).
-    if config_hash == "global":
-        cfg_clause = "(config_hash = 'global' OR config_hash IS NULL)"
-    else:
-        cfg_clause = "config_hash = :config_hash"
-
-    prev_v0 = conn.execute(text(f"""
-        SELECT is_active
-        FROM prompt_versions
-        WHERE agent_type = :agent_type
-          AND version = 0
-          AND {cfg_clause}
-        LIMIT 1
-    """), delete_params).fetchone()
-    if prev_v0 is not None:
-        v0_was_active = bool(prev_v0.is_active)
-    else:
-        # Fresh v0: active only when the agent has no active version at all,
-        # mirroring init_database's seeding rules.
-        v0_was_active = conn.execute(text(f"""
-            SELECT 1
-            FROM prompt_versions
-            WHERE agent_type = :agent_type
-              AND is_active = TRUE
-              AND {cfg_clause}
-            LIMIT 1
-        """), delete_params).fetchone() is None
-
-    if config_hash == "global":
-        _delete_rows("prompt_versions", """
-            DELETE FROM prompt_versions
-            WHERE agent_type = :agent_type
-              AND version = 0
-              AND (config_hash = 'global' OR config_hash IS NULL)
-        """)
-    else:
-        _delete_rows("prompt_versions", """
-            DELETE FROM prompt_versions
-            WHERE agent_type = :agent_type
-              AND version = 0
-              AND config_hash = :config_hash
-        """)
-
-    _insert_row("prompt_versions", """
+    return conn.execute(text("""
         INSERT INTO prompt_versions
-            (agent_type, version, system_prompt, user_prompt_template, strategy_directives, soul, memory, description, created_by, is_active, config_hash)
-        VALUES
-            (:agent_type, 0, :system_prompt, :user_prompt, :strategy_directives, :soul, :memory, :description, 'prompt_reset', :is_active, :config_hash)
-    """)
-
-    def _table_exists(table_name):
-        result = conn.execute(text("SELECT to_regclass(:tbl)"), {"tbl": table_name}).scalar()
-        return result is not None
-
-    def _table_has_column(table_name, column_name):
-        return conn.execute(text("""
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = :table AND column_name = :column
-        """), {"table": table_name, "column": column_name}).fetchone() is not None
-
-    if _table_exists('ai_agent_prompts') and _table_has_column('ai_agent_prompts', 'agent_type'):
-        has_config = _table_has_column('ai_agent_prompts', 'config_hash')
-        use_version = _table_has_column('ai_agent_prompts', 'version')
-
-        if not has_config:
-            # Cannot scope by config hash; skip syncing to avoid corrupting shared rows
-            return
-        else:
-            if config_hash == "global":
-                if use_version:
-                    _delete_rows("ai_agent_prompts", """
-                        DELETE FROM ai_agent_prompts
-                        WHERE agent_type = :agent_type
-                          AND version = 0
-                          AND (config_hash = 'global' OR config_hash IS NULL)
-                    """)
-                else:
-                    _delete_rows("ai_agent_prompts", """
-                        DELETE FROM ai_agent_prompts
-                        WHERE agent_type = :agent_type
-                          AND (config_hash = 'global' OR config_hash IS NULL)
-                    """)
-            else:
-                if use_version:
-                    _delete_rows("ai_agent_prompts", """
-                        DELETE FROM ai_agent_prompts
-                        WHERE agent_type = :agent_type
-                          AND version = 0
-                          AND config_hash = :config_hash
-                    """)
-                else:
-                    _delete_rows("ai_agent_prompts", """
-                        DELETE FROM ai_agent_prompts
-                        WHERE agent_type = :agent_type
-                          AND config_hash = :config_hash
-                    """)
-
-        if has_config:
-            if use_version:
-                _insert_row("ai_agent_prompts", """
-                    INSERT INTO ai_agent_prompts
-                        (agent_type, version, prompt_version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
-                    VALUES
-                        (:agent_type, 0, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
-                """)
-            else:
-                _insert_row("ai_agent_prompts", """
-                    INSERT INTO ai_agent_prompts
-                        (agent_type, prompt_version, system_prompt, user_prompt, description, created_by, is_active, config_hash)
-                    VALUES
-                        (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
-                """)
-
-    if _table_exists('unified_prompts') and _table_has_column('unified_prompts', 'agent_type'):
-        if config_hash == "global":
-            _delete_rows("unified_prompts", """
-                DELETE FROM unified_prompts
-                WHERE agent_type = :agent_type
-                  AND version = 0
-                  AND (config_hash = 'global' OR config_hash IS NULL)
-            """)
-        else:
-            _delete_rows("unified_prompts", """
-                DELETE FROM unified_prompts
-                WHERE agent_type = :agent_type
-                  AND version = 0
-                  AND config_hash = :config_hash
-            """)
-
-        _insert_row("unified_prompts", """
-            INSERT INTO unified_prompts
-                (agent_type, version, system_prompt, user_prompt_template, description, created_by, is_active, config_hash)
-            VALUES
-                (:agent_type, 0, :system_prompt, :user_prompt, :description, 'prompt_reset', TRUE, :config_hash)
-        """)
+            (agent_type,version,system_prompt,user_prompt_template,strategy_directives,soul,memory,
+             description,created_by,is_active,config_hash)
+        VALUES (:agent_type,0,:system_prompt,:user_prompt,:strategy_directives,:soul,:memory,
+                :description,'prompt_reset',FALSE,:config_hash) RETURNING id
+    """), {
+        "agent_type": agent_type, "config_hash": config_hash,
+        "system_prompt": system_prompt, "user_prompt": user_prompt,
+        "strategy_directives": prompt_payload.get("strategy_directives") or "",
+        "soul": prompt_payload.get("soul") or "", "memory": prompt_payload.get("memory") or "",
+        "description": prompt_payload.get("description") or "Baseline created for explicit reset",
+    }).scalar_one()
 
 
 def _normalize_feedback_value(value):
@@ -2147,12 +1994,12 @@ def api_portfolio_performance():
 def api_reset_prompts_to_baseline():
     """Reset prompt blueprints to their v0 baseline for the active configuration."""
     config_hash = get_current_config_hash()
-    agents = ["SummarizerAgent", "DeciderAgent", "FeedbackAgent"]
+    agents = ["SummarizerAgent", "DeciderAgent", "FeedbackAgent", "CompanyExtractionAgent"]
     try:
         importlib.reload(default_prompts_module)
         latest_defaults = default_prompts_module.DEFAULT_PROMPTS
 
-        # Sync global baselines first so initialize_config_prompts copies fresh text
+        # Ensure missing historical baseline rows; never replace existing text.
         with engine.begin() as conn:
             for agent, payload in latest_defaults.items():
                 _ensure_v0_prompt(conn, agent, "global", payload)
@@ -3077,7 +2924,7 @@ def reset_prompts():
                     'error': f'Cannot reset prompts for FIXED mode configuration (currently FIXED v{config_result.forced_prompt_version})'
                 }), 400
 
-        # Ensure v0 templates match current code defaults before toggling
+        # Insert any missing baseline; existing historical v0 text is immutable.
         try:
             importlib.reload(default_prompts_module)
             latest_defaults = default_prompts_module.DEFAULT_PROMPTS
@@ -3086,7 +2933,7 @@ def reset_prompts():
                     _ensure_v0_prompt(conn, agent_type, config_hash, payload)
                     _ensure_v0_prompt(conn, agent_type, 'global', payload)
         except Exception as e:
-            print(f"⚠️  Failed to sync v0 prompts with defaults: {e}")
+            print(f"⚠️  Failed to ensure missing v0 baselines: {e}")
 
         # Reset prompt systems with proper error handling
         try:
@@ -3810,12 +3657,31 @@ _PROMPT_LAB_LABELS = {
     'SummarizerAgent': 'Summarizer',
     'DeciderAgent': 'Decider',
     'FeedbackAgent': 'Feedback',
+    'CompanyExtractionAgent': 'Company extraction',
 }
 _PROMPT_LAB_AGENT_DIRS = {
     'SummarizerAgent': 'summarizer',
     'DeciderAgent': 'decider',
     'FeedbackAgent': 'feedback',
+    'CompanyExtractionAgent': 'company',
 }
+
+
+@app.route('/api/prompt-contracts')
+def get_prompt_contract():
+    from prompt_contracts import prompt_contract
+    from policy_graph.model import AGENT_PREFIX
+    agent = request.args.get('agent', 'DeciderAgent')
+    if agent not in AGENT_PREFIX:
+        return jsonify({'error': 'Unknown agent'}), 400
+    with engine.connect() as conn:
+        version = conn.execute(text("""SELECT version FROM prompt_versions
+            WHERE config_hash=:h AND agent_type=:a AND is_active=TRUE
+            ORDER BY version DESC LIMIT 1"""),
+            {'h': get_current_config_hash(), 'a': agent}).scalar()
+    response = jsonify(prompt_contract(agent, version))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 _MISSION_HEADER_LOWER = 'mission (shared across all agents'
 
 

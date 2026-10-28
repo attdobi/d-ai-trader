@@ -86,7 +86,7 @@ def test_weekly_quarantine_precedes_every_policy_or_memory_write(feedback):
     assert calls == []
 
 
-def test_weekly_selective_feedback_still_updates_policy_and_memory():
+def test_weekly_selective_feedback_requires_review_before_policy_or_memory():
     calls = []
     tracker = SimpleNamespace(
         _is_config_in_auto_mode=lambda cfg: True,
@@ -97,10 +97,10 @@ def test_weekly_selective_feedback_still_updates_policy_and_memory():
     )
     method = _method("feedback_agent.py", "_auto_generate_prompts_from_feedback_for_config",
                      {"feedback_policy_violations": feedback_policy_violations})
-    method(tracker, {"decider_rules": ["IF RISK-OFF THEN half size."]}, 124, "test-config")
-    assert [c[0] for c in calls] == ["version", "memory"]
-    assert calls[0][1]["memory"] == "new memory"
-    assert calls[1][1]["write_prompt_row"] is False
+    result = method(tracker, {"decider_rules": ["IF RISK-OFF THEN half size."]}, 124, "test-config")
+    assert calls == []
+    assert result["status"] == "pending_human_review"
+    assert result["policy_updated"] is False and result["active_memory_updated"] is False
 
 
 def test_direct_feedback_cannot_bypass_quarantine_and_raw_record_is_unchanged():
@@ -108,7 +108,8 @@ def test_direct_feedback_cannot_bypass_quarantine_and_raw_record_is_unchanged():
     assert "withheld" in safe_feedback_context(raw)
     assert raw == {"rule": MACRO}
     safe = "RISK-OFF: evaluate an oversold reversal at half size."
-    assert safe_feedback_context(safe) == safe
+    assert safe in safe_feedback_context(safe)
+    assert "UNREVIEWED FEEDBACK" in safe_feedback_context(safe)
     assert "withheld" in safe_feedback_context(json.dumps({"rule": MACRO}))
     assert "withheld" in safe_feedback_context(json.dumps(REGIME))
     assert feedback_policy_violations({"decider_rules": json.dumps([REGIME])})

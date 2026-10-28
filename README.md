@@ -1,10 +1,71 @@
 # 🤖 D-AI-Trader
 
-An autonomous trading system built as a reinforcement-learning loop in which **the market is the reward signal**. Frozen LLM agents read financial news, decide trades, and execute them through the Schwab API (or in simulation); a feedback agent then scores the realized P&L and rewrites the agents' prompts. The policy that improves over time is **natural-language text — agent identity, strategy, and memory — not network weights.**
+An autonomous trading system built as a reinforcement-learning loop in which **the market is the reward signal**. Frozen LLM agents read financial news, decide trades, and execute them through the Schwab API (or in simulation); a feedback agent then scores the realized P&L and proposes changes for human review. The policy that improves over time is **natural-language text — agent identity, strategy, and memory — not network weights.**
 
 We call this **RLMF — Reinforcement Learning from Market Feedback** ([detailed below](#how-it-learns-rlmf)). It's the actual point of the project; the trading is the environment it learns in, not a get-rich scheme. Treat it as a research harness for prompt-space policy iteration. Its sibling project, **RUSH**, applies the same idea (a versioned policy graph of Markdown guidelines, edited one gated step at a time) to content judging, where the reward is expert labels instead of P&L. See [Next steps](#next-steps-rush-jev-and-model-routing).
 
-Loop: `news → summarize → decide → execute → score → rewrite the prompt`. Cycles run every `-c` minutes during market hours (the live run uses 120), suited to 1–5 day holds on a cash account with T+1 settlement. It can also run in simulation without placing broker orders.
+Loop: `news → summarize → decide → execute → score → propose → review → version the prompt`. Cycles run every `-c` minutes during market hours (the live run uses 120), suited to 1–5 day holds on a cash account with T+1 settlement. It can also run in simulation without placing broker orders.
+
+---
+
+## Agent policy audit — October 28, 2026
+
+The reviewed release activates **Summarizer v30, Decider v60, Feedback v16 and Company extraction v1** for config `9ea09b9as`. The five-field sources live in `policy_graph/audited_agent_prompts.json`; active graph mirrors are under `agents/*/policy-graph/latest/`. Fresh defaults and the eight committed `SOUL.default.md` / `MEMORY.default.md` files use the same reviewed texts. Existing database history is preserved.
+
+| Field | Responsibility | Production use |
+|---|---|---|
+| System prompt | Role, precedence, ownership, evidence and output contract | Summarizer, Company, Decider; weekly Feedback uses code-owned instructions |
+| Guidelines | Current conditional trading/extraction rules | Summarizer, Company, Decider |
+| User template | Current inputs and response checklist | Summarizer, Company, Decider |
+| Soul | Objectives and judgment principles | All four agents |
+| Memory | Dated evidence and lessons subordinate to current rules | Summarizer, Company, Decider |
+
+**Prompt Lab** now includes Company extraction, usage badges and a compiled runtime preview. Company supports viewing/manual editing; it is excluded from batch generation. Feedback’s other four stored fields remain reference/manual templates, and the legacy manual review now resolves all five fields. The weekly reviewer’s JSON contract remains code-owned. The Summarizer puts essential event facts in `headlines`/`insights`, the fields actually passed downstream; catalyst cards alone do not reach the Decider.
+
+The audit found obsolete stop ladders, duplicate imperative memories, an unconditional FOMC portfolio exit and instructions treating manipulation as a fact. It retires **28 active retrieved memories**, retaining their original contents and metadata in history/journal, and inserts **8 reviewed evidence-scoped notes**. Current D ≤1.3%, the -0.8% holding loss cap, exits at/below K, quarantine, extension and other exposure controls remain. Missing optional VWAP/intraday/volume data is unknown rather than an automatic setup failure. Repeated news coverage is not independent confirmation or proof of manipulation. A reported earnings beat, a promotion and the observed price response are distinct pieces of evidence.
+
+A wording-only version of the old example is: **“When FOMC is within one trading session, sell every confirmed holding before the decision.”** That is clearer but preserves the same blanket exit. The reviewed behavioral correction instead reads: **“A macro event alone does not liquidate the portfolio. Evaluate each holding against its current stop, loss, earnings and thesis-exit rules.”** The old `Falsified if…` paragraph becomes a separate review protocol with an eligible population, fixed horizon, sample requirement, costs and comparator. It is not a second instruction to the live trader. Stable guideline IDs and citation contracts remain intact.
+
+Rewording **can change model outputs**; semantic intent alone does not establish equivalent performance. [OpenAI’s prompting guidance](https://developers.openai.com/api/docs/guides/prompt-engineering) recommends evaluations across prompt changes. This release has deterministic contract/execution tests; no paid paired model replay or forward P&L improvement is claimed. Use Learning map’s explicit paired replay on a frozen cohort, include passed opportunities, retain sampling uncertainty and then evaluate later independent periods. Win rate alone omits payoff size, costs, unassessed cases and losses; report net expectancy/dollars, gain capture and loss incidence with their denominators.
+
+### Separate pre-earnings strategy
+
+The Decider receives upcoming own-company releases **1–5 NYSE trading sessions ahead**, including MSFT, GOOG/GOOGL, NFLX, ORCL, AMZN, META, AAPL, NVDA and TSLA plus supplied candidates/holdings. Today is eligible only when verified timing proves the release is still ahead. A call, an earnings release and an investor day are different events. For example, [Oracle’s October 28 event is Investor Day](https://investor.oracle.com/home/); its preceding quarterly release was September 10. Dates, source, fetch time, estimate status and release timing accompany the calendar. Estimated, stale, absent or inconsistent dates cannot enable the exception; a provider date is not mislabeled as primary IR verification.
+
+An ordinary trade retains the five-session entry exclusion and two-session holding-exit policy. A separate intentional entry must return:
+
+```json
+{"strategy":"earnings_event","earnings_event":{"date":"YYYY-MM-DD","hold_through":true,"gap_risk_accepted":true}}
+```
+
+It also requires the actual supplied `# EARNINGS_EVENT_CONTROLS:v1` block and the exact run’s server-saved calendar/allowance. A model flag, quoted charter, invented date or copied authorization cannot grant permission. Old trader processes without this runtime block cannot use the new exception.
+
+- Hard event notional: **min($500, 5% of account value, 25% of the normal position cap)**; at most **one event exposure**, with aggregate event exposure no more than 5% of equity. Existing held/pending event exposure consumes capacity.
+- Keep settled funds, cash buffer, ordinary minimum BUY (**locally $400**), whole shares, position/total caps, ticket limits, regime/macro allowances, quarantine, correlation, anti-chase and current stops. Final whole-share notional must fit both the minimum and cap; skip when it cannot, without rounding above the cap.
+- Live event entries use regular-session **LIMIT** orders. Validate again against current account/holdings and durable pre-submit reservations, including ambiguous broker timeouts and simultaneous processes. Standard orders retain their normal path.
+- Intent is tagged only after server validation and retained with the saved execution record. It cannot retroactively exempt an ordinary holding from earnings exits. Binding losses/stops still apply; an overnight release gap can exceed a stop and put the entire event ticket at risk.
+
+Verified IR timing may be supplied through the existing `DAI_EVENT_CALENDAR_FILE` JSON override, using `earnings: [{ticker, date, confirmed: true, source_url, verified_at, release_timing, release_at}]`. Use timezone-aware ISO timestamps and the actual primary IR source; records expire for event eligibility after 12 hours without renewed verification. No secret or credential belongs in that file. Provider lookups remain the default for future dates.
+
+The requested examples show why this is a distinct strategy rather than an automatic earnings BUY:
+
+| Completed after-close release | Next regular-session opening gap | Next close | Fifth-session close |
+|---|---:|---:|---:|
+| MSFT, July 29 | +12.13% | +15.51% | +24.82% |
+| GOOGL, July 22 | -6.13% | -7.13% | -1.57% |
+| NFLX, October 20 | -6.61% | -5.31% | -8.98% |
+
+These are gross adjusted-price returns relative to the pre-release regular close, computed from Yahoo Finance daily bars retrieved October 28, **selected illustrations rather than an unbiased backtest**. See [raw cases and calculation method](docs/EARNINGS_EXAMPLES_2026-10-28.json), [MSFT IR](https://www.microsoft.com/en-us/investor/earnings/fy-2026-q4/press-release-webcast), [Alphabet IR](https://abc.xyz/investor/), [Netflix IR](https://ir.netflix.net/investor-news-and-events/financial-releases/press-release-details/2026/Netflix-to-Announce-Third-Quarter-2026-Financial-Results/default.aspx), and [price history](https://finance.yahoo.com/quote/MSFT/history/). Results/guidance, expectations and price positioning can produce opposite reactions; a headline “beat” is not a directional edge by itself.
+
+### Audited rollout and learning safeguards
+
+`./dai/bin/python audit_agent_prompts.py --config-hash 9ea09b9as --output /private/tmp/policy-preview.json` is a read-only preview. Activation requires `--apply --source-hash <reviewed source_hash> --spec-hash <reviewed spec_hash>`. It locks, checks the exact active four-agent sources and memory state, writes new versions/activation events, retires memories and records `agent_prompt_audits` in one transaction. Mirrors refresh only after commit. It neither places orders nor calls a model. The journal preserves previous row IDs, contents and metadata; do not restore a known blanket ban through undo. Future saves append new versions rather than rewriting v1 after reset. Reset means the configuration’s historical v0, which may predate this release; new installations use current release defaults.
+
+Weekly feedback continues automatically as research, allowing no change and empty rule arrays. Its proposals remain archived/pending human review; neither a model’s approval flag nor legacy memory writes can activate them. The runtime labels unreviewed feedback nonbinding. Use Prompt Lab or a reviewed operator version for promotion.
+
+Validation for this release: **1,578 passed, 1 skipped**. Coverage includes capped execution in both broker paths, whole-share/minimum rules, fresh/exact-run provenance, duplicate submission reservations across concurrent requests and restarts, feedback governance, immutable seeding/reset history and atomic audit rollback. All four active graph round trips were verified against Postgres; source prompt and memory text stayed unchanged. PostgreSQL advisory-lock SQL was reviewed; concurrency tests use SQLite. The read-only dashboard preview confirms the four-agent timeline and Feedback field disclosures.
+
+**Rollout:** active database policy is read each cycle. New Python execution/governance guards require restarting the trader process. This maintenance does not invoke a trading cycle or restart the live trader; the dashboard preview can be restarted independently. Model mappings/credentials in `.env` remain local and uncommitted. The strategy itself adds no model call; the larger watchlist can add input tokens and public calendar lookups. Actual future spend should be measured from `api_usage` rather than extrapolated from prompt character counts.
 
 ---
 
@@ -12,19 +73,19 @@ Loop: `news → summarize → decide → execute → score → rewrite the promp
 
 The system is a reinforcement-learning loop with two deliberate substitutions from the textbook setup:
 
-- The **reward** is realized trade P&L — *the market itself*. No human rater (as in RLHF) and no learned reward model. The environment hands back ground truth.
+- The **reward** is realized trade P&L — *the market itself*. Human reviews provide a second signal about process and proposed rule changes. There is no trained reward model; realized fills and outcomes are the market observations, with costs and selection bias still requiring analysis.
 - The **policy** is a block of prompt text — each agent's `SOUL` (identity), `STRATEGY DIRECTIVES` (numbered gates), and `MEMORY` (lessons and a dated diary) — injected into the system prompt at runtime. The LLM weights stay frozen. Learning happens in *text space*.
 
-An **episode** is one trading cycle. A **policy update** is normally a new row in `prompt_versions`. The exceptions are that `init_database.py` re-syncs v0 to the code defaults at startup, and the first version saved after a reset to v0 overwrites v1. Four writers create versions:
+An **episode** is one trading cycle. A **policy update** appends a new row in `prompt_versions`. Existing versions, including v0/v1, retain their original text across startup, reset and later saves. Four paths participate in learning:
 
 | Writer | When | Gate |
 |---|---|---|
-| **Weekly feedback** (`feedback_agent.py`) | Thursday 20:30 ET | A deterministic opportunity-policy lint quarantines obvious blanket regime or macro-window entry bans. Otherwise it replaces the `Latest Feedback Reminder` section with this week's 2 to 4 numbered gates and adds them to memory before activation. It still has no LLM critic gate. |
+| **Weekly feedback** (`feedback_agent.py`) | Thursday 20:30 ET | Archives findings in `agent_feedback` and returns `pending_human_review`. No active prompt or memory writes, even when the model claims approval. Bring supported proposals into Prompt Lab for critic and human review; no change is valid. |
 | **Prompt Lab** (`/prompt-evolution`) | On demand | Generator, then critic verdict, then human approve or reject |
 | **Policy-graph proposals** (`policy_graph/proposals.py`) | On demand | A patch of at most 3 guideline files, then critic per file, then human approval per guideline |
 | **Operator versions** (`policy_graph/operator.py`) | By hand | Hand-authored patches get the same validation and critic record as a drafted proposal. Maintenance versions skip both and are labelled `maintenance` in their description and the activation log. |
 
-Every activation by these writers goes through `prompt_manager.set_active_prompt_version` and is logged in `prompt_activation_events`, and the most recent batch can be undone from the Feedback tab. At startup `init_database.py` re-activates a dormant v0 directly, without a log entry.
+Every activation by these writers goes through `prompt_manager.set_active_prompt_version` and is logged in `prompt_activation_events`, and the most recent batch can be undone from the Feedback tab. Startup only inserts a missing baseline; it does not reactivate a deliberately dormant version. Reset explicitly reactivates that configuration’s original v0 through the activation journal; it does not replace its historical contents with the current release defaults.
 
 **The policy is a knowledge graph.** Each prompt version is mirrored as one Markdown guideline per file plus `edges.json`, under `agents/<agent>/policy-graph/<config>/v<N>/`, in the RUSH layout. The directory is written the first time the version is read (by a Decider cycle, the Policy Graph tab or a proposal), and it compiles back to the stored row byte for byte. The `prompt_versions` row stays canonical; the graph is an exact, editable view of it. The **Policy Graph** tab shows three layers: **policy** (the `.md` guidelines compiled into the prompt), **prompt scaffold** (templates and code-owned text) and **cycle context** (memory rows and world factors such as the regime, FOMC, CPI and jobs windows, and earnings dates). Each gate reads as plain lines, and a version timeline shows the policy changing.
 
@@ -84,18 +145,18 @@ flowchart TB
         SUM --> CO[Company extraction<br/><i>Luna — DAI_MODEL_COMPANY</i>]
         CO --> TR[Momentum recap · regime · watchlist<br/>event calendar · no LLM]
         SUM & CO & TR --> KG{{Policy graph query<br/>every gate and lesson served;<br/>diary entries routed}}
-        KG --> DEC[Decider<br/><i>Terra · high</i>]
+        KG --> DEC[Decider<br/><i>6.1 Sol · high</i>]
         DEC --> EXEC[Execution<br/>Schwab / simulation]
         EXEC --> OUT[(trade_outcomes<br/><b>market P&L = reward</b>)]
     end
 
     OUT -->|outcome analysis| FB[FeedbackAgent<br/><i>Sol · high</i>]
-    FB -->|guidance| GEN[Prompt evolution / proposal drafter<br/><i>Terra · high — DAI_MODEL_EVOLUTION</i>]
-    GEN -->|candidate + declared changes| CRITIC[Critic<br/><i>Terra · high — DAI_MODEL_CRITIC</i>]
+    FB -->|guidance| GEN[Prompt evolution / proposal drafter<br/><i>6.1 Sol · high — DAI_MODEL_EVOLUTION</i>]
+    GEN -->|candidate + declared changes| CRITIC[Critic<br/><i>6.1 Sol · high — DAI_MODEL_CRITIC</i>]
     OUT -->|"trade-level evidence<br/>(up to 20 worst + 20 best, last 30 days)"| CRITIC
     OUT -->|trade-level evidence| GEN
     CRITIC -->|verdict · reason · confidence| REV[(prompt_change_reviews)]
-    REV --> HUMAN{Human approve / reject<br/><b>optional RLHF gate</b>}
+    REV --> HUMAN{Human approve / reject<br/><b>required promotion review</b>}
     HUMAN -->|approve| POL[(prompt_versions<br/><b>active policy</b>)]
     POL -.->|soul + directives + memory| SUM & CO & DEC & FB
 
@@ -106,10 +167,10 @@ flowchart TB
 
 - **Review history.** Every verdict, reason and confidence lands in `prompt_change_reviews`. The 8 most recent rows, human-labeled first, go into the next Prompt Lab and proposal runs as `past_review_verdicts` and into the weekly feedback run as its review history. A candidate that repeats a rejected pattern without addressing the objection is told it will be rejected again. Because labeled rows sort first, an unclicked critic verdict stops reaching the next prompt once eight or more rows are labeled.
 - **Evidence, not vibes.** Generation and the critic both receive per-trade rows: up to the 20 worst and 20 best trades closed in the last 30 days, each with its entry and exit reasons cut to 140 characters. Proposals must cite tickers; the critic verifies claims against the same rows.
-- **Plain gates.** The drafter, the weekly feedback agent and the critic are all told to write rules in one shape: *"N. LABEL — IF one condition on a supplied field THEN one action. Otherwise next gate. Falsified if …"*, at most 240 characters. On policy-graph proposals a style lint (`proposals.style_check`) warns on gates over 300 characters, more than one IF, several parentheses, or a primary gate with no falsifier. The critic receives those warnings; the Policy Graph tab does not display them yet.
+- **Readable rules.** Keep stable `N. LABEL` IDs and write a complete condition, action and rationale in ordinary language. A 400–600 character target is advisory; do not lose qualifiers to meet a limit. The separate `falsified_if` proposal metadata describes the eligible population, metric, costs, fixed horizon, sample requirement and comparator. It is a review protocol, not a live command or a promise that a tiny sample proves causality. Old 240-character warnings remain readable in historical records.
 - **Human RLHF labels (optional).** An approve or reject stamps `human_verdict` and `human_agrees_critic`. Concordance is computed only against genuine critic judgments, so a critic outage never reads as a human override.
 - **Anti-sycophancy guardrails.** The critic recalibrates only on a consistent pattern (3+ same-direction human overrides), and realized `winrate_delta` outranks concordance, read through the regime split because a change shipped into a falling tape shows a negative delta regardless of merit.
-- **Fail-closed.** Cosmetic-only candidates are auto-rejected without an LLM call; a critic outage defers to the human as a low-confidence reject.
+- **Review gates.** Readability changes receive critic and human review with an equivalence advisory; lexical similarity alone does not reject a useful clarification. A critic outage records uncertainty and leaves promotion to explicit human review.
 
 Keep reasoning at **high** throughout the learning loop: these calls are a small share of spend (see [Cost](#cost)), and candidate and verdict quality are the loop's ceiling.
 
@@ -400,18 +461,18 @@ Rates live in `model_pricing.json` (re-read per request) and drive per-agent cos
 
 The strategy is the policy the RLMF loop starts from and then mutates, so treat everything here as starting conditions, not promises. The Policy Graph tab always shows the active version.
 
-### Active gates (Decider v48, October 2026)
+### Active gates (Decider v60, operator audit October 28, 2026)
 
 The Decider's strategy directives hold twelve numbered gates plus the weekly reminder rules. They are not applied strictly in number order: the prompt has the Decider clear exits first (kill breach, harvest, earnings), then check each new buy in the user template's order (quarantine, regime allowance, extension, setup, priced kill, correlation, day chase) and stop at the first failure.
 
-1. **REGIME GATE** — RISK-ON allows up to 3 new buys; MIXED at most 2 at half size; RISK-OFF defaults to cash.
+1. **REGIME GATE** — RISK-ON allows up to 3 new buys; MIXED at most 2 at half size; RISK-OFF permits at most one half-size oversold reversal or entry within 3% of the 20-day MA. It is not a blanket cash instruction.
 2. **EXTENSION CAP** — ≤5% above the 20-day MA is full size; 5–8% half size in RISK-ON only; above 8% is a chase.
 3. **PRICED KILL** — every buy names its kill price K and distance D; pass when D is missing or above 1.3%, otherwise size by the regime gate. The system prompt (since Prompt Lab v44), gate 3 and the `#priced-kill` lesson all state this rule since v47/v48; the old 3% / 6% ladder is gone.
 4. **RE-ENTRY QUARANTINE** — no buy in a name on the QUARANTINE line or exited within 2 sessions; after a losing exit, also wait for a reclaim of the failed level or a genuinely new catalyst.
 5. **CORRELATION**, 6. **HARVEST** (take profit at +3%), 7. **DAY CHASE**, 8. **CANDIDATES** (rank 2–3 setups).
-9. **EVENT GATE** — inside an FOMC / CPI / jobs window, at most one half-size buy with D ≤2%.
-10. **EARNINGS CANDIDATE**, 11. **EARNINGS HOLDING** — no entry into a name reporting inside the hold window; sell or trim a holding that reports within 2 sessions.
-12. **KILL BREACH** — sell when price breaks K.
+9. **EVENT GATE** — inside an FOMC / CPI / jobs window, at most one half-size buy; the stricter active D ≤1.3% gate still applies. A macro date alone does not liquidate the portfolio.
+10. **EARNINGS CANDIDATE**, 11. **EARNINGS HOLDING** — ordinary entries avoid the next 5 trading sessions; ordinary holdings exit before an own-company release within 2 sessions (the existing half-trim exception requires RISK-ON and +3%). The separate pre-earnings strategy below has a narrower, explicit exception.
+12. **UNPRICED HOLDING** — fully exit a confirmed holding without an executable recorded numeric K/D. The reviewed reminder also retains the -0.8% loss cap and exit at/below K; neither is waived for earnings.
 
 ### Sizing and execution
 
@@ -419,7 +480,7 @@ The Decider's strategy directives hold twelve numbered gates plus the weekly rem
 - **Whole shares only.** A ticket smaller than one share rounds up to exactly one share when that share is within `DAI_MAX_BUY_AMOUNT`, within settled cash minus `MIN_CASH_BUFFER`, and within the room left under the position and total-investment caps. Otherwise it is skipped with the bound that blocked it.
 - **Position caps.** Every buy is cut to fit `MAX_POSITION_*` (this name's market value after the buy) and `MAX_TOTAL_INVESTMENT*` (all positions after the buy); see [Guardrails](#guardrails).
 - **Cash account.** Buys use settled funds only (Schwab settled cash minus unsettled). Sells run first, then a 30-second wait, then buys.
-- **Orders** are market orders, placed only during regular hours. Outside them, decisions are recorded as "MARKET CLOSED".
+- **Orders** use regular market hours. Ordinary orders remain market orders; the earnings-event strategy uses dollar-bounded whole-share LIMIT orders. Outside market hours decisions are recorded as "MARKET CLOSED".
 
 ### Account types
 
@@ -681,7 +742,7 @@ The router is thin and open: candidates, an `eligible()` capability filter, a de
 
 ### Recommended next upgrades: the learning loop (RLMF with RLHF)
 
-1. **Gate the weekly automatic path.** It wrote 10 of the 44 versions since September 1, across all four agents, with no critic and no human. Route it through the proposal flow: auto-apply only when the critic approves, otherwise queue it for one-click review.
+1. **Completed: gate weekly policy writes.** The October 28 audit made automatic feedback research-only. A model critic cannot grant human approval; reviewed promotion goes through Prompt Lab. Keep evaluating reviewer calibration and the usefulness of proposals.
 2. **A cross-field consistency check on every new version.** v44 put a 1.3% kill rule in the system prompt while gate 3 still said 3% and 6%, and nothing flagged it for two weeks. Extract the numeric thresholds per rule from the templates, gates and lessons, and block activation when two disagree.
 3. **Score rejections against what happened next.** 305 cycles carry rejected setups, and they now cite their gate. Price each rejected ticker 1, 3 and 5 sessions later to show what every gate saved or cost. Gates mostly act by rejecting, so this is their missing reward signal.
 4. **Reward alpha, not raw P&L.** Score each closed trade against SPY over the same holding window, and split realized deltas by regime. A version shipped into a falling tape should not be blamed for the tape.

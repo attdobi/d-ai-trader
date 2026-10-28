@@ -250,11 +250,11 @@ def _policy_seed_mode() -> str:
 
 
 def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
-    from policy_graph.seed import CREATED_BY_LATEST, describe, seed_rows
+    from policy_graph.seed import describe, seed_rows
     mode = _policy_seed_mode()
     repo_root = Path(__file__).resolve().parent
     # The seed choice only matters for a config with no rows yet; existing rows are never
-    # re-seeded. 'global' always carries the code defaults (it is what "reset" restores).
+    # re-seeded. Existing global rows also remain historical snapshots.
     fresh = config_hash != "global" and not any(
         _any_prompt_version_exists(conn, a, config_hash) for a in ("SummarizerAgent", "DeciderAgent", "FeedbackAgent"))
     if fresh:
@@ -336,74 +336,13 @@ def seed_v0_prompts(conn, stats: InitStats, config_hash: str) -> None:
             print(f"   ✅ Seeded v0 prompt: {agent_type} ({config_hash}) from {payload.get('seed', 'default')}")
             continue
 
-        if getattr(existing, "created_by", None) == CREATED_BY_LATEST:
-            # A v0 seeded from the shipped latest policy is not the code default — never
-            # re-sync its text to DEFAULT_PROMPTS; only the dormant-reactivation rule applies.
-            if not bool(existing.is_active) and not _any_active_prompt_exists(conn, agent_type, config_hash):
-                conn.execute(text("UPDATE prompt_versions SET is_active = TRUE WHERE id = :id"), {"id": existing.id})
-                stats.updated_prompts += 1
-                print(f"   🔄 Re-activated v0 (seeded from latest): {agent_type} ({config_hash})")
-            else:
-                stats.skipped_prompts += 1
-                print(f"   ↪ v0 seeded from the shipped latest policy — left as is: {agent_type} ({config_hash})")
-            continue
-
-        needs_update = (
-            (existing.system_prompt or "") != payload["system_prompt"]
-            or (existing.user_prompt_template or "") != payload["user_prompt_template"]
-            or (existing.strategy_directives or "") != payload["strategy_directives"]
-            or (existing.description or "") != payload["description"]
-        )
-
-        # Seed soul/memory into existing rows only if DB is empty and payload has content
-        seed_soul = not (existing.soul or "").strip() and payload.get("soul", "").strip()
-        seed_memory = not (existing.memory or "").strip() and payload.get("memory", "").strip()
-
-        # Re-activate a dormant v0 only when NOTHING is active for this
-        # agent+config. A feedback-promoted higher version owns the active
-        # flag; restarts must never hand it back to the baseline.
-        reactivate = not bool(existing.is_active) and not _any_active_prompt_exists(
-            conn, agent_type, config_hash
-        )
-
-        if needs_update or seed_soul or seed_memory or reactivate:
-            update_fields = {
-                "id": existing.id,
-                "system_prompt": payload["system_prompt"],
-                "user_prompt_template": payload["user_prompt_template"],
-                "strategy_directives": payload["strategy_directives"],
-                "description": payload["description"],
-            }
-
-            # Build dynamic SET clause. created_at is preserved: bumping it
-            # made synced v0 rows look freshly created on every restart.
-            set_parts = [
-                "system_prompt = :system_prompt",
-                "user_prompt_template = :user_prompt_template",
-                "strategy_directives = :strategy_directives",
-                "description = :description",
-                "created_by = 'init_database'",
-            ]
-
-            if reactivate:
-                set_parts.append("is_active = TRUE")
-            if seed_soul:
-                set_parts.append("soul = :soul")
-                update_fields["soul"] = payload["soul"]
-            if seed_memory:
-                set_parts.append("memory = :memory")
-                update_fields["memory"] = payload["memory"]
-
-            conn.execute(
-                text(f"UPDATE prompt_versions SET {', '.join(set_parts)} WHERE id = :id"),
-                update_fields,
-            )
-            stats.updated_prompts += 1
-            suffix = " (re-activated: no active version)" if reactivate else ""
-            print(f"   🔄 Updated v0 prompt: {agent_type} ({config_hash}){suffix}")
-        else:
-            stats.skipped_prompts += 1
-            print(f"   ↪ Prompt already up-to-date: {agent_type} ({config_hash})")
+        # A version is immutable history, even when it is v0, inactive, or
+        # differs from today's published defaults. Startup must not rewrite
+        # content, fill old blanks, or silently undo an intentional no-active
+        # state. An explicit reset may activate this existing baseline through
+        # the audited activation switchboard.
+        stats.skipped_prompts += 1
+        print(f"   ↪ Existing v0 history preserved: {agent_type} ({config_hash})")
 
 
 def deactivate_superseded_v0_prompts(conn, stats: InitStats) -> None:

@@ -1,0 +1,141 @@
+{
+  "retrieved_at": "2026-10-28T21:44:38.851633+00:00",
+  "method": "Adjusted daily OHLC. Opening gap and first/fifth subsequent close relative to the regular-session close on the after-close earnings release date. Gross price returns, no fees/slippage; illustrative selected cases, not a backtest or strategy-selection proof.",
+  "cases": [
+    {
+      "ticker": "MSFT",
+      "earnings_release_date": "2026-07-29",
+      "prior_close": 389.8062,
+      "opening_gap_pct": 12.127,
+      "marks": [
+        {
+          "session": 1,
+          "date": "2026-07-30",
+          "open": 437.0772,
+          "close": 450.2524,
+          "close_return_pct": 15.507
+        },
+        {
+          "session": 2,
+          "date": "2026-07-31",
+          "open": 449.1545,
+          "close": 463.8468,
+          "close_return_pct": 18.994
+        },
+        {
+          "session": 3,
+          "date": "2026-08-03",
+          "open": 475.2354,
+          "close": 486.7337,
+          "close_return_pct": 24.866
+        },
+        {
+          "session": 4,
+          "date": "2026-08-04",
+          "open": 479.9964,
+          "close": 491.884,
+          "close_return_pct": 26.187
+        },
+        {
+          "session": 5,
+          "date": "2026-08-05",
+          "open": 495.4273,
+          "close": 486.5441,
+          "close_return_pct": 24.817
+        }
+      ],
+      "provider": "Yahoo Finance adjusted daily OHLC via yfinance",
+      "data_url": "https://finance.yahoo.com/quote/MSFT/history/"
+    },
+    {
+      "ticker": "GOOGL",
+      "earnings_release_date": "2026-07-22",
+      "prior_close": 341.8702,
+      "opening_gap_pct": -6.127,
+      "marks": [
+        {
+          "session": 1,
+          "date": "2026-07-23",
+          "open": 320.9237,
+          "close": 317.4859,
+          "close_return_pct": -7.133
+        },
+        {
+          "session": 2,
+          "date": "2026-07-24",
+          "open": 318.2155,
+          "close": 319.5346,
+          "close_return_pct": -6.533
+        },
+        {
+          "session": 3,
+          "date": "2026-07-27",
+          "open": 324.8312,
+          "close": 326.3502,
+          "close_return_pct": -4.54
+        },
+        {
+          "session": 4,
+          "date": "2026-07-28",
+          "open": 327.6894,
+          "close": 333.4956,
+          "close_return_pct": -2.45
+        },
+        {
+          "session": 5,
+          "date": "2026-07-29",
+          "open": 334.455,
+          "close": 336.4937,
+          "close_return_pct": -1.573
+        }
+      ],
+      "provider": "Yahoo Finance adjusted daily OHLC via yfinance",
+      "data_url": "https://finance.yahoo.com/quote/GOOGL/history/"
+    },
+    {
+      "ticker": "NFLX",
+      "earnings_release_date": "2026-10-20",
+      "prior_close": 68.69,
+      "opening_gap_pct": -6.609,
+      "marks": [
+        {
+          "session": 1,
+          "date": "2026-10-21",
+          "open": 64.15,
+          "close": 65.04,
+          "close_return_pct": -5.314
+        },
+        {
+          "session": 2,
+          "date": "2026-10-22",
+          "open": 65.11,
+          "close": 67.05,
+          "close_return_pct": -2.388
+        },
+        {
+          "session": 3,
+          "date": "2026-10-23",
+          "open": 67.01,
+          "close": 65.85,
+          "close_return_pct": -4.135
+        },
+        {
+          "session": 4,
+          "date": "2026-10-26",
+          "open": 65.16,
+          "close": 63.9,
+          "close_return_pct": -6.973
+        },
+        {
+          "session": 5,
+          "date": "2026-10-27",
+          "open": 63.4,
+          "close": 62.52,
+          "close_return_pct": -8.982
+        }
+      ],
+      "provider": "Yahoo Finance adjusted daily OHLC via yfinance",
+      "data_url": "https://finance.yahoo.com/quote/NFLX/history/"
+    }
+  ]
+}

@@ -1,14 +1,16 @@
-const AGENT_TYPES = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent'];
+const AGENT_TYPES = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent', 'CompanyExtractionAgent'];
 const AGENT_LABELS = {
   SummarizerAgent: 'Summarizer',
   DeciderAgent: 'Decider',
-  FeedbackAgent: 'Feedback'
+  FeedbackAgent: 'Feedback',
+  CompanyExtractionAgent: 'Company extraction'
 };
 
 const selectedVersions = {
   SummarizerAgent: [],
   DeciderAgent: [],
-  FeedbackAgent: []
+  FeedbackAgent: [],
+  CompanyExtractionAgent: []
 };
 
 // Notify any other open dashboard page (e.g. the Feedback tab) that a new
@@ -408,6 +410,52 @@ function setupPromptLab() {
   const feedbackRefreshStatusEl = document.getElementById('feedbackRefreshStatus');
 
   if (!agentSelect || !generateBtn || !applyBtn) return;
+  let contractSequence = 0;
+  let editorSequence = 0;
+  let loadedAgent = null;
+  let loadedVersion = null;
+  const syncGenerateAvailability = () => {
+    const company = agentSelect.value === 'CompanyExtractionAgent';
+    generateBtn.disabled = company;
+    generateBtn.title = company ? 'Company extraction supports viewing and manual editing; it is excluded from automatic prompt generation.' : '';
+  };
+  async function loadContract(agentType) {
+    const sequence = ++contractSequence;
+    const note = document.getElementById('promptRuntimeNote');
+    const link = document.getElementById('promptRuntimeLink');
+    document.querySelectorAll('[data-contract-field]').forEach(badge => {
+      badge.textContent = 'Usage pending'; badge.classList.remove('is-runtime', 'is-reference');
+    });
+    document.querySelectorAll('[data-contract-note]').forEach(el => { el.textContent = ''; });
+    if (note) note.textContent = 'Loading runtime field usage…';
+    if (link) link.hidden = true;
+    try {
+      const contract = await apiJSON(`/api/prompt-contracts?agent=${encodeURIComponent(agentType)}`);
+      if (sequence !== contractSequence || agentSelect.value !== agentType) return;
+      if (note) note.textContent = contract.runtime_note || 'Runtime usage follows the agent’s assembly contract.';
+      document.querySelectorAll('[data-contract-field]').forEach(badge => {
+        const field = contract.fields?.[badge.dataset.contractField];
+        const known = typeof field?.used === 'boolean';
+        badge.textContent = known ? (field.used ? 'Used at runtime' : 'Reference only') : 'Usage unknown';
+        badge.classList.toggle('is-runtime', known && field.used);
+        badge.classList.toggle('is-reference', known && !field.used);
+      });
+      document.querySelectorAll('[data-contract-note]').forEach(el => { el.textContent = contract.fields?.[el.dataset.contractNote]?.note || ''; });
+      if (link && typeof contract.compiled_runtime_url === 'string' && contract.compiled_runtime_url.startsWith('/api/policy-graph/compiled?')) {
+        link.href = contract.compiled_runtime_url; link.hidden = false;
+      }
+    } catch (_) {
+      if (sequence !== contractSequence || agentSelect.value !== agentType) return;
+      if (note) note.textContent = 'Runtime usage could not be loaded. Editable fields are not necessarily all used by the automatic agent.';
+      document.querySelectorAll('[data-contract-field]').forEach(badge => { badge.textContent = 'Usage unknown'; });
+    }
+  }
+  agentSelect.addEventListener('change', () => {
+    editorSequence++; loadedAgent = null; loadedVersion = null;
+    setHidden(resultsEl, true);
+    syncGenerateAvailability(); loadContract(agentSelect.value);
+  });
+  syncGenerateAvailability(); loadContract(agentSelect.value);
 
   // Refresh feedback on demand — runs the FeedbackAgent with the latest
   // trade outcomes. Does NOT mutate existing prompts (skip_auto_prompts=True
@@ -473,6 +521,7 @@ function setupPromptLab() {
   if (loadActiveBtn) {
     loadActiveBtn.addEventListener('click', async () => {
       const agentType = agentSelect.value;
+      const sequence = ++editorSequence;
       clearPromptLabAlerts();
       setPromptLabMessage('Loading active version...');
       const originalLabel = loadActiveBtn.textContent;
@@ -481,7 +530,9 @@ function setupPromptLab() {
 
       try {
         const data = await apiJSON(`/api/prompts/${encodeURIComponent(agentType)}/active`);
+        if (sequence !== editorSequence || agentSelect.value !== agentType) return;
         if (!data || data.error) throw new Error(data?.error || 'No active prompt found');
+        loadedAgent = agentType; loadedVersion = data.version;
 
         reasoningEl.textContent = `Loaded active v${data.version ?? '?'} for ${AGENT_LABELS[agentType]}. Edit any field and apply as a new version.`;
         systemPromptEl.value = data.system_prompt || '';
@@ -494,6 +545,7 @@ function setupPromptLab() {
         setHidden(resultsEl, false);
         setPromptLabMessage(`Active v${data.version ?? '?'} loaded. Edit and apply to create a new version.`);
       } catch (error) {
+        if (sequence !== editorSequence || agentSelect.value !== agentType) return;
         showPromptLabError(`Failed to load active version: ${error.message}`);
         setPromptLabMessage('');
       } finally {
@@ -505,6 +557,8 @@ function setupPromptLab() {
 
   generateBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
+    if (agentType === 'CompanyExtractionAgent') return;
+    const sequence = ++editorSequence;
     const generateSoul = true;
     const generateMemory = true;
     clearPromptLabAlerts();
@@ -522,6 +576,8 @@ function setupPromptLab() {
         method: 'POST',
         body: JSON.stringify({ agent_type: agentType, generate_soul: generateSoul, generate_memory: generateMemory })
       });
+      if (sequence !== editorSequence || agentSelect.value !== agentType) return;
+      loadedAgent = agentType; loadedVersion = data.current_version;
 
       reasoningEl.textContent = data.reasoning || 'No reasoning returned by API.';
       systemPromptEl.value = data.system_prompt || '';
@@ -540,16 +596,18 @@ function setupPromptLab() {
       setHidden(resultsEl, false);
       setPromptLabMessage('Generated candidate ready. Review and apply as a new version when ready.');
     } catch (error) {
+      if (sequence !== editorSequence || agentSelect.value !== agentType) return;
       showPromptLabError(`Failed to generate prompt: ${error.message}`);
       setPromptLabMessage('');
     } finally {
-      generateBtn.disabled = false;
+      syncGenerateAvailability();
       generateBtn.textContent = originalLabel;
     }
   });
 
   applyBtn.addEventListener('click', async () => {
     const agentType = agentSelect.value;
+    const sequence = editorSequence;
     const systemPrompt = systemPromptEl.value.trim();
     const userPromptTemplate = userPromptEl.value.trim();
     const strategyDirectives = strategyDirectivesEl ? strategyDirectivesEl.value.trim() : '';
@@ -558,6 +616,11 @@ function setupPromptLab() {
     const description = descriptionEl.value.trim();
 
     clearPromptLabAlerts();
+
+    if (loadedAgent !== agentType || loadedVersion === null || loadedVersion === undefined) {
+      showPromptLabError('Load this agent’s active version or generate a fresh candidate before applying.');
+      return;
+    }
 
     if (!systemPrompt || !userPromptTemplate) {
       showPromptLabError('System prompt and user prompt template are required before applying.');
@@ -582,7 +645,8 @@ function setupPromptLab() {
         strategy_directives: strategyDirectives,
         soul: soul,
         memory: memory,
-        description
+        description,
+        base_version: loadedVersion
       };
       const data = await apiJSON('/api/prompt-evolution/apply', {
         method: 'POST',
@@ -594,6 +658,7 @@ function setupPromptLab() {
       }
 
       showPromptLabSuccess(`Applied successfully as version v${data.version}.`);
+      if (sequence === editorSequence && loadedAgent === agentType) loadedVersion = data.version;
       setPromptLabMessage('Prompt version applied. Timeline refreshed.');
       broadcastPromptApplied(agentType, data.version);
       await loadPromptHistory();

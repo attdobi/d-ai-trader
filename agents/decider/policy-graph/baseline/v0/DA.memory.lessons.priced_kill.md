@@ -2,7 +2,7 @@
 id: DA.memory.lessons.priced_kill
 version: DeciderAgent.baseline.v0
 agent: DeciderAgent
-title: "#priced-kill — A kill is a price."
+title: "#priced-kill — Record an executable price."
 node_type: lesson
 polarity: gate
 polarity_source: override
@@ -16,8 +16,8 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n"
-body_sha256: 5859ed89fa5dd24a430d5e39a8e773c586e08d886bf0c16434d177ac96b2b342
+body_sha256: be66ecc5e1767ad84b9ac4ecdebebb7e593bcebca7d584c0e460a109ea29bc27
 tags: [priced-kill]
 tickers: []
 ---
-- **#priced-kill — A kill is a price.** Write `K:<price>;D:<%>` on every BUY from supplied numbers (higher of 20d MA / stated support and entry × 0.97). No priced kill within 6% = pass. Binding on the first breach.
+- **#priced-kill — Record an executable price.** A narrative such as “exit on a 20-day break” was associated with historical loss tails. Current policy requires a numeric entry kill and controls its distance. That association is not proof that tighter stops always improve returns.

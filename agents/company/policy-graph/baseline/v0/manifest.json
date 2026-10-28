@@ -14,11 +14,11 @@
  "is_active": true,
  "materialized_by": "baseline",
  "source_sha256": {
-  "system_prompt": "ff40a46f8ab2c57f89c7040b846f773af4f1277fffb61bce65a70dd3abd5f4ce",
-  "user_prompt_template": "710de1d6bb083b8e4615990d6f564d2e5c77c69c1c73ad17fcfbbecfe5f1619b",
-  "strategy_directives": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "soul": "80ce6fad0b4ab24c7035c50dc43d6bf07e0051611b3eecbda57490f0f67cb00f",
-  "memory": "7a5504d5afdf4e8e346acda2bfb3794248c573fa46e4ddfafe28b8ffd7c1fd2d"
+  "system_prompt": "6c2e19f5ff242c93aa4391f31f2ec0a19752cb925f0cea6cda89523f0d61eafd",
+  "user_prompt_template": "a26c2f0bf656dcfb568f4554aeffe42b7810e40ceeb834d51c28fbb74cf0e674",
+  "strategy_directives": "377e3e2a1da76f8320dbbcd8d5a6f9045c2d521a7f2b28aaa77ce35de4967ae8",
+  "soul": "66ab30c7f9cfaaa020e23dddbeb97d71add7500847a17b784d6b6f2092cbdb03",
+  "memory": "5b0ad534e0d32028b3ea3c17f4cd1a6df046ec90c00547539f2bffa142a0575b"
  },
  "fields": {
   "system_prompt": {
@@ -33,7 +33,7 @@
   },
   "strategy_directives": {
    "stored_null": false,
-   "stored_empty": true,
+   "stored_empty": false,
    "inherited": false
   },
   "soul": {
@@ -55,7 +55,10 @@
    "CA.template.user"
   ],
   "strategy_directives": [
-   "CA.directives"
+   "CA.directives",
+   "CA.directives.entity_grounding",
+   "CA.directives.parent_ticker_resolution",
+   "CA.directives.event_attribution"
   ],
   "soul": [
    "CA.soul",
@@ -70,13 +73,14 @@
    "CA.memory.lessons.parent_rollup",
    "CA.memory.lessons.no_guess",
    "CA.memory.lessons.dedupe",
-   "CA.memory.log"
+   "CA.memory.lessons.event_owner",
+   "CA.memory.lessons.not_a_position"
   ]
  },
- "node_count": 16,
- "edge_count": 18,
+ "node_count": 20,
+ "edge_count": 23,
  "code": {
-  "sha": "f1f7e2716819",
+  "sha": "f42dce4ea4f4",
   "dir": null,
   "git_sha": "baseline",
   "fires": {}
@@ -91,7 +95,7 @@
  },
  "lineage": null,
  "delta_vs_prev": {
-  "added": 14,
+  "added": 18,
   "changed": 0,
   "removed": 0,
   "renamed": 0,

@@ -16,12 +16,9 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n\n"
-body_sha256: a2a51b189ad89d9081bf4b635f3e329d96cf24980f99751cf5462218ffe17b63
+body_sha256: 29666e9834d721a147a728d081c412582d0df8efae55b8e8726a1a204993237f
 tags: []
 tickers: []
 ---
 ## Review Style
-- Direct and analytical. Short sentences. No fluff, no encouragement.
-- Lead with the ranked leaks in dollars. Then regime, geometry, re-entry, payoff. Then rules.
-- Retire rules the diagnostics contradict, and say which. Keep rules the diagnostics still support even if last week's prose was softer.
-- Track patterns across cycles: extension chases, unpriced kills, re-entry churn, harvest cap vs stop distance, correlated books, synced inventory, phantom holdings.
+Use short explanations a first-time reader can follow. Separate Condition, Action, Reason and Review plan. Do not hide an unconditional exit inside an evaluation metric or use vague horizons such as “through the decision”.

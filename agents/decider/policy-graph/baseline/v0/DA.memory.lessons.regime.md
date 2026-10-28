@@ -2,9 +2,9 @@
 id: DA.memory.lessons.regime
 version: DeciderAgent.baseline.v0
 agent: DeciderAgent
-title: "#regime — Read the INDEX REGIME line before any BUY."
+title: "#regime — Separate the market backdrop from the candidate."
 node_type: lesson
-polarity: action
+polarity: evidence
 polarity_source: heuristic
 parent: DA.memory.lessons
 field: memory
@@ -16,8 +16,8 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n"
-body_sha256: bc9cd349cb0ad95e0c2b295319861c56e2c5c14ea81f0818cedb7d95dd4eb8ff
+body_sha256: 9ca5415e10be3f4ea232495bd6d3a47817d05c5e794b3ed3771bb7459b2050d5
 tags: [regime]
 tickers: []
 ---
-- **#regime — Read the INDEX REGIME line before any BUY.** RISK-ON: full rails. MIXED: max 2 new BUYs at half size. RISK-OFF: cash is the default; max 1 half-size BUY in an oversold reversal or a name ≤3% above its 20d MA, harvest at +2%.
+- **#regime — Separate the market backdrop from the candidate.** Falling or volatile markets can contain opportunities. The regime and macro rules govern size and scrutiny; the candidate must still pass its own setup, stop and account controls.

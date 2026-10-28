@@ -16,9 +16,8 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n"
-body_sha256: 90d56ebe9cc652fee47ba72658c437afef1a008e4dcc22eadb69509035c6dd82
+body_sha256: 9e26bda537d43f177e661d50a2123279a910096371886e28b7006b444a73ab24
 tags: []
 tickers: []
 ---
 ## Lessons Learned
-*High-confidence rules earned through P&L.*

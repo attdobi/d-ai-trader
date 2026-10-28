@@ -54,26 +54,34 @@ def ensure_table():
 
 
 def add_memory(config_hash, content, kind="lesson", tags=None, ticker=None, source="feedback", weight=1.0):
-    """Insert a long-term memory. De-dupes on identical active content per config."""
+    """Insert a memory; model feedback is archived inactive until human review.
+
+    The source cannot grant itself review authority by using a rule kind or a
+    large weight. Reviewed human/operator imports keep their explicit source.
+    """
     if not content or not str(content).strip():
         return
     content = str(content).strip()
     if blanket_entry_vetoes(content):
         logger.warning("decider_memory insert skipped: blanket regime/macro entry veto conflicts with opportunity charter")
         return
+    pending_review = str(source or "feedback").strip().lower().startswith("feedback")
+    source = str(source or "feedback").strip()
+    active = not pending_review
     try:
         with engine.begin() as conn:
             exists = conn.execute(text(
-                "SELECT 1 FROM decider_memory WHERE config_hash=:c AND active AND content=:ct LIMIT 1"
-            ), {"c": config_hash, "ct": content}).fetchone()
+                "SELECT 1 FROM decider_memory WHERE config_hash=:c AND active=:active AND content=:ct LIMIT 1"
+            ), {"c": config_hash, "ct": content, "active": active}).fetchone()
             if exists:
                 return
             conn.execute(text("""
-                INSERT INTO decider_memory (config_hash, kind, tags, ticker, content, source, weight)
-                VALUES (:c, :k, :t, :tk, :ct, :s, :w)
+                INSERT INTO decider_memory (config_hash, kind, tags, ticker, content, source, weight, active)
+                VALUES (:c, :k, :t, :tk, :ct, :s, :w, :active)
             """), {
                 "c": config_hash, "k": kind, "t": list(tags) if tags else None,
                 "tk": (ticker.upper() if ticker else None), "ct": content, "s": source, "w": float(weight),
+                "active": active,
             })
     except Exception as exc:
         logger.warning("decider_memory add_memory failed: %s", exc)

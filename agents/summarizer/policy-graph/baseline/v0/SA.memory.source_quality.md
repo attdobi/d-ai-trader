@@ -15,10 +15,9 @@ compiled: stored
 locked: false
 provenance: prompt_versions#0
 sep_before: ""
-sep_after: "\n\n"
-body_sha256: f94678c21b205cf6f525b6db082103e7063e3a0be599a8decca93ff6446ce909
+sep_after: "\n"
+body_sha256: efec4a3e8fd9951b2e74cdad543809379d79c488736ca7503337a1e9ae8b096e
 tags: []
 tickers: []
 ---
 ## Source Quality Notes
-*Per-source reliability scores will accumulate here.*

@@ -1,9 +1,8 @@
 # Company Extraction Agent — Memory
 
 ## Lessons learned
-- **#parent-rollup** Products and brands map to the listed parent (YouTube TV → GOOGL, ESPN → DIS); ETFs and indexes are not companies.
-- **#no-guess** An unsure ticker is an empty string, never a lookalike (MRVL is not MRVA).
-- **#dedupe** One row per company even when several summaries mention it.
-
-## Log
-<!-- template: ## YYYY-MM-DD #tag — one short line per lesson -->
+- **#parent-rollup** Products/brands map to listed parents only when supported; corporate relationships are time-dependent.
+- **#no-guess** A doubtful ticker is an empty string, not a lookalike.
+- **#dedupe** Repeated summaries do not create additional companies. Deduplicate a parent even if several brands/classes appear.
+- **#event-owner** Distinguish an earnings reporter from a peer reacting to the release.
+- **#not-a-position** A resolved entity is review context, not a holding or approved trade.

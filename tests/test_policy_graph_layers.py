@@ -69,18 +69,41 @@ def test_last_run_served_sqlite():
 
 def test_style_check_flags_dense_gates():
     dense = P.FileChange(id="DA.directives.strategy.x", action="add", primary=True, body=(
-        "9. EVENT GATE — read the block (every cycle). IF a THEN b. IF c THEN d (see above). " + "x" * 260))
+        "9. EVENT GATE — read the block (every cycle). IF a THEN b. IF c THEN d (see above). "
+        "IF e THEN f. IF g THEN h (check this). IF i THEN j. " + "x" * 620))
     plain = P.FileChange(id="DA.directives.strategy.y", action="add", primary=True, body=(
-        "10. EARNINGS CANDIDATE — IF a BUY candidate reports earnings within the next 5 sessions THEN reject it. "
-        "Otherwise next gate. Falsified if 20 such candidates average better than +1% over their next 5 sessions."))
-    lesson = P.FileChange(id="DA.memory.lessons.z", action="add", primary=False, body="- **#tag — short.** One sentence (with an aside) (and another).")
+        "10. EARNINGS CANDIDATE — When a standard BUY candidate reports earnings within the next 5 sessions, "
+        "reject that standard entry. A separately authorized earnings-event strategy must satisfy its own "
+        "verified-date, size and gap-risk controls. Every other entry gate still applies."),
+        falsified_if="Test wording equivalence on the same frozen 30 eligible cases, comparing decision and size parity with the incumbent.")
+    lesson = P.FileChange(id="DA.memory.lessons.z", action="add", primary=False,
+                          body="- **#tag — short.** One sentence (with an aside) (and another) (and a third).")
     prose = P.FileChange(id="DA.soul.risk_management", action="edit", primary=False, body="## Risk Management\n- a bullet (with parens) (twice) " + "y" * 400)
     removed = P.FileChange(id="DA.directives.strategy.old", action="remove", primary=False, body="")
     w = P.style_check([dense, plain, lesson, prose, removed])
     by = {}
     for x in w:
         by.setdefault(x["id"], []).append(x["warning"])
-    assert len(by["DA.directives.strategy.x"]) == 4          # long, two conditions, parentheses, no falsifier
+    assert len(by["DA.directives.strategy.x"]) == 5          # long, branches, sentences, asides, missing review metadata
     assert "DA.directives.strategy.y" not in by
-    assert by["DA.memory.lessons.z"] == ["lesson has 2 parenthetical asides; move the numbers into the sentence"]
+    assert by["DA.memory.lessons.z"] == ["lesson has 3 asides; make essential qualifications easy to follow"]
     assert "DA.soul.risk_management" not in by and "DA.directives.strategy.old" not in by
+
+
+def test_review_protocol_is_separate_and_advisory():
+    protocol = ("Compare paired net return after fees and slippage for 30 eligible FOMC exits, "
+                "using recorded entry and exit timestamps over 5 sessions against the incumbent baseline.")
+    assert P.review_protocol_gaps(protocol) == []
+    assert P.review_protocol_gaps("The next 5 exits through the decision lose money")
+    change = P.FileChange(id="DA.directives.strategy.event", action="edit", primary=True,
+                          body="2. EVENT — Keep the current position limits. Falsified if returns fall.",
+                          falsified_if=protocol)
+    warnings = P.style_check([change])
+    assert warnings == [{"id": change.id, "warning": "review test is embedded in live text; move it to proposal.falsified_if metadata"}]
+
+
+def test_necessary_conditions_do_not_require_compressed_if_boilerplate():
+    change = P.FileChange(id="DA.directives.strategy.event", action="edit", primary=True,
+                          body="2. EVENT — IF the date is verified, apply the approved event limit. IF it is unknown, skip the event entry.",
+                          falsified_if="Check equivalence on the same 30 eligible saved cases against the incumbent decisions.")
+    assert P.style_check([change]) == []

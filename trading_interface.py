@@ -290,7 +290,7 @@ class TradingInterface:
         return payload
 
     def execute_buy_order(self, ticker: str, amount_usd: float, reason: Optional[str] = None,
-                          shares: Optional[int] = None) -> Dict[str, Any]:
+                          shares: Optional[int] = None, earnings_decision=None) -> Dict[str, Any]:
         """
         Place a market buy order using USD allocation (legacy helper for decider_agent).
         Pass `shares` when the caller already sized the order: re-deriving the count from
@@ -305,6 +305,10 @@ class TradingInterface:
         }
         if shares is not None:
             decision["shares_override"] = int(shares)
+        if isinstance(earnings_decision, dict):
+            for key in ('strategy', 'earnings_event', '_earnings_authorization', 'earnings_event_controls', '_earnings_run_id'):
+                if key in earnings_decision:
+                    decision[key] = earnings_decision[key]
         return self._wrap_live_result(self._execute_schwab_order(decision))
 
     def execute_sell_order(self, ticker: str, shares: float, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -392,20 +396,44 @@ class TradingInterface:
                         "decision": decision
                     }
                 estimated_total = shares * current_price
+                _event_order = decision.get('strategy') == 'earnings_event'
+                _event_limit_price = None
+                if _event_order:
+                    from earnings_strategy import execution_limit, pending_orders, mark_submitted, reserve_submission
+                    from order_sizing import resolve_cap
+                    from config import MAX_POSITION_VALUE, MAX_POSITION_FRACTION
+                    from shared.market_clock import MarketClock
+                    _cfg = get_current_config_hash()
+                    with engine.connect() as _ec:
+                        _event_holdings = [dict(r) for r in _ec.execute(text(
+                            "SELECT ticker,current_value,shares,current_price,reason FROM holdings "
+                            "WHERE config_hash=:h AND is_active=TRUE"), {'h':_cfg}).mappings()]
+                    _equity = sum(float(h.get('current_value') or 0) for h in _event_holdings)
+                    _normal_cap = resolve_cap(MAX_POSITION_VALUE, MAX_POSITION_FRACTION, _equity)
+                    shares, _event_limit_price, _event_cap = execution_limit(
+                        decision, current_price, config_hash=_cfg, market_open=MarketClock.is_market_open(),
+                        account_value=_equity, normal_position_cap=_normal_cap,
+                        holdings=_event_holdings, pending=pending_orders(engine, _cfg))
+                    decision['shares_override'] = shares
+                    decision['earnings_limit_price'] = _event_limit_price
+                    estimated_total = shares * _event_limit_price
+                    reserve_submission(engine, decision, _cfg)
+                    mark_submitted(decision)
                 decision["shares_estimate"] = shares
                 decision["price_estimate"] = current_price
                 decision["estimated_value"] = estimated_total
                 
                 # Place buy order
-                order_result = schwab_client.place_equity_order(
-                    symbol=ticker,
-                    quantity=shares,
-                    instruction="BUY",
-                    order_type="MARKET"
-                )
+                if _event_order:
+                    order_result = schwab_client.place_equity_order(
+                        symbol=ticker, quantity=shares, instruction="BUY",
+                        order_type="LIMIT", price=_event_limit_price)
+                else:
+                    order_result = schwab_client.place_equity_order(
+                        symbol=ticker, quantity=shares, instruction="BUY", order_type="MARKET")
                 if isinstance(order_result, dict):
                     order_result.setdefault("shares", shares)
-                    order_result.setdefault("price", current_price)
+                    order_result.setdefault("price", _event_limit_price if _event_order else current_price)
                     order_result.setdefault("estimated_value", estimated_total)
                 
             elif action == "sell":
@@ -484,6 +512,30 @@ class TradingInterface:
                     "decision": decision
                 }
             
+            if action == 'buy' and decision.get('strategy') == 'earnings_event':
+                _event_state = str(((order_result or {}).get('order_status') or {}).get('status') or '').upper()
+                _order_id = (order_result or {}).get('order_id')
+                decision['order_id'] = _order_id
+                decision['execution_status'] = ('filled' if _event_state == 'FILLED' else
+                    'rejected' if _event_state in ('REJECTED','CANCELED','CANCELLED','EXPIRED') else 'working' if _order_id else 'pending')
+                if decision['execution_status'] == 'filled':
+                    shares = int(order_result.get('filled_quantity') or shares)
+                    current_price = float(order_result.get('price') or _event_limit_price)
+                    decision['executed_shares'] = shares
+                    decision['executed_price'] = current_price
+                    decision['executed_amount'] = order_result.get('executed_amount') or round(shares * current_price, 2)
+                if decision['execution_status'] == 'rejected':
+                    from earnings_strategy import release
+                    release(decision)
+                try:
+                    from decider_agent import _persist_execution_outcomes
+                    _persist_execution_outcomes([decision], decision.get('_earnings_run_id'), get_current_config_hash())
+                except Exception:
+                    pass
+                if decision['execution_status'] != 'filled':
+                    return {'status':decision['execution_status'], 'order_id':_order_id,
+                            'reason':'Earnings LIMIT order is not confirmed filled; no holding recorded',
+                            'execution_type':'live','decision':dict(decision)}
             if order_result and order_result.get("status") == "success":
                 order_state = (order_result.get("order_status", {}) or {}).get("status")
                 order_reason = (order_result.get("order_status", {}) or {}).get("reason")

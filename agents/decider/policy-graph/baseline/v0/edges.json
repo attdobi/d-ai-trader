@@ -25,7 +25,7 @@
  },
  {
   "source_node_id": "DA.code.confirmation_policy",
-  "target_node_id": "DA.memory.lessons.priced_kill",
+  "target_node_id": "DA.directives.reminder.kill_breach",
   "edge_type": "constrains",
   "confidence": 1.0,
   "provenance": "authored:code_map",
@@ -33,7 +33,31 @@
  },
  {
   "source_node_id": "DA.code.confirmation_policy",
-  "target_node_id": "DA.memory.lessons.reentry_quarantine",
+  "target_node_id": "DA.directives.strategy.extension_cap",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.confirmation_policy",
+  "target_node_id": "DA.directives.strategy.priced_kill",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.confirmation_policy",
+  "target_node_id": "DA.directives.strategy.re_entry_quarantine",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.confirmation_policy",
+  "target_node_id": "DA.directives.strategy.regime_gate",
   "edge_type": "constrains",
   "confidence": 1.0,
   "provenance": "authored:code_map",
@@ -73,10 +97,42 @@
  },
  {
   "source_node_id": "DA.code.deploy_policy",
+  "target_node_id": "DA.directives.strategy.regime_gate",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.deploy_policy",
   "target_node_id": "DA.code",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.event_calendar",
+  "target_node_id": "DA.directives.strategy.earnings_candidate",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.event_calendar",
+  "target_node_id": "DA.directives.strategy.earnings_holding",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.event_calendar",
+  "target_node_id": "DA.directives.strategy.event_gate",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
   "version": "DeciderAgent.baseline.v0"
  },
  {
@@ -93,6 +149,14 @@
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.index_regime",
+  "target_node_id": "DA.directives.strategy.regime_gate",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
   "version": "DeciderAgent.baseline.v0"
  },
  {
@@ -137,7 +201,7 @@
  },
  {
   "source_node_id": "DA.code.quarantine_line",
-  "target_node_id": "DA.memory.lessons.reentry_quarantine",
+  "target_node_id": "DA.directives.strategy.re_entry_quarantine",
   "edge_type": "constrains",
   "confidence": 1.0,
   "provenance": "authored:code_map",
@@ -169,6 +233,14 @@
  },
  {
   "source_node_id": "DA.code.watchlist_header",
+  "target_node_id": "DA.directives.strategy.extension_cap",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.watchlist_header",
   "target_node_id": "DA.code",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -184,39 +256,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.account_mode",
-  "target_node_id": "DA.directives",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.directives.cash_playbook",
-  "target_node_id": "DA.code.cash_playbook",
-  "edge_type": "overlaps",
-  "confidence": 0.518,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.directives.cash_playbook",
-  "target_node_id": "DA.directives",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.directives.crowd_fade",
-  "target_node_id": "DA.directives",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.directives.daily_pacing",
+  "source_node_id": "DA.directives.earnings_event_exception",
   "target_node_id": "DA.directives",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -232,7 +272,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.hard_sell_rule",
+  "source_node_id": "DA.directives.reminder",
   "target_node_id": "DA.directives",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -240,7 +280,23 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.hold_duration",
+  "source_node_id": "DA.directives.reminder.kill_breach",
+  "target_node_id": "DA.directives.reminder",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.reminder.loss_cap",
+  "target_node_id": "DA.directives.reminder",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy",
   "target_node_id": "DA.directives",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -248,56 +304,96 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.holding_window",
-  "target_node_id": "DA.directives",
+  "source_node_id": "DA.directives.strategy.candidates",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.loser_management",
-  "target_node_id": "DA.directives",
+  "source_node_id": "DA.directives.strategy.correlation",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.primary_mission",
-  "target_node_id": "DA.directives",
+  "source_node_id": "DA.directives.strategy.day_chase",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.primary_mission.n1",
-  "target_node_id": "DA.directives.primary_mission",
+  "source_node_id": "DA.directives.strategy.earnings_candidate",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.primary_mission.n2",
-  "target_node_id": "DA.directives.primary_mission",
+  "source_node_id": "DA.directives.strategy.earnings_holding",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.primary_mission.n3",
-  "target_node_id": "DA.directives.primary_mission",
+  "source_node_id": "DA.directives.strategy.event_gate",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.directives.reason_content",
-  "target_node_id": "DA.directives",
+  "source_node_id": "DA.directives.strategy.extension_cap",
+  "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy.harvest",
+  "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy.priced_kill",
+  "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy.re_entry_quarantine",
+  "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy.regime_gate",
+  "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.strategy.unpriced_holding",
+  "target_node_id": "DA.directives.strategy",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -320,52 +416,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.ticker.ionq",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[IONQ]]"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.ticker.mrvl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[MRVL]]"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.ticker.orcl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[ORCL]]"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.ticker.rklb",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[RKLB]]"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
-  "target_node_id": "DA.memory.log.2026_09_02_regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "#extension-chase"
- },
- {
-  "source_node_id": "DA.memory.lessons.extension_chase",
+  "source_node_id": "DA.memory.lessons.churn",
   "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -373,25 +424,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.lessons.gap_chase",
-  "target_node_id": "DA.ticker.irdm",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[IRDM]]"
- },
- {
-  "source_node_id": "DA.memory.lessons.gap_chase",
-  "target_node_id": "DA.memory.log.2026_06_29_irdm",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "#gap-chase"
- },
- {
-  "source_node_id": "DA.memory.lessons.gap_chase",
+  "source_node_id": "DA.memory.lessons.confirmation",
   "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -399,7 +432,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.lessons.n6",
+  "source_node_id": "DA.memory.lessons.earnings",
   "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -415,31 +448,6 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.lessons.reentry_quarantine",
-  "target_node_id": "DA.memory.lessons",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.memory.lessons.regime",
-  "target_node_id": "DA.code.index_regime",
-  "edge_type": "overlaps",
-  "confidence": 0.513,
-  "provenance": "derived:similarity",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.memory.lessons.regime",
-  "target_node_id": "DA.memory.log.2026_09_02_regime",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:tag",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "#regime"
- },
- {
   "source_node_id": "DA.memory.lessons.regime",
   "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
@@ -448,105 +456,8 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.log",
-  "target_node_id": "DA.memory",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.memory.log.2026_06_29_irdm",
-  "target_node_id": "DA.ticker.irdm",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "#IRDM"
- },
- {
-  "source_node_id": "DA.memory.log.2026_06_29_irdm",
-  "target_node_id": "DA.soul.core_philosophy",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:wikilink",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[front-run-not-chase]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_06_29_irdm",
-  "target_node_id": "DA.memory.log",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.ticker.ionq",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[IONQ]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.ticker.mdb",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[MDB]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.ticker.mrvl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[MRVL]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.ticker.orcl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[ORCL]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.ticker.rklb",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[RKLB]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.memory.lessons.reentry_quarantine",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:wikilink",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[reentry-quarantine]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.soul.core_philosophy",
-  "edge_type": "related_to",
-  "confidence": 1.0,
-  "provenance": "derived:wikilink",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[front-run-not-chase]]"
- },
- {
-  "source_node_id": "DA.memory.log.2026_09_02_regime",
-  "target_node_id": "DA.memory.log",
+  "source_node_id": "DA.memory.lessons.source_quality",
+  "target_node_id": "DA.memory.lessons",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -561,7 +472,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.mistakes.unexecutable_gate",
+  "source_node_id": "DA.memory.mistakes.n2",
   "target_node_id": "DA.memory.mistakes",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -569,58 +480,12 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.crm",
-  "edge_type": "cites",
+  "source_node_id": "DA.memory.mistakes.unexecutable_gate",
+  "target_node_id": "DA.memory.mistakes",
+  "edge_type": "subtype_of",
   "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[CRM]]"
- },
- {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.cvna",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[CVNA]]"
- },
- {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.net",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[NET]]"
- },
- {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.schw",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[SCHW]]"
- },
- {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.snap",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[SNAP]]"
- },
- {
-  "source_node_id": "DA.memory.patterns",
-  "target_node_id": "DA.ticker.v",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[V]]"
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
  },
  {
   "source_node_id": "DA.memory.patterns",
@@ -648,42 +513,6 @@
  },
  {
   "source_node_id": "DA.soul.core_philosophy",
-  "target_node_id": "DA.ticker.ionq",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[IONQ]]"
- },
- {
-  "source_node_id": "DA.soul.core_philosophy",
-  "target_node_id": "DA.ticker.mrvl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[MRVL]]"
- },
- {
-  "source_node_id": "DA.soul.core_philosophy",
-  "target_node_id": "DA.ticker.orcl",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[ORCL]]"
- },
- {
-  "source_node_id": "DA.soul.core_philosophy",
-  "target_node_id": "DA.ticker.rklb",
-  "edge_type": "cites",
-  "confidence": 1.0,
-  "provenance": "derived:ticker",
-  "version": "DeciderAgent.baseline.v0",
-  "via": "[[RKLB]]"
- },
- {
-  "source_node_id": "DA.soul.core_philosophy",
   "target_node_id": "DA.soul",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -699,7 +528,7 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
-  "source_node_id": "DA.soul.identity",
+  "source_node_id": "DA.soul.learning",
   "target_node_id": "DA.soul",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -938,102 +767,6 @@
  },
  {
   "source_node_id": "DA.template.user",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.crm",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.cvna",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.ionq",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.irdm",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.mdb",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.mrvl",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.net",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.orcl",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.rklb",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.schw",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.snap",
-  "target_node_id": "DA.root",
-  "edge_type": "subtype_of",
-  "confidence": 1.0,
-  "provenance": "derived:hierarchy",
-  "version": "DeciderAgent.baseline.v0"
- },
- {
-  "source_node_id": "DA.ticker.v",
   "target_node_id": "DA.root",
   "edge_type": "subtype_of",
   "confidence": 1.0,

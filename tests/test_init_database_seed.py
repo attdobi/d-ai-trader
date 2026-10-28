@@ -145,7 +145,7 @@ def test_dormant_v0_stays_inactive_when_higher_version_active(monkeypatch):
     assert stats.skipped_prompts == len(payloads)
 
 
-def test_dormant_v0_reactivated_only_when_nothing_active(monkeypatch):
+def test_dormant_v0_remains_inactive_until_explicit_audited_reset(monkeypatch):
     init_db = _import_init_database(monkeypatch)
     payloads = _canonical_payloads(init_db)
 
@@ -154,15 +154,12 @@ def test_dormant_v0_reactivated_only_when_nothing_active(monkeypatch):
     stats = init_db.InitStats()
     init_db.seed_v0_prompts(conn, stats, "cfg_test")
 
-    updates = conn.executed("update")
-    assert len(updates) == len(payloads)
-    for sql, _params in updates:
-        assert "is_active = TRUE" in sql
-        assert "created_at" not in sql, "seeding must not rewrite created_at"
+    assert conn.executed("update") == []
+    assert stats.updated_prompts == 0 and stats.skipped_prompts == len(payloads)
 
 
-def test_content_sync_never_steals_active_flag(monkeypatch):
-    """Baseline text drift is synced, but activation stays with the evolved version."""
+def test_new_defaults_never_rewrite_historical_baseline_content(monkeypatch):
+    """New release defaults apply to fresh configs, not an existing v0 snapshot."""
     init_db = _import_init_database(monkeypatch)
     payloads = _canonical_payloads(init_db)
 
@@ -176,11 +173,8 @@ def test_content_sync_never_steals_active_flag(monkeypatch):
     stats = init_db.InitStats()
     init_db.seed_v0_prompts(conn, stats, "cfg_test")
 
-    updates = conn.executed("update")
-    assert len(updates) == len(payloads)
-    for sql, _params in updates:
-        assert "is_active" not in sql, "content sync must not re-activate v0"
-        assert "created_at" not in sql
+    assert conn.executed("update") == []
+    assert stats.updated_prompts == 0 and stats.skipped_prompts == len(payloads)
 
 
 def test_deactivates_superseded_active_v0_rows(monkeypatch):

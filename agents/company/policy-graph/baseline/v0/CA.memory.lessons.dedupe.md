@@ -4,7 +4,7 @@ version: CompanyExtractionAgent.baseline.v0
 agent: CompanyExtractionAgent
 title: "#dedupe"
 node_type: lesson
-polarity: evidence
+polarity: gate
 polarity_source: heuristic
 parent: CA.memory.lessons
 field: memory
@@ -15,9 +15,9 @@ compiled: stored
 locked: false
 provenance: prompt_versions#0
 sep_before: ""
-sep_after: "\n\n"
-body_sha256: b51591fd346603aa827cba2ed24742c50c07741064a2811103b48e3217d4d3f4
+sep_after: "\n"
+body_sha256: 0c0616f33834f375df1ab05d4e28df29a0e87b3492d1b2eec7d4741507e3e639
 tags: [dedupe]
 tickers: []
 ---
-- **#dedupe** One row per company even when several summaries mention it.
+- **#dedupe** Repeated summaries do not create additional companies. Deduplicate a parent even if several brands/classes appear.

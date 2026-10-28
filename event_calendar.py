@@ -44,7 +44,7 @@ import json
 import logging
 import os
 import time
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -386,6 +386,9 @@ def next_earnings_date(ticker: str, *, today: Optional[date] = None, engine=None
     """{'ticker','date','estimate','sessions_to','source'} — memory cache → earnings_calendar table → yfinance."""
     ticker = (ticker or "").strip().upper()
     today = today or date.today()
+    operator = _confirmed_earnings(ticker, today)
+    if operator:
+        return operator
     cache_h = float(os.getenv("DAI_EARNINGS_CACHE_HOURS", "12"))
     now = time.time()
     rec = _EARN_CACHE.get(ticker)
@@ -409,7 +412,30 @@ def next_earnings_date(ticker: str, *, today: Optional[date] = None, engine=None
         rec = {"date": None, "estimate": False, "ts": now, "source": "not_shown"}
     d = rec.get("date")
     return {"ticker": ticker, "date": _iso(d), "estimate": bool(rec.get("estimate")),
-            "sessions_to": sessions_between(today, d) if d else None, "source": rec.get("source")}
+            "sessions_to": sessions_between(today, d) if d else None, "source": rec.get("source"),
+            "fetched_at": datetime.fromtimestamp(rec.get("ts", now), timezone.utc).isoformat(),
+            "date_confidence": "provider" if d else "unknown", "release_timing": "unknown"}
+
+
+def _confirmed_earnings(ticker, today):
+    """Operator-verified IR dates in the existing calendar file; never LLM output."""
+    rows = _extra_calendar().get("earnings") or []
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get("ticker") or "").upper() != ticker:
+            continue
+        d = _parse_date(row.get("date"))
+        verified = _to_dt(row.get("verified_at"))
+        url = str(row.get("source_url") or "")
+        if not d or d < today or row.get("confirmed") is not True or not url.startswith("https://") or verified is None or verified.tzinfo is None:
+            continue
+        return {"ticker": ticker, "date": d.isoformat(), "estimate": False,
+                "sessions_to": sessions_between(today, d), "source": "operator_confirmed_ir",
+                "source_url": url, "fetched_at": verified.astimezone(timezone.utc).isoformat(),
+                "date_confidence": "operator-confirmed IR", "release_timing": row.get("release_timing", "unknown"),
+                "release_at": row.get("release_at")}
+    return None
 
 
 def _db_earnings(engine, ticker: str, today: date, cache_h: float) -> Optional[dict]:
@@ -429,7 +455,7 @@ def _db_earnings(engine, ticker: str, today: date, cache_h: float) -> Optional[d
     d = _parse_date(row.next_earnings_date)
     if d is not None and d < today:
         return None
-    return {"date": d, "estimate": bool(row.estimate), "ts": time.time(), "source": row.source or "cache"}
+    return {"date": d, "estimate": bool(row.estimate), "ts": fetched.timestamp(), "source": row.source or "cache"}
 
 
 def _db_store_earnings(engine, ticker: str, rec: dict) -> None:
@@ -515,7 +541,7 @@ def _regime_allowance(regime: Optional[str]) -> str:
     return {
         "RISK-ON": "up to 3 new BUYs at full rails",
         "MIXED": "at most 2 new BUYs at half size (extension ≤5%)",
-        "RISK-OFF": "cash default; at most 1 half-size BUY (oversold reversal or ≤3% above the 20d MA)",
+        "RISK-OFF": "evaluate selective opportunities; at most 1 half-size BUY (oversold reversal or ≤3% above the 20d MA)",
     }.get((regime or "").upper(), "regime unreadable → MIXED: at most 2 new BUYs at half size")
 
 
@@ -528,7 +554,9 @@ def _allowance(regime: Optional[str], in_window: bool, reason: str, holdings_ear
     soon = [h for h in holdings_earnings if h.get("flag") == "reports_within_2"]
     if soon:
         names = ", ".join(f"{h['ticker']} {h['date']}{' (est.)' if h.get('estimate') else ''}" for h in soon)
-        exits = f"{names} → SELL before the print (TRIM to half only if RISK-ON and ≥ +3%)"
+        exits = (f"{names} → SELL before the print (TRIM to half only if RISK-ON and ≥ +3%) for ordinary positions; "
+                 "a position explicitly authorized under EARNINGS_EVENT_CONTROLS:v1 may hold through its named release "
+                 "within that separate capped strategy; all other active exit gates still apply")
     else:
         exits = "none"
     return {"buys": buys, "holdings_reporting_within_2": exits}
@@ -570,6 +598,7 @@ def build_event_context(holdings=None, watchlist=None, regime: Optional[str] = N
         coverage = {"horizon_end": None, "gaps": [], "warning": None}
     ctx = {
         "today": today.isoformat(), "weekday": today.strftime("%a"), "time_et": now_et.strftime("%H:%M"),
+        "as_of": now_et.astimezone(timezone.utc).isoformat(), "earnings_controls_version": 1,
         "session_state": session_state(now_et), "regime": (regime or "").upper() or None,
         "macro": statuses, "macro_window": in_window, "macro_reason": reason,
         "holdings_earnings": hold_rows, "watchlist_earnings": watch_rows,
@@ -598,7 +627,10 @@ def _earn_text(rows: list, limit: int = 8) -> str:
             st = r.get("sessions_to")
             tag = " (est.)" if r.get("estimate") else ""
             flag = {"reports_within_2": " ⚠ REPORTS ≤2 SESSIONS", "reports_within_5": " ⚠ inside 5-session hold window"}.get(r.get("flag"), "")
-            shown.append(f"{r['ticker']} {r['date']}{tag} ({'today' if st == 0 else f'{st} sessions'}){flag}")
+            source = r.get("source") or "unknown"
+            timing = r.get("release_timing") or "unknown"
+            shown.append(f"{r['ticker']} {r['date']}{tag} ({'today' if st == 0 else f'{st} sessions'}){flag} "
+                         f"[release: {timing}; source: {source}]")
         else:
             missing.append(r["ticker"])
     parts = shown[:limit]
@@ -607,6 +639,13 @@ def _earn_text(rows: list, limit: int = 8) -> str:
     if missing:
         parts.append("not_shown: " + ", ".join(missing[:limit]))
     return "; ".join(parts) if parts else "none"
+
+
+def upcoming_earnings(rows):
+    """The dated pre-earnings watchlist, not a recommendation to buy each name."""
+    selected = [r for r in rows if isinstance(r, dict) and r.get("date")
+                and isinstance(r.get("sessions_to"), (int, float)) and 0 <= r["sessions_to"] <= 5]
+    return sorted(selected, key=lambda r: (r["sessions_to"], r["ticker"]))
 
 
 def format_event_calendar(ctx: Optional[dict]) -> str:
@@ -637,6 +676,8 @@ def format_event_calendar(ctx: Optional[dict]) -> str:
         "# MACRO: " + " · ".join(macro_bits) + (" · recent: " + ", ".join(recent) if recent else ""),
         f"# EARNINGS (holdings): {_earn_text(hold_rows)}{hold_note}",
         f"# EARNINGS (watchlist): {_earn_text(ctx.get('watchlist_earnings') or [])}",
+        "# UPCOMING EARNINGS (today before release / next 1–5 TRADING sessions; date/time provenance, not a buy signal): "
+        + _earn_text(upcoming_earnings(hold_rows + (ctx.get('watchlist_earnings') or [])), limit=20),
         f"# ALLOWANCE THIS CYCLE: {ctx.get('regime') or 'regime n/a'}; new BUYs → {allow.get('buys', '')}; "
         f"holdings reporting within 2 sessions: {allow.get('holdings_reporting_within_2', 'none')}",
     ]

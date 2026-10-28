@@ -16,9 +16,8 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n"
-body_sha256: c4e4fedfa14f2bf64d0a6a71e7eab425faaad30002f36df2588a7539aca3ab45
+body_sha256: 3f25fb97152994b14b3104a428ef1747c9714e18bd67c9e70e3220de7ddca4ac
 tags: []
 tickers: []
 ---
 ## Mistakes to Avoid
-*Tagged by failure mode: `#stop-too-tight`, `#held-too-long`, `#narrative-trap`, `#gap-chase`, `#extension-chase`, `#reentry`, `#size-too-big`, etc.*

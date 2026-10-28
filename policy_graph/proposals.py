@@ -2,8 +2,8 @@
 
 A *proposal* is a patch of at most three guideline files against the active policy version of one
 agent: `edit` (replace one guideline's text), `add` (a new guideline under an existing section) or
-`remove`. Exactly one file is `primary` (the behavioral change); the others are minor supporting
-edits. The flow is
+`remove`. Exactly one file is `primary` (the main behavioral or readability change); the others
+are supporting edits. The flow is
 
     draft (LLM)  →  validate + dry-run round trip  →  critic (LLM, per file)  →  human review on
     the Policy Graph tab  →  apply: compile the approved files into the five prompt fields, insert
@@ -238,21 +238,47 @@ def derive_kind(change: FileChange) -> str:
     return "minor"
 
 
-# ----------------------------------------------------------------------------- style lint (plain gates)
-MAX_GATE_CHARS = 300          # GATE_STYLE asks for ≤ 240; warn above 300 so a long label line still passes
-_IF_RE = re.compile(r"\bIF\b")          # the gate shape writes the condition in capitals; "Falsified if" is not one
+# ----------------------------------------------------------------------------- advisory readability / review lint
+MAX_GATE_CHARS = 600
+STYLE_TARGET_CHARS = 600
+_IF_RE = re.compile(r"\bIF\b")
 _FALSIFIED_RE = re.compile(r"falsified if", re.I)
 
 
+def review_protocol_gaps(value: str) -> list:
+    """Heuristic review checklist, not proof that a natural-language test is valid."""
+    protocol = str(value or "")
+    if not protocol.strip():
+        return ["separate review protocol"]
+    tests = {
+        "eligible population": r"\b(?:eligible|cohort|population|cases?|candidates?|campaigns?|trades?|entries|exits)\b",
+        "metric": r"\b(?:return|expectancy|p&l|profit|loss|win|precision|recall|error|parity|equivalen\w*|decisions?)\b",
+        "sample size": r"\b(?:n\s*=\s*\d+|\d+\s+(?:[\w-]+\s+){0,3}(?:cases?|candidates?|campaigns?|trades?|entries|exits|decisions?))\b",
+        "comparison method": r"\b(?:paired|baseline|incumbent|control|holdout|forward|independent|equivalen\w*)\b|same\s+(?:frozen\s+|saved\s+)?cases|before.+after",
+    }
+    # A defined wording-equivalence check need not pretend to estimate returns.
+    equivalence = bool(re.search(r"\b(?:parity|equivalen\w*)\b", protocol, re.I))
+    if not equivalence:
+        tests.update({
+            "net/gross and costs": r"\b(?:net|gross|costs?|fees?|slippage)\b",
+            "horizon or entry/exit timestamps": r"\b(?:sessions?|days?|hours?|minutes?|timestamps?|horizon|open|close)\b",
+        })
+    return [label for label, pattern in tests.items() if not re.search(pattern, protocol, re.I)]
+
+
 def style_check(files: list) -> list:
-    """[{id, warning}] for gates / lessons that a first-time reader could not execute: too long, more than
-    one condition, parenthetical asides, a primary rule without a falsification metric. Advisory — the
-    critic sees it, the human sees it, nothing is blocked."""
+    """Advisory warnings; preserve qualifiers instead of enforcing compressed commands.
+
+    Evaluation belongs to FileChange.falsified_if, not the live rule body.
+    Existing stored warnings are translated separately for backward compatibility.
+    """
     out = []
     for c in files:
         if c.action == "remove" or not (c.body or "").strip():
             continue
         body = c.body.strip()
+        if c.kind == "minor":
+            out.append({"id": c.id, "warning": "wording-only classification; verify clarity and decision equivalence rather than assuming identical behavior"})
         is_rule = bool(re.match(r"^\d+\. ", body))
         is_lesson = body.startswith("- **#")
         if not (is_rule or is_lesson):
@@ -260,22 +286,42 @@ def style_check(files: list) -> list:
         what = "gate" if is_rule else "lesson"
         n = len(body)
         if n > MAX_GATE_CHARS:
-            out.append({"id": c.id, "warning": f"{what} is {n} characters; plain gates stay under 240"})
+            out.append({"id": c.id, "warning": f"{what} is {n} characters; readable guidelines target 400–600 without dropping qualifiers"})
         conds = len(_IF_RE.findall(body))
-        if is_rule and conds > 1:
-            out.append({"id": c.id, "warning": f"{what} tests {conds} conditions; one condition per gate — split it"})
+        if is_rule and conds > 4:
+            out.append({"id": c.id, "warning": f"{what} has {conds} IF branches; review clarity while preserving required exceptions"})
+        sentences = len(re.findall(r"[.!?](?:\s|$)", body))
+        if sentences > 4:
+            out.append({"id": c.id, "warning": f"{what} has {sentences} sentences; aim for four short sentences without deleting controls"})
         parens = body.count("(")
-        if parens > 1:
-            out.append({"id": c.id, "warning": f"{what} has {parens} parenthetical asides; move the numbers into the sentence"})
-        if is_rule and c.primary and not _FALSIFIED_RE.search(body):
-            out.append({"id": c.id, "warning": "primary gate has no 'Falsified if …' metric in its text"})
+        if parens > 2:
+            out.append({"id": c.id, "warning": f"{what} has {parens} asides; make essential qualifications easy to follow"})
+        if _FALSIFIED_RE.search(body):
+            out.append({"id": c.id, "warning": "review test is embedded in live text; move it to proposal.falsified_if metadata"})
+        if c.primary:
+            gaps = review_protocol_gaps(c.falsified_if)
+            if gaps:
+                out.append({"id": c.id, "warning": "review protocol needs " + ", ".join(gaps)})
     return out
 
 
-STYLE_TARGET_CHARS = 240      # GATE_STYLE's per-gate target (the lint only fires above MAX_GATE_CHARS)
 _PLAIN_STYLE = (
+    (re.compile(r"^(gate|lesson) is (\d+) characters; plain gates stay under (\d+)"),
+     lambda m: f"{m[1].capitalize()} is {m[2]} characters; the target is {m[3]}."),
     (re.compile(r"^(gate|lesson) is (\d+) characters"),
-     lambda m: f"{m[1].capitalize()} is {m[2]} characters; the target is {STYLE_TARGET_CHARS}."),
+     lambda m: f"{m[1].capitalize()} is {m[2]} characters; aim for 400–600 without dropping important qualifiers."),
+    (re.compile(r"^(gate|lesson) has (\d+) IF branches"),
+     lambda m: f"{m[1].capitalize()} has {m[2]} branches; check that its actions and exceptions are easy to follow."),
+    (re.compile(r"^(gate|lesson) has (\d+) sentences"),
+     lambda m: f"{m[1].capitalize()} has {m[2]} sentences; aim for four short sentences while keeping every control."),
+    (re.compile(r"^(gate|lesson) has (\d+) asides"),
+     lambda m: f"{m[1].capitalize()} has {m[2]} asides; make the necessary qualifications explicit."),
+    (re.compile(r"^review test is embedded"),
+     lambda m: "Keep the live instruction readable; put its evaluation test in proposal review metadata."),
+    (re.compile(r"^review protocol needs (.+)$"),
+     lambda m: f"The review protocol still needs: {m[1]}."),
+    (re.compile(r"^wording-only classification"),
+     lambda m: "This appears to change wording; review clarity and decision equivalence before treating behavior as unchanged."),
     (re.compile(r"^(gate|lesson) tests (\d+) conditions"),
      lambda m: f"{m[1].capitalize()} tests {m[2]} conditions at once; a gate should test one, so split it."),
     (re.compile(r"^(gate|lesson) has (\d+) parenthetical asides"),
@@ -370,7 +416,7 @@ def normalize_files(raw_files, version: Version) -> list:
     if len(primaries) != 1:
         raise ProposalError(f"exactly one file must be primary (got {len(primaries)})")
     if not primaries[0].falsified_if:
-        raise ProposalError("the primary file needs \"falsified_if\" (which number over how many trades proves it wrong)")
+        raise ProposalError("the primary file needs \"falsified_if\" (a separate evaluation protocol or defined wording-equivalence check)")
     return out
 
 
@@ -765,12 +811,8 @@ def _dumps_payload(payload: dict) -> str:
 
 
 def run_critic(llm, agent_type: str, version: Version, files: list, reasoning: str, context: dict) -> dict:
-    summary = summarize(files)
-    if not summary["is_substantive"]:
-        return {"verdict": "reject", "confidence": 0.9, "auto": True,
-                "reason": "Cosmetic only — no behavioral change. Rewording does not move win rate.",
-                "ship_first": None, "unexecutable_gates": [],
-                "files": [{"id": c.id, "verdict": "reject", "reason": "wording only"} for c in files]}
+    # Readability is a legitimate review goal. A lexical "minor" classification is
+    # neither an automatic rejection nor evidence of behavioral equivalence.
     try:
         raw = llm("critic", CRITIC_DOCTRINE + CRITIC_OUTPUT_FILES,
                   "Review this proposed patch of guideline files:\n\n" + _dumps_payload(critic_input(agent_type, version, files, reasoning, context)))

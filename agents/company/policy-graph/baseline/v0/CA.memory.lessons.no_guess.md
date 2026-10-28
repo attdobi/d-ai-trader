@@ -4,7 +4,7 @@ version: CompanyExtractionAgent.baseline.v0
 agent: CompanyExtractionAgent
 title: "#no-guess"
 node_type: lesson
-polarity: gate
+polarity: evidence
 polarity_source: heuristic
 parent: CA.memory.lessons
 field: memory
@@ -16,8 +16,8 @@ locked: false
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: "\n"
-body_sha256: 9ddef33f8c5ba12174475df9519614f91887b06a00f85943eaf68788237b056a
+body_sha256: 28dbbcf457b43b9c91eedbdb96d549c9bc8b8680b056a16b595e7e5e9c1e0661
 tags: [no-guess]
 tickers: []
 ---
-- **#no-guess** An unsure ticker is an empty string, never a lookalike (MRVL is not MRVA).
+- **#no-guess** A doubtful ticker is an empty string, not a lookalike.

@@ -45,6 +45,10 @@
         <h3>Feedback</h3>
         <div id="timeline-FeedbackAgent" class="pe-timeline"></div>
       </article>
+      <article class="pe-column">
+        <h3>Company extraction</h3>
+        <div id="timeline-CompanyExtractionAgent" class="pe-timeline"></div>
+      </article>
     </div>
 
     <div id="historyError" class="pe-error pe-hidden"></div>
@@ -106,6 +110,7 @@
             <option value="SummarizerAgent">Summarizer</option>
             <option value="DeciderAgent">Decider</option>
             <option value="FeedbackAgent">Feedback</option>
+            <option value="CompanyExtractionAgent">Company extraction</option>
           </select>
         </div>
         <div class="pe-field" style="justify-content: flex-end; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
@@ -114,6 +119,12 @@
           <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
         </div>
       </div>
+
+      <section id="promptContractPanel" class="pe-contract-panel" aria-live="polite">
+        <div class="pe-contract-heading"><strong>What this agent actually reads</strong><a id="promptRuntimeLink" href="#" hidden target="_blank" rel="noopener">View assembled runtime prompt ↗</a></div>
+        <p id="promptRuntimeNote">Select an agent to inspect its runtime field usage.</p>
+        <p class="pe-contract-help">System: role and precedence. Guidelines: approved decisions and limits. User template: this cycle’s supplied inputs. Soul: identity and judgment. Memory: observations subordinate to current policy.</p>
+      </section>
 
       <div id="feedbackRefreshStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">Feedback not refreshed this session — Generate will use the most recent stored feedback.</div>
       <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
@@ -128,23 +139,28 @@
 
         <div class="pe-form-grid">
           <div class="pe-field">
-            <label for="generatedSystemPrompt">System Prompt</label>
+            <label for="generatedSystemPrompt">System Prompt <span class="pe-usage-badge" data-contract-field="system_prompt">Usage pending</span></label>
+            <p class="pe-field-usage" data-contract-note="system_prompt"></p>
             <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
           </div>
           <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedStrategyDirectives">Strategy Directives <span style="font-weight:normal;color:#888;">(evolves with feedback)</span></label>
-            <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Trading personality, sell thresholds, risk rules — this is what feedback evolves"></textarea>
+            <label for="generatedStrategyDirectives">Guidelines / Strategy Directives <span class="pe-usage-badge" data-contract-field="strategy_directives">Usage pending</span></label>
+            <p class="pe-field-usage" data-contract-note="strategy_directives"></p>
+            <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Approved guidelines, actions, limits and exceptions. See the runtime usage note above."></textarea>
           </div>
           <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedSoul">Agent Soul <span style="font-weight:normal;color:#888;">(persistent identity — who this agent is)</span></label>
-            <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent personality, philosophy, decision style — loaded from agents/<name>/SOUL.md by default"></textarea>
+            <label for="generatedSoul">Soul / Identity <span class="pe-usage-badge" data-contract-field="soul">Usage pending</span></label>
+            <p class="pe-field-usage" data-contract-note="soul"></p>
+            <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent mission, evidence standards and judgment style; field usage depends on the runtime contract."></textarea>
           </div>
           <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedMemory">Agent Memory <span style="font-weight:normal;color:#888;">(auto-updated by feedback agent)</span></label>
-            <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Lessons learned, patterns, mistakes — automatically updated after each analysis cycle"></textarea>
+            <label for="generatedMemory">Memory / Learned Evidence <span class="pe-usage-badge" data-contract-field="memory">Usage pending</span></label>
+            <p class="pe-field-usage" data-contract-note="memory"></p>
+            <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Historical observations and reviewed lessons, subordinate to approved guidelines."></textarea>
           </div>
           <div class="pe-field">
-            <label for="generatedUserPrompt">User Prompt Template</label>
+            <label for="generatedUserPrompt">User Prompt Template <span class="pe-usage-badge" data-contract-field="user_prompt_template">Usage pending</span></label>
+            <p class="pe-field-usage" data-contract-note="user_prompt_template"></p>
             <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
           </div>
         </div>
@@ -163,6 +179,19 @@
 </div>
 
 <style>
+.pe-timeline-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+@media (max-width:1100px) { .pe-timeline-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:650px) { .pe-timeline-grid { grid-template-columns:1fr; } }
+.pe-contract-panel { margin:12px 0; padding:12px 14px; border:1px solid var(--border, #344258); border-radius:8px; background:var(--bg-secondary, #101c30); font-size:12px; }
+.pe-contract-heading { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.pe-contract-heading a { margin-left:auto; font-size:11px; color:#73d8ff; text-decoration:underline; text-underline-offset:3px; }
+.pe-contract-heading a:hover, .pe-contract-heading a:focus-visible { color:#bcf0ff; }
+.pe-contract-panel p { margin:8px 0 0; line-height:1.5; }
+.pe-contract-help, .pe-field-usage { color:var(--muted, #8fa0b8); }
+.pe-field-usage { margin:0 0 6px; font-size:11px; line-height:1.4; }
+.pe-usage-badge { display:inline-block; margin-left:5px; padding:2px 6px; border:1px solid #43536a; border-radius:4px; font-size:10px; font-weight:500; color:#aabbd1; }
+.pe-usage-badge.is-runtime { color:#8de0c6; border-color:#376b61; }
+.pe-usage-badge.is-reference { color:#e1c383; border-color:#6e5e39; }
 /* Batch flow — tabs and per-agent panels */
 .pe-tab-btn {
   background: transparent;
