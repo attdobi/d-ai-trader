@@ -1,15 +1,15 @@
 {
  "config_hash": "9ea09b9as",
- "version": 18,
- "prompt_version_id": 609,
+ "version": 29,
+ "prompt_version_id": 653,
  "source_sha256": {
-  "system_prompt": "02b9426b755208d88b9e30c824d99b57b967e6f1b1bedab60f381308c438be92",
-  "user_prompt_template": "156be55624a3475624240cf5305d9a6f48c8f852b24e5194076858a634198d02",
-  "strategy_directives": "b7afb2256661430582276000eddccf708ea5732862af5107146f3d888171c1b9",
-  "soul": "e8a34046eeaf7561ef798eb5c2f3f95407c0810c82fb06eb568fcb0f9bdd3d9d",
-  "memory": "6c0bacc14f922a6cf3276476fae9af79100d112ccce9e7276c89ec5774570ff4"
+  "system_prompt": "83d7a8664bf1ef6a9c1a4a8bd40503f810aa25a02bce09a8320a3d05119e3f35",
+  "user_prompt_template": "41610a99e264f00342e58e300dcbe87cbf7e8e956139797c860f59013db1cd5d",
+  "strategy_directives": "19ee0072494f1b74be54b70f6cb5285aaa215fa957a0842dd7821578e32057b0",
+  "soul": "6f686a1a34ffb5885afc45fd1219a0929ea797084018c5449dd17d4c6c6cf49f",
+  "memory": "dd39904f057783312df15d5afb993d665e470e19b27867c3fbeb6995012d88dd"
  },
- "code_sha": "34ec242ab340",
+ "code_sha": "8b3436cc3cbb",
  "ltm_sha": "4f53cda18c2b",
  "builder_version": 1
 }

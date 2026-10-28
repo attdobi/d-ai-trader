@@ -1,0 +1,147 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 14,
+ "root_id": "FA.root",
+ "prompt_version_id": 654,
+ "created_at": "2026-10-28T08:31:43.315041",
+ "created_by": "prompt_lab",
+ "actor_kind": "human",
+ "description": "v14 Feedback (auto) · feedback#1263 · success 20.0% · 25 trades · 2026-10-28 15:26 UTC",
+ "is_active": true,
+ "materialized_by": "prompt_lab",
+ "source_sha256": {
+  "system_prompt": "38df3f83384e6627ab2463efba788c8090c18e8fcbec3104d74e4cd9c52cc2a3",
+  "user_prompt_template": "e1dd528e3ccf4f175a42fd16ecafd5f631df9a2690fde6651d5b6df290f17a96",
+  "strategy_directives": "67f0a572a77e60f2ce874e8387604ad12972d2014902bbbc871959689a5500dd",
+  "soul": "f3a81a0e964aadbdad2b924232d8248b63d9f742fb374ad0e1d3e11200b8c018",
+  "memory": "97af3d4075ac49a5822afaec6e252465ead57f62bf9ffa3eb487660932672908"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.anti_hallucination",
+   "FA.directives.audit_order",
+   "FA.directives.audit_order.n1",
+   "FA.directives.audit_order.regime",
+   "FA.directives.audit_order.entry_geometry",
+   "FA.directives.audit_order.re_entry",
+   "FA.directives.audit_order.payoff",
+   "FA.directives.audit_order.n6",
+   "FA.directives.audit_order.n7",
+   "FA.directives.audit_order.n8",
+   "FA.directives.audit_order.n9",
+   "FA.directives.audit_order.event_risk"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.ranked_leak_priority",
+   "FA.soul.ranked_leak_priority.kill_filter_control",
+   "FA.soul.ranked_leak_priority.risk_off_entry_pause",
+   "FA.soul.rule_style"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.log.2026_06_20",
+   "FA.memory.log.2026_06_24",
+   "FA.memory.log.2026_06_25",
+   "FA.memory.log.2026_08_04",
+   "FA.memory.log.2026_08_21",
+   "FA.memory.log.2026_09_01",
+   "FA.memory.log.2026_09_02_meta",
+   "FA.memory.log.2026_09_02_meta_2",
+   "FA.memory.log.2026_09_02_meta_3",
+   "FA.memory.log.2026_09_02_meta_4",
+   "FA.memory.log.2026_09_20",
+   "FA.memory.log.2026_10_12",
+   "FA.memory.log.2026_10_28"
+  ]
+ },
+ "node_count": 64,
+ "edge_count": 116,
+ "code": {
+  "sha": "8b3436cc3cbb",
+  "dir": "../_code/8b3436cc3cbb",
+  "git_sha": "2e2fac3b",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 13,
+  "lineage_version": 14,
+  "activation": {
+   "event_id": 64,
+   "created_at": "2026-10-28T08:31:43.315041",
+   "action": "apply_candidate",
+   "actor": "prompt_lab",
+   "from_version": 13,
+   "batch_id": "329b477fbd59466d84a0495dde4d5dba",
+   "reason": "v14 Feedback (auto) · feedback#1263 · success 20.0% · 25 trades · 2026-10-28 15:26 UTC"
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 2,
+  "changed": 13,
+  "removed": 1,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 13
+ },
+ "kind": "policy",
+ "history": []
+}
