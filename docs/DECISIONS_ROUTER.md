@@ -5,6 +5,52 @@ policy router. Its question is **which optional guidelines add useful context to
 this cycle?** The approved trading policy, its risk controls and the trade decision
 remain with the existing assembly and Decider.
 
+## Policy Router view and the October 29–November 5 evaluation
+
+The third Policy Graph subtab, **Policy Router**, shows saved cycles in a history
+list and slider. It follows evidence → proposed subgraph → actual Decider context,
+with pinned/kept/skipped/actually-served IDs, relevance estimates, image coverage,
+latency, usage and cost. Recorded-flow playback is a visualization of stored
+results, not streaming internal reasoning. Visible-only 30-second refresh reads
+the database; it never triggers an API call or changes routing.
+
+GET `/api/policy-graph/router-cycles?limit=100` returns the trial and bounded
+comparison list; GET `/api/policy-graph/router-cycles/<id>` returns one same-config
+trace. Context is restricted to ticker lists, regime, counts, timestamps and image
+availability. Cash, account IDs, raw prompts, replies and pixels are excluded.
+The browser opens a selected guideline in its recorded policy version. Mutable
+long-term memory inspection retains the existing graph's historical limitations.
+
+Trial `365b75fca9704cd7b053de24d6f9429d` for config `9ea09b9as` starts at
+`2026-10-29T17:40:18.639327+00:00` and ends at
+`2026-11-05T17:40:18.639327+00:00`, after input watermark 154. The Pacific wall
+clock changes from 10:40 AM to 9:40 AM because DST ends during this 168-hour window.
+New native live comparisons count toward the evaluation; earlier live rows and
+replay probes stay visible separately. An idempotent start cannot extend the
+week. Concurrent first starts are serialized per configuration.
+
+The current trader already produced live comparison 5 for input154: 60 pinned
+nodes, eight kept optional memories, none skipped, twelve screenshots, 42,231
+router input tokens and 7,502 ms latency, at $0.00521925. Its matched proposed text
+input was unchanged at 19,772 tokens, so estimated net input savings were negative
+by the router fee. This one cycle establishes functioning collection, not savings
+or preserved trading quality. No new observer or trader restart was necessary.
+
+`shadow_trial.py` persists the evaluation window and reports native calls without
+pretending an old cached process can be retroactively controlled. Optional
+reservation helpers provide atomic deduplication, expiry and finite spend bounds
+for explicitly integrated callers; they are not an enforced kill switch on the
+already-running native process. Unknown fees remain unknown. The evaluation
+cohort ends at the deadline while regular shadow mode remains subject to review;
+there is no automatic active-routing transition.
+
+A daily thread heartbeat stays quiet before the deadline unless collection
+requires attention, then reports cycle coverage, failures, router overhead,
+matched savings estimates and available quality evidence. It makes no paid probe,
+policy change, trader restart or order. A week of relevance selections alone does
+not prove unchanged decision quality: matched full-versus-routed decisions and
+later independent outcomes are still required. Pending horizons stay pending.
+
 ## October 29: shared original screenshot context
 
 The router and trading Decider now receive the same frozen screenshot bundle from

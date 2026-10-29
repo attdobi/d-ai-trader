@@ -23,7 +23,7 @@ def catalog(rows):
 
 def test_topic_words_are_multilabel_and_match_literal_evidence():
     found = T.matches("Iran war threatens Hormuz crude oil. AI cloud demand raises DRAM/HBM chip production.")
-    assert set(found) == {"geopolitics_iran", "energy_oil", "technology", "ai", "semiconductors", "memory_manufacturing"}
+    assert set(found) == {"geopolitics_iran", "geopolitics_conflict", "shipping_hormuz", "energy_oil", "technology", "ai", "semiconductors", "memory_manufacturing"}
     assert found["energy_oil"] == ["crude", "oil"]
     assert found["memory_manufacturing"] == ["dram", "hbm"]
 
@@ -43,9 +43,9 @@ def test_generic_policy_and_ambiguous_substrings_do_not_invent_market_events(bod
 def test_issuer_reference_is_exposure_not_iran_or_a_reported_catalyst():
     cases = [case(ticker="XOM"), case(ticker="GM", input_id=6), case(ticker="MU", input_id=7)]
     cat, method = T.annotate([], [cases])
-    assert cases[0]["market_themes"] == ["energy_oil"]
+    assert cases[0]["market_themes"] == ["energy", "energy_oil"]
     assert "geopolitics_iran" not in {topic for row in cases for topic in row["market_themes"]}
-    assert cases[1]["market_themes"] == ["electric_vehicles"]
+    assert cases[1]["market_themes"] == ["technology", "electric_vehicles"]
     assert "memory_manufacturing" in cases[2]["market_themes"]
     assert all(entry["source"] == "ticker_reference" and "not evidence" in entry["note"]
                for row in cases for entry in row["theme_evidence"])
@@ -69,7 +69,7 @@ def test_case_associations_attach_only_to_the_exact_cited_policy_revision():
     observed = case("Iran conflict and oil-price uncertainty.", version=1)
     T.annotate(nodes, [[observed]])
     first, second = nodes
-    assert first["market_themes"] == ["geopolitics_iran", "energy_oil"]
+    assert first["market_themes"] == ["geopolitics", "geopolitics_iran", "energy", "energy_oil"]
     assert first["direct_market_themes"] == []
     assert all(entry["source"] == "cited_case" and entry["case_ids"] == ["c1"] for entry in first["theme_evidence"])
     assert second["market_themes"] == ["general"]
@@ -108,7 +108,7 @@ def test_duplicate_display_rows_merge_themes_without_doubling_counts_or_replacin
     audit = case("Iran and oil", action="BUY", id="audit-1")
     nodes = [landmark()]
     cat, _ = T.annotate(nodes, [[prospective], [audit]])
-    assert prospective["market_themes"] == audit["market_themes"] == ["geopolitics_iran", "energy_oil"]
+    assert prospective["market_themes"] == audit["market_themes"] == ["geopolitics", "geopolitics_iran", "energy", "energy_oil"]
     assert prospective["action"] == "PASS" and audit["action"] == "BUY"
     for topic in ("geopolitics_iran", "energy_oil"):
         item = catalog(cat)[topic]

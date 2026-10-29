@@ -147,6 +147,26 @@ def test_filtering_theme_observations_never_recomputes_or_mutates_global_quality
     assert result['metrics']=={'recall':.4,'episodes':50} and result['same']
 
 
+def test_source_observations_are_filtered_separately_from_decision_cases_and_rules():
+    data={'source_observations':{'observations':[
+        {'record_id':'summary:1','market_themes':['geopolitics','geopolitics_iran'],'text':'Iran risk reported','source_agent':'BBC'},
+        {'record_id':'feedback:2','market_themes':['energy'],'text':'Review oil exposure','source_agent':'FeedbackAgent'}]},
+        'opportunities':{'metrics':{'recall':None},'cases':[{'ticker':'ABC'}]},'landmarks':[{'id':'DA.rule'}]}
+    result=js("const before=JSON.stringify(d);console.log(JSON.stringify({iran:L.sourceObservations(d,'geopolitics_iran'),search:L.sourceObservations(d,'','oil'),same:before===JSON.stringify(d),counts:L.themeCounts({news_observation_count:45,feedback_hypothesis_count:0},0)}));",data)
+    assert result['same'] and result['iran'][0]['record_id']=='summary:1'
+    assert result['search'][0]['record_id']=='feedback:2'
+    assert result['counts']=='0 guidelines · 45 news · 0 hypotheses'
+
+
+def test_theme_excerpt_surfaces_the_matching_evidence_buried_in_a_long_summary():
+    data={'text':'Unrelated headline. '*50+'Reported Hormuz disruption remains unverified. '+'Other context. '*30,
+          'theme_evidence':[{'theme_id':'shipping_hormuz','matches':['hormuz']}]}
+    result=js("console.log(JSON.stringify({excerpt:L.sourceExcerpt(d,'shipping_hormuz'),general:L.sourceExcerpt(d),unchanged:d.text.length>1000}));",data)
+    assert 'Reported Hormuz disruption remains unverified.' in result['excerpt']
+    assert len(result['excerpt'])<=452 and result['excerpt'].startswith('…')
+    assert 'Hormuz' not in result['general'] and result['unchanged']
+
+
 def test_learning_map_mount_keeps_theme_controls_and_metric_scope_synchronized():
     script=r'''
 const assert=require('node:assert/strict'),fs=require('node:fs');

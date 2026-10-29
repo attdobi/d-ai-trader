@@ -11,8 +11,10 @@ from __future__ import annotations
 from collections import defaultdict
 import re
 
+from .taxonomy import HIERARCHY, VERSION, expand_topics, topic_metadata
 
-METHOD_ID = "market_themes_v1"
+
+METHOD_ID = "market_themes_v2"
 ISSUER_REFERENCE_ID = "issuer_theme_exposure_2026_10_28_v1"
 
 # A small versioned browsing aid, not live sector-master data. Membership means
@@ -40,10 +42,24 @@ ISSUER_THEMES = {
 # prompt memory, not evidence about DRAM/NAND production; bare "EV" can mean
 # enterprise value, and an oil/defense ticker does not establish an Iran event.
 _TOPICS = (
-    ("geopolitics_iran", "Iran / geopolitics", "Explicit Iran, conflict or geopolitical references.",
-     r"\b(?:iran(?:ian)?|strait of hormuz|hormuz|middle east|geopolitic\w*|armed conflict|ceasefire|military strike\w*)\b|(?<!price )(?<!bidding )\bwar\b"),
-    ("energy_oil", "Oil / energy", "Oil, gas, fuel and energy-market references.",
-     r"\b(?:oil|crude|brent|wti|opec\+?|natural gas|petroleum|refiner\w*|energy|fuel|lng)\b"),
+    ("geopolitics", "Geopolitics", "Explicit geopolitical references; geography may be unspecified.",
+     r"\bgeopolitic\w*\b"),
+    ("geopolitics_iran", "Iran / Middle East", "Explicit Iran or Middle East references, including risks and denials.",
+     r"\b(?:iran(?:ian)?|strait of hormuz|straight of hormuz|hormuz|middle east)\b"),
+    ("geopolitics_conflict", "Conflict / diplomacy", "Explicit military conflict, ceasefire and diplomatic references.",
+     r"\b(?:armed conflict|ceasefire|military strike\w*|diplomat\w*)\b|(?<!price )(?<!bidding )\bwar\b"),
+    ("geopolitics_sanctions", "Sanctions / restrictions", "Recorded economic sanctions, embargoes or trade restrictions.",
+     r"\b(?:sanctions?|embargo\w*|export controls?|trade restrictions?)\b"),
+    ("trade_shipping", "Trade / shipping", "Explicit shipping, freight or supply-chain references.",
+     r"\b(?:shipping|freight|supply.chain\w*|tankers?)\b"),
+    ("shipping_hormuz", "Strait of Hormuz", "Explicit Hormuz references, including discussion of potential disruption.",
+     r"\b(?:(?:strait|straight) of hormuz|hormuz)\b"),
+    ("shipping_disruption", "Shipping / supply disruption", "Recorded shipping-route, port or supply disruption references.",
+     r"\b(?:shipping (?:routes?|disrupt\w*)|supply disrupt\w*|port closures?|tanker traffic|red sea|suez canal|bab.el.mandeb)\b"),
+    ("energy", "Energy", "Broad energy and electricity-market references.",
+     r"\b(?:energy|electricity|power grids?|power generation|power demand)\b"),
+    ("energy_oil", "Oil / gas", "Oil, gas and fuel-market references.",
+     r"\b(?:oil|crude|brent|wti|opec\+?|natural gas|petroleum|refiner\w*|fuel|lng)\b"),
     ("technology", "Technology", "Technology, software, cloud and computing references.",
      r"\b(?:tech(?:nology)?|software|cloud|comput(?:e|ing) (?:capacity|infrastructure|demand|chips?|hardware)|data cent(?:er|re)s?|semiconductors?|chip(?:s|maker\w*)?|artificial intelligence|ai|electric vehicles?|electric cars?)\b"),
     ("ai", "AI", "Explicit artificial intelligence, model or AI infrastructure references.",
@@ -56,7 +72,7 @@ _TOPICS = (
      r"\b(?:electric vehicles?|electric cars?|ev (?:sales|deliveries|production|manufactur\w*|batteries|charging)|vehicle batter(?:y|ies)|battery electric|charging stations?|automotive electrification)\b"),
 )
 _PATTERNS = {ident: re.compile(pattern, re.I) for ident, _label, _description, pattern in _TOPICS}
-_ORDER = [topic[0] for topic in _TOPICS] + ["general"]
+_ORDER = list(HIERARCHY)
 
 
 def _text(value):
@@ -71,8 +87,7 @@ def matches(text):
 
 
 def _ordered(values):
-    selected = set(values)
-    return [ident for ident in _ORDER if ident in selected]
+    return expand_topics(values)
 
 
 def case_key(case):
@@ -109,7 +124,7 @@ def _outcome(case, horizon=3):
     return {}
 
 
-def annotate(landmarks, case_groups, *, config_hash=None):
+def annotate(landmarks, case_groups, *, config_hash=None, observations=None, observation_counts=None):
     """Annotate presentation copies in place; return catalog and method metadata.
 
     Case groups are the already-scoped bounded prospective display rows and
@@ -203,21 +218,41 @@ def annotate(landmarks, case_groups, *, config_hash=None):
         landmark["market_themes"] = _ordered(direct | linked.keys()) or ["general"]
         landmark["theme_evidence"] = evidence
 
+    # Saved news reports and feedback hypotheses are a distinct evidence layer.
+    # General news never creates a citation link or edits a policy landmark.
+    observed = {}
+    for record in observations or ():
+        if not isinstance(record, dict) or record.get("source_kind") not in ("news_observation", "feedback_hypothesis"):
+            continue
+        if config_hash is not None and record.get("config_hash") not in (None, config_hash):
+            continue
+        ident = record.get("record_id")
+        if not isinstance(ident, str) or not re.fullmatch(r"(?:summary|feedback):[0-9]{1,20}", ident):
+            continue
+        found = matches(_text(record.get("text")))
+        record["market_themes"] = _ordered(found) or ["general"]
+        record["theme_evidence"] = [{"theme_id": theme, "source": "recorded_observation_text", "matches": words}
+                                    for theme, words in found.items()]
+        observed.setdefault(ident, record)
     catalog = []
-    topics = [(ident, label, description) for ident, label, description, _ in _TOPICS]
-    topics.append(("general", "General policy / unclassified", "No market-topic words are recorded; general policy is not assigned an invented market event."))
-    for ident, label, description in topics:
+    for ident, topic in HIERARCHY.items():
         cases = [case for case in unique.values() if ident in case["market_themes"]]
+        sampled = [record for record in observed.values() if ident in record["market_themes"]]
+        counted = (observation_counts or {}).get(ident) or {}
         assessed = [case for case in cases if str(case.get("action") or "").upper()
                     in ("BUY", "PASS", "REJECT", "REJECTED", "SKIP", "NO BUY", "NO_BUY")]
-        catalog.append({"id": ident, "label": label, "description": description,
+        catalog.append({"id": ident, "label": topic["label"], "description": topic["description"], **topic_metadata(ident),
                         "landmark_count": sum(ident in landmark["market_themes"] for landmark in landmarks),
                         "direct_landmark_count": sum(ident in landmark["direct_market_themes"] for landmark in landmarks),
                         "linked_landmark_count": sum(ident in landmark["linked_market_themes"] for landmark in landmarks),
                         "case_count": len(cases), "assessed_count": len(assessed),
-                        "matured_count": sum(_outcome(case).get("status") == "matured" for case in assessed)})
+                        "matured_count": sum(_outcome(case).get("status") == "matured" for case in assessed),
+                        "observation_count": counted.get("total", len(sampled)),
+                        "news_observation_count": counted.get("news_observations", sum(record["source_kind"] == "news_observation" for record in sampled)),
+                        "feedback_hypothesis_count": counted.get("feedback_hypotheses", sum(record["source_kind"] == "feedback_hypothesis" for record in sampled)),
+                        "sample_observation_count": len(sampled)})
     method = {"id": METHOD_ID, "kind": "deterministic_text_annotations", "multi_label": True,
               "counts_scope": "Bounded displayed cases, deduplicated by input/run and ticker; not quality-rate denominators.",
-              "maturity_horizon": 3, "issuer_reference_id": ISSUER_REFERENCE_ID,
+              "maturity_horizon": 3, "issuer_reference_id": ISSUER_REFERENCE_ID, "taxonomy_version": VERSION,
               "note": "Market themes use recorded words and a small versioned issuer-exposure reference, labeled separately. Issuer exposure does not establish a current event; Iran/conflict needs explicit words. Cited-case links require the same policy version and are associations, not causal credit. Theme grouping does not refit the frozen embedding coordinates or reveal the Decider's decision boundary. Empty themes stay empty; general policy remains unclassified."}
     return catalog, method

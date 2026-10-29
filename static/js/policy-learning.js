@@ -87,6 +87,21 @@
   const marketThemes = item => [...new Set(list(item?.market_themes).map(String).filter(Boolean))].length ? [...new Set(list(item.market_themes).map(String).filter(Boolean))] : ['general'];
   const inMarketTheme = (item, theme) => !theme || marketThemes(item).includes(theme);
   const themeCatalog = data => list(data?.theme_catalog).length ? list(data.theme_catalog) : [{id:'general',label:'General policy',description:'No market topic recorded.'}];
+  function sourceObservations(data, theme='', search='') {
+    const query=String(search||'').toLowerCase();
+    return list(data?.source_observations?.observations).filter(row=>inMarketTheme(row,theme)&&(!query||`${row.text||''} ${row.source_agent||''}`.toLowerCase().includes(query)));
+  }
+  function themeCounts(theme, guidelines) {
+    return `${number(guidelines,0)} guidelines · ${number(theme?.news_observation_count,0)} news · ${number(theme?.feedback_hypothesis_count,0)} hypotheses`;
+  }
+  function sourceExcerpt(row, theme='') {
+    const text=String(row?.text||'Text unavailable');
+    const evidence=list(row?.theme_evidence).filter(e=>e.theme_id===theme).flatMap(e=>list(e.matches));
+    const at=evidence.map(word=>text.toLowerCase().indexOf(String(word).toLowerCase())).filter(i=>i>=0).sort((a,b)=>a-b)[0];
+    if(!theme||at===undefined||text.length<=450)return short(text,450);
+    const start=Math.max(0,at-130),end=Math.min(text.length,start+450);
+    return (start?'…':'')+text.slice(start,end)+(end<text.length?'…':'');
+  }
   function themePosition(id, theme, box) {
     // Category positions are a readable grid, separate from stored embeddings.
     // The layout receives the whole version before display filters are applied.
@@ -150,9 +165,9 @@
     const empty = (title,text) => `<div class="pl-empty"><h3>${esc(title)}</h3><p>${esc(text)}</p></div>`;
     const typeView = n => win.PolicyGraphSchema?.nodeView(n) || {title:n.title || n.id,typeLabel:n.node_type || 'Guideline',color:'#8ab4cc',structural:false};
 
-    function writeView(active) {
+    function writeView(selectedView) {
       const p = new URLSearchParams(location.hash.slice(1));
-      if (active) p.set('view','learning'); else p.delete('view');
+      if (['learning','router'].includes(selectedView)) p.set('view',selectedView); else p.delete('view');
       history.replaceState(null,'',`#${p.toString()}`);
     }
     function openExplorer(id,version) {
@@ -161,12 +176,16 @@
       const p=new URLSearchParams(location.hash.slice(1));p.set('agent',state.agent||'DeciderAgent');
       if(finite(version))p.set('v',String(version));p.set('node',id);p.delete('view');location.hash=p.toString();
     }
-    function setView(active, update=true) {
+    function setView(value, update=true) {
+      const active=value===true||value==='learning',selectedView=active?'learning':value==='router'?'router':'explorer';
       state.active=active;
       document.querySelector('.pg-page')?.classList.toggle('pl-learning-active',active);
+      document.querySelector('.pg-page')?.classList.toggle('pr-router-active',selectedView==='router');
+      const routerPanel=$('#prRouter');if(routerPanel)routerPanel.hidden=selectedView!=='router';
       $('#plLearning').hidden=!active;
-      document.querySelectorAll('[data-policy-view]').forEach(b=>{const selected=(b.dataset.policyView==='learning')===active; b.setAttribute('aria-selected',String(selected)); b.tabIndex=selected?0:-1;});
-      if (update) writeView(active);
+      document.querySelectorAll('[data-policy-view]').forEach(b=>{const selected=b.dataset.policyView===selectedView; b.setAttribute('aria-selected',String(selected)); b.tabIndex=selected?0:-1;});
+      if (update) writeView(selectedView);
+      if(typeof win.CustomEvent==='function')win.dispatchEvent(new win.CustomEvent('policygraph:viewchange',{detail:{view:selectedView}}));
       if (active) { load(); win.requestAnimationFrame(renderMap);if(state.jobId)pollReplay(); } else {stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;}
     }
     function setLens(lens) {
@@ -208,7 +227,7 @@
       const themeOptions=[...themes.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).slice(0,16);
       $('#plTheme').innerHTML='<option value="">All policy sections</option><optgroup label="Policy sections"><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></optgroup>'+(themeOptions.length?`<optgroup label="Recorded policy tags">${themeOptions.map(([tag])=>`<option value="tag:${esc(tag)}">#${esc(tag.replace(/^#/,''))}</option>`).join('')}</optgroup>`:'');
       $('#plTheme').value=state.theme;if($('#plTheme').value!==state.theme)state.theme='';
-      const marketOptions='<option value="">All market themes</option>'+themeCatalog(state.data).map(t=>`<option value="${esc(t.id)}">${esc(t.label)}</option>`).join('');
+      const marketOptions='<option value="">All market themes</option>'+themeCatalog(state.data).map(t=>`<option value="${esc(t.id)}">${esc(t.path_label||t.label)}</option>`).join('');
       for(const id of ['#plMarketTheme','#plEvidenceTheme']){$(id).innerHTML=marketOptions;$(id).value=state.marketTheme;}
       if($('#plMarketTheme').value!==state.marketTheme)state.marketTheme='';
       renderTimeline();renderMap();renderInspector();renderEvidence();renderReplays();configureReplayForm();
@@ -257,8 +276,17 @@
       const catalog=themeCatalog(state.data),theme=catalog.find(t=>t.id===state.marketTheme);
       const currentNodes=getSnapshot().points;
       const populated=catalog.filter(t=>currentNodes.some(n=>marketThemes(n).includes(t.id)));
-      const summary=theme ? `${theme.label}: ${number(theme.case_count,0)} displayed saved observations · ${number(theme.assessed_count,0)} assessed · ${number(theme.matured_count,0)} matured at 3 sessions. These are bounded display counts, not theme quality rates. ${theme.description||''}` : `${populated.length} themes contain guidelines in this version. A guideline can appear in multiple groups; general controls stay in General policy.`;
+      const summary=theme ? `${theme.path_label||theme.label}: ${themeCounts(theme,currentNodes.filter(n=>inMarketTheme(n,theme.id)).length)} · ${number(theme.case_count,0)} displayed decision cases. ${theme.description||''}` : `${populated.length} themes contain guidelines in this version. News observations and feedback hypotheses are counted separately from learned rules. Parent/child themes overlap; do not sum them as independent events.`;
       $('#plThemeSummary').innerHTML=`<p>${esc(summary)}</p><p class="pl-boundary-note"><span>Decision boundary: not validated</span> These regions group recorded topics. Testing a BUY/PASS boundary requires matched routed/full decisions and later outcomes; colors do not estimate profitability.</p>`;
+      renderSourceObservations();
+    }
+    function renderSourceObservations() {
+      const target=$('#plSourceList'),summary=$('#plSourceSummary'),reviewBox=$('#plTaxonomyReview');
+      if(!target||!summary||!reviewBox)return;
+      const inventory=state.data?.source_observations||{},rows=sourceObservations(state.data,state.marketTheme,state.search),review=state.data?.taxonomy_review;
+      summary.textContent=inventory.available===false?'Observation history unavailable; no topic or lesson inferred.':`${number(inventory.safe_record_count,0)} safe parsed source records in the ${number(inventory.window_days,90)}-day window · ${rows.length} matching sampled records · showing up to 8. These news reports and feedback hypotheses are not independent events, assessed trades or approved rules. ${inventory.truncated?'The scan was capped. ':''}${inventory.sample_truncated?'The displayed sample is bounded and balanced by topic. ':''}`;
+      reviewBox.innerHTML=review?`<p class="pl-footnote"><strong>${esc(review.taxonomy_version)} · Sol organization review</strong> · ${number(list(review.topics).length)} source-grounded topics · ${esc(dateText(review.created_at))}. No trading policy was changed.</p><details><summary>Inspect the organization review and suggested categories</summary>${list(review.topics).map(topic=>`<p><strong>${esc(topic.label)}</strong>${String(topic.id).startsWith('proposed_')?' · Suggested addition; not installed':''}<br>${esc(topic.description)}<br><small>${esc(topic.evidence?.[0]?.record_id||'')} · “${esc(topic.evidence?.[0]?.quote||'')}”</small></p>`).join('')}<p>${esc(list(review.limitations).join(' '))}</p></details>`:'';
+      target.innerHTML=rows.length?rows.slice(0,8).map(row=>`<article class="pl-source-card"><div class="pl-type-line"><strong>${esc(row.source_kind==='feedback_hypothesis'?'Feedback hypothesis':'News observation')}</strong><span>${esc(row.source_agent||'Recorded source')}</span></div><small>${esc(row.record_id)} · ${esc(dateText(row.observed_at))}</small><p>${esc(sourceExcerpt(row,state.marketTheme))}</p>${String(row.text||'').length>450?`<details><summary>Full saved observation</summary><p>${esc(row.text)}</p></details>`:''}<small>${esc(marketThemes(row).map(id=>themeCatalog(state.data).find(t=>t.id===id)?.label||id).join(' · '))}</small></article>`).join(''):empty('No sampled source observations match.','This does not turn a general rule into a theme-specific lesson. Try another topic or clear the search.');
     }
     function renderMap() {
       const target=$('#plMap');if(!state.data || !state.active || state.lens!=='evolution') return;
@@ -286,8 +314,8 @@
           box.append(ns('rect',{x:group.x,y:group.y,width:group.width,height:group.height,rx:10}));
           box.append(ns('text',{class:'pl-theme-title',x:group.x+12,y:group.y+21},short(group.label,Math.max(12,Math.floor((group.width-24)/6.3)))));
           const count=points.filter(n=>marketThemes(n).includes(group.id)).length;
-          box.append(ns('text',{class:'pl-theme-count',x:group.x+12,y:group.y+38},`${count} shown nodes · ${number(group.case_count,0)} saved cases`));
-          if(!count)box.append(ns('text',{class:'pl-theme-empty',x:group.x+group.width/2,y:group.y+group.height/2+16,'text-anchor':'middle'},'No matching guidelines here'));
+          box.append(ns('text',{class:'pl-theme-count',x:group.x+12,y:group.y+38},themeCounts(group,count)));
+          if(!count)box.append(ns('text',{class:'pl-theme-empty',x:group.x+group.width/2,y:group.y+group.height/2+16,'text-anchor':'middle'},Number(group.observation_count)>0?'Observations recorded; no guideline here':'No matching guidelines here'));
           svg.append(box);
         }
       } else {
@@ -455,7 +483,7 @@
       }
     }
 
-    document.querySelectorAll('[data-policy-view]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.policyView==='learning')));
+    document.querySelectorAll('[data-policy-view]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.policyView)));
     document.querySelectorAll('[data-learning-lens]').forEach(b=>b.addEventListener('click',()=>setLens(b.dataset.learningLens)));
     for(const selector of ['.pl-subnav','.pl-lenses']) $(selector)?.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;const buttons=[...e.currentTarget.querySelectorAll('[role="tab"]')],i=buttons.indexOf(document.activeElement);if(i<0)return;e.preventDefault();const target=e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[target].click();buttons[target].focus();});
     $('#plTimeline').addEventListener('input',e=>{stopPlayback();setIndex(e.target.value);});
@@ -480,11 +508,11 @@
     $('#plReplayForm').querySelectorAll('select').forEach(select=>select.addEventListener('change',invalidateReplay));
     $('#plReplayRun').addEventListener('click',runReplay);
     $('#plReplayRefresh').addEventListener('click',()=>{state.pollCount=0;state.pollErrors=0;pollReplay();});
-    win.addEventListener('hashchange',()=>{const p=new URLSearchParams(location.hash.slice(1));state.agent=p.get('agent')||state.agent;const v=p.get('v');if(v!==null&&finite(v))state.version=Number(v);setView(p.get('view')==='learning',false);});
+    win.addEventListener('hashchange',()=>{const p=new URLSearchParams(location.hash.slice(1));state.agent=p.get('agent')||state.agent;const v=p.get('v');if(v!==null&&finite(v))state.version=Number(v);setView(p.get('view'),false);});
     win.addEventListener('policygraph:loaded',e=>{state.agent=e.detail?.agent||agentFromPage();state.version=e.detail?.version??versionFromPage();if(state.active)load();});
     if(win.ResizeObserver){const observer=new ResizeObserver(()=>{if(state.active)win.requestAnimationFrame(renderMap);});observer.observe($('#plMap'));}
     document.addEventListener('visibilitychange',()=>{if(document.hidden){stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;}else if(state.jobId)pollReplay();});
-    setView(new URLSearchParams(location.hash.slice(1)).get('view')==='learning',false);
+    setView(new URLSearchParams(location.hash.slice(1)).get('view'),false);
   }
-  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,marketThemes,inMarketTheme,themeCatalog,themePosition,themeLayout,themeEvidenceLabel,caseThemeEvidenceLabel,mount};
+  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,marketThemes,inMarketTheme,themeCatalog,themePosition,themeLayout,themeEvidenceLabel,caseThemeEvidenceLabel,sourceObservations,themeCounts,sourceExcerpt,mount};
 }));

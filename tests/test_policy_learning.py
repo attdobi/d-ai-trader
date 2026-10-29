@@ -122,7 +122,7 @@ def test_payload_empty_evidence_is_not_zero_performance(db, tmp_path):
     assert result["opportunities"]["cases"] == [] and result["replays"]["runs"] == []
     assert result["opportunities"]["metrics_by_horizon"]["3"]["recall"] is None
     assert result["evidence"] == []
-    assert result["theme_method"]["id"] == "market_themes_v1"
+    assert result["theme_method"]["id"] == "market_themes_v2"
     assert {theme["id"] for theme in result["theme_catalog"]} >= {"geopolitics_iran", "energy_oil", "ai", "memory_manufacturing", "electric_vehicles"}
     assert all(theme["case_count"] == 0 for theme in result["theme_catalog"])
     assert all(node["market_themes"] == ["general"] for node in result["landmarks"])

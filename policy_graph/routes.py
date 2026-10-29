@@ -282,6 +282,34 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
         return _run(go)
 
     # ------------------------------------------------------------------ proposals (Phase 2)
+    @app.route("/api/policy-graph/router-cycles", methods=["GET"])
+    def policy_router_cycles():
+        config_hash = get_config_hash()
+        def go():
+            from policy_router.shadow_trial import cycle_list
+            raw = request.args.get("limit", "100")
+            if not _VERSION_RE.fullmatch(str(raw)) or not 1 <= int(raw) <= 200:
+                raise service.BadRequest("limit must be an integer between 1 and 200")
+            response = jsonify(cycle_list(engine, config_hash, limit=int(raw)))
+            if hasattr(response, "headers"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+        return _run(go)
+
+    @app.route("/api/policy-graph/router-cycles/<int:comparison_id>", methods=["GET"])
+    def policy_router_cycle(comparison_id):
+        config_hash = get_config_hash()
+        def go():
+            from policy_router.decisions_log import cycle_detail
+            result = cycle_detail(engine, config_hash, comparison_id)
+            if result is None:
+                raise service.NotFound("Unknown router comparison")
+            response = jsonify(result)
+            if hasattr(response, "headers"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+        return _run(go)
+
     def _json_body() -> dict:
         body = request.get_json(silent=True) if hasattr(request, "get_json") else None
         return body if isinstance(body, dict) else {}

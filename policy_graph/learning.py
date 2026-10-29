@@ -301,12 +301,17 @@ def learning_payload(engine, config_hash, agent, version=None, *, repo_root, is_
             except (learning_replay.ReplayError, ValueError):
                 pass
         evidence = _evidence(engine, config_hash, days=days)
+    from .taxonomy import observation_inventory
+    from .taxonomy_review import latest_review
+    observations = observation_inventory(engine, config_hash, days=days)
     from .themes import annotate as annotate_themes
     theme_catalog, theme_method = annotate_themes(
-        landmarks, [opportunities.get("cases") or [], evidence], config_hash=config_hash)
+        landmarks, [opportunities.get("cases") or [], evidence], config_hash=config_hash,
+        observations=observations.get("observations") or [], observation_counts=observations.get("topic_counts") or {})
     return {"schema_version": FORMAT, "agent": agent, "selected_version": selected,
             "projection": projected, "versions": versions, "landmarks": landmarks,
             "theme_catalog": theme_catalog, "theme_method": theme_method,
+            "source_observations": observations, "taxonomy_review": latest_review(engine, config_hash),
             "reviews": reviews, "evidence": evidence, "opportunities": opportunities, "replays": replays,
             "notes": ["Policy text comes from versioned prompt rows. Mutable long-term memory is excluded from historical landmarks.",
                       "Citation links are associations; they do not establish a rule's causal contribution to P&L.",

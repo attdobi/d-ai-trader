@@ -8,6 +8,57 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Topic taxonomy and a week of router observation — October 29, 2026
+
+**Policy Graph → Policy Router** now has its own subtab. Select a recorded cycle
+to follow six summaries/screenshots into the Decisions relevance scorer, inspect
+pinned/kept/skipped/actually-served guideline IDs and probabilities, and compare
+costs and matched text-token estimates. Playback animates a saved trace; passive
+refresh reads logs and never invokes a model. Earlier replay probes remain clearly
+separate from in-cycle observations and from the new evaluation cohort.
+
+The seven-day evaluation for config `9ea09b9as` runs from **October 29, 10:40 AM
+Pacific to November 5, 9:40 AM Pacific** (168 hours across daylight-saving time).
+It starts after saved input 154. The running trader already recorded an in-cycle
+comparison with twelve screenshots; no duplicate observer or trader restart was
+needed. This remains shadow: no prompt pruning or automatic promotion. A quiet
+daily follow-up checks collection and reports at the deadline. The evaluation
+window ends then; changing the ongoing router mode requires a separate review.
+
+The empty Iran/Energy groups reflected a missing evidence layer. Earlier grouping
+read guideline text and cited decision rationale, excluding the news-summary
+history. Across saved history, 569 summary rows mention Iran and 227 Hormuz;
+these are repeated reports, not independent events. No retrieved long-term memory
+row explicitly named Iran, Hormuz, oil or energy. The weekly learner previously
+reviewed trade diagnostics and compressed feedback without a theme-by-theme news
+inventory. It now receives bounded topic-coverage counts and source excerpts as
+nonbinding research context when the updated Feedback code loads; taxonomy
+organization alone still cannot establish a tradable lesson.
+
+The Learning map now includes a versioned hierarchy for Geopolitics (Iran/Middle
+East, conflict/diplomacy, sanctions), Trade/shipping (Hormuz and disruption),
+Energy, Technology, AI, semiconductors, memory manufacturing and EVs. It separately
+counts **news observations, feedback hypotheses, decision cases and guidelines**,
+with source excerpts/hashes and explicit scan/sample limits. Parent and child
+counts overlap; topic membership does not verify an event or establish causation.
+General controls remain general rather than acquiring an invented Iran rule.
+
+One source-grounded **GPT-6.1 Sol** review used sixteen bounded saved news excerpts
+and cost **$0.034224** (4,817 input and 2,459 output tokens, including 495 reasoning
+tokens). Its exact quotes were validated against source IDs and saved as an
+organization-only audit. Suggested additions remain proposals. New observations
+use the stable deterministic taxonomy without another model call per cycle;
+review substantial new/unclassified themes periodically instead of rebuilding the
+ontology every cycle. See [taxonomy and source coverage](docs/POLICY_TAXONOMY.md)
+and [the router evaluation](docs/DECISIONS_ROUTER.md).
+
+Validation: **1,768 tests passed, 1 skipped**, plus Python/JavaScript syntax and
+diff checks. The read-only dashboard preview on port 8083 displayed live cycle 5,
+the trial dates, and Hormuz's 45 news observations beside zero guidelines. The
+running trader already collects native shadow comparisons. New dashboard routes
+and weekly Feedback context load on the application's next normal restart; the
+preview exposes the updated interface without restarting live trading.
+
 ## Screenshot context and visual-framing research — October 29, 2026
 
 The selected summary rows now supply their original screenshots to **both** the

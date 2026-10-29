@@ -4,6 +4,8 @@
 
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-learning.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/policy-router.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/policy-taxonomy.css') }}" />
 {% endblock %}
 
 {% block content %}
@@ -54,6 +56,7 @@
   <div class="pl-subnav" role="tablist" aria-label="Policy Graph views">
     <button type="button" id="plExplorerTab" role="tab" aria-selected="true" aria-controls="pgGraphCard" data-policy-view="explorer">Policy explorer</button>
     <button type="button" id="plLearningTab" role="tab" aria-selected="false" aria-controls="plLearning" data-policy-view="learning">Learning map <span class="pl-new-mark" aria-hidden="true"></span></button>
+    <button type="button" id="prRouterTab" role="tab" aria-selected="false" aria-controls="prRouter" data-policy-view="router">Policy Router</button>
     <span class="pl-subnav-note">From experience to a reviewed policy</span>
   </div>
 
@@ -85,6 +88,10 @@
         <label class="pl-checkbox"><input id="plShowRetired" type="checkbox" checked /> Show changes from previous version</label>
       </div>
       <div id="plThemeSummary" class="pl-theme-summary" aria-live="polite"></div>
+      <details id="plSourceEvidence" class="pl-methods pl-source-evidence" open>
+        <summary>News behind these themes · observations and research hypotheses</summary>
+        <div><p id="plSourceSummary" class="pl-footnote"></p><div id="plTaxonomyReview"></div><div id="plSourceList" class="pl-source-list"></div></div>
+      </details>
       <div class="pl-map-layout">
         <div class="pl-map-frame">
           <div id="plMap" class="pl-map" aria-label="Policy learning landscape"></div>
@@ -213,8 +220,25 @@
     <ul id="pgChangeList" class="pg-change-list"></ul>
   </section>
 
-  <!-- Router status precedes the historical outcome tables. -->
-  <section class="pe-card" id="pgRouterCard" hidden>
+  <section class="pe-card pr-router" id="prRouter" role="tabpanel" aria-labelledby="prRouterTab" hidden>
+    <div class="pr-heading"><div><span class="pg-eyebrow">CONTEXT → RELEVANCE → SUBGRAPH</span><h2>The router, cycle by cycle.</h2><p class="pg-muted">Follow the proposed route through recorded evidence and guidelines. During this trial the Decider keeps its full approved context.</p></div><span class="pr-mode-badge">SHADOW · NO PROMPT PRUNING</span></div>
+    <div id="prTrial" class="pr-trial" aria-live="polite"></div>
+    <div id="prSummary" class="pr-summary"></div>
+    <div class="pr-toolbar"><div><p id="prStatus" class="pr-status" role="status" aria-live="polite">Open Policy Router to load saved cycles.</p><span class="pr-passive-note">Refresh reads saved logs. It never runs a model.</span></div><label class="pr-filter-label">Cycles<select id="prSourceFilter" aria-label="Router cycle source"><option value="all">All recorded cycles</option><option value="forward">Forward observations</option><option value="replay">Saved-cycle replays</option></select></label><label class="pr-auto"><input type="checkbox" id="prAutoRefresh" checked /> Auto-refresh</label><button type="button" class="pl-button" id="prRefresh">Refresh cycles</button></div>
+    <div class="pr-workspace">
+      <aside class="pr-cycle-sidebar" aria-label="Recorded router cycles"><div class="pr-list-head"><h3>Decision cycles</h3><span id="prCycleCount"></span></div><div id="prCycles" class="pr-cycle-list" aria-label="Choose a router cycle"></div></aside>
+      <div class="pr-cycle-main"><div id="prEmpty" class="pr-empty"><span class="pg-eyebrow">A TRACE FOR EVERY CYCLE</span><h3>Waiting for a recorded comparison.</h3><p>The one-week trial will add evidence as new decision inputs arrive. Earlier probes remain labeled replay.</p></div><div id="prCycleDetail" hidden>
+        <div class="pr-cycle-heading"><div><span class="pg-eyebrow" id="prCycleKicker"></span><h3 id="prCycleTitle"></h3><p id="prCycleMeta" class="pg-muted"></p></div><button type="button" id="prPlayFlow" class="pl-button">▶ Play recorded flow</button></div>
+        <div class="pr-scrubber"><button id="prPrevious" type="button" class="pl-button" aria-label="Older router cycle">←</button><input type="range" id="prCycleSlider" min="0" max="0" value="0" aria-label="Recorded router cycle" /><button id="prNext" type="button" class="pl-button" aria-label="Newer router cycle">→</button><span id="prSliderLabel"></span></div>
+        <div id="prFlow" class="pr-flow" aria-label="Recorded policy routing flow"></div><p id="prFlowCaption" class="pr-footnote">Recorded sequence, not a live model trace. Relevance is not a probability of trading profit.</p>
+        <div id="prCycleStats" class="pr-cycle-stats"></div><div id="prCycleEconomics" class="pr-cycle-economics"></div>
+        <div class="pr-node-tabs" role="tablist" aria-label="Guideline selection"><button type="button" data-router-nodes="selected" role="tab" aria-controls="prNodeTable" aria-selected="true">Proposed to keep <span id="prSelectedCount"></span></button><button type="button" data-router-nodes="skipped" role="tab" aria-controls="prNodeTable" aria-selected="false">Proposed to skip <span id="prSkippedCount"></span></button><button type="button" data-router-nodes="pinned" role="tab" aria-controls="prNodeTable" aria-selected="false">Always pinned <span id="prPinnedCount"></span></button><button type="button" data-router-nodes="actual" role="tab" aria-controls="prNodeTable" aria-selected="false">Actually served <span id="prActualCount"></span></button></div>
+        <div id="prNodeTable" class="pr-node-table" role="tabpanel" aria-label="Recorded guideline selections"></div><p id="prSelectionNote" class="pr-footnote"></p>
+        <details class="pr-method"><summary>What this trace can establish</summary><p>Selected and skipped lists describe the router’s relevance proposal. Always-pinned controls stay included. Actually served describes the captured trading prompt, not a claim that the model consciously used every guideline. In shadow mode the proposal changes no trading input and realizes no token savings. Image processing, output and reasoning costs are not inferred from text length.</p><p>Replay probes, delayed forward observers and in-cycle comparisons have different timing and remain labeled separately. Decision-quality comparisons require matched model decisions and later outcomes; a relevance score, citation match or one profitable trade does not establish preservation of quality. Trial expiry never activates pruning.</p></details>
+      </div></div>
+    </div>
+    <details class="pr-legacy"><summary>Local router history and latest comparison</summary>
+  <section class="pr-legacy-content" id="pgRouterCard" hidden>
     <div class="pg-change-head">
       <div>
         <h2>Subgraph routing</h2>
@@ -237,6 +261,9 @@
         <div id="pgDecisionsRows" class="pg-comparison-rows"></div>
       </details>
     </section>
+  </section>
+
+    </details>
   </section>
 
   <!-- Decision paths: associations across the selected date window. -->
@@ -763,4 +790,5 @@
 <script defer src="{{ url_for('static', filename='js/router-economics.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/policy-router-view.js') }}"></script>
 {% endblock %}
