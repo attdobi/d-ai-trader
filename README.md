@@ -8,6 +8,44 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Feedback dashboard audit — October 29, 2026
+
+**Prompt Blueprints** and **Recent Trade Outcomes** now have bounded internal
+scroll panels. Prompt actions stay outside the scroll area; outcome column
+headings stay visible while scrolling, and sorting survives data refreshes.
+
+**Closed-Trade Performance** compares overlapping rolling UTC lookbacks with
+columns rather than a connected time series. Every column displays its scored
+closure count. A visible summary states the shortest window's wins/denominator,
+recorded dollars and cutoff; an expandable audit provides every exact interval,
+wins/losses/flat counts and missing-return counts. A 100% result can correctly
+mean two wins out of two closures; it does not describe all purchase decisions,
+open holdings or future profitability. Empty windows show unavailable metrics.
+Returns are unweighted means of recorded closure returns, not account growth.
+
+The audit also corrected the latest review's percentage scale and displayed
+timestamp, percentage-point labeling for the benchmark return spread, unknown
+sale markers and daily event-risk provenance. Benchmark curves stop at shared
+observed endpoints, show missing valuation sessions as gaps and disclose the
+daily cash-flow approximation. The running trading policy is unchanged.
+[Metric definitions and limitations](docs/FEEDBACK_METRICS.md).
+
+The policy tooling is documented together:
+
+| View | Purpose | Documentation |
+|---|---|---|
+| Policy Graph → Explorer | Inspect versioned rules and their source connections | [Policy graph](docs/POLICY_GRAPH.md) |
+| Policy Graph → Learning map | Browse fixed local embeddings, taxonomy facets and source evidence | [Semantic landscape](docs/SEMANTIC_ATLAS.md), [taxonomy](docs/POLICY_TAXONOMY.md) |
+| Policy Graph → Policy Router | Inspect per-cycle pinned/kept/skipped rules, cost and matched token estimates | [Router](docs/POLICY_ROUTER.md), [Decisions shadow evaluation](docs/DECISIONS_ROUTER.md) |
+
+The seven-day router review remains a shadow evaluation. Learning-map groupings
+organize evidence; they do not activate rules or establish decision quality.
+
+Validation: **1,876 tests passed, 1 skipped**, including window boundaries,
+configuration scope, empty/nonfinite values, percentage units, observed benchmark
+coverage, event provenance and out-of-order range requests. Browser checks used
+the updated read-only preview at `http://127.0.0.1:8083/feedback`.
+
 ## Semantic learning landscape — October 29, 2026
 
 Learning map now opens as an interactive **semantic landscape**: local Nomic text

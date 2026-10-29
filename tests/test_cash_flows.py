@@ -353,7 +353,7 @@ def test_twr_uses_counted_flows_only(monkeypatch):
     bt.ensure_tables(eng)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE portfolio_history (timestamp TIMESTAMP, total_portfolio_value REAL, config_hash TEXT)"))
-        conn.execute(text("CREATE TABLE trade_outcomes (gain_loss_amount REAL, gain_loss_percentage REAL, config_hash TEXT, sell_timestamp TIMESTAMP)"))
+        conn.execute(text("CREATE TABLE trade_outcomes (gain_loss_amount REAL, gain_loss_percentage REAL, config_hash TEXT, sell_timestamp TIMESTAMP, ticker TEXT, original_reason TEXT)"))
         conn.execute(text("CREATE TABLE model_transitions (model_name TEXT, started_at TIMESTAMP, config_hash TEXT)"))
     today = datetime.utcnow().date()
     days = [today - timedelta(days=9 - i) for i in range(10)]

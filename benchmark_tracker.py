@@ -21,6 +21,7 @@ The trader process never imports this; it is dashboard-only.
 import os
 import time
 import hashlib
+import math
 from datetime import datetime, timedelta, date as date_type
 
 from sqlalchemy import text
@@ -245,8 +246,8 @@ def filter_artifact_days(daily_values, flows_by_date, threshold=0.15):
 
     The settled-cash writer bug wrote end-of-day snapshots missing unsettled
     cash (25-50%% dips that fully recover at the next real snapshot). Writers
-    are fixed, but surviving historical rows would still poison compounded
-    TWR (a fake -25%%/+33%% pair costs ~8%% of the index). A day is treated as
+    are fixed, but surviving historical rows still distort drawdown and
+    volatility (a complete flowless V cancels in cumulative return). A day is treated as
     an artifact when it sits > threshold below BOTH neighbors and no external
     flow could explain it; its value is replaced by carry-forward.
 
@@ -395,21 +396,36 @@ def sharpe_ratio(daily_returns, periods_per_year=252):
 
 
 def trade_stats(outcomes):
-    """Profit factor / expectancy / payoff from [(gain_amount, gain_fraction)]."""
-    if not outcomes:
-        return {"trades": 0}
-    wins = [(a, p) for a, p in outcomes if a > 0]
-    losses = [(a, p) for a, p in outcomes if a < 0]
-    gross_win = sum(a for a, _ in wins)
-    gross_loss = abs(sum(a for a, _ in losses))
-    avg_win_pct = (sum(p for _, p in wins) / len(wins) * 100.0) if wins else 0.0
-    avg_loss_pct = (sum(p for _, p in losses) / len(losses) * 100.0) if losses else 0.0
+    """Separate finite dollar and percentage cohorts; missing values stay unknown."""
+    from feedback_metrics import finite_number
+    rows = [(finite_number(a), finite_number(p)) for a, p in outcomes]
+    amounts = [a for a, _ in rows if a is not None]
+    percentages = [p for _, p in rows if p is not None]
+    wins = [p for p in percentages if p > 0]
+    losses = [p for p in percentages if p < 0]
+    def safe_sum(values):
+        try:
+            return finite_number(math.fsum(values))
+        except OverflowError:
+            return None
+    def mean_pct(values):
+        mean = safe_sum(value / len(values) for value in values) if values else None
+        return finite_number(mean * 100.0) if mean is not None else None
+    gross_win = safe_sum(a for a in amounts if a > 0)
+    loss_sum = safe_sum(a for a in amounts if a < 0)
+    gross_loss = abs(loss_sum) if loss_sum is not None else None
+    avg_win_pct = mean_pct(wins)
+    avg_loss_pct = mean_pct(losses)
     return {
-        "trades": len(outcomes),
-        "win_rate": len(wins) / len(outcomes) * 100.0,
-        "profit_factor": (gross_win / gross_loss) if gross_loss > 0 else None,
-        "expectancy_pct": sum(p for _, p in outcomes) / len(outcomes) * 100.0,
-        "payoff_ratio": (avg_win_pct / abs(avg_loss_pct)) if avg_loss_pct else None,
+        "trades": len(rows),
+        "scored_trades": len(percentages),
+        "amount_scored_trades": len(amounts),
+        "missing_profit_pct": len(rows) - len(percentages),
+        "missing_gain_amount": len(rows) - len(amounts),
+        "win_rate": len(wins) / len(percentages) * 100.0 if percentages else None,
+        "profit_factor": finite_number(gross_win / gross_loss) if gross_win is not None and gross_loss else None,
+        "expectancy_pct": mean_pct(percentages),
+        "payoff_ratio": finite_number(avg_win_pct / abs(avg_loss_pct)) if avg_win_pct is not None and avg_loss_pct else None,
         "avg_win_pct": avg_win_pct,
         "avg_loss_pct": avg_loss_pct,
     }
@@ -419,7 +435,7 @@ def trade_stats(outcomes):
 # Orchestration (called by the /api/feedback/benchmarks endpoint)
 # --------------------------------------------------------------------------
 
-def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
+def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True, *, as_of=None):
     """sync_flows: pull Schwab transfers into this config first (TTL-guarded). The dashboard passes
     the same live/Schwab predicate as its Sync button, so a simulation config — whose book never
     receives Schwab transfers — stays manual-only instead of subtracting the real account's
@@ -429,7 +445,8 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
     if sync_flows:
         refresh_cash_flows(engine, config_hash)
 
-    window_start = datetime.utcnow().date() - timedelta(days=days)
+    as_of = as_of or datetime.utcnow()
+    window_start = as_of.date() - timedelta(days=days)
 
     # Counted transfers only: Schwab rows minus the ones the operator excluded, plus manual entries
     # that do not duplicate a Schwab row (cash_flows.mark_counted).
@@ -440,19 +457,14 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
     with engine.connect() as conn:
         snap_rows = conn.execute(text("""
             SELECT timestamp, total_portfolio_value FROM portfolio_history
-            WHERE config_hash = :c AND timestamp >= :start
+            WHERE config_hash = :c AND timestamp >= :start AND timestamp <= :end
             ORDER BY timestamp
-        """), {"c": config_hash, "start": window_start - timedelta(days=5)}).fetchall()
+        """), {"c": config_hash, "start": window_start - timedelta(days=5), "end": as_of}).fetchall()
 
         bench_rows = conn.execute(text("""
             SELECT symbol, date, close FROM benchmark_history
-            WHERE date >= :start ORDER BY date
-        """), {"start": window_start - timedelta(days=5)}).fetchall()
-
-        outcome_rows = conn.execute(text("""
-            SELECT gain_loss_amount, gain_loss_percentage FROM trade_outcomes
-            WHERE config_hash = :c AND sell_timestamp >= :start
-        """), {"c": config_hash, "start": window_start}).fetchall()
+            WHERE date >= :start AND date <= :end ORDER BY date
+        """), {"start": window_start - timedelta(days=5), "end": as_of.date()}).fetchall()
 
         # Decider model switches (config hash stays fixed across model upgrades,
         # so this table is the only record of when the brain changed).
@@ -461,38 +473,45 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
             WHERE config_hash = :c ORDER BY started_at
         """), {"c": config_hash}).fetchall()
 
-    portfolio_daily = last_value_per_day([(r.timestamp, r.total_portfolio_value) for r in snap_rows])
+    from feedback_metrics import finite_number, is_recorded_closure
+    valid_snapshots = [(r.timestamp, finite_number(r.total_portfolio_value)) for r in snap_rows]
+    invalid_snapshots = sum(v is None for _, v in valid_snapshots)
+    portfolio_daily = last_value_per_day([(ts, v) for ts, v in valid_snapshots if v is not None])
     if len(portfolio_daily) < 2:
         return {"error": "Not enough portfolio history for this window"}
 
     closes_by_symbol = {}
     for r in bench_rows:
-        closes_by_symbol.setdefault(r.symbol, []).append((r.date, float(r.close)))
+        close = finite_number(r.close)
+        if close is not None and close > 0:
+            closes_by_symbol.setdefault(r.symbol, []).append((r.date, close))
 
-    # Common timeline = benchmark trading days inside the window that the
-    # portfolio can cover; the portfolio value carries forward onto each one.
+    # Common dates stop at the last observed portfolio value. Missing sessions
+    # remain gaps rather than invented flat portfolio performance.
     anchor_symbol = BENCHMARKS[0]["symbol"]
     trading_days = [d for d, _ in closes_by_symbol.get(anchor_symbol, [])
-                    if d >= max(window_start, portfolio_daily[0][0])]
+                    if max(window_start, portfolio_daily[0][0]) <= d <= portfolio_daily[-1][0]]
     if len(trading_days) < 2:
         return {"error": "Not enough benchmark history for this window"}
 
     pv_by_day = dict(portfolio_daily)
-    all_days = [d for d, _ in portfolio_daily]
-
-    def portfolio_value_on(day):
-        if day in pv_by_day:
-            return pv_by_day[day]
-        prior = [d for d in all_days if d <= day]
-        return pv_by_day[prior[-1]] if prior else None
-
-    aligned = []
-    for d in trading_days:
-        v = portfolio_value_on(d)
-        if v is not None:
-            aligned.append((d, v))
+    aligned = [(d, pv_by_day[d]) for d in trading_days if d in pv_by_day]
     if len(aligned) < 2:
         return {"error": "Not enough overlapping history"}
+    trading_days = [d for d in trading_days if aligned[0][0] <= d <= aligned[-1][0]]
+    missing_portfolio_days = [d for d in trading_days if d not in pv_by_day]
+
+    # Trade statistics use the chart's actual observed date span, not a wider
+    # current-time cohort when one data source is stale.
+    trade_start = datetime.combine(aligned[0][0], datetime.min.time())
+    trade_end = min(as_of, datetime.combine(aligned[-1][0] + timedelta(days=1), datetime.min.time()))
+    with engine.connect() as conn:
+        outcome_rows = conn.execute(text("""
+            SELECT ticker, original_reason, gain_loss_amount, gain_loss_percentage
+            FROM trade_outcomes
+            WHERE config_hash = :c AND sell_timestamp >= :start AND sell_timestamp < :end
+        """), {"c": config_hash, "start": trade_start, "end": trade_end}).mappings().all()
+    outcome_rows = [r for r in outcome_rows if is_recorded_closure(r)]
 
     flows_by_date = {}
     flow_list = []
@@ -502,7 +521,7 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
         # in the starting value; attributing them to an in-window step would
         # subtract them a second time (a pre-window +$1,000 deposit rendered
         # as a fake -34% first step in the 30d view).
-        if d <= aligned[0][0]:
+        if d <= aligned[0][0] or d > aligned[-1][0]:
             continue
         flows_by_date[d] = flows_by_date.get(d, 0.0) + float(f["amount"])
         flow_list.append({"id": f["id"], "date": d.isoformat(), "amount": float(f["amount"]),
@@ -513,24 +532,30 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
     port_returns = twr_daily_returns(aligned, flows_by_date)
     port_index = [(aligned[0][0], 100.0)] + chain_index(port_returns)
 
-    series = {"dates": [d.isoformat() for d, _ in port_index],
-              "portfolio": [round(v, 3) for _, v in port_index]}
+    port_by_day = dict(port_index)
+    series = {"dates": [d.isoformat() for d in trading_days],
+              "portfolio": [round(port_by_day[d], 3) if d in port_by_day else None for d in trading_days]}
     bench_stats = {}
+    unavailable_benchmarks = []
     for bench in BENCHMARKS:
         closes = [(d, c) for d, c in closes_by_symbol.get(bench["symbol"], [])
                   if aligned[0][0] <= d <= aligned[-1][0]]
+        if not closes or closes[0][0] != aligned[0][0] or closes[-1][0] != aligned[-1][0]:
+            unavailable_benchmarks.append(bench["symbol"])
+            continue
         gi = growth_index_from_closes(closes)
         gi_by_day = dict(gi)
         series[bench["symbol"]] = [
             round(gi_by_day[d], 3) if d in gi_by_day else None
-            for d, _ in port_index
+            for d in trading_days
         ]
         if gi:
             bench_returns = [(d2, (c2 / c1 - 1.0)) for (d1, c1), (d2, c2) in zip(closes, closes[1:])]
             bench_stats[bench["symbol"]] = {
                 "label": bench["label"],
                 "return_pct": round(gi[-1][1] - 100.0, 2),
-                "sharpe": _round(sharpe_ratio(bench_returns), 2),
+                "sharpe": _round(sharpe_ratio(bench_returns), 2) if len(closes) == len(trading_days) else None,
+                "missing_sessions": len(trading_days) - len(closes),
                 "max_drawdown_pct": round(max_drawdown(gi), 2),
             }
 
@@ -542,7 +567,7 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
         "end": aligned[-1][0].isoformat(),
         "portfolio": {
             "return_pct": round(port_return_pct, 2),
-            "sharpe": _round(sharpe_ratio(port_returns), 2),
+            "sharpe": _round(sharpe_ratio(port_returns), 2) if not missing_portfolio_days else None,
             "max_drawdown_pct": round(max_drawdown(port_index), 2),
         },
         "alpha_vs": {
@@ -550,8 +575,19 @@ def get_benchmark_performance(engine, config_hash, days=90, sync_flows=True):
             for b in BENCHMARKS if b["symbol"] in bench_stats
         },
         "benchmarks": bench_stats,
-        "trade": trade_stats([(float(r.gain_loss_amount), float(r.gain_loss_percentage))
+        "trade": trade_stats([(r["gain_loss_amount"], r["gain_loss_percentage"])
                               for r in outcome_rows]),
+        "coverage": {
+            "missing_portfolio_sessions": [d.isoformat() for d in missing_portfolio_days],
+            "invalid_portfolio_snapshots": invalid_snapshots,
+            "portfolio_last_snapshot": portfolio_daily[-1][0].isoformat(),
+            "benchmark_last_date": closes_by_symbol[anchor_symbol][-1][0].isoformat(),
+            "unavailable_benchmarks": unavailable_benchmarks,
+            "portfolio_sharpe_note": "Unavailable: missing portfolio sessions" if missing_portfolio_days else "Annualized, zero risk-free rate",
+        },
+        "methodology": "Daily flow-adjusted return approximation; transfers assigned to nearby observed steps by value-change fit. Snapshot dates are used as recorded; unobserved sessions remain gaps. V-shaped flowless snapshot outliers may be filtered heuristically.",
+        "trade_window": {"start": trade_start.isoformat(), "end_exclusive": trade_end.isoformat(),
+                         "counting_unit": "closed_outcome_row"},
         "external_flows": flow_list,
         "artifact_days_filtered": [d.isoformat() for d in artifact_days],
         # Only switches inside the plotted window get an annotation line; the

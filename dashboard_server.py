@@ -2259,7 +2259,11 @@ def get_feedback_event_risk():
 def get_feedback_data():
     """Get feedback analysis data"""
     try:
-        tracker = TradeOutcomeTracker()
+        from feedback_metrics import dashboard_period_metrics, utc_instant, iso_utc
+        # Reading the dashboard must not initialize tables or trigger learning.
+        tracker = object.__new__(TradeOutcomeTracker)
+        as_of = utc_instant()
+        config_hash = get_current_config_hash()
         
         # Get recent feedback (gracefully handle missing AI key)
         try:
@@ -2278,63 +2282,60 @@ def get_feedback_data():
             })
             if parsed:
                 periods = parsed[:12]  # cap to keep the chart readable
-        period_data = {}
-
-        for days in periods:
-            # Compute metrics without AI call to avoid API failures impacting the dashboard
-            metrics = tracker.compute_recent_outcomes_metrics(days_back=days)
-            period_data[f'{days}d'] = {
-                'total_trades': metrics['total_trades'],
-                'success_rate': metrics['success_rate'],
-                'avg_profit': metrics['avg_profit']
-            }
+        period_data = dashboard_period_metrics(engine, config_hash, periods, as_of=as_of)
         
         return jsonify({
             'latest_feedback': latest_feedback,
             'period_analysis': period_data,
+            'as_of': iso_utc(as_of),
             'status': 'success'
         })
-    except Exception as e:
-        return jsonify({'error': str(e), 'status': 'error'})
+    except Exception:
+        return jsonify({'error': 'Feedback metrics are unavailable', 'status': 'error'}), 500
 
 @app.route('/api/trade_outcomes')
 def get_trade_outcomes():
     """Get recent trade outcomes"""
     try:
+        from feedback_metrics import finite_number, iso_utc
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT ticker, sell_timestamp, purchase_price, sell_price, 
+                SELECT id, ticker, sell_timestamp, purchase_price, sell_price,
                        shares, gain_loss_amount, gain_loss_percentage, 
                        outcome_category, hold_duration_days
                 FROM trade_outcomes 
                 WHERE config_hash = :config_hash
-                ORDER BY sell_timestamp DESC 
+                  AND sell_timestamp <= :as_of
+                  AND TRIM(COALESCE(ticker,'')) != '' AND UPPER(TRIM(ticker)) != 'N/A'
+                  AND LOWER(COALESCE(original_reason,'')) NOT LIKE '%market is closed%'
+                ORDER BY sell_timestamp DESC, id DESC
                 LIMIT 50
-            """), {"config_hash": config_hash}).fetchall()
+            """), {"config_hash": config_hash, "as_of":datetime.utcnow()}).fetchall()
             
             outcomes = []
             for row in result:
                 outcomes.append({
                     'ticker': row.ticker,
-                    'sell_date': row.sell_timestamp.isoformat() if row.sell_timestamp else None,
-                    'purchase_price': float(row.purchase_price),
-                    'sell_price': float(row.sell_price),
-                    'shares': float(row.shares),
-                    'net_gain_dollars': float(row.gain_loss_amount),
+                    'id': row.id,
+                    'sell_date': iso_utc(row.sell_timestamp) if row.sell_timestamp else None,
+                    'purchase_price': finite_number(row.purchase_price),
+                    'sell_price': finite_number(row.sell_price),
+                    'shares': finite_number(row.shares),
+                    'net_gain_dollars': finite_number(row.gain_loss_amount),
                     # trade_outcomes.gain_loss_percentage is stored as a FRACTION
                     # (e.g. -0.0158). The frontend (schwab.js, feedback.js) renders
                     # gain_loss_pct as an already-percent value, so convert here.
                     # Previously the raw fraction leaked through and -1.58% showed
                     # as "-0.02%".
-                    'gain_loss_pct': float(row.gain_loss_percentage) * 100.0,
+                    'gain_loss_pct': finite_number(row.gain_loss_percentage) * 100.0 if finite_number(row.gain_loss_percentage) is not None else None,
                     'category': row.outcome_category,
                     'hold_days': row.hold_duration_days
                 })
             
             return jsonify(outcomes)
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return jsonify({'error': 'Recorded trade outcomes are unavailable'}), 500
 
 @app.route('/api/feedback_log')
 def get_feedback_log():

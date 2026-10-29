@@ -12,7 +12,8 @@
 
 <div class="feedback-overview">
   <div class="chart-section" style="max-width: 320px;">
-    <h2>Win/Loss Distribution</h2>
+    <h2>Recent Outcome Categories</h2>
+    <p class="feedback-scroll-hint">Latest 50 recorded closures. Break-even is the stored dollar-based category.</p>
     <canvas id="winLossDonut" width="280" height="280"></canvas>
   </div>
   <div class="streak-indicator" id="streakIndicator">
@@ -51,7 +52,7 @@
 
 <section class="prompt-section">
   <header class="prompt-section-header">
-    <h2>Prompt Blueprints</h2>
+    <h2 id="promptBlueprintsHeading">Prompt Blueprints</h2>
     <p class="section-intro">
       Explore the exact system and user templates driving each agent. These prompts are retrieved live from the active configuration for full transparency.
     </p>
@@ -61,6 +62,8 @@
       <span id="promptResetStatus" class="prompt-reset-status"></span>
     </div>
   </header>
+  <p class="feedback-scroll-hint" id="promptBlueprintsScrollHint">Scroll within the panel to read all agent templates.</p>
+  <div class="feedback-scroll-region prompt-blueprints-scroll" tabindex="0" role="region" aria-labelledby="promptBlueprintsHeading" aria-describedby="promptBlueprintsScrollHint">
   <div class="prompt-grid">
     <article class="prompt-card" id="summarizerPromptCard">
       <header>
@@ -128,19 +131,20 @@
       </details>
     </article>
   </div>
+  </div>
 </section>
 
 <div class="portfolio-summary">
   <div class="metric-card">
-    <h3>Success Rate (30d)</h3>
+    <h3>Win Rate (30d)</h3>
     <p class="value" id="successRate">--</p>
   </div>
   <div class="metric-card">
-    <h3>Average Profit (30d)</h3>
+    <h3>Mean Return (30d)</h3>
     <p class="value" id="avgProfit">--</p>
   </div>
   <div class="metric-card">
-    <h3>Total Trades (30d)</h3>
+    <h3>Scored Closures (30d)</h3>
     <p class="value" id="tradeCount">--</p>
   </div>
   <div class="metric-card">
@@ -162,8 +166,9 @@
 </div>
 
 <div class="feedback-section">
-  <h2>📊 Recent Trade Outcomes</h2>
-  <div style="overflow-x:auto;">
+  <h2 id="recentTradeOutcomesHeading">📊 Recent Trade Outcomes</h2>
+  <p class="feedback-scroll-hint" id="tradeOutcomesScrollHint">Scroll for older closed trades. Select a column heading to sort.</p>
+  <div class="feedback-scroll-region trade-outcomes-scroll" tabindex="0" role="region" aria-labelledby="recentTradeOutcomesHeading" aria-describedby="tradeOutcomesScrollHint">
     <table class="outcomes-table" id="outcomesTable">
       <thead>
         <tr>
@@ -172,7 +177,7 @@
           <th class="sortable" data-column="shares">Shares</th>
           <th class="sortable" data-column="purchase_price">Purchase Price</th>
           <th class="sortable" data-column="sell_price">Sell Price</th>
-          <th class="sortable" data-column="net_gain_dollars">Net Gain ($)</th>
+          <th class="sortable" data-column="net_gain_dollars">Recorded P&amp;L ($)</th>
           <th class="sortable" data-column="gain_loss_pct">Gain/Loss %</th>
           <th class="sortable" data-column="category">Category</th>
           <th class="sortable" data-column="hold_days">Hold Days</th>
@@ -186,11 +191,11 @@
 <div class="chart-container">
   <div class="trend-header">
     <div>
-      <h2 style="margin:0;">Performance Trends</h2>
+      <h2 style="margin:0;">Closed-Trade Performance</h2>
       <div class="trend-subtitle">
-        Trailing windows ending today — each point covers <em>all</em> closed trades
-        from the last N days (windows nest). Read left&nbsp;→&nbsp;right as history
-        narrowing toward the most recent week.
+        Overlapping lookback windows ending at the same UTC cutoff. Each column
+        counts recorded closures in the last N × 24 hours; this is a comparison
+        of samples, not a daily time series. Open positions are excluded.
       </div>
     </div>
     <div id="trendRangeButtons">
@@ -199,10 +204,12 @@
       <button type="button" class="trend-range-btn" data-periods="30,90,180,365">1y</button>
     </div>
   </div>
-  <div class="trend-panel-title"><span class="trend-swatch" style="background:#29d697;"></span>Success rate — share of closed trades that won</div>
+  <p id="trendWindowSummary" class="trend-window-summary" role="status">Loading closure counts and cutoff…</p>
+  <div class="trend-panel-title"><span class="trend-swatch" style="background:#29d697;"></span>Win rate — positive recorded returns / scored closures</div>
   <div class="chart-canvas-box trend-panel"><canvas id="successRateChart"></canvas></div>
-  <div class="trend-panel-title"><span class="trend-swatch" style="background:#42c9ff;"></span>Average profit per closed trade</div>
+  <div class="trend-panel-title"><span class="trend-swatch" style="background:#42c9ff;"></span>Mean return per closure — unweighted, not account growth</div>
   <div class="chart-canvas-box trend-panel"><canvas id="avgProfitChart"></canvas></div>
+  <details class="trend-audit"><summary>Window counts, exact cutoffs and recorded dollars</summary><div class="trend-audit-scroll"><table class="trend-cohort-table"><thead><tr><th>Rolling window · UTC</th><th>Scored closures</th><th>Wins / losses / flat</th><th>Win rate</th><th>Mean return</th><th>Recorded P&amp;L</th></tr></thead><tbody id="trendCohortBody"></tbody></table></div><p class="bench-footnote">One observation is a recorded outcome row; partial sales or separate lots can produce several rows. Missing returns are unscored. Win rate uses strictly positive returns; the outcome-category donut uses the separate stored break-even bucket. Closure returns and dollars use recorded entry/exit prices, with no separate fee adjustment.</p></details>
 </div>
 
 <div class="chart-container">
@@ -210,10 +217,10 @@
     <div>
       <h2 style="margin:0;">System vs Market</h2>
       <div class="trend-subtitle">
-        Growth of the account against the benchmarks over the same window, both
-        starting at 0%. Deposits and withdrawals are stripped out (time-weighted
-        return), so only trading skill moves the cyan line — if it sits below
-        SPY, an index fund would have done better that window.
+        Account growth and benchmarks start at 0% over the same observed window.
+        The system line adjusts for external transfers using daily valuations.
+        It includes realized and unrealized changes, dividends and fees; the
+        difference from SPY is a return spread, not risk-adjusted alpha.
       </div>
     </div>
     <div id="benchRangeButtons">
@@ -237,13 +244,11 @@
     <div>
       <h2 style="margin:0;">Event Risk Landscape</h2>
       <div class="trend-subtitle">
-        How much scheduled, binary risk sits in front of the book each session: the regime base
-        (RISK-ON 10 · MIXED 30 · RISK-OFF 55) plus the proximity of the next FOMC decision and the
-        CPI / jobs prints, plus any holding that reports inside the 1–5 day hold window. Shaded bands
-        are the regime, verticals are the events, triangles are fills (▲ buy, ▼ sell, on the risk
-        they were taken at). The dotted tail projects the calendar forward at today's regime. The
-        Decider reads the same numbers in its EVENT CALENDAR block; the EVENT GATE decides what each
-        window allows for buying, holding and selling.
+        A calendar-risk score from 0 to 100, not a probability of loss. History uses
+        the day's maximum recorded score when available, otherwise a calendar
+        reconstruction. Shading shows regime, verticals mark events, and triangles
+        mark fill dates at the daily score. The dotted tail projects the calendar
+        at the current regime.
       </div>
     </div>
     <div id="eventRangeButtons">
@@ -273,6 +278,13 @@
 .trend-range-btn.active { background: #2196F3; border-color: #2196F3; color: #fff; }
 .trend-panel-title { color: #9bb0cc; font-size: 0.85em; margin: 10px 0 2px; display: flex; align-items: center; gap: 7px; }
 .trend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.trend-window-summary { margin:14px 0 10px; padding:10px 13px; border:1px solid #284453; border-radius:9px; background:#132c363d; color:#b6d5df; font-size:12px; line-height:1.6; }
+.trend-audit { margin-top:12px; color:#9bb0cc; font-size:12px; }
+.trend-audit summary { cursor:pointer; padding:7px 0; }
+.trend-audit-scroll { overflow-x:auto; }
+.trend-cohort-table { width:100%; min-width:680px; border-collapse:collapse; }
+.trend-cohort-table th,.trend-cohort-table td { padding:9px 11px; border-bottom:1px solid #233447; text-align:left; font-size:11px; }
+.trend-cohort-table small { display:block; color:#7f8ca6; font-size:10px; line-height:1.5; font-weight:400; }
 /* Bound the canvases so Chart.js (maintainAspectRatio:false) can't grow them
    without limit — unbounded height caused the runaway vertical stretch. */
 .chart-canvas-box { position: relative; width: 100%; }
@@ -306,93 +318,5 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script defer src="{{ url_for('static', filename='js/cash-flows.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/feedback.js') }}"></script>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  // Win/Loss Donut Chart
-  fetch('/api/trade_outcomes')
-    .then(r => r.json())
-    .then(outcomes => {
-      if (!Array.isArray(outcomes) || outcomes.length === 0) return;
 
-      const categories = {
-        'significant_profit': { count: 0, color: '#29d697', label: 'Significant Profit' },
-        'moderate_profit': { count: 0, color: '#42c9ff', label: 'Moderate Profit' },
-        'break_even': { count: 0, color: '#fadb5f', label: 'Break Even' },
-        'moderate_loss': { count: 0, color: '#ff8a5c', label: 'Moderate Loss' },
-        'significant_loss': { count: 0, color: '#ff5f73', label: 'Significant Loss' }
-      };
-
-      outcomes.forEach(o => {
-        const cat = o.category || 'break_even';
-        if (categories[cat]) categories[cat].count++;
-      });
-
-      const labels = Object.values(categories).map(c => c.label);
-      const data = Object.values(categories).map(c => c.count);
-      const colors = Object.values(categories).map(c => c.color);
-
-      const ctx = document.getElementById('winLossDonut');
-      if (ctx) {
-        new Chart(ctx, {
-          type: 'doughnut',
-          data: {
-            labels: labels,
-            datasets: [{
-              data: data,
-              backgroundColor: colors.map(c => c + '33'),
-              borderColor: colors,
-              borderWidth: 2
-            }]
-          },
-          options: {
-            responsive: true,
-            cutout: '65%',
-            plugins: {
-              legend: {
-                position: 'bottom',
-                labels: { color: '#7f8ca6', usePointStyle: true, padding: 14, font: { size: 11 } }
-              },
-              tooltip: {
-                backgroundColor: '#151f35',
-                titleColor: '#e6ecff',
-                bodyColor: '#e6ecff',
-                borderColor: 'rgba(66,201,255,0.3)',
-                borderWidth: 1,
-                cornerRadius: 12
-              }
-            }
-          }
-        });
-      }
-
-      // Streak calculation
-      let streak = 0;
-      let streakType = '';
-      const sorted = outcomes.sort((a, b) => new Date(b.sell_date) - new Date(a.sell_date));
-      for (const o of sorted) {
-        const isWin = o.net_gain_dollars > 0;
-        if (streak === 0) {
-          streakType = isWin ? 'winning' : 'losing';
-          streak = 1;
-        } else if ((isWin && streakType === 'winning') || (!isWin && streakType === 'losing')) {
-          streak++;
-        } else {
-          break;
-        }
-      }
-
-      const streakEl = document.getElementById('streakValue');
-      const labelEl = document.getElementById('streakLabel');
-      if (streakEl) {
-        streakEl.textContent = streak;
-        streakEl.style.color = streakType === 'winning' ? '#29d697' : '#ff5f73';
-      }
-      if (labelEl) {
-        labelEl.textContent = `${streak} trade ${streakType} streak`;
-        labelEl.style.color = streakType === 'winning' ? '#29d697' : '#ff5f73';
-      }
-    })
-    .catch(err => console.error('Donut chart error:', err));
-});
-</script>
 {% endblock %}

@@ -206,3 +206,48 @@ def test_earnings_cache_prefers_db_then_memory(engine, monkeypatch):
     assert c["date"] == "2026-10-21" and calls == ["TSLA"]
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM earnings_calendar")).scalar() == 1
+
+
+def test_recorded_daily_max_keeps_score_level_regime_and_window_from_one_cycle(engine, monkeypatch):
+    _stub_earnings(monkeypatch, {})
+    early = ec.build_event_context(holdings=[], regime='RISK-OFF', now_et=_et(2026, 9, 23, 9, 30), engine=engine)
+    early.update(risk_score=95, risk_level='EXTREME', macro_window=True)
+    ec.record_snapshot(engine, 'cfg', 'early', early)
+    late = ec.build_event_context(holdings=[], regime='RISK-ON', now_et=_et(2026, 9, 23, 15), engine=engine)
+    ec.record_snapshot(engine, 'cfg', 'late', late)
+    future = dict(early, today='2026-09-24')
+    ec.record_snapshot(engine, 'cfg', 'future', future)
+    result = ec.event_risk_payload(engine, 'cfg', 3, lambda _d: 'RISK-ON',
+                                   now_et=_et(2026, 9, 23, 16), horizon_sessions=1)
+    point = result['series'][-1]
+    assert point['date'] == '2026-09-23'
+    assert (point['score'], point['level'], point['regime'], point['macro_window']) == (95, 'EXTREME', 'RISK-OFF', True)
+    assert point['snapshot_count'] == 2 and point['score_source'] == 'recorded_daily_max'
+    assert result['snapshots_recorded'] == 2
+    assert result['live']['regime'] == 'RISK-ON'
+
+
+def test_historical_reconstruction_cannot_inflate_a_saved_snapshot(engine, monkeypatch):
+    _stub_earnings(monkeypatch, {})
+    ctx = ec.build_event_context(holdings=[], regime='RISK-ON', now_et=_et(2026, 9, 16, 15), engine=engine)
+    ctx.update(risk_score=11, risk_level='LOW')
+    ec.record_snapshot(engine, 'cfg', 'saved', ctx)
+    result = ec.event_risk_payload(engine, 'cfg', 1, lambda _d: 'RISK-ON',
+                                   now_et=_et(2026, 9, 16, 16), horizon_sessions=1)
+    point = result['series'][-1]
+    assert point['score'] == 11 and point['level'] == 'LOW'
+    assert point['score_source'] == 'recorded_daily_max'
+
+
+def test_trade_markers_use_eastern_session_dates_skip_future_and_preserve_unknown_returns(engine):
+    with engine.begin() as conn:
+        rows = [('MIDNIGHT', 'cfg', '2026-09-23 00:30:00', None, None),
+                ('FUTURE', 'cfg', '2026-09-24 13:00:00', .02, 'entry'),
+                ('CLOSED', 'cfg', '2026-09-23 13:00:00', .02, 'MARKET IS CLOSED'),
+                ('OTHER', 'other', '2026-09-23 13:00:00', .02, 'entry'),
+                (' ', 'cfg', '2026-09-23 13:00:00', .02, 'entry')]
+        for ticker, cfg, stamp, pct, reason in rows:
+            conn.execute(text('INSERT INTO trade_outcomes (ticker, config_hash, sell_timestamp, gain_loss_percentage, original_reason) VALUES (:t,:c,:s,:p,:r)'),
+                         {'t': ticker, 'c': cfg, 's': stamp, 'p': pct, 'r': reason})
+    rows = ec._trades_in_window(engine, 'cfg', date(2026, 9, 22), _et(2026, 9, 23, 16))
+    assert rows == [{'date': '2026-09-22', 'ticker': 'MIDNIGHT', 'action': 'sell', 'pct': None}]

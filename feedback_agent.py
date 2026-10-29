@@ -1190,7 +1190,8 @@ CRITICAL INSTRUCTIONS:
         with engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT summarizer_feedback, decider_feedback, recommended_adjustments,
-                       success_rate, avg_profit_percentage, total_trades_analyzed
+                       success_rate, avg_profit_percentage, total_trades_analyzed,
+                       analysis_timestamp, lookback_period_days
                 FROM agent_feedback 
                 WHERE config_hash = :config_hash
                 ORDER BY analysis_timestamp DESC 

@@ -139,8 +139,59 @@ async function undoLastPromptChange() {
 }
 
 function formatMaybePct(v) {
-  const n = Number(v || 0);
-  return `${n.toFixed(2)}%`;
+  return Number.isFinite(v) ? `${v.toFixed(2)}%` : '—';
+}
+function feedbackEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+function feedbackDate(value) {
+  if (!value) return null;
+  const source = String(value);
+  // Flask can serialize datetimes as RFC 1123 GMT; ledger/API ISO values may
+  // omit a zone. Preserve explicit RFC zones and interpret naive ISO as UTC.
+  const raw = /(?:GMT|UTC)$/i.test(source) ? source : source.replace(' ', 'T');
+  const date = new Date(/(?:Z|[+-]\d{2}:\d{2}|GMT|UTC)$/i.test(raw) ? raw : `${raw}Z`);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+function feedbackUTCLabel(value) {
+  const date = feedbackDate(value);
+  return date ? date.toISOString().slice(0,16).replace('T',' ') + ' UTC' : 'Not recorded';
+}
+function feedbackLocalLabel(value) {
+  return feedbackDate(value)?.toLocaleString() || 'Not recorded';
+}
+function performanceRows(periodData) {
+  return Object.entries(periodData || {}).filter(([key]) => /^\d+d$/.test(key))
+    .map(([key, value]) => {
+      const metric = value || {}, n = Number.isInteger(metric.total_trades) && metric.total_trades >= 0 ? metric.total_trades : null;
+      return {key, days:parseInt(key,10), label:`Last ${key}`, metric, n,
+        wins:Number.isInteger(metric.wins) ? metric.wins : null,
+        rate:n > 0 && Number.isFinite(metric.success_rate) ? metric.success_rate * 100 : null,
+        mean:n > 0 && Number.isFinite(metric.avg_profit) ? metric.avg_profit * 100 : null};
+    }).sort((a,b) => b.days - a.days);
+}
+function outcomeStreak(outcomes) {
+  const sorted=[...(outcomes || [])].sort((a,b)=>(feedbackDate(b.sell_date)?.getTime() ?? -Infinity)-(feedbackDate(a.sell_date)?.getTime() ?? -Infinity) || (b.id ?? 0)-(a.id ?? 0));
+  const kind=row=>!Number.isFinite(row.gain_loss_pct)?'unscored':row.gain_loss_pct>0?'winning':row.gain_loss_pct<0?'losing':'flat';
+  const type=sorted.length?kind(sorted[0]):'none';
+  let count=0;
+  if(['winning','losing'].includes(type)) for(const row of sorted){if(kind(row)!==type)break;count++;}
+  return {type,count,capped:count===50&&sorted.length===50};
+}
+let outcomeDonut=null;
+function renderOutcomeOverview(outcomes) {
+  const categories=[['significant_profit','Significant Profit','#29d697'],['moderate_profit','Moderate Profit','#42c9ff'],['break_even','Break Even','#fadb5f'],['moderate_loss','Moderate Loss','#ff8a5c'],['significant_loss','Significant Loss','#ff5f73'],['unclassified','Unclassified','#7f8ca6']];
+  const counts=new Map(categories.map(([id])=>[id,0]));
+  for(const row of outcomes){const id=counts.has(row.category)?row.category:'unclassified';counts.set(id,counts.get(id)+1);}
+  const data=categories.map(([id])=>counts.get(id));
+  if(outcomeDonut){outcomeDonut.data.datasets[0].data=data;outcomeDonut.update('none');}
+  else if(document.getElementById('winLossDonut')) outcomeDonut=new Chart(document.getElementById('winLossDonut').getContext('2d'),{
+    type:'doughnut',data:{labels:categories.map(([,label])=>label),datasets:[{data,backgroundColor:categories.map(([, ,color])=>color+'33'),borderColor:categories.map(([, ,color])=>color),borderWidth:2}]},
+    options:{responsive:true,animation:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{color:'#7f8ca6',usePointStyle:true,padding:12,font:{size:10}}},tooltip:{backgroundColor:'#151f35',titleColor:'#e6ecff',bodyColor:'#e6ecff'}}}});
+  const {type,count,capped}=outcomeStreak(outcomes), color=type==='winning'?'#29d697':type==='losing'?'#ff5f73':'#7f8ca6';
+  const value=document.getElementById('streakValue'),label=document.getElementById('streakLabel');
+  if(value){value.textContent=count?`${count}${capped?'+':''}`:'—';value.style.color=color;}
+  if(label){label.textContent=count?`${count}${capped?'+':''} closure ${type} streak · latest 50`:type==='none'?'No recorded closures':`Latest closure: ${type}`;label.style.color=color;}
 }
 function formatFeedbackBlock(txt) {
   if (!txt || txt === 'null') return 'No specific guidance available';
@@ -150,15 +201,27 @@ async function loadLatestFeedback() {
   const el = document.getElementById('latestFeedback');
   try {
     const data = await fetchJSON('/api/feedback');
+    if(data.status !== 'success') throw new Error('Saved feedback metrics are unavailable');
+    const p30 = data.period_analysis?.['30d'];
+    if (p30) {
+      setText('successRate', p30.total_trades > 0 && Number.isFinite(p30.success_rate) ? `${(p30.success_rate * 100).toFixed(1)}%` : '—');
+      setText('avgProfit', p30.total_trades > 0 ? formatMaybePct(Number.isFinite(p30.avg_profit) ? p30.avg_profit * 100 : null) : '—');
+      setText('tradeCount', p30.total_trades ?? '—');
+    }
+    if (selectedTrendPeriods === DEFAULT_TREND_PERIODS && data.period_analysis) {
+      updatePerformanceChart(data.period_analysis);
+    } else {
+      refreshPerformanceChart(selectedTrendPeriods);
+    }
     if (data.status === 'success' && data.latest_feedback) {
       const f = data.latest_feedback;
       const html = `
         <div class="feedback-history-item">
           <h4>📊 Analysis Summary (${f.total_trades_analyzed} trades)</h4>
-          <div class="timestamp">${new Date().toLocaleString()}</div>
+          <div class="timestamp">${feedbackEscape(feedbackLocalLabel(f.analysis_timestamp))}${f.lookback_period_days ? ` · ${f.lookback_period_days}-day analysis` : ''}</div>
           <div style="margin-bottom: 15px;">
-            <strong>Success Rate:</strong> ${(f.success_rate * 100).toFixed(1)}%<br>
-            <strong>Average Profit:</strong> ${formatMaybePct(f.avg_profit_percentage)}
+            <strong>Win Rate:</strong> ${f.total_trades_analyzed > 0 && Number.isFinite(f.success_rate) ? `${(f.success_rate * 100).toFixed(1)}%` : '— (no closed-trade sample)'}<br>
+            <strong>Average Return:</strong> ${f.total_trades_analyzed > 0 ? formatMaybePct(Number.isFinite(f.avg_profit_percentage) ? f.avg_profit_percentage * 100 : null) : '—'}
           </div>
           <h4>📝 Summarizer Guidance:</h4>
           <div class="content">${formatFeedbackBlock(f.summarizer_feedback)}</div>
@@ -171,19 +234,6 @@ async function loadLatestFeedback() {
             </ul>` : '' }
         </div>`;
       el.innerHTML = html;
-      const p30 = data.period_analysis?.['30d'];
-      if (p30) {
-        document.getElementById('successRate').textContent = `${(p30.success_rate * 100).toFixed(1)}%`;
-        document.getElementById('avgProfit').textContent = `${(p30.avg_profit * 100).toFixed(2)}%`;
-        document.getElementById('tradeCount').textContent = p30.total_trades;
-      }
-      // Drive the chart from the user's selected range. When it's the default
-      // set, reuse the data we just fetched; otherwise fetch the chosen windows.
-      if (selectedTrendPeriods === DEFAULT_TREND_PERIODS && data.period_analysis) {
-        updatePerformanceChart(data.period_analysis);
-      } else {
-        refreshPerformanceChart(selectedTrendPeriods);
-      }
     } else {
       el.innerHTML = '<p>No recent feedback analysis available</p>';
     }
@@ -193,6 +243,7 @@ async function loadLatestFeedback() {
 }
 const DEFAULT_TREND_PERIODS = '7,14,30,60,90';
 let selectedTrendPeriods = DEFAULT_TREND_PERIODS;
+let trendRequestSequence = 0;
 
 // --- Performance trend panels (small multiples, one axis each) --------------
 // Windows are trailing and NESTED (30d includes 14d includes 7d). Plotted
@@ -223,6 +274,7 @@ const trendEndLabelPlugin = {
     const pt = meta.data[meta.data.length - 1];
     if (!pt) return;
     const value = chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1];
+    if (!Number.isFinite(value)) return;
     const { ctx } = chart;
     ctx.save();
     ctx.font = '600 11px Inter, system-ui, sans-serif';
@@ -237,29 +289,23 @@ const trendEndLabelPlugin = {
   }
 };
 
-function buildTrendChart(canvasId, { color, labels, data, trades, fmt, guideValue, yOpts, tickOpts = {}, showXTicks }) {
+function buildTrendChart(canvasId, { color, labels, data, rows, fmt, guideValue, yOpts, tickOpts = {}, showXTicks }) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const chart = new Chart(ctx, {
-    type: 'line',
+    type: 'bar',
     data: {
       labels,
       datasets: [{
         data,
         borderColor: color,
         borderWidth: 2,
-        backgroundColor: trendRgba(color, 0.07),
-        fill: true,
-        tension: 0,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        pointBackgroundColor: color,
-        pointBorderColor: '#121c33',
-        pointBorderWidth: 1.5,
+        backgroundColor: trendRgba(color, 0.32),
+        borderRadius: 5, borderSkipped: false, maxBarThickness: 56,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
-      layout: { padding: { right: 56, top: 8 } },
+      layout: { padding: { right: 12, top: 8 } },
       interaction: { mode: 'index', intersect: false },
       scales: {
         x: {
@@ -270,7 +316,8 @@ function buildTrendChart(canvasId, { color, labels, data, trades, fmt, guideValu
         y: {
           ...yOpts,
           border: { display: false },
-          // Emphasize the interpretive baseline (50% coin-flip / 0% breakeven).
+          // The zero-return line is a financial baseline; 50% is a reference,
+          // not a claim that win rate alone establishes profitability.
           grid: { color: c => c.tick.value === guideValue ? TREND_INK.gridStrong : TREND_INK.grid },
           ticks: { color: TREND_INK.muted, font: { size: 11 }, maxTicksLimit: 6, callback: v => `${v}%`, ...tickOpts },
           // Fixed axis width keeps both panels' plot areas x-aligned.
@@ -284,43 +331,46 @@ function buildTrendChart(canvasId, { color, labels, data, trades, fmt, guideValu
           borderWidth: 1, titleColor: '#dfe8f7', bodyColor: TREND_INK.text,
           padding: 10, displayColors: false,
           callbacks: {
-            title: items => items.length ? items[0].label : '',
+            title: items => items.length ? itemWindowTitle(items[0].chart.$trendRows?.[items[0].dataIndex]) : '',
             label: item => {
-              const n = item.chart.$trendTrades?.[item.dataIndex];
-              return `${fmt(item.parsed.y)}${Number.isFinite(n) ? ` across ${n} closed trades` : ''}`;
+              const row = item.chart.$trendRows?.[item.dataIndex];
+              return `${fmt(item.parsed.y)} · ${row?.wins ?? '—'} wins / ${row?.n ?? '—'} scored closures`;
             },
+            afterBody: items => {const row=items[0]?.chart.$trendRows?.[items[0].dataIndex];return row ? [`${feedbackUTCLabel(row.metric.window?.start)} →`, feedbackUTCLabel(row.metric.window?.end)] : [];},
           },
         },
       },
     },
-    plugins: [trendEndLabelPlugin],
   });
-  chart.$trendTrades = trades;
-  chart.$trendFmt = fmt;
-  chart.draw(); // re-draw so the end label (which needs $trendFmt) appears
+  chart.$trendRows = rows;
   return chart;
 }
 
+function itemWindowTitle(row) {return row ? `${row.label} · ${row.n ?? '—'} scored closures` : '';}
+function renderPerformanceAudit(rows) {
+  const latest = rows[rows.length-1], summary=document.getElementById('trendWindowSummary'), body=document.getElementById('trendCohortBody');
+  if(summary) summary.textContent = !latest ? 'No lookback data is available.' : latest.n > 0
+    ? `${latest.label}: ${latest.wins ?? '—'} wins / ${latest.n} scored closures (${formatMaybePct(latest.rate)}). ${Number.isFinite(latest.metric.net_gain_dollars) ? `Recorded P&L ${formatDollars(latest.metric.net_gain_dollars)}. ` : ''}Cutoff: ${feedbackUTCLabel(latest.metric.window?.end)}.`
+    : `${latest.label}: no scored closed trades. Win rate and average return are unavailable.`;
+  if(body) body.innerHTML = rows.map(row=>`<tr><th scope="row">${feedbackEscape(row.label)}<small>${feedbackEscape(feedbackUTCLabel(row.metric.window?.start))}<br>to ${feedbackEscape(feedbackUTCLabel(row.metric.window?.end))}</small></th><td>${row.n ?? '—'}${row.metric.unscored_trades ? `<small>${row.metric.unscored_trades} unscored</small>` : ''}</td><td>${row.wins ?? '—'} / ${row.metric.losses ?? '—'} / ${row.metric.flat_trades ?? '—'}</td><td>${formatMaybePct(row.rate)}</td><td>${fmtPct(row.mean)}</td><td>${formatDollars(row.metric.net_gain_dollars)}</td></tr>`).join('');
+}
+function formatDollars(value) {return Number.isFinite(value) ? `${value < 0 ? '−' : '+'}$${Math.abs(value).toFixed(2)}` : '—';}
+
 function updatePerformanceChart(periodData) {
   // Widest window first → most recent (7d) lands on the right.
-  const periods = Object.keys(periodData || {})
-    .map(k => ({ key: k, days: parseInt(k, 10) }))
-    .filter(p => !Number.isNaN(p.days))
-    .sort((a, b) => b.days - a.days);
-  if (!periods.length) return;
-  const labels = periods.map(p => p.days >= 365 ? `Last ${Math.round(p.days / 365)}y` : `Last ${p.days}d`);
-  const successRates = periods.map(p => (periodData[p.key]?.success_rate || 0) * 100);
-  const avgProfits = periods.map(p => (periodData[p.key]?.avg_profit || 0) * 100);
-  const trades = periods.map(p => periodData[p.key]?.total_trades);
+  const rows = performanceRows(periodData);
+  renderPerformanceAudit(rows);
+  const labels = rows.map(row=>[row.label, `n = ${row.n ?? '—'}`]);
+  const successRates = rows.map(row=>row.rate), avgProfits = rows.map(row=>row.mean);
 
   // Update in place when the panels exist and the x-axis still matches.
   // Destroying + recreating every 10s caused the visible flicker.
   if (feedbackTrendCharts
       && feedbackTrendCharts.labels.length === labels.length
-      && feedbackTrendCharts.labels.every((l, i) => l === labels[i])) {
+      && feedbackTrendCharts.labels.every((l, i) => JSON.stringify(l) === JSON.stringify(labels[i]))) {
     for (const [chart, data] of [[feedbackTrendCharts.success, successRates], [feedbackTrendCharts.profit, avgProfits]]) {
       chart.data.datasets[0].data = data;
-      chart.$trendTrades = trades;
+      chart.$trendRows = rows;
       chart.update('none'); // no animation, no re-create
     }
     return;
@@ -333,16 +383,16 @@ function updatePerformanceChart(periodData) {
   feedbackTrendCharts = {
     labels,
     success: buildTrendChart('successRateChart', {
-      color: TREND_SUCCESS_COLOR, labels, data: successRates, trades,
+      color: TREND_SUCCESS_COLOR, labels, data: successRates, rows,
       fmt: v => `${v.toFixed(1)}%`,
-      guideValue: 50, // coin-flip baseline
-      yOpts: { suggestedMin: 40, suggestedMax: 80 },
-      tickOpts: { stepSize: 10 }, // guarantees a tick (and guide line) at 50
+      guideValue: 50,
+      yOpts: { min: 0, max: 100 },
+      tickOpts: { stepSize: 25 },
 
-      showXTicks: false, // shared x — labels live on the bottom panel
+      showXTicks: true,
     }),
     profit: buildTrendChart('avgProfitChart', {
-      color: TREND_PROFIT_COLOR, labels, data: avgProfits, trades,
+      color: TREND_PROFIT_COLOR, labels, data: avgProfits, rows,
       fmt: v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`,
       guideValue: 0, // breakeven baseline
       yOpts: { beginAtZero: true },
@@ -353,10 +403,16 @@ function updatePerformanceChart(periodData) {
 
 // Re-fetch the chart for a chosen set of lookback windows (range buttons + poll).
 async function refreshPerformanceChart(periodsCsv) {
+  const sequence=++trendRequestSequence;
+  setText('trendWindowSummary','Loading the selected lookback samples…');
   try {
     const data = await fetchJSON(`/api/feedback?periods=${encodeURIComponent(periodsCsv)}`);
-    if (data?.period_analysis) updatePerformanceChart(data.period_analysis);
+    if(sequence!==trendRequestSequence || periodsCsv!==selectedTrendPeriods) return;
+    if (!data?.period_analysis) throw new Error('No saved lookback data');
+    updatePerformanceChart(data.period_analysis);
   } catch (e) {
+    if(sequence!==trendRequestSequence) return;
+    setText('trendWindowSummary','Lookback data could not be refreshed. Previously loaded values may be stale.');
     console.error('Error loading performance chart:', e);
   }
 }
@@ -383,6 +439,7 @@ const BENCH_COLORS = {
   'VTI': '#9bb0cc',
 };
 let benchmarkChart = null;
+let benchmarkRequestSequence = 0;
 
 // Deposit / withdrawal markers from static/js/cash-flows.js (absent → charts render without them).
 function transferPlugins() {
@@ -435,9 +492,9 @@ const benchModelLinePlugin = {
   }
 };
 
-function benchChip(k, v, sub, signed) {
+function benchChip(k, v, sub, signed, unit = signed ? '%' : '') {
   const cls = signed && Number.isFinite(v) ? (v >= 0 ? ' pos' : ' neg') : '';
-  const val = Number.isFinite(v) ? `${signed && v >= 0 ? '+' : ''}${v.toFixed(2)}${signed ? '%' : ''}` : '—';
+  const val = Number.isFinite(v) ? `${signed && v >= 0 ? '+' : ''}${v.toFixed(2)}${unit}` : '—';
   return `<div class="bench-chip"><div class="k">${k}</div><div class="v${cls}">${val}</div>` +
          (sub ? `<div class="s">${sub}</div>` : '') + `</div>`;
 }
@@ -450,12 +507,12 @@ function renderBenchStats(stats) {
   const spy = (stats.benchmarks || {})[spySym] || {};
   const t = stats.trade || {};
   el.innerHTML = [
-    benchChip('Alpha vs SPY', stats.spy_alpha, `system ${fmtPct(p.return_pct)} vs SPY ${fmtPct(spy.return_pct)}`, true),
+    benchChip(`Return spread vs ${feedbackEscape(spySym || 'benchmark')}`, stats.spy_alpha, `system ${fmtPct(p.return_pct)} vs ${feedbackEscape(spySym || 'benchmark')} ${fmtPct(spy.return_pct)}`, true, ' pp'),
     benchChip('System return', p.return_pct, `${stats.start} → ${stats.end}`, true),
-    benchChip('Sharpe', p.sharpe ?? NaN, `SPY ${spy.sharpe ?? '—'}`, false),
-    benchChip('Max drawdown', p.max_drawdown_pct, `SPY ${fmtPct(spy.max_drawdown_pct)}`, true),
-    benchChip('Profit factor', t.profit_factor ?? NaN, `$won / $lost, ${t.trades ?? 0} trades`, false),
-    benchChip('Expectancy', t.expectancy_pct, 'avg % per closed trade', true),
+    benchChip('Sharpe (annualized)', p.sharpe ?? NaN, `0% risk-free · ${feedbackEscape(spySym || 'benchmark')} ${spy.sharpe ?? '—'}`, false),
+    benchChip('Max drawdown', p.max_drawdown_pct, `${feedbackEscape(spySym || 'benchmark')} ${fmtPct(spy.max_drawdown_pct)}`, true),
+    benchChip('Profit factor', t.profit_factor ?? NaN, `$won / $lost · ${t.amount_scored_trades ?? t.trades ?? 0} scored closures`, false),
+    benchChip('Mean trade return', t.expectancy_pct, `${t.scored_trades ?? t.trades ?? 0} scored closures · unweighted`, true),
     benchChip('Payoff ratio', t.payoff_ratio ?? NaN, `avg win ${fmtPct(t.avg_win_pct)} / loss ${fmtPct(t.avg_loss_pct)}`, false),
   ].join('');
 }
@@ -465,15 +522,18 @@ function fmtPct(v) {
 }
 
 async function loadBenchmarkChart(days = 90) {
+  const sequence=++benchmarkRequestSequence;
   const canvas = document.getElementById('benchmarkChart');
   if (!canvas) return;
   let payload;
   try {
     payload = await fetchJSON(`/api/feedback/benchmarks?days=${days}`);
   } catch (e) {
+    if(sequence!==benchmarkRequestSequence) return;
     console.error('Error loading benchmark data:', e);
     return;
   }
+  if(sequence!==benchmarkRequestSequence) return;
   const foot = document.getElementById('benchFootnote');
   if (payload?.error) {
     if (foot) foot.textContent = `Benchmark comparison unavailable: ${payload.error}`;
@@ -500,7 +560,7 @@ async function loadBenchmarkChart(days = 90) {
       borderColor: BENCH_COLORS[b.symbol] || '#9bb0cc',
       borderWidth: 1.5, fill: false, tension: 0, pointRadius: 0, pointHoverRadius: 4,
       pointBackgroundColor: BENCH_COLORS[b.symbol] || '#9bb0cc', pointBorderColor: '#121c33',
-      spanGaps: true,
+      spanGaps: false,
     });
   }
 
@@ -565,6 +625,11 @@ async function loadBenchmarkChart(days = 90) {
       bits.push(`Decider model: ${chain.join(' → ')}`);
     }
     bits.push('SPY/VTI use dividend-adjusted closes; DJIA/NASDAQ are price indexes.');
+    if(stats.methodology) bits.push(stats.methodology);
+    const coverage=stats.coverage || {};
+    if(coverage.missing_portfolio_sessions?.length) bits.push(`${coverage.missing_portfolio_sessions.length} session(s) lack a portfolio valuation and appear as gaps; daily Sharpe is unavailable across gaps`);
+    if(coverage.unavailable_benchmarks?.length) bits.push(`Common-date coverage unavailable for: ${coverage.unavailable_benchmarks.join(', ')}`);
+    if(coverage.portfolio_last_snapshot) bits.push(`Last portfolio snapshot: ${coverage.portfolio_last_snapshot}`);
     foot.textContent = bits.join(' · ');
   }
 }
@@ -591,9 +656,10 @@ const EVENT_INK = {
     'RISK-OFF': 'rgba(255,99,132,0.16)', 'UNKNOWN': 'rgba(155,176,204,0.06)',
   },
   event: { fomc: '#ff6384', cpi: '#f2a35e', jobs: '#f2a35e', other: '#b28dff', earnings: '#42c9ff' },
-  buy: '#29d697', sellWin: '#29d697', sellLoss: '#ff6384',
+  buy: '#29d697', sellWin: '#29d697', sellLoss: '#ff6384', sellFlat: '#fadb5f', sellUnscored: '#9bb0cc',
 };
 let eventRiskChart = null;
+let eventRequestSequence = 0;
 
 // Background: one band per plotted session coloured by its regime, plus the today divider.
 const eventBandsPlugin = {
@@ -683,7 +749,7 @@ function renderEventStats(live, payload) {
     chip('Next print', nextPrint ? nextPrint.label : '—', whenOf(nextPrint), ''),
     chip('Holdings reporting', reporting.length ? reporting.map(h => `${h.ticker} ${h.date}`).join(', ') : 'none ≤5 sessions',
          reporting.length ? 'inside the hold window' : `${(live.holdings_earnings || []).length} holding(s) checked`, reporting.length ? ' neg' : ' pos'),
-    chip('Allowance', live.macro_window ? '≤1 half-size, D ≤2%' : 'regime rules', (live.allowance || {}).buys || '', ''),
+    chip('Calendar buy guidance', live.macro_window ? 'Macro window' : 'Regime guidance', (live.allowance || {}).buys || '', ''),
   ].join('');
 }
 
@@ -698,15 +764,18 @@ function renderCalendarGap(gap) {
 }
 
 async function loadEventRiskChart(days = 90) {
+  const sequence=++eventRequestSequence;
   const canvas = document.getElementById('eventRiskChart');
   if (!canvas) return;
   let payload;
   try {
     payload = await fetchJSON(`/api/feedback/event-risk?days=${days}`);
   } catch (e) {
+    if(sequence!==eventRequestSequence) return;
     console.error('Error loading event risk data:', e);
     return;
   }
+  if(sequence!==eventRequestSequence) return;
   const foot = document.getElementById('eventFootnote');
   if (payload?.error) {
     if (foot) foot.textContent = `Event risk landscape unavailable: ${payload.error}`;
@@ -726,14 +795,17 @@ async function loadEventRiskChart(days = 90) {
   const buys = new Array(rows.length).fill(null);
   const sellWins = new Array(rows.length).fill(null);
   const sellLosses = new Array(rows.length).fill(null);
+  const sellFlat = new Array(rows.length).fill(null), sellUnscored = new Array(rows.length).fill(null);
   const tradeNotes = new Map();
   for (const t of payload.trades || []) {
     const i = byDate.get(t.date);
     if (i == null) continue;
     const y = rows[i].score;
     if (t.action === 'buy') buys[i] = y;
-    else if ((t.pct ?? 0) >= 0) sellWins[i] = y;
-    else sellLosses[i] = y;
+    else if (!Number.isFinite(t.pct)) sellUnscored[i] = y;
+    else if (t.pct > 0) sellWins[i] = y;
+    else if (t.pct < 0) sellLosses[i] = y;
+    else sellFlat[i] = y;
     const note = t.action === 'buy' ? `▲ ${t.ticker}` : `▼ ${t.ticker} ${fmtPct(t.pct)}`;
     tradeNotes.set(t.date, (tradeNotes.get(t.date) || []).concat(note));
   }
@@ -758,6 +830,8 @@ async function loadEventRiskChart(days = 90) {
     marker('Buy fill', buys, EVENT_INK.buy, 0),
     marker('Sell (win)', sellWins, EVENT_INK.sellWin, 180),
     marker('Sell (loss)', sellLosses, EVENT_INK.sellLoss, 180),
+    marker('Sell (flat)', sellFlat, EVENT_INK.sellFlat, 180),
+    marker('Sell (unscored)', sellUnscored, EVENT_INK.sellUnscored, 180),
   ];
 
   if (eventRiskChart) eventRiskChart.destroy();
@@ -795,7 +869,7 @@ async function loadEventRiskChart(days = 90) {
           callbacks: {
             title: items => {
               const r = rows[items[0].dataIndex];
-              return `${r.date} · ${r.regime}${items[0].dataIndex > todayIndex ? ' (projected)' : r.recorded ? ' (recorded by the Decider)' : ''}`;
+              return `${r.date} · ${r.regime}${items[0].dataIndex > todayIndex ? ' (projected)' : r.recorded ? ` (recorded daily maximum · ${r.snapshot_count ?? 1} snapshots)` : ' (reconstructed)'}`;
             },
             label: item => ` risk ${item.parsed.y}/100 · ${rows[item.dataIndex].level}${rows[item.dataIndex].macro_window ? ' · MACRO WINDOW' : ''}`,
             afterBody: items => {
@@ -854,20 +928,21 @@ async function loadFeedbackHistory() {
   const el = document.getElementById('feedbackHistory');
   try {
     const log = await fetchJSON('/api/feedback_log');
-    document.getElementById('feedbackCount').textContent = Array.isArray(log) ? log.length : 0;
-    if (!Array.isArray(log) || !log.length) {
+    const reviews=Array.isArray(log)?log.filter(entry=>entry.type==='feedback'||Number.isFinite(entry.success_rate)):[];
+    document.getElementById('feedbackCount').textContent = reviews.length;
+    if (!reviews.length) {
       el.innerHTML = '<p>No feedback history available</p>';
       return;
     }
-    const lastTen = log.slice(0, 10);
+    const lastTen = reviews.slice(0, 10);
     el.innerHTML = lastTen.map((entry, idx) => `
       <div class="feedback-history-item">
-        <h4>📊 Feedback Analysis #${log.length - idx}</h4>
-        <div class="timestamp">${new Date(entry.timestamp).toLocaleString()} (${entry.lookback_days} days lookback)</div>
+        <h4>📊 Feedback Analysis #${reviews.length - idx}</h4>
+        <div class="timestamp">${feedbackLocalLabel(entry.timestamp)} (${entry.lookback_days} days lookback)</div>
         <div style="margin-bottom: 15px;">
           <strong>Trades Analyzed:</strong> ${entry.trades_analyzed}<br>
-          <strong>Success Rate:</strong> ${entry.success_rate.toFixed(1)}%<br>
-          <strong>Average Profit:</strong> ${entry.avg_profit.toFixed(2)}%
+          <strong>Win Rate:</strong> ${entry.trades_analyzed>0?formatMaybePct(entry.success_rate):'— (no closed-trade sample)'}<br>
+          <strong>Mean Return:</strong> ${entry.trades_analyzed>0?formatMaybePct(entry.avg_profit):'—'}
         </div>
         <h4>📝 Summarizer Guidance:</h4>
         <div class="content">${formatFeedbackBlock(entry.summarizer_feedback)}</div>
@@ -885,7 +960,8 @@ async function loadTradeOutcomes() {
     const outcomes = await fetchJSON('/api/trade_outcomes');
     if (Array.isArray(outcomes)) {
       currentOutcomes = outcomes;
-      updateOutcomesTable(currentOutcomes);
+      renderOutcomeOverview(outcomes);
+      sortOutcomes(currentSort.column,currentSort.direction);
       setupTableSorting();
     }
   } catch (e) {
@@ -899,31 +975,31 @@ function updateOutcomesTable(outcomes) {
     return;
   }
   tbody.innerHTML = outcomes.map(outcome => {
-    const netGainClass = outcome.net_gain_dollars >= 0 ? 'text-success' : 'text-danger';
-    const netGainValue = outcome.net_gain_dollars >= 0 ? 
-      `$${outcome.net_gain_dollars.toFixed(2)}` : 
-      `-$${Math.abs(outcome.net_gain_dollars).toFixed(2)}`;
-    const percentageClass = outcome.gain_loss_pct >= 0 ? 'text-success' : 'text-danger';
-    const percentageValue = outcome.gain_loss_pct >= 0 ? 
-      `${outcome.gain_loss_pct.toFixed(2)}%` : 
-      `-${Math.abs(outcome.gain_loss_pct).toFixed(2)}%`;
+    const netGainClass = Number.isFinite(outcome.net_gain_dollars) ? outcome.net_gain_dollars >= 0 ? 'text-success' : 'text-danger' : '';
+    const netGainValue = formatDollars(outcome.net_gain_dollars);
+    const percentageClass = Number.isFinite(outcome.gain_loss_pct) ? outcome.gain_loss_pct >= 0 ? 'text-success' : 'text-danger' : '';
+    const percentageValue = fmtPct(outcome.gain_loss_pct);
+    const category=String(outcome.category||'unscored').replace(/[^a-z_]/g,'');
+    const price=value=>Number.isFinite(value)?`$${value.toFixed(2)}`:'—';
     return `
-      <tr class="outcome-${outcome.category}">
-        <td><strong>${outcome.ticker}</strong></td>
-        <td>${new Date(outcome.sell_date).toLocaleDateString()}</td>
-        <td>${outcome.shares.toFixed(0)}</td>
-        <td>$${outcome.purchase_price.toFixed(2)}</td>
-        <td>$${outcome.sell_price.toFixed(2)}</td>
+      <tr class="outcome-${category}">
+        <td><strong>${feedbackEscape(outcome.ticker)}</strong></td>
+        <td>${feedbackDate(outcome.sell_date)?.toLocaleDateString() || '—'}</td>
+        <td>${Number.isFinite(outcome.shares) ? outcome.shares.toLocaleString(undefined,{maximumFractionDigits:4}) : '—'}</td>
+        <td>${price(outcome.purchase_price)}</td>
+        <td>${price(outcome.sell_price)}</td>
         <td class="${netGainClass}"><strong>${netGainValue}</strong></td>
         <td class="${percentageClass}"><strong>${percentageValue}</strong></td>
-        <td>${outcome.category.replace('_', ' ').toUpperCase()}</td>
-        <td>${outcome.hold_days || 'N/A'}</td>
+        <td>${category.replaceAll('_', ' ').toUpperCase()}</td>
+        <td>${outcome.hold_days ?? '—'}</td>
       </tr>`;
   }).join('');
 }
 function setupTableSorting() {
   const headers = document.querySelectorAll('.outcomes-table th.sortable');
   headers.forEach(header => {
+    if(header.dataset.sortBound) return;
+    header.dataset.sortBound='true';
     header.addEventListener('click', () => {
       const column = header.dataset.column;
       if (currentSort.column === column) {
@@ -950,7 +1026,8 @@ function sortOutcomes(column, direction) {
       case 'net_gain_dollars':
       case 'gain_loss_pct':
       case 'hold_days':
-        aVal = parseFloat(aVal) || 0; bVal = parseFloat(bVal) || 0; break;
+        if(!Number.isFinite(aVal)||!Number.isFinite(bVal))return Number.isFinite(aVal)?-1:Number.isFinite(bVal)?1:0;
+        break;
       case 'ticker':
       case 'category':
         aVal = String(aVal).toLowerCase(); bVal = String(bVal).toLowerCase(); break;

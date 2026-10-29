@@ -46,6 +46,7 @@ import os
 import time
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Callable, Optional
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -756,8 +757,12 @@ def _loads(v, default):
 
 
 # ----------------------------------------------------------------------------- dashboard series
-def _snapshot_days(engine, config_hash: str, start: date) -> dict:
-    """{session_date: {"score": max, "regime": last, "flags": max holdings flagged ≤2 sessions, "n": rows}}"""
+def _snapshot_days(engine, config_hash: str, start: date, end: Optional[date] = None) -> dict:
+    """Recorded daily maximum, with regime/window from that same snapshot.
+
+    Latest regime is separate: the current view should not inherit a morning
+    peak's regime when a later cycle changed it.
+    """
     from sqlalchemy import text
     out: dict = {}
     try:
@@ -765,8 +770,9 @@ def _snapshot_days(engine, config_hash: str, start: date) -> dict:
         with engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT session_date, risk_score, regime, holdings_earnings, macro_window
-                FROM event_risk_snapshots WHERE config_hash = :h AND session_date >= :s ORDER BY as_of
-            """), _params(engine, {"h": config_hash, "s": start})).fetchall()
+                FROM event_risk_snapshots WHERE config_hash = :h AND session_date >= :s
+                    AND session_date <= :e ORDER BY as_of
+            """), _params(engine, {"h": config_hash, "s": start, "e": end or datetime.now().date()})).fetchall()
     except Exception:
         return out
     for r in rows:
@@ -774,41 +780,57 @@ def _snapshot_days(engine, config_hash: str, start: date) -> dict:
         if not d:
             continue
         flags = sum(1 for h in _loads(r.holdings_earnings, []) if isinstance(h, dict) and h.get("flag") == "reports_within_2")
-        rec = out.setdefault(d, {"score": 0, "regime": None, "flags": 0, "n": 0})
-        rec["score"] = max(rec["score"], int(r.risk_score or 0))
-        rec["regime"] = r.regime or rec["regime"]
+        rec = out.setdefault(d, {"score": 0, "regime": None, "latest_regime": None,
+                                 "flags": 0, "n": 0, "macro_window": False})
+        if rec["n"] == 0 or int(r.risk_score or 0) >= rec["score"]:
+            rec["score"] = max(0, min(100, int(r.risk_score or 0)))
+            rec["regime"] = r.regime
+            rec["macro_window"] = bool(r.macro_window)
+        rec["latest_regime"] = r.regime or rec["latest_regime"]
         rec["flags"] = max(rec["flags"], flags)
         rec["n"] += 1
     return out
 
 
-def _trades_in_window(engine, config_hash: str, start: date) -> list:
+def _trades_in_window(engine, config_hash: str, start: date, end: Optional[datetime] = None) -> list:
     from sqlalchemy import text
     out = []
-    params = _params(engine, {"h": config_hash, "s": start})
+    eastern = ZoneInfo("America/New_York")
+    end = end or datetime.now(timezone.utc)
+    end = (end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc))
+    start_utc = datetime.combine(start, dtime.min, tzinfo=eastern).astimezone(timezone.utc)
+    params = _params(engine, {"h": config_hash, "s": start_utc.replace(tzinfo=None), "e": end.replace(tzinfo=None)})
+    def session_date(ts):
+        if ts is None:
+            return None
+        aware = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+        return aware.astimezone(eastern).date().isoformat()
     try:      # filled buys live inside the decision JSON (jsonb on Postgres; skipped elsewhere)
         with engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT d.timestamp, e->>'ticker' AS ticker
                 FROM trade_decisions d, jsonb_array_elements(d.data) e
-                WHERE d.config_hash = :h AND d.timestamp >= :s AND e->>'action' = 'buy' AND e->>'execution_status' = 'filled'
+                WHERE d.config_hash = :h AND d.timestamp >= :s AND d.timestamp <= :e
+                    AND e->>'action' = 'buy' AND e->>'execution_status' = 'filled'
             """), params).fetchall()
         for r in rows:
             ts = _to_dt(r.timestamp)
-            out.append({"date": ts.date().isoformat() if ts else None, "ticker": r.ticker, "action": "buy", "pct": None})
+            out.append({"date": session_date(ts), "ticker": r.ticker, "action": "buy", "pct": None})
     except Exception:
         pass
     try:
         with engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT sell_timestamp, ticker, gain_loss_percentage FROM trade_outcomes
-                WHERE config_hash = :h AND sell_timestamp >= :s AND ticker != 'N/A'
-                  AND COALESCE(original_reason, '') NOT LIKE '%Market is closed%'
+                WHERE config_hash = :h AND sell_timestamp >= :s AND sell_timestamp <= :e
+                    AND ticker IS NOT NULL AND trim(ticker) != '' AND upper(trim(ticker)) != 'N/A'
+                    AND lower(COALESCE(original_reason, '')) NOT LIKE '%market is closed%'
             """), params).fetchall()
         for r in rows:
             ts = _to_dt(r.sell_timestamp)
-            pct = float(r.gain_loss_percentage or 0.0) * 100.0
-            out.append({"date": ts.date().isoformat() if ts else None, "ticker": r.ticker, "action": "sell", "pct": round(pct, 2)})
+            from feedback_metrics import finite_number
+            pct = finite_number(r.gain_loss_percentage)
+            out.append({"date": session_date(ts), "ticker": r.ticker, "action": "sell", "pct": round(pct * 100.0, 2) if pct is not None else None})
     except Exception:
         pass
     return sorted((t for t in out if t["date"]), key=lambda t: t["date"])
@@ -823,10 +845,10 @@ def event_risk_payload(engine, config_hash: str, days: int, regime_for: Callable
         now_et = datetime.now(pytz.timezone("US/Eastern"))
     today = now_et.date()
     start = today - timedelta(days=int(days))
-    snaps = _snapshot_days(engine, config_hash, start)
+    snaps = _snapshot_days(engine, config_hash, start, today)
     snap_today = snaps.get(today)
     # the trader's own regime read (recorded with today's snapshot) beats the benchmark reconstruction
-    live_regime = (snap_today or {}).get("regime") or regime_for(today)
+    live_regime = (snap_today or {}).get("latest_regime") or regime_for(today)
     live = build_event_context(holdings=holdings or [], watchlist=[], regime=live_regime, now_et=now_et,
                                lookup_earnings=False, engine=engine)
     series = []
@@ -839,15 +861,19 @@ def event_risk_payload(engine, config_hash: str, days: int, regime_for: Callable
             flags = [{"flag": "reports_within_2"}] * ((snap or {}).get("flags") or 0)
             score, level, _ = score_event_risk(regime, statuses, flags)
             if snap:
-                score = max(score, snap["score"])
+                score = snap["score"]
+                level = next(name for cut, name in LEVELS if score < cut)
             series.append({"date": d.isoformat(), "score": score, "level": level, "regime": regime or "UNKNOWN",
                            "recorded": bool(snap), "fomc_sessions": statuses["fomc"].get("sessions_to"),
-                           "macro_window": macro_window(statuses)[0]})
+                           "macro_window": snap["macro_window"] if snap else macro_window(statuses)[0],
+                           "snapshot_count": snap["n"] if snap else 0,
+                           "score_source": "recorded_daily_max" if snap else "reconstructed"})
         d += timedelta(days=1)
     if series and live and not snap_today and series[-1]["date"] == today.isoformat():
         series[-1]["score"] = live["risk_score"]
         series[-1]["level"] = live["risk_level"]
         series[-1]["macro_window"] = live["macro_window"]
+        series[-1]["score_source"] = "current_calendar_estimate"
     projection = []
     regime_now = (live or {}).get("regime") or live_regime
     hold_flags = [h for h in (live or {}).get("holdings_earnings") or [] if h.get("date")]
@@ -877,7 +903,7 @@ def event_risk_payload(engine, config_hash: str, days: int, regime_for: Callable
     return {
         "config_hash": config_hash, "days": int(days), "today": today.isoformat(),
         "series": series, "projection": projection, "events": events,
-        "trades": _trades_in_window(engine, config_hash, start),
+        "trades": _trades_in_window(engine, config_hash, start, now_et),
         "live": {k: v for k, v in (live or {}).items() if k not in ("block",)},
         "calendar_gap": (live or {}).get("calendar_gap") or calendar_coverage(today),
         "snapshots_recorded": sum(v["n"] for v in snaps.values()),

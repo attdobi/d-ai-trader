@@ -126,6 +126,22 @@ def test_trade_stats():
     assert abs(s["expectancy_pct"] - 0.625) < 1e-9
 
 
+def test_trade_stats_keep_unknown_metrics_out_of_each_denominator():
+    result = bt.trade_stats([(30, .03), (-10, -.01), (5, None), (None, .005), (float('nan'), float('inf'))])
+    assert result['trades'] == 5
+    assert result['scored_trades'] == 3 and result['amount_scored_trades'] == 3
+    assert result['missing_profit_pct'] == 2 and result['missing_gain_amount'] == 2
+    assert result['win_rate'] == 2 / 3 * 100
+    assert abs(result['expectancy_pct'] - (.025 / 3 * 100)) < 1e-9
+    assert result['profit_factor'] == 3.5 and abs(result['payoff_ratio'] - 1.75) < 1e-9
+    empty = bt.trade_stats([(None, None)])
+    assert empty['win_rate'] is None and empty['expectancy_pct'] is None
+    assert empty['avg_win_pct'] is None and empty['avg_loss_pct'] is None
+    overflow = bt.trade_stats([(1e308, .03), (1e308, .02), (-10, -.01)])
+    assert overflow['profit_factor'] is None
+    assert abs(overflow['expectancy_pct'] - 4 / 3) < 1e-9
+
+
 def test_last_value_per_day_takes_latest():
     from datetime import datetime
     rows = [
