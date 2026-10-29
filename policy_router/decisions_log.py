@@ -86,6 +86,7 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         "agreements": sum(n["local_choice"] == n["decisions_choice"] for n in comparable),
         "disagreements": sum(n["local_choice"] != n["decisions_choice"] for n in comparable),
         "actual_prompt_changed": False,
+        "image_manifest": dict(getattr(result, "image_manifest", None) or {}),
     }
     if economics is not None:
         comparison["economics"] = economics

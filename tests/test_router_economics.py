@@ -133,6 +133,22 @@ def test_counterfactual_can_cost_more_than_actual_when_it_adds_previously_unserv
     assert metrics["net_input_savings_usd_uncached_estimate"] < -.002
 
 
+def test_visual_counterfactuals_preserve_images_and_never_claim_full_input_percentage():
+    manifest={"image_count":12,"snapshot_hash":"frozen-image-identity","images":[{"sha256":"abc"}]}
+    capture,_=fixture_capture(image_manifest=manifest)
+    out=e.measure(capture,result(capture))
+    assert out["token_scope"]=="text_only" and out["image_count"]==12
+    assert out["image_input_tokens"] is None and out["provider_input_tokens"] is None
+    assert out["potential_input_reduction_pct"] is None
+    assert out["text_input_reduction_pct"]>0
+    assert out["images_preserved_across_variants"]
+    assert out["image_identity_hash"]=="frozen-image-identity"
+    manifest["image_count"]=0
+    assert e.measure(capture,result(capture))["image_count"]==12
+    assert out["net_input_savings_usd_uncached_estimate"]==pytest.approx(
+        out["potential_input_tokens_saved"]*2/1e6-.002)
+
+
 def test_ltm_only_selection_does_not_change_graph_or_its_dropped_diary_tail():
     _, args = fixture_capture()
     args["eligible"] = {i: kind for i, kind in args["eligible"].items() if kind == "ltm"}

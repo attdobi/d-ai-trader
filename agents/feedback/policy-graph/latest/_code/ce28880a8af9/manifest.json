@@ -1,0 +1,12 @@
+{
+ "code_sha": "ce28880a8af9",
+ "git_sha": "8ffd8c21",
+ "kind": "code",
+ "sha": "ce28880a8af9",
+ "node_ids": [
+  "FA.code.system_base",
+  "FA.code.base_instructions",
+  "FA.code.json_format",
+  "FA.code.opportunity_charter"
+ ]
+}

@@ -22,6 +22,7 @@ import copy
 import hashlib
 import json
 import math
+from pathlib import Path
 import re
 import time
 
@@ -173,6 +174,35 @@ def _source_inputs(engine, config_hash, ids):
     if len({int(s["prompt_version"]) for s in sources}) != 1:
         raise ReplayError("one comparison must use a single incumbent policy version")
     return sources
+
+
+def _source_image_bundle(source, config_hash, screenshot_root):
+    """Recover only the recorded bytes. Missing images cannot become text-only replay."""
+    try:
+        context = source.get("context_json") or {}
+        context = json.loads(context) if isinstance(context, str) else context
+        manifest = context.get("image_manifest") if isinstance(context, dict) else None
+        counts = re.findall(r"^SCREENSHOT EVIDENCE:\s*([0-9]+)\s+of", source.get("user_prompt") or "", re.M)
+        if len(counts) > 1:
+            raise ReplayError("saved screenshot coverage is ambiguous")
+        if manifest is None:
+            if counts and int(counts[0]) > 0:
+                raise ReplayError("saved screenshot inputs lack their replay manifest")
+            return None
+        from cycle_images import load_manifest
+        from .inputs import image_manifest_payload
+        clean = image_manifest_payload(manifest)
+        if clean != manifest or clean["config_hash"] != config_hash:
+            raise ReplayError("saved screenshot manifest differs from its configuration")
+        if clean["decision_run_id"] != source.get("run_id"):
+            raise ReplayError("saved screenshot manifest differs from its decision run")
+        if counts and int(counts[0]) != clean["image_count"]:
+            raise ReplayError("saved screenshot coverage differs from its image manifest")
+        return load_manifest(clean, screenshot_root=screenshot_root)
+    except ReplayError:
+        raise
+    except Exception:
+        raise ReplayError("recorded screenshots are missing, changed or invalid; exact replay is unavailable") from None
 
 
 def _tags(source):
@@ -402,10 +432,13 @@ def _case_rows(engine, config_hash, sources, cases):
 
 
 def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assembly_mode="captured_subgraph_edits",
-             candidate_policy=None, model=None, reasoning_effort=None, cases=None, outcome_spec=None, max_calls=40):
+             candidate_policy=None, model=None, reasoning_effort=None, cases=None, outcome_spec=None, max_calls=40,
+             image_root=None):
     if assembly_mode not in MODES:
         raise ReplayError("unknown replay assembly mode")
     sources = _source_inputs(engine, config_hash, source_input_ids)
+    screenshot_root = Path(image_root) if image_root is not None else Path(__file__).resolve().parents[1] / "screenshots"
+    image_bundles = {int(source["id"]): _source_image_bundle(source, config_hash, screenshot_root) for source in sources}
     if len(sources) * 2 > max(0, min(int(max_calls), 40)):
         raise ReplayError("comparison exceeds the explicit model-call budget")
     incumbent = _row(engine, config_hash, int(sources[0]["prompt_version"]))
@@ -467,6 +500,8 @@ def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assemb
                                    ("candidate", candidate_system, candidate_user)):
             request = {"config_hash": config_hash, "source_input_id": int(source["id"]), "side": side, "system_prompt": system,
                        "user_prompt": user, "model": chosen_model, "reasoning_effort": chosen_effort}
+            if image_bundles[int(source["id"])] is not None:
+                request["image_manifest"] = image_bundles[int(source["id"])].manifest()
             request["request_hash"] = _hash(request)
             requests.append(request)
     case_rows = _case_rows(engine, config_hash, sources, cases)
@@ -480,10 +515,12 @@ def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assemb
             "policy_soul", "policy_directives", "policy_memory", "context_json", "ltm_ids", "run_id", "decided_at", "raw_reply")}) for s in sources},
         "incumbent_policy_hash": _policy_hash(incumbent), "candidate_policy_hash": _policy_hash(candidate),
         "candidate_created_at": _iso(candidate.get("created_at")), "outcome_spec": outcome_spec,
-        "cases": case_rows, "request_hashes": [r["request_hash"] for r in requests], "changed_ids": sorted(edits)}
+        "cases": case_rows, "request_hashes": [r["request_hash"] for r in requests], "changed_ids": sorted(edits),
+        "images_per_side": sum(len(b.attachments) for b in image_bundles.values() if b is not None)}
     return {"incumbent_version": incumbent["version"], "candidate_version": candidate["version"],
             "model": chosen_model, "reasoning_effort": chosen_effort, "assembly_mode": assembly_mode,
-            "sources": sources, "requests": requests, "frozen": frozen, "cohort_hash": _hash(frozen)}
+            "sources": sources, "requests": requests, "frozen": frozen, "cohort_hash": _hash(frozen),
+            "image_bundles": image_bundles}
 
 
 def preview_comparison(engine, config_hash, source_input_ids, candidate_version, **kwargs):
@@ -495,6 +532,7 @@ def preview_comparison(engine, config_hash, source_input_ids, candidate_version,
     frozen = prepared["frozen"]
     return {"compatible": True, "errors": [], "model_calls": len(prepared["requests"]),
             "source_input_ids": frozen["source_input_ids"], "case_count": len(frozen["cases"]),
+            "images_per_side": frozen["images_per_side"],
             "prospective_case_count": sum(bool(c.get("eligible_for_recall")) for c in frozen["cases"]),
             "incumbent_version": prepared["incumbent_version"], "candidate_version": prepared["candidate_version"],
             "assembly_mode": prepared["assembly_mode"], "model": prepared["model"],
@@ -669,7 +707,9 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
         """), params).scalar_one())
     results, costs = {}, []
     for request in prepared["requests"]:
-        result, raw = _call(runner, request)
+        bundle = prepared["image_bundles"].get(request["source_input_id"])
+        call_request = {**request, "image_bundle": bundle} if bundle is not None else request
+        result, raw = _call(runner, call_request)
         results[(request["source_input_id"], request["side"])] = result
         costs.append(result["cost_usd"])
         with engine.begin() as conn:
@@ -781,9 +821,19 @@ def openai_runner(client, *, max_completion_tokens=3000, cost_fn=None, usage_cal
     if not 128 <= cap <= 12000:
         raise ReplayError("completion token cap must be between 128 and 12000")
     def run(request):
+        user_content = request["user_prompt"]
+        manifest = request.get("image_manifest")
+        bundle = request.get("image_bundle")
+        if manifest is not None:
+            if bundle is None or bundle.manifest() != manifest:
+                raise ReplayError("replay runner requires the exact frozen screenshot bundle")
+            if bundle.attachments:
+                user_content = [{"type": "text", "text": user_content}, *bundle.chat_parts()]
+        elif bundle is not None:
+            raise ReplayError("replay images lack their recorded manifest")
         params = {"model": request["model"], "messages": [
             {"role": "system", "content": request["system_prompt"]},
-            {"role": "user", "content": request["user_prompt"]}],
+            {"role": "user", "content": user_content}],
             "max_completion_tokens": cap, "store": False}
         if request["reasoning_effort"] is not None:
             params["reasoning_effort"] = request["reasoning_effort"]

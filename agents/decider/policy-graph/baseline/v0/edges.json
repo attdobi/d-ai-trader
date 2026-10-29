@@ -232,6 +232,14 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
+  "source_node_id": "DA.code.visual_evidence",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
   "source_node_id": "DA.code.watchlist_header",
   "target_node_id": "DA.directives.strategy.extension_cap",
   "edge_type": "constrains",
@@ -394,6 +402,14 @@
  {
   "source_node_id": "DA.directives.strategy.unpriced_holding",
   "target_node_id": "DA.directives.strategy",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.visual_framing_research",
+  "target_node_id": "DA.directives",
   "edge_type": "subtype_of",
   "confidence": 1.0,
   "provenance": "derived:hierarchy",
@@ -741,6 +757,15 @@
  {
   "source_node_id": "DA.template.user",
   "target_node_id": "DA.code.recent_activity_header",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.visual_evidence",
   "edge_type": "includes",
   "confidence": 1.0,
   "provenance": "derived:assembly",

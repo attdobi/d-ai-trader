@@ -3,6 +3,7 @@ import json
 import base64
 import time
 import threading
+from copy import deepcopy
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -946,8 +947,66 @@ class PromptManager:
         except Exception:
             pass  # telemetry must never break a trading-path API call
 
-    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None):
+    class _ImageSnapshot:
+        """Immutable-at-request image content, reused by retries and fallback.
+
+        Raw pixels/data URLs live only in memory. The replay record receives the
+        bundle's public provenance, never the request's encoded image content.
+        """
+        def __init__(self, parts, manifest=None):
+            self._parts = deepcopy(tuple(parts))
+            self._manifest = deepcopy(manifest or {})
+
+        def chat_parts(self):
+            return deepcopy(list(self._parts))
+
+        def public_manifest(self):
+            return deepcopy(self._manifest)
+
+    def _freeze_image_input(self, image_paths=None, image_bundle=None):
+        if image_paths and image_bundle is not None:
+            raise ValueError("Use either image_paths or a frozen image bundle")
+        if isinstance(image_bundle, self._ImageSnapshot):
+            return image_bundle
+        if image_bundle is not None:
+            parts = image_bundle.chat_parts()
+            # Only the confined/frozen bundle may supply image content. Never
+            # interpret a caller's arbitrary URL as a remote image fetch.
+            for part in parts:
+                if not isinstance(part, dict) or part.get("type") not in ("text", "image_url"):
+                    raise ValueError("Invalid frozen image content")
+                if part["type"] == "text":
+                    if not isinstance(part.get("text"), str):
+                        raise ValueError("Invalid frozen image caption")
+                else:
+                    image = part.get("image_url") or {}
+                    if (not isinstance(image, dict) or not isinstance(image.get("url"), str)
+                            or not image["url"].startswith("data:image/")
+                            or ";base64," not in image["url"]
+                            or image.get("detail", "high") not in ("low", "high", "original", "auto")):
+                        raise ValueError("Invalid frozen image attachment")
+            return self._ImageSnapshot(parts, image_bundle.public_manifest())
+        if image_paths:
+            parts = []
+            for image_path in image_paths:
+                with open(image_path, "rb") as handle:
+                    encoded = base64.b64encode(handle.read()).decode("utf-8")
+                parts.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + encoded}})
+            return self._ImageSnapshot(parts)
+        return None
+
+    def _user_content(self, prompt, image_snapshot=None):
+        if image_snapshot is None:
+            return prompt
+        parts = image_snapshot.chat_parts()
+        return [{"type": "text", "text": prompt}] + parts if parts else prompt
+
+    def ask_openai(self, prompt, system_prompt, agent_name=None, image_paths=None, max_retries=3, model_override=None,
+                   image_bundle=None):
         base_system_prompt = system_prompt or ""
+        # Freeze once, before the first attempt. A disk change or a mutable
+        # client request must not replace screenshots on retry/fallback.
+        image_snapshot = self._freeze_image_input(image_paths, image_bundle)
         try:
             self._tls.last_reply = None  # never attribute an earlier call's reply to this one
         except Exception:
@@ -986,19 +1045,7 @@ class PromptManager:
                         {"role": "system", "content": effective_system_prompt}
                     ]
                     
-                    if image_paths:
-                        user_content = [{"type": "text", "text": prompt}]
-                        for image_path in image_paths:
-                            with open(image_path, "rb") as img_file:
-                                image_bytes = img_file.read()
-                            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                            user_content.append({
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
-                            })
-                        messages.append({"role": "user", "content": user_content})
-                    else:
-                        messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "user", "content": self._user_content(prompt, image_snapshot)})
                     
                     # Reasoning requests omit sampling parameters.
                     token_cap = get_reasoning_token_cap(agent_name, model_name, 12000 if decider_agent else 6000)
@@ -1025,19 +1072,7 @@ class PromptManager:
                         {"role": "system", "content": base_system_prompt}
                     ]
                     
-                    if image_paths:
-                        user_content = [{"type": "text", "text": prompt}]
-                        for image_path in image_paths:
-                            with open(image_path, "rb") as img_file:
-                                image_bytes = img_file.read()
-                            encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                            user_content.append({
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
-                            })
-                        messages.append({"role": "user", "content": user_content})
-                    else:
-                        messages.append({"role": "user", "content": prompt})
+                    messages.append({"role": "user", "content": self._user_content(prompt, image_snapshot)})
                     
                     # GPT-4o parameters: Normal tokens, custom temperature
                     token_cap = 2800 if decider_agent else 2000
@@ -1060,10 +1095,10 @@ class PromptManager:
                     # Older models: Use max_tokens instead of max_completion_tokens
                     messages = [
                         {"role": "system", "content": base_system_prompt},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": self._user_content(prompt, image_snapshot)}
                     ]
                     
-                    # Note: GPT-4-turbo doesn't have vision support in this path
+                    # Keep frozen image evidence on the standard vision payload too.
                     token_cap = 2800 if decider_agent else 1500
                     api_params = {
                         "model": model_name,
@@ -1103,6 +1138,7 @@ class PromptManager:
                         "reasoning_effort": (reasoning_params or {}).get("reasoning_effort") if _reasoning_path else None,
                         "system_prompt": effective_system_prompt if _reasoning_path else base_system_prompt,
                         "user_prompt": prompt, "content": content, "finish_reason": finish_reason,
+                        "image_manifest": image_snapshot.public_manifest() if image_snapshot else None,
                     }
                 except Exception:
                     pass
@@ -1143,7 +1179,7 @@ class PromptManager:
                             fallback_prompt,
                             system_prompt,
                             agent_name=agent_name,
-                            image_paths=image_paths,
+                            image_bundle=image_snapshot,
                             max_retries=max_retries,
                             model_override=fallback_model
                         )
@@ -1219,21 +1255,9 @@ class PromptManager:
                             {"role": "user", "content": enhanced_prompt}
                         ]
                         
-                        # Add images back if they were provided
-                        if image_paths and len(image_paths) > 0:
-                            user_content = [{"type": "text", "text": enhanced_prompt}]
-                            for image_path in image_paths:
-                                try:
-                                    with open(image_path, "rb") as img_file:
-                                        image_bytes = img_file.read()
-                                    encoded_image = base64.b64encode(image_bytes).decode("utf-8")
-                                    user_content.append({
-                                        "type": "image_url",
-                                        "image_url": {"url": f"data:image/png;base64,{encoded_image}"}
-                                    })
-                                except Exception as img_e:
-                                    print(f"Error re-adding image {image_path}: {img_e}")
-                            messages[-1]["content"] = user_content
+                        # The next attempt reconstructs this content from the
+                        # same immutable snapshot, including on JSON retries.
+                        messages[-1]["content"] = self._user_content(enhanced_prompt, image_snapshot)
                         
                         retries += 1
                         continue  # Retry the request
@@ -1276,12 +1300,17 @@ class PromptManager:
 
             except Exception as e:
                 elapsed = None
+                # Vision validation errors can echo a submitted data URL. Keep
+                # encoded pixels/provider diagnostics out of logs and stored
+                # fallback results; the exception type is sufficient telemetry.
+                error_note = (type(e).__name__ + " (image request; diagnostic withheld)"
+                              if image_snapshot is not None else str(e))
                 if 'start_time' in locals():
                     elapsed = time.time() - start_time
                 if elapsed is not None:
-                    print(f"[PromptManager] ❌ {agent_name or 'UnknownAgent'} error after {elapsed:.1f}s: {e}")
+                    print(f"[PromptManager] ❌ {agent_name or 'UnknownAgent'} error after {elapsed:.1f}s: {error_note}")
                 else:
-                    print(f"API Call Error: {e}")
+                    print(f"API Call Error: {error_note}")
                 if allow_reasoning_payload and reasoning_params and "reasoning_effort" in str(e).lower():
                     print("⚠️  reasoning_effort rejected by API; retrying without reasoning payload.")
                     allow_reasoning_payload = False
@@ -1293,7 +1322,7 @@ class PromptManager:
                         self._tls.last_reply = None  # the caller gets this error dict, not any model text
                     except Exception:
                         pass
-                    return {"headlines": ["API error occurred"], "insights": f"API error: {str(e)}"}
+                    return {"headlines": ["API error occurred"], "insights": f"API error: {error_note}"}
 
         try:
             self._tls.last_reply = None  # the caller gets this dict, not the last retried attempt's text

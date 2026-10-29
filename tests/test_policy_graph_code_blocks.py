@@ -117,6 +117,10 @@ def extract_from_source() -> list:
         if tgt.startswith("FEEDBACK_"):
             found[tgt] = _render(n.value)
 
+    for n in ast.walk(_func(_parse("decider_agent.py"), "_visual_image_context")):
+        if _assign_target(n) == "VISUAL_EVIDENCE_INSTRUCTIONS":
+            found["visual_evidence"] = _render(n.value)
+
     ordered = [
         ("DA.code.crowd_fade", found["contrarian_directive"]),
         ("DA.code.cash_playbook", found["cash_horizon_block"]),
@@ -136,6 +140,7 @@ def extract_from_source() -> list:
         ("DA.code.guideline_citations", prompt_adds[7]),
         ("DA.code.json_fallback", template_adds[0]),
         ("DA.code.opportunity_charter", found["opportunity_charter"]),
+        ("DA.code.visual_evidence", found["visual_evidence"]),
         ("SA.code.feedback_suffix", found["feedback_suffix"]),
         ("SA.code.opportunity_charter", found["opportunity_charter"]),
         ("FA.code.system_base", found["FEEDBACK_SYSTEM_BASE"]),
@@ -157,7 +162,7 @@ def test_code_blocks_match_source_verbatim():
 
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 24
+    assert len(ids) == len(set(ids)) == 25
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title

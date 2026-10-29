@@ -1008,7 +1008,9 @@ class TradeOutcomeTracker:
             from feedback_diagnostics import compute_trade_diagnostics, format_diagnostics, SUPPLIED_DECIDER_FIELDS
             _cfg = config_hash or get_current_config_hash()
             diagnostics_block = format_diagnostics(compute_trade_diagnostics(_cfg, FEEDBACK_LOOKBACK_DAYS))
-            supplied_fields = SUPPLIED_DECIDER_FIELDS
+            supplied_fields = (SUPPLIED_DECIDER_FIELDS
+                               + "; when recorded, source-labeled screenshots and visual_context observations "
+                                 "of visible editorial framing (unverified model interpretations)")
         except Exception as _diag_exc:
             print(f"⚠️ Trade diagnostics unavailable: {_diag_exc}")
 
@@ -1067,6 +1069,21 @@ ANALYSIS REQUIREMENTS:
     "sector_insights": "supported finding or unavailable"
 }
 Use supplied dollars for usd, otherwise null. decider_rules accepts 0-2 proposals; summarizer_rules 0-1. Empty arrays mean no supported change. Each compact proposal is at most 220 characters, with one observable condition and one action. Label changed behavior as a proposal. Put its predeclared outcome, sample requirement, matched comparator and exact horizon in key_insights. Never manufacture findings or fill a rule quota. No Markdown, code fences or prose outside JSON.'''
+
+        # Recorded visual hypotheses remain observational research. This reads
+        # exact saved input/image IDs and does not infer a fill from a model BUY.
+        try:
+            from visual_learning import recent_visual_context
+            visual_review = recent_visual_context(engine, config_hash or get_current_config_hash())
+            performance_guidance += (
+                "\n\nVISUAL FRAMING RESEARCH (model observations, not verified intent or causal signals):\n"
+                + json.dumps(visual_review, ensure_ascii=False, default=str)
+                + "\nCompare headline/price/event context and independent later evidence. Reused photos, publication timing, "
+                  "issuer exposure and regime can confound results. Missing outcomes stay unknown. "
+                  "No automatic rule promotion or trading instruction follows from a face, photo or framing label."
+            )
+        except Exception as visual_exc:
+            print(f"Visual research unavailable ({type(visual_exc).__name__})")
 
         # COMBINE: Fixed template + Modifiable performance data + Fixed JSON format
         prompt = f'''{FEEDBACK_BASE_INSTRUCTIONS}

@@ -18,6 +18,8 @@ stdlib + `sqlalchemy.text`; never imports config; config_hash is explicit.
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
+import re
 from datetime import datetime
 from typing import Iterable, Optional
 
@@ -113,21 +115,91 @@ def raw_text(reply) -> Optional[str]:
         return str(reply)
 
 
+def image_manifest_payload(value):
+    """Bounded local replay metadata only; pixel URLs/bytes never enter this log."""
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("invalid_image_manifest")
+    def ident(v, *, optional=False, pattern=r"[A-Za-z0-9_-]{1,80}"):
+        if optional and v is None:
+            return None
+        if not isinstance(v, str) or not re.fullmatch(pattern, v):
+            raise ValueError("invalid_image_manifest_identifier")
+        return v
+    def count(v, maximum, minimum=0):
+        if isinstance(v, bool) or not isinstance(v, int) or not minimum <= v <= maximum:
+            raise ValueError("invalid_image_manifest_count")
+        return v
+    out = {"schema_version": 1, "config_hash": ident(value.get("config_hash")),
+           "decision_run_id": ident(value.get("decision_run_id"), optional=True),
+           "image_count": count(value.get("image_count"), 12),
+           "offered_count": count(value.get("offered_count"), 10000),
+           "snapshot_hash": ident(value.get("snapshot_hash"), pattern=r"[a-f0-9]{64}"),
+           "images": [], "omissions": []}
+    if value.get("coverage_status") not in ("complete", "partial", "unavailable"):
+        raise ValueError("invalid_image_manifest_coverage")
+    out["coverage_status"] = value["coverage_status"]
+    images, omissions = value.get("images"), value.get("omissions", [])
+    if not isinstance(images, list) or len(images) != out["image_count"] or not isinstance(omissions, list) or len(omissions) > 100:
+        raise ValueError("invalid_image_manifest_items")
+    seen = set()
+    for item in images:
+        if not isinstance(item, dict):
+            raise ValueError("invalid_image_manifest_item")
+        image_id = ident(item.get("image_id"), pattern=r"I[0-9]{2}")
+        if image_id in seen:
+            raise ValueError("duplicate_image_manifest_id")
+        seen.add(image_id)
+        path = item.get("relative_path")
+        if not isinstance(path, str) or len(path) > 240 or "\\" in path:
+            raise ValueError("invalid_image_manifest_path")
+        relative = PurePosixPath(path)
+        if relative.is_absolute() or len(relative.parts) not in (2, 3) or any(p in ("..", ".") for p in relative.parts):
+            raise ValueError("invalid_image_manifest_path")
+        if item.get("mime_type") != "image/png" or item.get("detail") not in ("low", "high", "auto", "original"):
+            raise ValueError("invalid_image_manifest_profile")
+        out["images"].append({"image_id": image_id,
+            "source_agent": ident(item.get("source_agent")),
+            "summary_id": ident(item.get("summary_id"), optional=True),
+            "source_run_id": ident(item.get("source_run_id")),
+            "sha256": ident(item.get("sha256"), pattern=r"[a-f0-9]{64}"),
+            "relative_path": relative.as_posix(), "width": count(item.get("width"), 20000000, 1),
+            "height": count(item.get("height"), 20000000, 1),
+            "bytes": count(item.get("bytes"), 1499999, 1),
+            "mime_type": "image/png", "detail": item["detail"]})
+    for item in omissions:
+        if not isinstance(item, dict):
+            raise ValueError("invalid_image_manifest_omission")
+        out["omissions"].append({k: ident(item.get(k), optional=(k != "reason"))
+                                 for k in ("source_agent", "summary_id", "source_run_id", "reason")})
+    expected_coverage = ("partial" if out["omissions"] else "complete") if out["images"] else "unavailable"
+    if out["coverage_status"] != expected_coverage or out["offered_count"] < out["image_count"]:
+        raise ValueError("inconsistent_image_manifest_coverage")
+    return out
+
+
 # ----------------------------------------------------------------------------- writes
 def record_input(engine, config_hash: str, *, run_id: Optional[str], prompt_version=None,
                  system_prompt: Optional[str] = None, user_prompt: Optional[str] = None,
                  policy: Optional[dict] = None, context=None, ltm_ids=None, model: Optional[str] = None,
-                 reasoning_effort: Optional[str] = None, call_kind: str = CALL_DECIDE, decided_at=None) -> Optional[int]:
+                 reasoning_effort: Optional[str] = None, call_kind: str = CALL_DECIDE, decided_at=None,
+                 image_manifest=None) -> Optional[int]:
     """Insert one row for a Decider call about to be made; returns its id. `policy` is
     {"soul", "directives", "memory"} as rendered; `context` a Context / dict (see context_payload)."""
     policy = policy or {}
+    captured_context = context_payload(context) if context is not None or image_manifest is not None else None
+    if image_manifest is not None:
+        captured_context["image_manifest"] = image_manifest_payload(image_manifest)
+        if captured_context["image_manifest"]["config_hash"] != config_hash:
+            raise ValueError("image_manifest_config_mismatch")
+        if captured_context["image_manifest"]["decision_run_id"] != run_id:
+            raise ValueError("image_manifest_decision_run_mismatch")
     params = {
         "h": config_hash, "r": run_id,
         "v": (int(prompt_version) if prompt_version is not None else None),
         "k": call_kind or CALL_DECIDE, "t": decided_at or datetime.now(),
         "m": model, "e": reasoning_effort, "sp": system_prompt, "up": user_prompt,
         "ps": policy.get("soul"), "pd": policy.get("directives"), "pm": policy.get("memory"),
-        "ctx": (json.dumps(context_payload(context), ensure_ascii=False, sort_keys=True) if context is not None else None),
+        "ctx": (json.dumps(captured_context, ensure_ascii=False, sort_keys=True) if captured_context is not None else None),
         "ltm": json.dumps(ltm_row_ids(ltm_ids)) if ltm_ids is not None else None,
     }
     with engine.begin() as conn:
@@ -198,4 +270,4 @@ def latest_input(engine, config_hash: str, *, call_kind: str = CALL_DECIDE) -> O
 
 __all__ = ["CALL_DECIDE", "CALL_CITATION_REPAIR", "CONTEXT_KEYS", "COLUMNS", "DDL_POSTGRES", "DDL_SQLITE",
            "INDEX_RUN_SQL", "ensure_schema", "context_payload", "ltm_row_ids", "raw_text", "record_input",
-           "record_reply", "load_inputs", "latest_input"]
+           "record_reply", "load_inputs", "latest_input", "image_manifest_payload"]

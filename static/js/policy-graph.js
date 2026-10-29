@@ -2300,8 +2300,11 @@
     if(economics)economics.innerHTML=window.DAIRouterEconomics?.render(last.economics)||'';
     const tile = (key, value, sub) => `<div class="pg-router-stat"><div class="k">${esc(key)}</div><div class="v">${esc(value)}</div><div class="s">${esc(sub)}</div></div>`;
     const dollars = n => n === null || n === undefined ? '—' : `$${Number(n).toFixed(5)}`;
+    const images = last.image_manifest || {};
+    const imageCount = Number.isInteger(images.image_count) ? images.image_count : null;
     stats.innerHTML = tile(last.source_kind === 'replay' ? 'Saved-cycle replay' : 'Live shadow comparison', last.status || 'unknown', `${fmtPT(last.decided_at)} · policy v${last.prompt_version ?? '?'} · ${last.model || data.model || ''}`)
       + tile('Router API cost', dollars(last.cost_usd), `${Number(last.input_tokens || 0).toLocaleString()} input tokens · ${Number(last.latency_ms || 0).toLocaleString()} ms`)
+      + tile('Router image evidence', imageCount === null ? 'Not recorded' : `${imageCount} screenshots`, imageCount === null ? 'No image manifest on this historical or image-disabled comparison' : `${images.coverage_status || 'unknown'} coverage · ${Number(images.offered_count || 0)} offered · frozen source IDs and hashes`)
       + tile('Proposed routable context', `${kChars(last.chars_selected)} chars`, `${kChars(last.chars_today)} chars actually served · hypothetical; excludes pinned policy`)
       + tile('Comparisons in window', String(total.runs ?? (data.runs || []).length), `${total.live_runs || 0} live · ${total.replay_runs || 0} replay · ${total.ok || 0} completed · ${total.fallback || 0} fell back · ${dollars(total.known_cost_usd ?? total.cost_usd)} ${total.unknown_cost_calls ? 'known subtotal' : 'total'}${total.unknown_cost_calls ? ` · ${total.unknown_cost_calls} cost unknown` : ''}`);
     const nodes = last.nodes || [];

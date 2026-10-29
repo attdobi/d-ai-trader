@@ -412,3 +412,105 @@ def test_rewritten_untagged_field_preamble_is_incompatible(db):
             REPLACE(strategy_directives,'Original preamble.','Rewritten preamble.') WHERE version IN (10,11)"""))
     preview = R.preview_comparison(db, CFG, [ident], 11)
     assert not preview["compatible"] and "preamble differs" in preview["errors"][0]
+
+
+# Exact screenshot replay: the same recorded pixels on both policy sides.
+def _source_with_images(db, tmp_path):
+    from io import BytesIO
+    from PIL import Image
+    from cycle_images import freeze_summary_images
+    ident = saved(db)
+    capture_run = '20261029T083047'
+    folder = tmp_path / CFG / capture_run
+    folder.mkdir(parents=True)
+    files = [folder / f'Agent_CNBC_{i}.png' for i in (1, 2)]
+    for file in files:
+        data = BytesIO(); Image.new('RGB', (64, 32), 'red').save(data, format='PNG'); file.write_bytes(data.getvalue())
+    summary = {'id':1, 'agent':'Agent_CNBC', 'run_id':capture_run, 'config_hash':CFG,
+               'data':{'agent':'Agent_CNBC','run_id':capture_run,'screenshot_paths':list(map(str,files))}}
+    bundle = freeze_summary_images([summary], screenshot_root=tmp_path, config_hash=CFG, decision_run_id='run-0')
+    manifest = inputs.image_manifest_payload(bundle.manifest())
+    assert manifest == bundle.manifest()
+    with db.begin() as conn:
+        current = dict(conn.execute(text('SELECT context_json,user_prompt FROM decider_inputs WHERE id=:i'), {'i':ident}).mappings().one())
+        context = json.loads(current['context_json']); context['image_manifest'] = manifest
+        conn.execute(text('UPDATE decider_inputs SET context_json=:c,user_prompt=:u WHERE id=:i'),
+                     {'i':ident,'c':json.dumps(context),'u':current['user_prompt']+'\n\n'+bundle.describe()})
+    return ident, bundle, files
+
+
+def test_multimodal_pair_preserves_pixels_after_files_change_during_first_call(db, tmp_path):
+    ident, bundle, files = _source_with_images(db, tmp_path)
+    plan = R.preview_comparison(db, CFG, [ident], 2, cases=cases(ident), image_root=tmp_path)
+    assert plan['compatible'] and plan['images_per_side'] == 2
+    observed = []
+    def invoke(request):
+        observed.append(request['image_bundle'].chat_parts())
+        assert request['image_bundle'].manifest() == request['image_manifest']
+        if request['side'] == 'incumbent':
+            files[0].write_bytes(b'changed after both sides were frozen')
+        return runner(request)
+    result = R.run_comparison(db, CFG, source_input_ids=[ident], candidate_version=2, runner=invoke,
+                              expected_cohort_hash=plan['cohort_hash'], cases=cases(ident), image_root=tmp_path)
+    assert result['status'] == 'ok' and observed == [bundle.chat_parts(), bundle.chat_parts()]
+    with db.connect() as conn:
+        frozen = conn.execute(text('SELECT frozen_json FROM policy_learning_replays')).scalar_one()
+    assert 'base64' not in frozen
+
+
+@pytest.mark.parametrize('change', ['missing', 'changed', 'cross_run', 'wrong_config', 'empty_manifest'])
+def test_multimodal_replay_refuses_to_drop_or_replace_recorded_images(db, tmp_path, change):
+    from cycle_images import FrozenImageBundle
+    ident, bundle, files = _source_with_images(db, tmp_path)
+    if change == 'missing':
+        files[0].unlink()
+    elif change == 'changed':
+        files[0].write_bytes(files[1].read_bytes()+b'changed')
+    else:
+        manifest = bundle.manifest()
+        if change == 'cross_run': manifest['decision_run_id'] = 'different-decision'
+        elif change == 'wrong_config': manifest['config_hash'] = 'another-config'
+        else: manifest = FrozenImageBundle(CFG, 'run-0').manifest()
+        with db.begin() as conn:
+            context = json.loads(conn.execute(text('SELECT context_json FROM decider_inputs WHERE id=:i'), {'i':ident}).scalar_one())
+            context['image_manifest'] = manifest
+            conn.execute(text('UPDATE decider_inputs SET context_json=:c WHERE id=:i'), {'c':json.dumps(context),'i':ident})
+    preview = R.preview_comparison(db, CFG, [ident], 2, cases=cases(ident), image_root=tmp_path)
+    assert not preview['compatible'] and preview['model_calls'] == 0
+
+
+def test_image_manifest_log_roundtrip_rejects_wrong_run_and_excludes_pixels(db, tmp_path):
+    ident, bundle, _ = _source_with_images(db, tmp_path)
+    manifest = bundle.manifest()
+    with pytest.raises(ValueError, match='decision_run'):
+        inputs.record_input(db, CFG, run_id='wrong-run', image_manifest=manifest)
+    manifest['data_url'] = 'data:image/png;base64,SHOULD_NEVER_BE_STORED'
+    manifest['images'][0]['data_url'] = manifest['data_url']
+    record = inputs.record_input(db, CFG, run_id='run-0', context={'regime':'MIXED'}, image_manifest=manifest)
+    with db.connect() as conn:
+        raw = conn.execute(text('SELECT context_json FROM decider_inputs WHERE id=:i'), {'i':record}).scalar_one()
+    assert 'base64' not in raw and 'data_url' not in raw
+    assert json.loads(raw)['image_manifest'] == bundle.manifest()
+
+
+def test_openai_runner_sends_native_images_and_requires_matching_manifest(db, tmp_path):
+    _, bundle, _ = _source_with_images(db, tmp_path)
+    calls = []
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(model='gpt-6.1-sol', usage=None,
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"decisions":[]}'), finish_reason='stop')])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    request = {'model': 'gpt-6.1-sol', 'reasoning_effort': 'high',
+               'system_prompt': 'frozen system', 'user_prompt': 'frozen text',
+               'image_bundle': bundle, 'image_manifest': bundle.manifest()}
+    run = R.openai_runner(client)
+    run(request)
+    assert calls[0]['messages'][1]['content'] == [
+        {'type': 'text', 'text': 'frozen text'}, *bundle.chat_parts()]
+    assert calls[0]['store'] is False
+    with pytest.raises(R.ReplayError):
+        run({**request, 'image_manifest': {**bundle.manifest(), 'snapshot_hash': '0' * 64}})
+    with pytest.raises(R.ReplayError):
+        run({key: value for key, value in request.items() if key != 'image_manifest'})
+    assert len(calls) == 1

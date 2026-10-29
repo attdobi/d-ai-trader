@@ -8,9 +8,100 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Screenshot context and visual-framing research — October 29, 2026
+
+The selected summary rows now supply their original screenshots to **both** the
+Luna Decisions router and the Sol trading Decider: option #2, with the summaries
+retained as compact evidence. A normal six-source cycle has two views per source,
+**12 PNGs total**; the inspected October 29 set was **1920 × 993 pixels per image**.
+The Summary tab displays scaled originals, not separate thumbnail inputs.
+
+`cycle_images.py` freezes only files referenced by those selected rows. Each image
+gets a source/summary/run identifier, SHA-256, dimensions and byte count. Modern
+`screenshots/<config>/<source-run>/` and legacy `screenshots/<source-run>/` paths
+are supported. Files must remain under the screenshot root and match the selected
+agent/run/config provenance; there is no search for the newest unrelated folder.
+The bundle is capped at 12 validated PNGs, 1.5 MB each. Missing, invalid, changed,
+out-of-scope or over-budget images have explicit omission reasons and coverage.
+The unchanged PNG bytes use `detail: high`; provider image preprocessing can still
+apply. Router questions share one copy of the images per request. Decider retries
+reuse the frozen bytes; citation-only repair does not resend them.
+
+Both image flags default to enabled in the new code, with independent opt-outs:
+
+```dotenv
+DAI_ROUTER_IMAGES=1
+DAI_DECIDER_IMAGES=1
+```
+
+`DAI_DECISIONS_ROUTER=shadow` still controls whether the hosted router runs. Images
+do not activate routing or change trading constraints. The `.env` file remains
+local, and screenshot pixels are not committed or copied into public audit JSON.
+Loading changed Python code requires the existing trader to restart; starting a
+second trader is not a rollout method.
+
+`policy_graph/visual_policy.py` adds a reviewed visual-context supplement. The
+Summarizer puts relevant **VISUAL FRAMING:** observations inside its existing
+insights field. The Decider also inspects the originals and may return an optional
+top-level `visual_context` array with the supplied image ID, visible cues, a
+caption/headline-linked ticker when shown, an editorial-framing hypothesis,
+interpretation confidence, photo status and caveat. Empty/omitted observations
+are valid. The server supplies source/hash metadata rather than trusting model
+claims. Policy activation is recorded separately as new audited versions; older
+prompt versions and the October 28 audit remain unchanged.
+
+For config `9ea09b9as`, the October 29 audit activated **Summarizer v31, Decider
+v61 and Feedback v17**; Company extraction remains v1. The activation journal
+records batch `3fe7c9411d854e7dab1a93feaee491f6`. `update_visual_policy.py` previews
+the append-only supplement and requires the reviewed source/spec hashes to apply
+it. It does not invoke trading.
+
+The distinction is deliberate: **“a smiling portrait beside a negative headline”**
+is observable; **“the subject is smug, optimistic or manipulating investors”** is
+not established by that photo. Framing describes presentation, not someone's
+actual emotion or intention. Identity comes from supplied labels/captions, not
+face recognition. Stock/archival status requires a visible label or provenance;
+unknown photo age remains unknown, and repeated bytes show reuse rather than
+purpose. A screenshot is source context, not authoritative Holdings or a current
+executable quote. Visual tone alone cannot create an entry/exit gate or override
+cash, exposure, priced-kill, loss, quarantine or earnings controls.
+
+`visual_learning.py` supplies Feedback with at most 24 validated model observations
+from the latest 12 saved decision inputs. They stay labeled unverified research.
+Paper outcomes can attach only through an exact configuration/input/ticker link;
+there is no nearest-time fill match or claim of causal P&L. Evaluate the incremental
+value beyond price/headline/source/regime context on matched cases and later
+independent periods before proposing a reviewed rule. No visual-sentiment edge
+or trading-performance improvement is established by this release.
+
+Router economics count matched **text** inputs and keep the same images on every
+counterfactual side. Image tokens are not inferred from base64 length, and a text
+reduction is not a whole multimodal-input percentage. Provider usage includes
+image processing; local tariffs remain standard-rate estimates. See
+[router cost conventions](docs/DECISIONS_ROUTER.md) and
+[frozen-image replay and review](docs/LEARNING_MAP.md).
+
+Bounded October 29 API verification used saved input **153**, its six summaries
+and all twelve referenced screenshots, with approved v61 policy. The router's
+text-only request cost **$0.00196150**; the image request cost **$0.00508425**
+(**$0.00312275 extra**, including image metadata/captions and 30-minute cache
+writes). Both returned valid selections; they are labeled replay, not forward
+quality evidence. A separate small Sol vision validation recognized all twelve
+image/source labels: 28,382 input tokens, 265 output tokens, **$0.059414 total**
+at standard local rates. This was not a trading decision or a measurement of the
+normal high-reasoning Decider's incremental cost. No orders or live-trader restart
+were involved. Shadow routing still realizes **$0 savings**.
+
+Release validation: **1,702 tests passed, 1 skipped**, JavaScript syntax checks
+passed, and the read-only dashboard preview displayed active v61 plus complete
+12-image router coverage. Tests include frozen retry bytes, scoped PNG validation,
+exact replay provenance, metadata-only logging, visual-observation sanitization,
+policy mirrors and image-aware text-cost displays. Actual trading benefit remains
+unmeasured.
+
 ## Agent policy audit — October 28, 2026
 
-The reviewed release activates **Summarizer v30, Decider v60, Feedback v16 and Company extraction v1** for config `9ea09b9as`. The five-field sources live in `policy_graph/audited_agent_prompts.json`; active graph mirrors are under `agents/*/policy-graph/latest/`. Fresh defaults and the eight committed `SOUL.default.md` / `MEMORY.default.md` files use the same reviewed texts. Existing database history is preserved.
+The October 28 reviewed release activated **Summarizer v30, Decider v60, Feedback v16 and Company extraction v1** for config `9ea09b9as`. Its five-field sources live in `policy_graph/audited_agent_prompts.json`; active graph mirrors are under `agents/*/policy-graph/latest/`. The separate October 29 visual supplement appends to these reviewed defaults without rewriting this audit. Existing database history is preserved.
 
 | Field | Responsibility | Production use |
 |---|---|---|
@@ -145,6 +236,7 @@ flowchart TB
         SUM --> CO[Company extraction<br/><i>Luna — DAI_MODEL_COMPANY</i>]
         CO --> TR[Momentum recap · regime · watchlist<br/>event calendar · no LLM]
         SUM & CO & TR --> KG{{Policy graph query<br/>every gate and lesson served;<br/>diary entries routed}}
+        NEWS -->|same frozen screenshots| DEC
         KG --> DEC[Decider<br/><i>6.1 Sol · high</i>]
         DEC --> EXEC[Execution<br/>Schwab / simulation]
         EXEC --> OUT[(trade_outcomes<br/><b>market P&L = reward</b>)]
@@ -266,10 +358,11 @@ agents/
 One trading cycle. The four cycle agents (Summarizer, Company extraction, Decider, Feedback) each have their own soul, directives and memory in `prompt_versions` and their own folder under `agents/`; the Prompt Lab's critic and evolution calls have neither.
 
 ```
-  news + screenshots (6 sources)
+  news + screenshots (6 sources; normally 12 validated originals)
         │
         ▼
   Summarizers (6 per cycle, Luna)          → headlines + insights + "Watchlist:" per source
+        │  selected screenshot bundle also feeds Decisions shadow + the Sol Decider
         │
         ▼
   Company extraction (Luna)                → listed companies + tickers, rolled up to the parent
@@ -347,6 +440,10 @@ DAI_MODEL_CRITIC=gpt-5.6-terra      # defaults to the feedback model
 DAI_MODEL_EVOLUTION=gpt-5.6-terra   # defaults to the feedback model
 DAI_DECIDER_FALLBACK_MODEL=gpt-4.1  # asked again when a GPT-5 Decider returns an empty [] or {}
 DAI_MODEL_TEMPERATURE=0.2
+
+# Original screenshot context; independent opt-outs, enabled by default
+DAI_ROUTER_IMAGES=1
+DAI_DECIDER_IMAGES=1
 
 # Reasoning levels (light | low | medium | high | xhigh | max*)  *GPT-5.6 only
 DAI_SUMMARIZER_REASONING_LEVEL=     # default medium
@@ -590,21 +687,22 @@ keeps the frozen embedding coordinates. Theme regions are descriptive; the page
 does not claim a validated BUY/PASS decision boundary. Theme counts are bounded
 display observations and do not change quality denominators or trading behavior.
 
-The Decisions router has now passed two saved-context probes. The latest used
+The October 28 Decisions router verification passed two saved-context probes. The second used
 six saved summaries with approved v60, kept 7/8 optional memories beside 58 pinned
-nodes, and cost **$0.00180445**. It uses the summaries' **text**, not original
-screenshot pixels; the six summarizers perform vision upstream. It remains in
-shadow and has produced **$0 realized token savings**. New comparisons capture
-matched full-prompt token estimates, router overhead and potential net input
-savings; cache-adjusted savings and quality impact stay unknown. At $2/million
+nodes, and cost **$0.00180445**. Those probes supplied summary text only. The
+October 29 code adds the same frozen original images to the router and Decider;
+it remains in shadow with **$0 realized token savings**. New comparisons capture
+matched text-token estimates, shared image metadata, router overhead and potential
+net input savings. Image tokens are not counted by the local text estimator;
+cache-adjusted savings and quality impact stay unknown. At $2/million
 uncached Sol input tokens, that probe fee needs at least 903 removed tokens to
 break even. See [router economics and verification](docs/DECISIONS_ROUTER.md).
 
 Quality currently combines closed-trade P&L/win-rate associations and a separate
 prospective paper specification: next-session open to session 1/3/5 close, minus
 10 bps each side, with BUY precision, winner recall, loss FPR, expectancy, coverage
-and Wilson intervals. The prospective ledger currently has **zero rows**: these
-rates are unknown, and no routed-vs-full quality comparison has been established.
+and Wilson intervals. At the October 28 check the prospective ledger had **zero
+rows**; that snapshot established no rates or routed-vs-full quality comparison.
 The existing trader must load the new code to begin live shadow/candidate capture;
 restarting only the preview does not load it. Keep routing activation behind
 matched comparisons and later independent outcomes. [Measurement conventions](docs/LEARNING_MAP.md)

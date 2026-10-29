@@ -49,6 +49,39 @@ changes the coordinate reference; record the change before comparing screenshots
 It does not change the policy. **Refresh evidence** makes read-only requests.
 Reduced-motion preferences disable automatic playback but retain version steps.
 
+### Visual-framing observations
+
+The October 29 image path gives the Decisions router and trading Decider the same
+frozen originals referenced by the selected summary rows, alongside summary text.
+The Summarizer can put a compact VISUAL FRAMING observation inside insights; the
+Decider may also return an optional top-level `visual_context` array. An empty or
+omitted array is valid. It records supplied image IDs, visible cues, any explicit
+caption/headline-linked ticker, editorial-framing interpretation, interpretation
+confidence, photo status and an uncertainty caveat.
+
+This is not an emotion or intent detector. A smiling portrait next to a negative
+headline is observable; confidence about a person's actual beliefs or an alleged
+manipulation scheme does not follow. A stock/archival label needs evidence, and a
+capture timestamp does not date the photographed event. Verified identical bytes
+show reuse, not purpose. No visual-tone observation alone creates an automatic
+BUY/SELL gate or changes current trading constraints.
+
+`visual_learning.normalize_observations` validates image IDs against the local
+manifest, supplies the trusted source/run/hash fields, rejects forged provenance
+and bounds observations. Its read-only Feedback report covers at most the latest
+12 saved `decide` inputs and displays at most 24 accepted model observations, with
+scope, missingness and truncation disclosed. It does not return raw replies,
+private image paths or pixels. These observations stay labeled unverified model
+reports, not facts about a subject's state or causal trading effects.
+
+Paper outcomes attach only by exact configuration/input/ticker records. No
+nearest-time fill is inferred, and the ticker association remains model-reported
+unless separately verified. Feedback must compare the incremental contribution
+beyond price, headline, source and regime on the same eligible cases and later
+independent periods. Include negative and neutral/unclear examples and avoid
+counting multiple crops of one story as independent observations. New observations
+do not modify the full-cohort quality denominator or activate a rule.
+
 ## Opportunity evidence
 
 Immediately before the Decider API call, the ledger freezes supplied screener
@@ -114,6 +147,14 @@ Original observed actions remain distinct. Live news, current holdings, future
 outcomes and current rule-health statistics do not enter replay requests. Frozen
 cohort hashes reject changes after preview. Credential-shaped content, rewritten
 incumbent rules, incompatible templates and ambiguous spans fail before calls.
+
+Image-enabled inputs retain a local manifest with relative source paths, SHA-256,
+dimensions, source identifiers and original order. Preview and execution recover
+exactly those bytes for both incumbent and candidate calls. Missing, altered,
+out-of-scope or mismatched images refuse the replay before a provider request;
+there is no fallback to a current/newer screenshot. A preview reports images per
+side, and frozen cohort hashes bind the image manifest. Raw PNG/base64 data is
+not inserted into the replay's public report or persisted request JSON.
 
 Two scopes are supported:
 

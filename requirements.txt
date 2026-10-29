@@ -9,6 +9,7 @@ numpy>=1.26              # policy_router (logistic model, embeddings); already i
 python-dotenv>=1.0.1
 openai>=1.40.0
 tiktoken>=0.14,<1  # Optional cached BPE estimates; router never downloads vocabulary during a cycle
+Pillow>=10,<13  # Validate the explicitly selected cycle screenshots
 
 # Scraping
 selenium>=4.25.0

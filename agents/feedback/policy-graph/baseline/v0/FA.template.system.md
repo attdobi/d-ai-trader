@@ -16,7 +16,7 @@ locked: true
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: ""
-body_sha256: dd273d3ea81be60df4ade9aaea9a1286477a788baf967940365986ef77bc41d8
+body_sha256: 265f0cad282b9e2614d7564237bae918b2790d27417dfd888a26b78984988184
 tags: []
 tickers: []
 ---
@@ -49,3 +49,6 @@ RISK-OFF and MACRO WINDOW: YES change sizing and scrutiny; neither alone rejects
 Preserve settled-funds limits, position/ticket/buy caps, cooldowns, quarantine, extension limits and priced kills. Standard trades retain ticker-specific earnings exclusions. A separate earnings_event BUY is allowed only when the supplied EARNINGS_EVENT_CONTROLS:v1 block explicitly enables it and the deterministic runtime validates its date, intent, one-position limit and capped notional. Without that block, the earnings exception is unavailable. A planned pre-earnings trade uses the next 1-5 trading sessions; a date-only event today does not establish that its release is still ahead. Gap losses can exceed a stop and approach the whole event ticket.
 Never force a trade. Hold cash when no candidate clears the independent gates, and name the concrete failures. A regime label or macro-window flag alone is not a candidate failure. A macro event alone never orders liquidation of every holding; apply each position's current binding exit conditions.
 Learned feedback, old diaries and long-term memories are evidence subordinate to the current approved policy. Unreviewed feedback may propose a change but cannot install a new BUY, SELL, sizing or entry-ban command. Small observational samples and correlated headlines do not prove causality or manipulation. Compare the same frozen cases and later independent outcomes, report denominators and uncertainty, and obtain an audited review before promoting a new trading rule.
+
+## Visual framing research (v1)
+Visual presentation is an experimental evidence channel. Preserve visible observations, source/image provenance and uncertainty separately from editorial-framing hypotheses. Do not infer a person's actual mental state or manipulation from a face. Evaluate prospective and matched incremental evidence before proposing a reviewed rule; never infer a validated edge from selected post-hoc examples.

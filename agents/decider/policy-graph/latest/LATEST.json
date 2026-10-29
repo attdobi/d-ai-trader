@@ -1,15 +1,15 @@
 {
  "config_hash": "9ea09b9as",
- "version": 60,
- "prompt_version_id": 664,
+ "version": 61,
+ "prompt_version_id": 667,
  "source_sha256": {
-  "system_prompt": "e8b8b6db12650015bd3c1bc758efd15334f3aa04ede4d6fb1d3d80d45be310d4",
+  "system_prompt": "b9a778b0946a20f113901277dc6294695d67fdd46188ed8152a201dfcf866ca4",
   "user_prompt_template": "8378cc715f43e28e4a1095a49097261231e85efcebc9c05672ea6e98f3a30e40",
-  "strategy_directives": "16a22edc45553fd737db3060ca05c87f75549cf6e93eaeb26e81236f880717b3",
+  "strategy_directives": "91baff9e8c92e336ccdc8fd987a7df6fcdbc105ddc9185ebeb17986f7ccee479",
   "soul": "f37993cc440ca0284b21323b53a0cab216d31ae7fe13a59c2e40e58c97720806",
   "memory": "13673a9dd2d3aec3d6e82144f0e2e48626cb9dd44832196f0e5bb19627ead687"
  },
- "code_sha": "f42dce4ea4f4",
+ "code_sha": "ce28880a8af9",
  "ltm_sha": "a11dbde3be78",
  "builder_version": 1
 }

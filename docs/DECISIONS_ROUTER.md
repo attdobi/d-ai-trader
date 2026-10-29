@@ -5,6 +5,73 @@ policy router. Its question is **which optional guidelines add useful context to
 this cycle?** The approved trading policy, its risk controls and the trade decision
 remain with the existing assembly and Decider.
 
+## October 29: shared original screenshot context
+
+The router and trading Decider now receive the same frozen screenshot bundle from
+the selected summary rows. Six sources normally supply two views each, or 12 PNG
+originals; the inspected October 29 cycle used 1920 × 993 images. The Decider also
+keeps the summary text. This implements direct visual context rather than relying
+only on an extra summarizer description.
+
+`cycle_images.freeze_summary_images` validates local PNGs referenced by those rows,
+their agent/source-run/config scope, canonical screenshot-root paths and size
+bounds. It freezes the bytes before the calls and assigns image IDs such as I01,
+SHA-256, source/summary/run identifiers, dimensions and coverage/omission metadata.
+It does not glob a latest directory, fetch a remote image or substitute another
+cycle. Public manifests omit file paths and pixels. Screenshot files remain local
+and ignored by Git.
+
+Images appear once in Decisions' shared `input` as captioned `input_image` parts,
+not once per guideline question. `detail: high` is explicit; the original PNG
+bytes are unchanged, while provider preprocessing may resize them. The existing
+400,000-character text guard remains separate from bounded image payload limits.
+The model still returns per-guideline relevance probabilities and the selector
+still returns pinned/selected/skipped IDs. No visual cue activates a provider or
+changes a trading control.
+
+`DAI_ROUTER_IMAGES` and `DAI_DECIDER_IMAGES` independently default to `1`; set either
+to `0` to omit images from that destination. `DAI_DECISIONS_ROUTER=shadow` remains
+the hosted-router mode switch. Neither image flag enables active routing. Missing
+or rejected images remain explicit coverage limitations; they are not an invented
+bearish signal. The router may still make its relevance comparison from supplied
+text, and the Decider keeps its existing independent entry/exit requirements.
+
+The visual policy records image choice, captions, visible expressions/scenes and
+headline-image contrasts as observations and editorial-framing hypotheses. It does
+not infer a person's genuine emotion, identity or intent from appearance. Photo
+age/stock status requires supplied evidence; repeated pixels establish reuse, not
+manipulation. Visual tone alone never grants a BUY/SELL, sizing or earnings-policy
+exception. Learning these associations remains a reviewed experiment, not an
+already validated source of alpha. See [visual review](LEARNING_MAP.md).
+
+### October 29 provider verification
+
+The user-authorized validation used saved input **153** and its exact six summary
+rows/twelve original PNGs. It evaluated current approved **Decider v61** against
+that saved v60 market context; this is a replay probe, not an exact historical
+prompt recreation. Comparisons **3** and **4** are scoped to config `9ea09b9as`.
+
+| Request | Input tokens | 30-minute cache-write tokens | Cost at standard rates | Latency |
+|---|---:|---:|---:|---:|
+| Text only | 16,169 | 13,784 | $0.00196150 | 1,490 ms |
+| Same context plus 12 originals | 41,151 | 38,766 | $0.00508425 | 2,930 ms |
+
+There were no cache reads or billed output tokens. The **24,982-token** and
+**$0.00312275** difference includes the image manifest/captions as well as vision
+input; it is not an isolated image-token tariff. Both kept seven of eight
+optional memories beside 60 pinned nodes, but they skipped different memories.
+That demonstrates functioning image input and selection, not superior selection
+quality. Each request ran once without a retry.
+
+A separate nontrading `gpt-6.1-sol` vision check received the same twelve images,
+recognized their source labels and returned a limitation of photo-based price
+inference. It reported **28,382 input**, **265 output**, **0 cached input** and
+**0 reasoning tokens**, costing **$0.059414** at the standard local tariff.
+`VisionValidationAgent` records that usage separately. This short low-reasoning
+validation is not the full high-reasoning trading Decider, nor an exact estimate
+of its incremental image cost. No orders, full trading pipeline or trader restart
+were invoked. Hosted routing remains shadow with zero realized savings.
+
 ## What was reviewed
 
 The October 28 review covered the live Policy Graph tab, `policy_graph/`,
@@ -53,6 +120,8 @@ The review found:
 ```mermaid
 flowchart LR
     C[Cycle evidence + approved graph] --> P[Pinned policy + optional diary/LTM]
+    I[Selected original screenshots<br/>one frozen bundle] --> D
+    I --> T
     P --> L[Existing local router]
     P --> D[Decisions relevance probabilities]
     L --> A[Existing prompt assembly]
@@ -86,6 +155,9 @@ or repetition of a standing rule. Candidate text is evidence; the opportunity
 charter has precedence. Inputs contain regime, holding/watchlist/quarantine
 tickers, news and event evidence, guideline text, and an as-of timestamp. They do
 not contain future decisions, realized outcomes, account credentials or keys.
+Current image-enabled requests also contain the selected screenshot pixels and
+their source/image-ID metadata. The public audit stores only their manifest, not
+the base64 payload. October 28 text-only probes below remain historical records.
 
 Answers must form a complete, correctly named and ordered set of finite
 probabilities. Refusals, missing/duplicate answers, incompatible models and
@@ -107,7 +179,8 @@ Standard short-context prices per million tokens are $0.10 uncached input,
 $0.01 cached input and $0.125 for a 30-minute cache write. Decisions output is
 free. Cached reads and writes are subsets of reported input tokens; neither is
 added to input twice. Rates are recorded in the implementation's cost function;
-regional/long-context premiums would need separate handling before using them.
+all input/cache rates double above 272,000 input tokens. Other billing adjustments,
+such as regional premiums, are outside this standard-rate estimate.
 
 The estimated per-request cost is:
 
@@ -120,25 +193,32 @@ For example, a $0.001 router request would need to remove 500 uncached Sol input
 tokens just to offset its cost at $2/million; cached Sol inputs change that
 comparison. Measure actual total cost and decision quality before claiming a win.
 
-### Full-prompt economics
+### Matched text economics and shared image context
 
 New live comparisons freeze the graph, cycle context, health annotations, memory
 rows/order, exact system/user text, citation index and client reasoning guidance
 before the Decider call. The audit worker renders three matched inputs: actually
 served, all optional candidates, and the Decisions-selected proposal. The actual
 reconstruction must match byte for byte or the economics report is unavailable.
-Only counts/hashes and selected/skipped IDs are added to `comparison_json`; raw
-prompts are not added to the hosted-router ledger.
+Only counts/hashes, selected/skipped IDs and a public image manifest are added to
+`comparison_json`; raw prompts and screenshot pixels are not added to this ledger.
 
 `policy_router/economics.py` uses a verified, already-cached `o200k_base` vocabulary
 through tiktoken. It never downloads a tokenizer during a cycle; without that
 cache, its UTF-8/4 fallback is explicitly labeled. These are full-text estimates,
 not measured provider framing or a claim about an undocumented model tokenizer.
 The configured primary Decider model is recorded separately from provider usage.
+With images, `token_scope=text_only`: the same frozen images remain on every
+counterfactual side, and their input-token count is unknown to the local estimator.
+`text_input_reduction_pct` describes text only; the total-input percentage stays
+null. The estimator does not convert PNG/base64 length into billable vision tokens
+or assume a published profile for an undocumented model variant. Provider-reported
+input usage includes image processing, whereas these local counts do not.
 
 Potential gross savings = estimated removed **input** tokens × the Decider's
 uncached input rate. Potential net input savings subtract the router's recorded
-API cost and may be negative. No output/reasoning reduction is assumed. Cache-
+API cost, including its image input, and may be negative. The shared Decider images
+are not counted as removed context. No output/reasoning reduction is assumed. Cache-
 adjusted dollars stay unknown; a cache-heavy Decider request can save less than
 the uncached estimate. Shadow realized savings are always **$0** and its router
 fee is incremental spend. Historical comparisons without a frozen snapshot stay
@@ -172,7 +252,7 @@ Its full-prompt economics remain unavailable because no contemporaneous producti
 capture exists for this mixed-policy probe. Future instrumented live comparisons
 will measure matched text; neither probe establishes quality preservation.
 
-The prospective opportunity ledger currently has **zero rows**, so paper recall,
+At the October 28 check, the prospective opportunity ledger had **zero rows**, so paper recall,
 FPR and their uncertainty are unknown, not zero or perfect. Closed-trade P&L and
 win-rate associations still exist; they are not the counterfactual quality loss
 from excluding a guideline. Live capture and its scheduled outcome maintenance
@@ -218,6 +298,8 @@ Before an active provider is considered:
 ```dotenv
 DAI_DECISIONS_ROUTER=shadow
 DAI_DECISIONS_TIMEOUT_S=8
+DAI_ROUTER_IMAGES=1
+DAI_DECIDER_IMAGES=1
 ```
 
 Only `off` and `shadow` are supported; `active` does not enable hosted routing.

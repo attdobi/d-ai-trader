@@ -12,7 +12,7 @@
  "actor_kind": "codex_operator",
  "description": "Operator audit 2026-10-28: readable approved rules, evidence-grounded learning, and a capped pre-earnings strategy.",
  "is_active": true,
- "materialized_by": "operator_prompt_audit",
+ "materialized_by": "visual_context_audit",
  "source_sha256": {
   "system_prompt": "6c2e19f5ff242c93aa4391f31f2ec0a19752cb925f0cea6cda89523f0d61eafd",
   "user_prompt_template": "a26c2f0bf656dcfb568f4554aeffe42b7810e40ceeb834d51c28fbb74cf0e674",
@@ -80,9 +80,9 @@
  "node_count": 20,
  "edge_count": 23,
  "code": {
-  "sha": "f42dce4ea4f4",
+  "sha": "ce28880a8af9",
   "dir": null,
-  "git_sha": "ccb9a1a4",
+  "git_sha": "8ffd8c21",
   "fires": {}
  },
  "ltm": {

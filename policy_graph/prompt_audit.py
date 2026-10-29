@@ -109,7 +109,7 @@ def apply(engine, config_hash, activate, *, expected_source_hash, expected_spec_
     if _hash(spec) != expected_spec_hash:
         raise AuditConflict("Proposed audit changed after the audit preview")
     batch = uuid.uuid4().hex
-    journal = {"audit": "agent-prompts-2026-10-28", "spec_hash": _hash(spec), "policies": [], "memories": []}
+    journal = {"audit": spec.get("audit_id", "agent-prompts-2026-10-28"), "spec_hash": _hash(spec), "policies": [], "memories": []}
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             conn.execute(text("SET LOCAL lock_timeout='5s'"))

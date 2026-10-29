@@ -72,6 +72,14 @@
   "version": "SummarizerAgent.baseline.v0"
  },
  {
+  "source_node_id": "SA.directives.visual_framing_research",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.baseline.v0"
+ },
+ {
   "source_node_id": "SA.memory",
   "target_node_id": "SA.root",
   "edge_type": "subtype_of",

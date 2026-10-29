@@ -1,0 +1,312 @@
+[
+ {
+  "source_node_id": "SA.code",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.code.feedback_suffix",
+  "target_node_id": "SA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.code.opportunity_charter",
+  "target_node_id": "SA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.catalyst_provenance",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.decider_uses",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.event_opportunities",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.ground_truth",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.review_checks",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.directives.visual_framing_research",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.evidence_provenance",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.earnings",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.event_calendar",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.market_context",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.ownership",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.pipeline",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.extraction_patterns.technical_only",
+  "target_node_id": "SA.memory.extraction_patterns",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality",
+  "target_node_id": "SA.memory",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality.event_time",
+  "target_node_id": "SA.memory.source_quality",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality.promotion",
+  "target_node_id": "SA.memory.source_quality",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.memory.source_quality.source_origin",
+  "target_node_id": "SA.memory.source_quality",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.runtime.inputs",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul.core_philosophy",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul.extraction_style",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul.identity",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul.mission",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.soul.principles",
+  "target_node_id": "SA.soul",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.directives",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "{strategy_directives}"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.memory",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "## LESSONS FROM EXPERIENCE"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.soul",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "## AGENT IDENTITY"
+ },
+ {
+  "source_node_id": "SA.template.system",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.code.feedback_suffix",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "system_tail"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.code.opportunity_charter",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "system_tail"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.runtime.inputs",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.9ea09b9as.v31",
+  "via": "per-cycle"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.root",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.9ea09b9as.v31"
+ }
+]

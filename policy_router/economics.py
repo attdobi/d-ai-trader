@@ -130,6 +130,7 @@ class PromptCapture:
     model: str
     input_rate: float | None
     token_cache_dir: str | None
+    image_manifest: dict | None
 
     def render(self, selected_ids=None, *, order=None):
         version, context = self.graph["version"], self.graph["context"]
@@ -173,7 +174,8 @@ class PromptCapture:
 
 def capture_prompt(*, graph, system_prompt, user_prompt, actual_graph_ids, actual_ltm_rows,
                    ltm_rows, ltm_health, ltm_span, index_span, eligible, model,
-                   input_rate=None, client_suffix="", actual_ltm_tail="", token_cache_dir=None):
+                   input_rate=None, client_suffix="", actual_ltm_tail="", token_cache_dir=None,
+                   image_manifest=None):
     """Freeze an assembly, rejecting incompatible/ambiguous reconstruction."""
     if not graph or ltm_span is None or index_span is None:
         raise ValueError("missing_frozen_assembly")
@@ -182,7 +184,7 @@ def capture_prompt(*, graph, system_prompt, user_prompt, actual_graph_ids, actua
     capture = PromptCapture(deepcopy(graph), system_prompt + client_suffix, user_prompt,
         frozenset(actual_graph_ids), tuple(deepcopy(actual_ltm_rows)), deepcopy(ltm_rows), deepcopy(ltm_health),
         tuple(ltm_span), tuple(index_span), str(actual_ltm_tail), dict(eligible), str(client_suffix), str(model), rate,
-        str(token_cache_dir) if token_cache_dir is not None else None)
+        str(token_cache_dir) if token_cache_dir is not None else None, deepcopy(image_manifest))
     if capture.render() != (capture.actual_system, capture.actual_user):
         raise ValueError("frozen_assembly_does_not_match_actual_prompt")
     return capture
@@ -212,16 +214,23 @@ def measure(capture, result):
     saved = counts["actual_served"] - counts["decisions_selected"]
     gross = saved * capture.input_rate / 1_000_000 if capture.input_rate is not None else None
     fee = result.cost_usd
+    image_count = int((capture.image_manifest or {}).get("image_count") or 0)
+    text_reduction = saved * 100 / counts["actual_served"] if counts["actual_served"] else None
     return {"schema_version": SCHEMA_VERSION, "status": "estimated", "capture_basis": "frozen_full_prompt_v1",
         "token_method": method, "token_estimates": counts,
+        "token_scope": "text_only" if image_count else "system_and_user_text",
+        "image_count": image_count, "image_input_tokens": None if image_count else 0,
+        "image_identity_hash": (capture.image_manifest or {}).get("snapshot_hash"),
+        "images_preserved_across_variants": True,
         "characters": {key: sum(map(len, value)) for key, value in prompts.items()},
         "prompt_hashes": {key: _sha(*value) for key, value in prompts.items()},
         "decider_model": capture.model, "decider_model_basis": "configured_primary_request_model",
         "provider_input_tokens": None, "input_rate_usd_per_million": capture.input_rate,
         "potential_input_tokens_saved": saved,
-        "potential_input_reduction_pct": saved * 100 / counts["actual_served"] if counts["actual_served"] else None,
+        "potential_input_reduction_pct": None if image_count else text_reduction,
+        "text_input_reduction_pct": text_reduction,
         "gross_input_savings_usd_uncached_estimate": gross, "router_cost_usd": fee,
         "net_input_savings_usd_uncached_estimate": gross - fee if gross is not None and fee is not None else None,
         "cache_adjusted_savings_usd": None, "realized_input_savings_usd": 0.0,
         "shadow_incremental_cost_usd": fee, "quality_status": "not_evaluated",
-        "note": "Shadow serves the actual prompt unchanged. Local text token counts are estimates, not provider-billed tokens or message framing. Decider model is the configured primary request model; provider fallbacks/retries are not measured here. Dollar potential assumes uncached standard input pricing; cache effects, completion/reasoning and quality changes are unknown."}
+        "note": "Shadow serves the actual prompt unchanged. Local text token counts are estimates, not provider-billed tokens or message framing. Supplied images are identical across all three Decider variants and never counted as removed context; their token profile is not inferred from pixels or base64 length. Decider model is the configured primary request model; provider fallbacks/retries are not measured here. Dollar potential assumes uncached standard text input pricing and subtracts the complete recorded router fee, including its image input. Cache effects, completion/reasoning and quality changes are unknown."}

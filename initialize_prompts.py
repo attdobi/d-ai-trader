@@ -41,6 +41,9 @@ DEFAULT_PROMPTS = {
     agent: {**proposal["fields"], "description": proposal["description"]}
     for agent, proposal in _audited_defaults["agents"].items()
 }
+from policy_graph.visual_policy import add_visual_fields as _add_visual_fields
+DEFAULT_PROMPTS = {agent: {**payload, **_add_visual_fields(agent, payload)}
+                   for agent, payload in DEFAULT_PROMPTS.items()}
 
 # Legacy alias — keep for any code that still references the old name
 DEFAULT_PROMPTS["feedback_analyzer"] = DEFAULT_PROMPTS["FeedbackAgent"]

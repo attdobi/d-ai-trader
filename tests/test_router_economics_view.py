@@ -50,3 +50,30 @@ def test_json_selection_distinguishes_unknown_answers_actual_reads_and_pinned_id
         {'node_id':'lesson.unknown','decisions_choice':None,'served_in_prompt':False}]})
     assert out=={'pinned_ids':['rule.stop'],'selected_ids':['lesson.keep'],
                  'skipped_ids':['lesson.drop'],'actual_optional_ids':['lesson.drop']}
+
+
+def test_screenshot_comparisons_use_text_reduction_without_inventing_total_input_percentage():
+    out=js('R.tiles(d)',{'status':'estimated','image_count':12,'token_scope':'text_only',
+        'images_preserved_across_variants':True,'decider_model':'gpt-6.1-sol',
+        'token_estimates':{'actual_served':20000,'decisions_selected':19900},
+        'potential_input_reduction_pct':45,'text_input_reduction_pct':.5,
+        'net_input_savings_usd_uncached_estimate':-.0033,'shadow_incremental_cost_usd':.0035,
+        'realized_input_savings_usd':0})
+    assert len(out)==5
+    assert 'text input' in out[0]['label'] and 'image tokens excluded' in out[0]['note']
+    assert 'text input' in out[1]['label'] and '0.50% potential text reduction' in out[1]['note']
+    assert '45' not in json.dumps(out)
+    assert out[2]['value']=='−$0.00330' and 'complete router fee, including its images' in out[2]['note']
+    assert out[3]['value']=='$0.00000'
+    assert out[4]['value']=='12 images' and 'Identical screenshots' in out[4]['note']
+    assert 'Image-only tokens and cost are unavailable' in out[4]['note']
+
+
+def test_missing_image_token_profile_does_not_fall_back_to_text_as_total_or_free_images():
+    out=js('R.tiles(d)',{'status':'estimated','image_count':1,
+        'token_estimates':{'actual_served':2000,'decisions_selected':1800},
+        'potential_input_reduction_pct':10,'images_preserved_across_variants':False})
+    assert 'Text reduction unknown' in out[1]['note'] and '10.00%' not in out[1]['note']
+    assert out[4]['value']=='1 image' and 'not confirmed' in out[4]['note']
+    assert 'no image savings are credited' in out[4]['note']
+    assert '$0.00000' not in json.dumps(out)
