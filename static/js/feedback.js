@@ -758,21 +758,27 @@ function renderEventStats(live, payload) {
   };
   const nextPrint = [m.cpi, m.jobs].filter(s => s && s.sessions_to != null).sort((a, b) => a.sessions_to - b.sessions_to)[0];
   const reporting = (live.holdings_earnings || []).filter(h => h.flag);
+  const holdings=live.holdings_earnings || [],dated=h=>Boolean(h.date)&&Number.isFinite(h.sessions_to),coverage=live.earnings_coverage?.holdings || {
+    total:holdings.length,known:holdings.filter(dated).length,unknown:holdings.filter(h=>!dated(h)).length,
+    unknown_tickers:holdings.filter(h=>!dated(h)).map(h=>h.ticker)};
+  const earningsValue=reporting.length?reporting.map(h=>`${h.ticker} ${h.date}`).join(', '):!coverage.total?'No holdings':coverage.unknown?'No known releases ≤5 sessions':'None ≤5 sessions';
+  const earningsCoverage=`${coverage.known}/${coverage.total} holdings dated${coverage.unknown?` · unknown: ${(coverage.unknown_tickers || []).join(', ')}`:''}`;
   const chip = (k, v, sub, cls) =>
     `<div class="bench-chip"><div class="k">${k}</div><div class="v${cls || ''}">${v}</div>` + (sub ? `<div class="s">${sub}</div>` : '') + `</div>`;
   el.innerHTML = [
-    chip('Event risk now', `${live.risk_score}/100`, `${live.risk_level} · regime ${live.regime || 'n/a'}`, eventLevelClass(live.risk_level)),
+    chip('Event/regime pressure', `${live.risk_score}/100`, `${live.risk_level} · regime ${live.regime || 'n/a'}`, eventLevelClass(live.risk_level)),
     chip('Macro window', live.macro_window ? 'YES' : 'no', live.macro_window ? live.macro_reason : 'no FOMC within 2 sessions, no print next session', live.macro_window ? ' neg' : ' pos'),
     chip('Next FOMC', m.fomc && m.fomc.next ? m.fomc.next : '—', whenOf(m.fomc), ''),
     chip('Next print', nextPrint ? nextPrint.label : '—', whenOf(nextPrint), ''),
-    chip('Holdings reporting', reporting.length ? reporting.map(h => `${h.ticker} ${h.date}`).join(', ') : 'none ≤5 sessions',
-         reporting.length ? 'inside the hold window' : `${(live.holdings_earnings || []).length} holding(s) checked`, reporting.length ? ' neg' : ' pos'),
+    chip('Holdings reporting', feedbackEscape(earningsValue), feedbackEscape(earningsCoverage), reporting.length?' neg':coverage.unknown?'':' pos'),
     chip('Calendar buy guidance', live.macro_window ? 'Macro window' : 'Regime guidance', (live.allowance || {}).buys || '', ''),
   ].join('');
+  const breakdown=document.getElementById('eventScoreBreakdown');
+  if(breakdown) breakdown.innerHTML=(live.score_parts || []).map(part=>`<span class="event-score-part"><strong>+${feedbackEscape(part[2])}</strong>${feedbackEscape(String(part[0] || '').toUpperCase())} · ${feedbackEscape(part[1])}</span>`).join('')+(live.risk_score===100?'<span class="event-score-part">Total capped at 100</span>':'');
 }
 
-// CPI / jobs calendars run out before the next 45 days do (event_calendar.calendar_coverage):
-// the same warning the Decider's EVENT CALENDAR block carries.
+// Show the same bounded coverage warning the Decider sees when its loaded
+// CPI/jobs calendars no longer reach the declared forward horizon.
 function renderCalendarGap(gap) {
   const el = document.getElementById('eventCalendarGap');
   if (!el) return;
@@ -925,7 +931,7 @@ async function loadEventRiskChart(days = 90) {
       '+ CPI / jobs (12 the session before, 6 day-of) + earnings (20 per holding reporting ≤2 sessions, 8 within 5; capped)',
       rec ? `${rec} Decider snapshot${rec === 1 ? '' : 's'} recorded in window; other days reconstructed from benchmark regimes + the calendars`
           : 'no Decider snapshots yet — the curve is reconstructed from benchmark regimes + the calendars until the next cycle runs',
-      'FOMC dates from federalreserve.gov (2026–2027), CPI and jobs dates from bls.gov (2026), earnings dates from yfinance',
+      'FOMC dates from federalreserve.gov (2026–2027), CPI and jobs dates from bls.gov (2026–2027), earnings dates from yfinance',
     ].join(' · ');
   }
 }

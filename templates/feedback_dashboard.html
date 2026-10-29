@@ -259,6 +259,8 @@
     </div>
   </div>
   <div id="eventStats" class="bench-stats"></div>
+  <div id="eventScoreBreakdown" class="event-score-breakdown" aria-label="Event and regime score components"></div>
+  <p class="bench-footnote">Pressure informs timing and sizing. Opportunity still depends on the individual setup and current policy; a high score does not measure upside or fundamental value.</p>
   <div id="eventCalendarGap" class="event-calendar-gap" role="note" hidden></div>
   <div class="chart-canvas-box bench-panel"><canvas id="eventRiskChart"></canvas></div>
   <div id="eventFootnote" class="bench-footnote"></div>
@@ -309,6 +311,9 @@
   background: rgba(250,219,95,0.07); color: #f2d67a; font-size: 0.8em; line-height: 1.45;
 }
 .event-calendar-gap[hidden] { display: none; }
+.event-score-breakdown { display:flex; flex-wrap:wrap; gap:7px; margin:9px 0; }
+.event-score-part { padding:6px 9px; border:1px solid #304352; border-radius:7px; color:#91adbe; font-size:11px; background:#10232d55; }
+.event-score-part strong { color:#d9e6ee; margin-right:5px; }
 .transfer-footnote { margin-top: 4px; }
 .transfer-footnote .tf-dep { color: #29d697; font-weight: 600; }
 .transfer-footnote .tf-wd { color: #ff5f73; font-weight: 600; }

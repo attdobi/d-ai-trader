@@ -16,6 +16,14 @@
   "version": "SummarizerAgent.baseline.v0"
  },
  {
+  "source_node_id": "SA.code.operator_calendar",
+  "target_node_id": "SA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.baseline.v0"
+ },
+ {
   "source_node_id": "SA.code.opportunity_charter",
   "target_node_id": "SA.code",
   "edge_type": "subtype_of",
@@ -282,6 +290,15 @@
   "provenance": "derived:assembly",
   "version": "SummarizerAgent.baseline.v0",
   "via": "system_tail"
+ },
+ {
+  "source_node_id": "SA.template.user",
+  "target_node_id": "SA.code.operator_calendar",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "SummarizerAgent.baseline.v0",
+  "via": "user_prompt_dynamic"
  },
  {
   "source_node_id": "SA.template.user",

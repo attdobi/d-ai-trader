@@ -349,8 +349,11 @@ def initialize_database():
             )
         '''))
 
-def get_openai_summary(agent_name, html_content, image_paths):
+def get_openai_summary(agent_name, html_content, image_paths, *, event_context=None):
     from policy_safety import opportunity_system_prompt, safe_feedback_context
+    from summary_event_context import freeze_summary_calendar, render_summary_calendar
+    if event_context is None:
+        event_context = freeze_summary_calendar()
     def _safe_format_template(template, values):
         sentinel_map = {}
         safe_template = template
@@ -482,6 +485,7 @@ Return a JSON object with:
             "feedback_context": feedback_context,
         }
     )
+    prompt += "\n\n" + render_summary_calendar(event_context)
 
     screenshot_instructions = []
     if valid_image_paths:
@@ -709,10 +713,11 @@ def try_click_popup(web_driver, agent_name):
         print(f"Error in try_click_popup for {agent_name}: {e}")
         return False
 
-def summarize_page(agent_name, url, web_driver):
-    """
-    Summarize a webpage using the provided webdriver
-    """
+def summarize_page(agent_name, url, web_driver, *, event_context=None):
+    """Summarize a webpage using the provided webdriver."""
+    from summary_event_context import freeze_summary_calendar, summary_calendar_metadata
+    if event_context is None:
+        event_context = freeze_summary_calendar()
     # Basic guard: ensure at least one window handle is available
     try:
         handles = web_driver.window_handles
@@ -861,7 +866,7 @@ def summarize_page(agent_name, url, web_driver):
 
     call_usage = None
     try:
-        summary_data = get_openai_summary(agent_name, html, saved_screenshots)
+        summary_data = get_openai_summary(agent_name, html, saved_screenshots, event_context=event_context)
         if isinstance(summary_data, list):
             summary_data = summary_data[0] if summary_data else {}
         print(f"🧾 {agent_name} summary response: {summary_data}")
@@ -882,6 +887,7 @@ def summarize_page(agent_name, url, web_driver):
         "cost_usd": (call_usage or {}).get("cost_usd"),
         "tokens": (call_usage or {}).get("total_tokens"),
         "model": (call_usage or {}).get("model"),
+        "operator_calendar": summary_calendar_metadata(event_context),
     }
 
     return summary
@@ -909,7 +915,7 @@ def store_summary(summary):
             "data": json.dumps(summary)
         })
 
-def _process_agent_sequence(agent_sequence, worker_id):
+def _process_agent_sequence(agent_sequence, worker_id, *, event_context=None):
     """Process a sequence of agents using a dedicated Chrome driver"""
     if not agent_sequence:
         return
@@ -991,7 +997,7 @@ def _process_agent_sequence(agent_sequence, worker_id):
                 summary = None
                 for page_attempt in range(2):
                     try:
-                        summary = summarize_page(agent_name, url, current_driver)
+                        summary = summarize_page(agent_name, url, current_driver, event_context=event_context)
                         break
                     except WebDriverException as driver_exc:
                         if "no such window" in str(driver_exc).lower():
@@ -1068,10 +1074,12 @@ def _process_agent_sequence(agent_sequence, worker_id):
 
 def run_summary_agents():
     initialize_database()
+    from summary_event_context import freeze_summary_calendar
+    event_context = freeze_summary_calendar()
     
     worker_count = max(1, min(SUMMARY_MAX_WORKERS, len(URLS)))
     if worker_count == 1:
-        _process_agent_sequence(URLS, worker_id=1)
+        _process_agent_sequence(URLS, worker_id=1, event_context=event_context)
         return
     
     # Distribute agents across workers in round-robin fashion
@@ -1086,7 +1094,7 @@ def run_summary_agents():
     executor = ThreadPoolExecutor(max_workers=worker_count)
     try:
         futures = {
-            executor.submit(_process_agent_sequence, batch, worker_id + 1): worker_id + 1
+            executor.submit(_process_agent_sequence, batch, worker_id + 1, event_context=event_context): worker_id + 1
             for worker_id, batch in enumerate(batches)
             if batch
         }

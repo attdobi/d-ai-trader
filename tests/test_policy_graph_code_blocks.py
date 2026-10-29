@@ -55,6 +55,9 @@ def extract_from_source() -> list:
     for n in ast.walk(_parse("policy_safety.py")):
         if _assign_target(n) == "OPPORTUNITY_CHARTER":
             found["opportunity_charter"] = _render(n.value)
+    for n in ast.walk(_parse("summary_event_context.py")):
+        if _assign_target(n) in ("SUMMARY_CALENDAR_HEADER", "SUMMARY_CALENDAR_RULES"):
+            found[_assign_target(n)] = _render(n.value)
 
     # decider_agent.ask_decision_agent
     ask = _func(_parse("decider_agent.py"), "ask_decision_agent")
@@ -143,6 +146,7 @@ def extract_from_source() -> list:
         ("DA.code.visual_evidence", found["visual_evidence"]),
         ("SA.code.feedback_suffix", found["feedback_suffix"]),
         ("SA.code.opportunity_charter", found["opportunity_charter"]),
+        ("SA.code.operator_calendar", found["SUMMARY_CALENDAR_HEADER"] + "\n" + found["SUMMARY_CALENDAR_RULES"]),
         ("FA.code.system_base", found["FEEDBACK_SYSTEM_BASE"]),
         ("FA.code.base_instructions", found["FEEDBACK_BASE_INSTRUCTIONS"]),
         ("FA.code.json_format", found["FEEDBACK_JSON_FORMAT"]),
@@ -160,9 +164,37 @@ def test_code_blocks_match_source_verbatim():
         assert act == exp, f"{bid}: verbatim copy in policy_graph/code_blocks.py drifted from the source literal"
 
 
+def test_live_confirmation_requires_evidenced_below_entry_geometry_within_active_cap():
+    """Always-appended guidance must not undo the corrected watchlist stop semantics."""
+    source = dict(extract_from_source())["DA.code.confirmation_policy"]
+    assert source == BLOCKS_BY_ID["DA.code.confirmation_policy"].text
+    assert "HIGHER of" not in source and "3% kill" not in source
+    assert "genuinely evidenced support/invalidation price from SUPPLIED numbers BELOW the proposed entry" in source
+    assert "20d MA ABOVE entry is a reclaim/resistance level, not a protective stop" in source
+    assert "use a below-entry MA as K only when supported as relevant support" in source
+    assert "3% downside reference" in source
+    assert "not stop authorization or an exception to the active D cap" in source
+    assert "positive D = (entry - K) / entry × 100" in source
+    assert "Never invent a tighter stop merely to pass the gate" in source
+    assert "numeric D ≤1.3%; missing, nonpositive or above-cap D means WATCH/PASS" in source
+    assert "including for earnings-event entries" in source
+    assert "Without valid below-entry geometry, do not force a BUY" in source
+    assert "binding on the first breach — no widening, no waiting for the close, no averaging" in source
+    assert "SELL at P&L -0.8% or worse" in source
+
+    # Feedback, the policy generator and critic share this field inventory. A descriptive
+    # reference must not be advertised to them as an authorized protective stop either.
+    inventory = next(
+        _render(n.value) for n in ast.walk(_parse("feedback_diagnostics.py"))
+        if _assign_target(n) == "SUPPLIED_DECIDER_FIELDS"
+    )
+    assert "3% downside reference (not an authorized stop)" in inventory
+    assert "suggested 3% kill" not in inventory
+
+
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 25
+    assert len(ids) == len(set(ids)) == 26
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title
@@ -244,7 +276,7 @@ def test_code_nodes_conditions():
     assert by_id["DA.code.json_fallback"].extra["fires"] is True
 
 
-@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 2), ("FeedbackAgent", "FA", 4),
+@pytest.mark.parametrize("agent,prefix,count", [("SummarizerAgent", "SA", 3), ("FeedbackAgent", "FA", 4),
                                                 ("CompanyExtractionAgent", "CA", 0)])
 def test_code_nodes_other_agents(agent, prefix, count):
     nodes = code_nodes(agent, {}, is_margin_account=False)

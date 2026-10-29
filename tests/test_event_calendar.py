@@ -98,6 +98,24 @@ def test_score_is_deterministic_and_capped():
     assert dict((p[0], p[2]) for p in prt if p[0] == "earnings" and "2 sessions" in p[1])["earnings"] == 40
 
 
+def test_post_fomc_points_describe_the_past_release_not_the_next_meeting():
+    statuses = ec.macro_statuses(date(2026, 10, 29), time(16, 0))
+    score, level, parts = ec.score_event_risk("RISK-OFF", statuses, [])
+    assert (score, level) == (65, "HIGH")
+    assert ec.macro_window(statuses) == (False, "")
+    assert parts == [("regime", "RISK-OFF", 55),
+                     ("fomc", "FOMC decision 2026-10-28 (1 session ago)", 10)]
+    assert statuses["fomc"]["next"] == "2026-12-09"
+
+
+def test_release_day_points_describe_the_released_print_without_changing_weights():
+    statuses = ec.macro_statuses(date(2026, 10, 14), time(10, 0))
+    score, level, parts = ec.score_event_risk("RISK-ON", statuses, [])
+    assert (score, level) == (16, "LOW")
+    assert ("cpi", "CPI 2026-10-14 (released today)", 6) in parts
+    assert not ec.macro_window(statuses)[0]
+
+
 def test_earnings_flags():
     assert ec._earnings_flag(0) == "reports_within_2" and ec._earnings_flag(2) == "reports_within_2"
     assert ec._earnings_flag(3) == "reports_within_5" and ec._earnings_flag(5) == "reports_within_5"
@@ -138,6 +156,32 @@ def test_quiet_day_block_falls_through_to_regime(monkeypatch):
     assert not ctx["macro_window"] and ctx["risk_score"] == 10 and ctx["risk_level"] == "LOW"
     assert "MACRO WINDOW: no" in ctx["block"] and "up to 3 new BUYs at full rails" in ctx["block"]
     assert "EARNINGS (holdings): none in play" in ctx["block"]
+
+
+def test_earnings_coverage_keeps_unknown_dates_visible_and_watchlist_out_of_portfolio_score(monkeypatch):
+    _stub_earnings(monkeypatch, {"KNOWN": date(2026, 10, 21), "SOON": date(2026, 9, 24)})
+    ctx = ec.build_event_context(holdings=["KNOWN", "MISSING"], watchlist=["SOON", "KNOWN"],
+                                 regime="RISK-ON", now_et=_et(2026, 9, 23, 10))
+    assert ctx["earnings_coverage"] == {
+        "holdings": {"total": 2, "known": 1, "unknown": 1, "unknown_tickers": ["MISSING"]},
+        "watchlist": {"total": 1, "known": 1, "unknown": 0, "unknown_tickers": []},
+    }
+    assert ctx["risk_score"] == 10             # candidate earnings are separate from held exposure
+    assert ctx["watchlist_earnings"][0]["flag"] == "reports_within_2"
+    assert "no known releases inside 5 sessions; unknown dates are not an event-free confirmation" in ctx["block"]
+    assert "holdings 1/2 dates known; unknown: MISSING" in ctx["block"]
+    assert "watchlist 1/1 dates known" in ctx["block"]
+    assert "not a BUY/SELL gate or valuation" in ctx["block"]
+
+
+def test_unusable_earnings_dates_are_not_counted_as_verified_coverage():
+    rows = [{"ticker": "KNOWN", "date": "2026-10-30", "sessions_to": 1},
+            {"ticker": "MISSING", "date": None, "sessions_to": None},
+            {"ticker": "BAD_DATE", "date": "not_shown", "sessions_to": 1},
+            {"ticker": "BAD_DISTANCE", "date": "2026-10-30", "sessions_to": float("nan")}]
+    assert ec.earnings_coverage(rows) == {"total": 4, "known": 1, "unknown": 3,
+                                          "unknown_tickers": ["MISSING", "BAD_DATE", "BAD_DISTANCE"]}
+    assert ec.earnings_coverage([]) == {"total": 0, "known": 0, "unknown": 0, "unknown_tickers": []}
 
 
 def test_disabled_by_env(monkeypatch):

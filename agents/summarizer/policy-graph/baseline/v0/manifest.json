@@ -87,15 +87,16 @@
    "SA.memory.evidence_provenance"
   ]
  },
- "node_count": 33,
- "edge_count": 38,
+ "node_count": 34,
+ "edge_count": 40,
  "code": {
-  "sha": "ce28880a8af9",
-  "dir": "../_code/ce28880a8af9",
+  "sha": "e6f37e94660d",
+  "dir": "../_code/e6f37e94660d",
   "git_sha": "baseline",
   "fires": {
    "SA.code.feedback_suffix": true,
-   "SA.code.opportunity_charter": true
+   "SA.code.opportunity_charter": true,
+   "SA.code.operator_calendar": true
   }
  },
  "ltm": {

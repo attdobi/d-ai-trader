@@ -113,3 +113,9 @@ not an inferred exact fill-time risk score. Future records are excluded. A sale
 with an unknown return has a neutral unscored marker; a zero return is flat,
 not a win. Calendar coverage gaps remain explicit. The graph does not change
 entry permissions, risk limits or the separate earnings-event strategy.
+
+The current card also shows component points and known/unknown earnings-date
+coverage. Missing dates do not establish an event-free window. The published BLS
+2027 schedule is loaded, while future coverage exhaustion remains explicit.
+See [risk versus opportunity context](RISK_OPPORTUNITY_CONTEXT.md) for the
+Summarizer/Decider pipeline, corrected screener guidance and provenance rules.

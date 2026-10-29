@@ -544,7 +544,8 @@ def _root_body(agent_type: str, config_hash: str, version: int, meta: RowMeta, f
         recipe = ("Runtime assembly (main.get_openai_summary): system prompt = system_prompt template, then "
                   "'## AGENT IDENTITY' + soul, then strategy_directives substituted for {strategy_directives} "
                   "(appended when absent), then '## LESSONS FROM EXPERIENCE' + memory, then the "
-                  "PERFORMANCE FEEDBACK suffix; user prompt = user_prompt_template filled per cycle.")
+                  "PERFORMANCE FEEDBACK suffix and code-owned opportunity charter; user prompt = user_prompt_template "
+                  "filled per source plus the sweep's shared operator macro-calendar context, separately labeled from news evidence.")
     elif agent_type == "CompanyExtractionAgent":
         recipe = ("Runtime assembly (decider_agent.extract_companies_from_summaries): system prompt = system_prompt "
                   "template, then '## AGENT IDENTITY' + soul, then strategy_directives substituted for "

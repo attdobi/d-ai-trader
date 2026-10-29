@@ -153,3 +153,24 @@ return {title:charts[0].options.plugins.tooltip.callbacks.title(items(charts[0])
     assert not any('CI' in line or 'interval' in line for line in result['mean'])
     assert 'N=2' in result['summaryTitle'] and '34.2%–100.0%' in result['summaryTitle']
     assert 'independent closures' in result['summaryTitle']
+
+
+def test_event_pressure_explains_components_and_keeps_unknown_earnings_visible():
+    result=view("vm.runInContext('renderEventStats(payload,{})',context);return {stats:elements.eventStats.innerHTML,parts:elements.eventScoreBreakdown.innerHTML};",{
+        'risk_score':65,'risk_level':'HIGH','regime':'RISK-OFF','macro_window':False,
+        'macro':{},'holdings_earnings':[{'ticker':'KNOWN','date':'2026-12-01','flag':None},
+                                      {'ticker':'UNKNOWN','date':None,'flag':None}],
+        'earnings_coverage':{'holdings':{'total':2,'known':1,'unknown':1,'unknown_tickers':['UNKNOWN']}},
+        'score_parts':[['regime','RISK-OFF',55],['fomc','FOMC 2026-10-28 (1 session ago)',10]]})
+    assert 'Event/regime pressure' in result['stats'] and '65/100' in result['stats']
+    assert 'No known releases ≤5 sessions' in result['stats']
+    assert '1/2 holdings dated · unknown: UNKNOWN' in result['stats']
+    assert 'None ≤5 sessions' not in result['stats']
+    assert '+55' in result['parts'] and '+10' in result['parts'] and '2026-10-28 (1 session ago)' in result['parts']
+
+
+def test_event_earnings_none_requires_complete_known_dates():
+    result=view("vm.runInContext('renderEventStats(payload,{})',context);return elements.eventStats.innerHTML;",{
+        'risk_score':10,'risk_level':'LOW','regime':'RISK-ON','macro':{},
+        'holdings_earnings':[{'ticker':'A','date':'2026-12-01','sessions_to':23,'flag':None}]})
+    assert 'None ≤5 sessions' in result and '1/1 holdings dated' in result

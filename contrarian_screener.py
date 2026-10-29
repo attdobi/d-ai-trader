@@ -19,8 +19,9 @@ Lessons encoded 2026-09-02 (see agents/decider/MEMORY.default.md):
   * The same rules made money while the index and the momentum leaders were above their
     20d MAs and lost in every bucket once the leaders rolled over, so the screener also
     publishes an INDEX REGIME line (SPY/QQQ vs 20d MA, 5d return, leader-cohort health).
-  * A kill must be a price. Each candidate line prints the price, the 20d MA level and the
-    3% kill so the decider can write K:<price>;D:<%> from supplied numbers.
+  * A kill must be a genuinely evidenced support/invalidation price below entry and inside
+    the active D cap. Candidate lines print price, 20d MA and a 3% downside reference;
+    an above-entry MA is a reclaim level, and the reference does not authorize a stop.
   * Same-ticker re-entry within 3 days of an exit was the largest measured leak; callers
     pass `exclude=` (recently exited tickers) and the block prints a QUARANTINE line.
 
@@ -324,9 +325,10 @@ def format_index_regime(regime):
         f"# INDEX REGIME: {regime['label']} ({regime['why']}) | {_b('SPY', regime.get('spy'))} | "
         f"{_b('QQQ', regime.get('qqq'))} | {lead_txt}\n"
         "# DEPLOYMENT RULE BY REGIME — RISK-ON: full rails, up to 3 new BUYs; extension ≤5% above 20d MA at full size, "
-        "5-8% at half size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: cash is the correct "
-        "default; at most 1 new BUY at half size, only an oversold reversal or a name ≤3% above its 20d MA; harvest at +2%; "
-        "no re-entry exceptions. The regime never relaxes the priced-kill rule (K:<price>;D:<%>)."
+        "5-8% at half size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: evaluate selective "
+        "opportunities; at most 1 new BUY at half size, only an oversold reversal or a name ≤3% above its 20d MA; harvest at +2%; "
+        "no re-entry exceptions. Hold cash when independent candidate gates fail; never force a BUY. "
+        "The regime never relaxes the priced-kill rule (K:<price>;D:<%>)."
     )
 
 
@@ -342,8 +344,11 @@ def format_contrarian_watchlist(candidates, quarantined=None):
         "# thesis (pullback into support within an uptrend, or an oversold turn). Confirm with what is reliable:",
         "# price holding/reclaiming its 20-day MA or recent support, a constructive multi-day/monthly trend, and",
         "# stabilizing relative strength. Do NOT require intraday VWAP/10m/1h — usually absent for pullbacks and",
-        "# near the open. PRIORITIZE these for BUY over extended gainers. Each line prints the PRICE, the 20d MA",
-        "# level and the 3% kill: your K: is the HIGHER of (20d MA, 3% kill) — write K:<price>;D:<%> from them.",
+        "# near the open. PRIORITIZE evaluating these over extended gainers. Each line prints PRICE, 20d MA, and a 3% downside reference.",
+        "# A 20d MA ABOVE entry is a reclaim/resistance level, not a protective stop. Use it as K only when BELOW entry and supported as relevant support.",
+        "# K must be a genuinely evidenced support/invalidation price BELOW entry. Compute positive D = (entry - K) / entry × 100.",
+        "# The active D cap still applies. Without a justified below-entry K inside that cap, WATCH/PASS; do not force a BUY.",
+        "# The printed 3% reference is not permission or an exception to the active cap. Never invent a tighter stop merely to pass the gate.",
         "# EXTENDED = 5-8% above the 20d MA: half size and only in RISK-ON. Never buy a name on the QUARANTINE line.",
     ]
     for c in candidates:
@@ -356,7 +361,7 @@ def format_contrarian_watchlist(candidates, quarantined=None):
         vol_text = f" | rel-vol {rel_vol:.1f}× 20d-avg" if rel_vol else ""
         tag = f" | {c['ext_tag']}" if c.get("ext_tag") else ""
         price_text = (
-            f"${c['price']:.2f} | 20d MA ${c['sma20']:.2f} | 3% kill ${c['kill_3pct']:.2f} | "
+            f"${c['price']:.2f} | 20d MA ${c['sma20']:.2f} | 3% reference ${c['kill_3pct']:.2f} | "
             if c.get("price") and c.get("sma20") else ""
         )
         lines.append(

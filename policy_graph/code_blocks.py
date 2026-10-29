@@ -21,6 +21,7 @@ from collections import namedtuple
 
 from .model import AGENT_PREFIX, Node, POLARITY_OVERRIDES
 from policy_safety import OPPORTUNITY_CHARTER
+from summary_event_context import SUMMARY_CALENDAR_HEADER, SUMMARY_CALENDAR_RULES
 
 CodeBlock = namedtuple("CodeBlock", "id title text source_file source_symbol condition position constrains")
 
@@ -133,11 +134,14 @@ _CONFIRMATION_POLICY = (
     " and monthly trend, relative strength vs SPY, position vs the 20-day MA and recent range, the"
     " pullback/reversal setup itself, and catalyst. A quality non-extended setup — above all a pullback"
     " in an uptrend on a down day (buying the dip) — is BUYABLE on those alone when the regime allows it."
-    " PRICED KILL: every BUY reason ends with K:<price>;D:<%>. Form the kill from SUPPLIED numbers — the"
-    " HIGHER of the watchlist's 20d MA level (or a stated support level) and entry × 0.97 (the 3% kill)."
-    " The watchlist prints the price, the 20d MA and the 3% kill; the Momentum Recap prints the price."
-    " You never need a quoted 'entry reference' beyond that price. The active entry gate requires numeric"
-    " D ≤1.3%; missing D or D above 1.3% means PASS, including for earnings-event entries. The kill is"
+    " PRICED KILL: every BUY reason ends with K:<price>;D:<%>. Use a genuinely evidenced support/invalidation"
+    " price from SUPPLIED numbers BELOW the proposed entry for K. A 20d MA ABOVE entry is a reclaim/resistance"
+    " level, not a protective stop; use a below-entry MA as K only when supported as relevant support."
+    " The watchlist prints the price, the 20d MA and entry × 0.97 as a 3% downside reference; the Momentum"
+    " Recap prints the price. That reference is not stop authorization or an exception to the active D cap."
+    " Compute positive D = (entry - K) / entry × 100. Never invent a tighter stop merely to pass the gate."
+    " The active entry gate requires numeric D ≤1.3%; missing, nonpositive or above-cap D means WATCH/PASS,"
+    " including for earnings-event entries. Without valid below-entry geometry, do not force a BUY. The kill is"
     " binding on the first breach — no widening, no waiting for the close, no averaging. The active"
     " holding loss cap also requires SELL at P&L -0.8% or worse. Stops cannot guarantee a bound on earnings gap losses."
 )
@@ -170,11 +174,12 @@ _GUIDELINE_CITATIONS = (
 # format_index_regime: the constant tail of the returned f-string (after the per-cycle INDEX REGIME line)
 _INDEX_REGIME = (
     "# DEPLOYMENT RULE BY REGIME — RISK-ON: full rails, up to 3 new BUYs; extension ≤5% above 20d MA at full size, "
-    "5-8% at half size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: cash is the correct "
-    "default; at most 1 new BUY at half size, only an oversold reversal or a name ≤3% above its 20d MA; harvest at +2%; "
-    "no re-entry exceptions. The regime never relaxes the priced-kill rule (K:<price>;D:<%>)."
+    "5-8% at half size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: evaluate selective "
+    "opportunities; at most 1 new BUY at half size, only an oversold reversal or a name ≤3% above its 20d MA; harvest at +2%; "
+    "no re-entry exceptions. Hold cash when independent candidate gates fail; never force a BUY. "
+    "The regime never relaxes the priced-kill rule (K:<price>;D:<%>)."
 )
-# format_contrarian_watchlist: the nine header comment lines ("\n".join of the `lines` list literal)
+# format_contrarian_watchlist: header comment lines ("\n".join of the `lines` list literal)
 _WATCHLIST_HEADER = "\n".join([
     "# CONTRARIAN WATCHLIST (front-run candidates — pulled back / oversold, NOT extended on either timeframe)",
     "# Screened for the reversal/pullback setups your doctrine targets, capped at 8% above the 20-day MA (the",
@@ -182,8 +187,11 @@ _WATCHLIST_HEADER = "\n".join([
     "# thesis (pullback into support within an uptrend, or an oversold turn). Confirm with what is reliable:",
     "# price holding/reclaiming its 20-day MA or recent support, a constructive multi-day/monthly trend, and",
     "# stabilizing relative strength. Do NOT require intraday VWAP/10m/1h — usually absent for pullbacks and",
-    "# near the open. PRIORITIZE these for BUY over extended gainers. Each line prints the PRICE, the 20d MA",
-    "# level and the 3% kill: your K: is the HIGHER of (20d MA, 3% kill) — write K:<price>;D:<%> from them.",
+    "# near the open. PRIORITIZE evaluating these over extended gainers. Each line prints PRICE, 20d MA, and a 3% downside reference.",
+    "# A 20d MA ABOVE entry is a reclaim/resistance level, not a protective stop. Use it as K only when BELOW entry and supported as relevant support.",
+    "# K must be a genuinely evidenced support/invalidation price BELOW entry. Compute positive D = (entry - K) / entry × 100.",
+    "# The active D cap still applies. Without a justified below-entry K inside that cap, WATCH/PASS; do not force a BUY.",
+    "# The printed 3% reference is not permission or an exception to the active cap. Never invent a tighter stop merely to pass the gate.",
     "# EXTENDED = 5-8% above the 20d MA: half size and only in RISK-ON. Never buy a name on the QUARANTINE line.",
 ])
 # format_contrarian_watchlist: the QUARANTINE line prefix (tickers are appended per cycle)
@@ -302,6 +310,8 @@ CODE_BLOCKS: list = [
               "main.py", "get_openai_summary:feedback_context", None, "system_tail", []),
     CodeBlock("SA.code.opportunity_charter", "OPPORTUNITY CHARTER", OPPORTUNITY_CHARTER,
               "policy_safety.py", "opportunity_system_prompt", None, "system_tail", []),
+    CodeBlock("SA.code.operator_calendar", "OPERATOR MACRO CALENDAR", SUMMARY_CALENDAR_HEADER + "\n" + SUMMARY_CALENDAR_RULES,
+              "summary_event_context.py", "render_summary_calendar", None, "user_prompt_dynamic", []),
     CodeBlock("FA.code.system_base", "Feedback system prompt (code)", _FA_SYSTEM_BASE,
               "feedback_agent.py", "_generate_ai_feedback:FEEDBACK_SYSTEM_BASE", None, "system_base", []),
     CodeBlock("FA.code.base_instructions", "Feedback base instructions (code)", _FA_BASE_INSTRUCTIONS,

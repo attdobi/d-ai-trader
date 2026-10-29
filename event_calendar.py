@@ -23,7 +23,7 @@ What it produces each cycle (`build_event_context`):
 The thresholds the score encodes mirror the EVENT GATE guideline in the Decider's policy graph
 (DA.directives.strategy.event_gate); the block itself only carries data — the gate decides.
 
-Calendars: FOMC 2026–2027 (federalreserve.gov), CPI and Employment Situation 2026 (bls.gov), NYSE
+Calendars: FOMC 2026–2027 (federalreserve.gov), CPI and Employment Situation 2026–2027 (bls.gov), NYSE
 holidays 2026–2027. `DAI_EVENT_CALENDAR_FILE` may point to a JSON file that adds dates:
 {"fomc": [...], "cpi": [...], "jobs": [...], "holidays": [...], "other": [{"date": "...", "label": "..."}]}.
 When the next 45 days run past the last known CPI or jobs date, `calendar_coverage` adds a CALENDAR GAP
@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from datetime import date, datetime, time as dtime, timedelta, timezone
@@ -56,15 +57,20 @@ FOMC_DECISION_DATES = {
     2026: ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09"],
     2027: ["2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09", "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08"],
 }
-# BLS Consumer Price Index, 8:30 am ET.
+# BLS Consumer Price Index, 8:30 am ET. The 2027 schedule was published
+# 2026-10-09 and verified 2026-10-29 against https://www.bls.gov/schedule/2027/home.htm.
 CPI_RELEASE_DATES = {
     2026: ["2026-01-13", "2026-02-13", "2026-03-11", "2026-04-10", "2026-05-12", "2026-06-10",
            "2026-07-14", "2026-08-12", "2026-09-11", "2026-10-14", "2026-11-10", "2026-12-10"],
+    2027: ["2027-01-13", "2027-02-11", "2027-03-10", "2027-04-13", "2027-05-12", "2027-06-10",
+           "2027-07-14", "2027-08-11", "2027-09-14", "2027-10-14", "2027-11-10", "2027-12-10"],
 }
-# BLS Employment Situation (jobs report), 8:30 am ET.
+# BLS Employment Situation (jobs report), 8:30 am ET; same verified 2027 source.
 JOBS_REPORT_DATES = {
     2026: ["2026-01-09", "2026-02-11", "2026-03-06", "2026-04-03", "2026-05-08", "2026-06-05",
            "2026-07-02", "2026-08-07", "2026-09-04", "2026-10-02", "2026-11-06", "2026-12-04"],
+    2027: ["2027-01-08", "2027-02-05", "2027-03-05", "2027-04-02", "2027-05-07", "2027-06-04",
+           "2027-07-02", "2027-08-06", "2027-09-03", "2027-10-08", "2027-11-05", "2027-12-03"],
 }
 # NYSE full-day closures.
 NYSE_HOLIDAYS = {
@@ -276,10 +282,10 @@ def calendar_coverage(today: date, horizon_days: int = COVERAGE_HORIZON_DAYS) ->
             gaps.append({"kind": kind, "label": label, "last": _iso(last)})
     warning = None
     if gaps:
-        lasts = [g["last"] for g in gaps if g["last"]]
-        after = f" after {max(lasts)}" if lasts else ""
-        warning = (f"CALENDAR GAP: no {' or '.join(g['label'] for g in gaps)} dates{after} — add them via "
-                   f"DAI_EVENT_CALENDAR_FILE")
+        coverage = "; ".join(f"{g['label']} dates known through {g['last']}" if g["last"]
+                             else f"{g['label']} dates unavailable" for g in gaps)
+        warning = (f"CALENDAR GAP: {int(horizon_days)}-day coverage horizon ends {horizon_end.isoformat()}; "
+                   f"{coverage}. Later dates are unknown, not confirmed event-free.")
     return {"horizon_end": horizon_end.isoformat(), "gaps": gaps, "warning": warning}
 
 
@@ -506,6 +512,16 @@ def _macro_points(status: dict, table: dict) -> int:
     return 0
 
 
+def _macro_score_detail(status: dict, table: dict) -> str:
+    """Name the event that contributed points, including a past release."""
+    if not status.get("in_window") and status.get("sessions_to") not in table["near"] and status.get("just_printed"):
+        last = status.get("last")
+        since = status.get("sessions_since")
+        ago = "released today" if since == 0 else "1 session ago" if since == 1 else f"{since} sessions ago" if since is not None else "release timing unknown"
+        return f"{status.get('label') or 'Event'} {last or '(date unknown)'} ({ago})"
+    return _when(status)
+
+
 def score_event_risk(regime: Optional[str], statuses: dict, holdings_earnings: list) -> tuple:
     """(score 0–100, level, [(name, detail, points)]) — deterministic, documented in the module header."""
     parts = []
@@ -517,12 +533,12 @@ def score_event_risk(regime: Optional[str], statuses: dict, holdings_earnings: l
         s = statuses.get(key) or {}
         p = _macro_points(s, table)
         if p:
-            parts.append((key, _when(s), p))
+            parts.append((key, _macro_score_detail(s, table), p))
             score += p
     for s in statuses.get("other") or []:
         p = _macro_points(s, PRINT_POINTS)
         if p:
-            parts.append(("other", _when(s), p))
+            parts.append(("other", _macro_score_detail(s, PRINT_POINTS), p))
             score += p
     exit_pts = sum(EARNINGS_POINTS["exit"] for h in holdings_earnings if h.get("flag") == "reports_within_2")
     rej_pts = sum(EARNINGS_POINTS["reject"] for h in holdings_earnings if h.get("flag") == "reports_within_5")
@@ -576,6 +592,17 @@ def _earnings_rows(tickers, today, engine, lookup, quarantine_seen: set) -> list
     return rows
 
 
+def earnings_coverage(rows: list) -> dict:
+    """Allowlisted date coverage; missing or unusable timing is not an all-clear."""
+    def known(row):
+        sessions = row.get("sessions_to")
+        return (_parse_date(row.get("date")) is not None and isinstance(sessions, (int, float))
+                and not isinstance(sessions, bool) and math.isfinite(sessions))
+    unknown = [str(row.get("ticker") or "UNKNOWN") for row in rows if not known(row)]
+    return {"total": len(rows), "known": len(rows) - len(unknown), "unknown": len(unknown),
+            "unknown_tickers": unknown}
+
+
 def build_event_context(holdings=None, watchlist=None, regime: Optional[str] = None, now_et: Optional[datetime] = None,
                         lookup_earnings: bool = True, engine=None) -> Optional[dict]:
     """Everything the block, the score, the snapshot and the dashboard need for this cycle."""
@@ -603,6 +630,7 @@ def build_event_context(holdings=None, watchlist=None, regime: Optional[str] = N
         "session_state": session_state(now_et), "regime": (regime or "").upper() or None,
         "macro": statuses, "macro_window": in_window, "macro_reason": reason,
         "holdings_earnings": hold_rows, "watchlist_earnings": watch_rows,
+        "earnings_coverage": {"holdings": earnings_coverage(hold_rows), "watchlist": earnings_coverage(watch_rows)},
         "risk_score": score, "risk_level": level, "score_parts": parts,
         "allowance": _allowance(regime, in_window, reason, hold_rows),
         "calendar_gap": coverage,
@@ -666,8 +694,18 @@ def format_event_calendar(ctx: Optional[dict]) -> str:
     if fomc.get("next"):
         macro_bits[0] += f" {fomc['release_et']}"
     hold_rows = ctx.get("holdings_earnings") or []
-    soon = [r for r in hold_rows if r.get("flag") == "reports_within_2"]
-    hold_note = "" if soon or not hold_rows else " — none inside 5 sessions" if not any(r.get("flag") for r in hold_rows) else ""
+    coverage = {"holdings": earnings_coverage(hold_rows),
+                "watchlist": earnings_coverage(ctx.get("watchlist_earnings") or [])}
+    hold_note = (" — no known releases inside 5 sessions" if hold_rows and not any(r.get("flag") for r in hold_rows) else "")
+    if coverage["holdings"]["unknown"]:
+        hold_note += "; unknown dates are not an event-free confirmation"
+    def coverage_text(key):
+        row = coverage[key]
+        missing = ", ".join(row["unknown_tickers"][:8])
+        suffix = f"; unknown: {missing}" if missing else ""
+        if len(row["unknown_tickers"]) > 8:
+            suffix += f" (+{len(row['unknown_tickers']) - 8} more)"
+        return f"{key} {row['known']}/{row['total']} dates known{suffix}"
     allow = ctx.get("allowance") or {}
     lines = [
         EVENT_CALENDAR_HEADER,
@@ -679,8 +717,11 @@ def format_event_calendar(ctx: Optional[dict]) -> str:
         f"# EARNINGS (watchlist): {_earn_text(ctx.get('watchlist_earnings') or [])}",
         "# UPCOMING EARNINGS (today before release / next 1–5 TRADING sessions; date/time provenance, not a buy signal): "
         + _earn_text(upcoming_earnings(hold_rows + (ctx.get('watchlist_earnings') or [])), limit=20),
+        "# EARNINGS COVERAGE: " + " · ".join(coverage_text(key) for key in ("holdings", "watchlist")),
         f"# ALLOWANCE THIS CYCLE: {ctx.get('regime') or 'regime n/a'}; new BUYs → {allow.get('buys', '')}; "
         f"holdings reporting within 2 sessions: {allow.get('holdings_reporting_within_2', 'none')}",
+        "# SCORE INTERPRETATION: descriptive event/regime pressure, not a BUY/SELL gate or valuation. "
+        "Assess opportunities separately within the active policy.",
     ]
     gap = (ctx.get("calendar_gap") or {}).get("warning")
     if gap:     # right under MACRO: past the last known date a print reads not_in_calendar

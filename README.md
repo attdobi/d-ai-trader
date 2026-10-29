@@ -8,6 +8,41 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Risk pressure and opportunity context — October 29, 2026
+
+The Event Risk Landscape measures **regime and scheduled-event pressure**, not
+expected loss, valuation or upside. For example, 65 can mean RISK-OFF's 55 base
+points plus 10 for the session after FOMC, even though no upcoming macro window
+is active. The dashboard now shows those components and distinguishes known
+earnings dates from missing ones. It no longer treats missing dates as an
+event-free window. CPI/jobs dates now include the published **2027 BLS schedule**.
+
+Each six-source summary sweep now freezes one local macro-calendar snapshot and
+supplies it to every Summarizer alongside its news and screenshots. The saved
+`operator_calendar` metadata records provenance separately from model output.
+The Decider independently refreshes the fuller context, including candidate and
+holding earnings, current regime and the separate earnings-event controls. No
+extra model or earnings-provider calls are introduced by summary enrichment.
+
+The audit corrected two contradictory screener instructions: risk-off no longer
+says cash is the default, and an above-entry moving average is a reclaim or
+resistance level rather than a protective stop. A genuine below-entry stop still
+must satisfy the active constraints; the printed 3% reference grants no exception.
+The charter now separates event pressure from opportunity evidence. A price
+decline alone does not prove undervaluation, and unknown valuation alone does not
+reject a qualified technical setup. Existing sizing, stop, cash, quarantine and
+earnings limits are preserved.
+
+Calendar provision and news-event mentions are measured separately, so repeating
+operator-provided dates cannot masquerade as improved news extraction. The
+router continues its existing shadow evaluation; core policy/context remains
+pinned. [Pipeline, findings and limits](docs/RISK_OPPORTUNITY_CONTEXT.md).
+
+Validation: **1,921 tests passed, 1 skipped**; the updated landscape was checked
+in the read-only preview. No paid model probe or broker order was run. Existing
+trader processes load the new Python context assembly at their normal restart;
+the live trader was not restarted during this audit.
+
 ## Feedback dashboard audit — October 29, 2026
 
 **Prompt Blueprints** and **Recent Trade Outcomes** now have bounded internal
@@ -755,7 +790,7 @@ Seven tabs:
 - **Schwab Live** — live balances, settled and unsettled cash, buying power, holdings, open orders and recent trades.
 - **Trades** — every buy and sell with its broker status (filled, not executed, market closed, rejected, failed) or "unconfirmed" when nothing is on record, the news behind it, citation chips into the policy graph, and sizing details.
 - **Summaries** — the latest news analysis per source.
-- **Feedback** — win rate, trade outcomes, System vs Market, Undo Last Prompt Change and Reset Prompts to v0, and the **Event Risk Landscape** (event-risk score per session with regime bands, event lines, fills at the risk they were taken, and the calendar projected forward).
+- **Feedback** — win rate, trade outcomes, System vs Market, Undo Last Prompt Change and Reset Prompts to v0, and the **Event Risk Landscape** (event/regime pressure with component breakdowns, earnings-date coverage, regime bands, event lines, fill dates aligned to daily scores, and a conditional calendar projection).
 - **Prompt Lab** — refresh feedback, then generate, critique, diff and approve or reject prompt versions. The critic scorecard is API-only (`/api/prompt-evolution/critic-scorecard`).
 - **Policy Graph** — the guideline graph in three layers, version timeline, node detail, proposals, decision paths and factor quality.
 

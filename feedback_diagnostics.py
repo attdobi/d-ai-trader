@@ -16,6 +16,7 @@ Public API:
     format_diagnostics(diag) -> str      # prompt-ready block ('' when no trades)
     SUPPLIED_DECIDER_FIELDS              # what the Decider actually receives
 """
+import json
 import re
 import statistics
 from collections import defaultdict
@@ -35,7 +36,7 @@ SUPPLIED_DECIDER_FIELDS = (
     "Momentum Recap (per ticker in news/holdings): price, 10m/1h/1d/1w/1mo/1y % change, RS vs SPY (10m/1d/1mo), "
     "volume and rel-vol vs 20d avg, day-range position, 52w range. "
     "CONTRARIAN WATCHLIST (screener): price, 20d MA level, setup type, day/wk/mo %, RS vs SPY 5d/20d, RSI, "
-    "% from 20d high, % vs 20d MA, rel-vol, EXTENDED tag, suggested 3% kill price. "
+    "% from 20d high, % vs 20d MA, rel-vol, EXTENDED tag, 3% downside reference (not an authorized stop). "
     "INDEX REGIME line: SPY and QQQ vs their 20d MA and 5d return, momentum-leader cohort health, label RISK-ON/MIXED/RISK-OFF. "
     "QUARANTINE line: tickers exited within the last 2 sessions. "
     "EVENT CALENDAR block: today's date and ET time, sessions to the next FOMC decision / CPI / jobs report with a MACRO "
@@ -102,25 +103,156 @@ def decision_acknowledges_event(text_):
     return bool(EVENT_ACK_RE.search(text_ or ""))
 
 
+def _event_json(value):
+    """Decode stored JSON/string wrappers without treating metadata as prose."""
+    for _ in range(3):
+        if not isinstance(value, str):
+            return value
+        if len(value) > 1_000_000:
+            return None
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            return None
+    return value if not isinstance(value, str) else None
+
+
+def _summary_event_parts(value):
+    """Allowlisted model text and separately recorded operator provenance.
+
+    Headlines remain model reports, not independently verified publisher text.
+    Insights from an operator-calendar cycle cannot establish a news-source
+    mention because they may correctly repeat the supplied calendar facts.
+    """
+    outer = _event_json(value)
+    if not isinstance(outer, dict):
+        return None
+    summary = _event_json(outer.get('summary'))
+    summary = summary if isinstance(summary, dict) else {}
+    headlines = summary.get('headlines')
+    headline_text = '\n'.join(head[:2000] for head in headlines[:6] if isinstance(head, str)) if isinstance(headlines, list) else ''
+    insights = summary.get('insights')
+    insights = insights[:16000] if isinstance(insights, str) else ''
+    model_valid = bool(headline_text.strip() or insights.strip())
+    # Presence marks the new protocol, including unavailable/disabled context;
+    # it must not silently re-enter the legacy unprovided-text cohort.
+    operator_context = 'operator_calendar' in outer
+    calendar = _event_json(outer.get('operator_calendar'))
+    provided = (isinstance(calendar, dict) and calendar.get('available') is True
+                and calendar.get('evidence_role') == 'provided_operator_context_not_news_observation')
+    return {'headlines': headline_text, 'insights': insights,
+            'operator_context': operator_context, 'provided_calendar': provided,
+            'model_valid': model_valid}
+
+
+def _decision_event_text(value):
+    """Only reasons/cash rationale and considered text can acknowledge events."""
+    value = _event_json(value)
+    rows = value if isinstance(value, list) else [value]
+    pieces = []
+    for row in rows[:100]:
+        if not isinstance(row, dict):
+            continue
+        for field in ('reason', 'cash_reason', 'signals', 'why'):
+            if isinstance(row.get(field), str):
+                pieces.append(row[field][:4000])
+        for field in ('decisions', 'considered'):
+            nested = row.get(field)
+            if isinstance(nested, list):
+                for item in nested[:100]:
+                    if isinstance(item, dict):
+                        for text_field in ('reason', 'cash_reason', 'signals', 'why'):
+                            if isinstance(item.get(text_field), str):
+                                pieces.append(item[text_field][:4000])
+    return '\n'.join(pieces)[:24000]
+
+
 def _event_acknowledgment(conn, config_hash, cutoff):
-    """Per decider cycle: did a Summarizer name a scheduled event, and did the decision text mention it?"""
+    """Scoped text-mention coverage, distinct from supplied calendar context.
+
+    Legacy flagged/acknowledged/rate_pct describe cycles without the operator
+    calendar protocol. New protocol cycles report headline-only source mentions,
+    unattributed model prose and acknowledgement of provided context separately.
+    These counts establish neither factual verification nor decision quality.
+    """
+    out = dict.fromkeys(('cycles', 'flagged', 'acknowledged', 'legacy_cycles',
+        'operator_context_cycles', 'provided_operator_calendar_cycles', 'provided_calendar_acknowledged',
+        'source_headline_mention_cycles', 'source_headline_acknowledged',
+        'provided_headline_mention_cycles', 'provided_headline_acknowledged',
+        'model_text_mention_cycles', 'provided_model_text_mention_cycles',
+        'provided_unattributed_insights_cycles', 'cycles_without_summary_rows', 'unparseable_summary_rows'), 0)
+    out.update(available=False, rate_pct=None, provided_calendar_ack_rate_pct=None,
+               method='scoped_model_text_and_operator_context_v2',
+               note='Text mentions are model reports, not verified news coverage or causal decision quality. Operator-provided dates are not independent news evidence.')
     try:
         rows = conn.execute(text("""
-            SELECT d.id, CAST(d.data AS TEXT) AS decision,
-                   (SELECT string_agg(CAST(s.data AS TEXT), ' ') FROM summaries s WHERE s.run_id = d.run_id) AS summaries
+            SELECT d.id, d.run_id, d.data AS decision
             FROM trade_decisions d
             WHERE d.config_hash = :h AND d.timestamp >= :cutoff
+            ORDER BY d.id
         """), {"h": config_hash, "cutoff": cutoff}).fetchall()
+        summary_rows = conn.execute(text("""
+            SELECT s.run_id, s.data FROM summaries s
+            WHERE s.config_hash = :h AND EXISTS (
+                SELECT 1 FROM trade_decisions d WHERE d.config_hash = :h
+                  AND d.timestamp >= :cutoff AND d.run_id = s.run_id)
+        """), {'h': config_hash, 'cutoff': cutoff}).fetchall()
     except Exception:
-        return {"cycles": 0, "flagged": 0, "acknowledged": 0, "rate_pct": None}
-    flagged = acked = 0
+        return out
+    by_run = defaultdict(list)
+    for row in summary_rows:
+        parts = _summary_event_parts(row.data)
+        if parts is None or not parts['model_valid']:
+            out['unparseable_summary_rows'] += 1
+        by_run[row.run_id].append(parts)
+    out['cycles'], out['available'] = len(rows), True
     for r in rows:
-        if summaries_name_event(r.summaries):
-            flagged += 1
-            if decision_acknowledges_event(r.decision):
-                acked += 1
-    return {"cycles": len(rows), "flagged": flagged, "acknowledged": acked,
-            "rate_pct": round(100.0 * acked / flagged, 0) if flagged else None}
+        supplied = by_run.get(r.run_id, [])
+        if not supplied:
+            out['cycles_without_summary_rows'] += 1
+        valid = [part for part in supplied if part is not None]
+        operator = any(part['operator_context'] for part in valid)
+        provided = any(part['provided_calendar'] for part in valid)
+        headline = any(summaries_name_event(part['headlines']) for part in valid)
+        insights = any(summaries_name_event(part['insights']) for part in valid)
+        model_text = headline or insights
+        acked = decision_acknowledges_event(_decision_event_text(r.decision))
+        out['source_headline_mention_cycles'] += headline
+        out['source_headline_acknowledged'] += headline and acked
+        out['model_text_mention_cycles'] += model_text
+        if operator:
+            out['operator_context_cycles'] += 1
+            out['provided_operator_calendar_cycles'] += provided
+            out['provided_calendar_acknowledged'] += provided and acked
+            out['provided_headline_mention_cycles'] += headline
+            out['provided_headline_acknowledged'] += headline and acked
+            out['provided_model_text_mention_cycles'] += model_text
+            out['provided_unattributed_insights_cycles'] += insights
+        else:
+            out['legacy_cycles'] += 1
+            out['flagged'] += model_text
+            out['acknowledged'] += model_text and acked
+    out['rate_pct'] = round(100.0*out['acknowledged']/out['flagged'], 0) if out['flagged'] else None
+    out['provided_calendar_ack_rate_pct'] = round(100.0*out['provided_calendar_acknowledged']/out['provided_operator_calendar_cycles'], 0) if out['provided_operator_calendar_cycles'] else None
+    return out
+
+
+def _format_event_acknowledgment(ack):
+    if not ack or ack.get('available') is False:
+        return 'Event-text coverage unavailable; no zero or complete-coverage inference.'
+    rate = f" ({ack['rate_pct']:.0f}%)" if ack.get('rate_pct') is not None else ''
+    provided = ack.get('provided_operator_calendar_cycles', 0)
+    provided_acked = ack.get('provided_calendar_acknowledged', 0)
+    missing = (f" Unassessed evidence: {ack.get('cycles_without_summary_rows', 0)} cycles without saved summary rows; "
+               f"{ack.get('unparseable_summary_rows', 0)} rows without usable model fields. Missing evidence is unknown, not failed policy use.")
+    return (
+        f"Legacy model-summary event mentions {ack.get('flagged', 0)}/{ack.get('legacy_cycles', ack.get('cycles', 0))} cycles; "
+        f"Decider text mentions in {ack.get('acknowledged', 0)}/{ack.get('flagged', 0)} such cycles{rate}. "
+        f"Operator calendar supplied in {provided}/{ack.get('cycles', 0)} cycles; Decider text mentions in {provided_acked}/{provided} provided cycles. "
+        f"Model headlines mention events in {ack.get('source_headline_mention_cycles', 0)}/{ack.get('cycles', 0)} cycles "
+        f"({ack.get('provided_headline_mention_cycles', 0)} with operator protocol); "
+        f"operator-context insights mention events in {ack.get('provided_unattributed_insights_cycles', 0)} cycles, with origin unattributed. "
+        "Mention counts do not verify news origins, correct policy use or decision quality." + missing)
 
 
 def _event_windows(trades):
@@ -417,12 +549,10 @@ def format_diagnostics(diag):
     ev = diag.get("event_risk") or {}
     if ev:
         ack = ev.get("acknowledgment") or {}
-        rate = f" ({ack['rate_pct']:.0f}%)" if ack.get("rate_pct") is not None else ""
         lines.append(
             f"- Event risk ({ev['definition']}): MACRO-WINDOW ENTRIES {_fmt_stats(ev['macro_window_entries'])} vs OTHER "
             f"{_fmt_stats(ev['other_entries'])} | held through an FOMC decision {_fmt_stats(ev['held_through_fomc'])} | "
-            f"Summarizers named a dated event in {ack.get('flagged', 0)}/{ack.get('cycles', 0)} decider cycles, the Decider "
-            f"acknowledged it in {ack.get('acknowledged', 0)}{rate}")
+            + _format_event_acknowledgment(ack))
     if diag.get("ranked_leaks_usd"):
         lines.append("- RANKED LEAKS ($): " + "; ".join(f"{l['leak']} = ${l['sum_usd']:+.0f} over {l['n']}" for l in diag["ranked_leaks_usd"][:5]))
     return "\n".join(lines)

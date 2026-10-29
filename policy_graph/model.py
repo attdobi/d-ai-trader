@@ -199,6 +199,7 @@ POLARITY_OVERRIDES = {
     "code.index_regime": "gate", "code.watchlist_header": "action", "code.quarantine_line": "gate",
     "code.event_calendar": "gate",
     "code.opportunity_charter": "principle",
+    "code.operator_calendar": "structure",
     "code.visual_evidence": "caution",
     "code.lessons_header": "structure", "code.recent_activity_header": "structure", "code.json_fallback": "structure",
     "code.feedback_suffix": "structure", "code.system_base": "structure", "code.base_instructions": "structure",
