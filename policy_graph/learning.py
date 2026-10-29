@@ -221,6 +221,27 @@ def _table_exists(engine, table):
     return inspect(engine).has_table(table)
 
 
+def cached_projection(landmarks, path):
+    """Legacy coordinates without model calls or refits while browsing the atlas."""
+    try:
+        artifact=json.loads(Path(path).read_text())
+        if artifact.get("format")!=FORMAT or artifact.get("method") not in ("semantic_pca","lexical_pca"):
+            raise ValueError("Unknown cached projection")
+        project(np.zeros((1,len(artifact["mean"]))),artifact)
+        saved=artifact.get("points") or {}
+    except (OSError,ValueError,TypeError,KeyError):
+        artifact={};saved={}
+    pending=0
+    for node in landmarks:
+        point=saved.get(node["key"])
+        valid=isinstance(point,list) and len(point)==2 and all(isinstance(n,(int,float)) and math.isfinite(n) for n in point)
+        node["x"],node["y"]=point if valid else (None,None)
+        pending+=not valid
+    return {"id":artifact.get("id"),"method":artifact.get("method","unavailable"),"frozen":True,
+            "pending":pending,"embedding_model":artifact.get("embedding_model"),
+            "note":"Original cached policy projection; browsing does not refit it or call an embedding model. Axes describe text similarity, not trading quality."}
+
+
 def _evidence(engine, config_hash, *, days=90, limit=500):
     """A bounded citation audit; no account balances, raw prompts or raw replies."""
     if not _table_exists(engine, "decider_inputs"):
@@ -276,9 +297,9 @@ def learning_payload(engine, config_hash, agent, version=None, *, repo_root, is_
     ctx.row(agent, selected)
     landmarks, versions = history(ctx, agent)
     root = Path(repo_root) / "agents" / AGENT_DIR[agent] / "policy-router"
-    if embedder is None:
-        embedder = EmbeddingClient(cache=EmbedCache(root / "embed-cache.sqlite3"), timeout=3)
-    projected = projection(landmarks, root / str(config_hash) / "learning-projection.json", embedder=embedder)
+    projection_path = root / str(config_hash) / "learning-projection.json"
+    projected = (cached_projection(landmarks,projection_path) if embedder is None else
+                 projection(landmarks,projection_path,embedder=embedder))
     try:
         reviews = [service._review_dict(r) for r in ctx.reviews(agent)]
     except Exception:
@@ -308,10 +329,18 @@ def learning_payload(engine, config_hash, agent, version=None, *, repo_root, is_
     theme_catalog, theme_method = annotate_themes(
         landmarks, [opportunities.get("cases") or [], evidence], config_hash=config_hash,
         observations=observations.get("observations") or [], observation_counts=observations.get("topic_counts") or {})
+    from .semantic_atlas import atlas_payload
+    from .atlas_taxonomy import atlas_catalog, annotate_atlas_points
+    atlas = atlas_payload(landmarks, observations.get("observations") or [],
+                          root / str(config_hash) / "semantic-atlas.json",
+                          config_hash=config_hash, agent=agent)
+    atlas["points"] = annotate_atlas_points(atlas.get("points") or [])
+    atlas["taxonomy"] = atlas_catalog()
     return {"schema_version": FORMAT, "agent": agent, "selected_version": selected,
             "projection": projected, "versions": versions, "landmarks": landmarks,
             "theme_catalog": theme_catalog, "theme_method": theme_method,
             "source_observations": observations, "taxonomy_review": latest_review(engine, config_hash),
+            "semantic_atlas": atlas,
             "reviews": reviews, "evidence": evidence, "opportunities": opportunities, "replays": replays,
             "notes": ["Policy text comes from versioned prompt rows. Mutable long-term memory is excluded from historical landmarks.",
                       "Citation links are associations; they do not establish a rule's causal contribution to P&L.",

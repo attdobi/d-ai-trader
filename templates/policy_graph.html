@@ -6,6 +6,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-learning.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-router.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-taxonomy.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/semantic-atlas.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/learning-atlas-layout.css') }}" />
 {% endblock %}
 
 {% block content %}
@@ -62,7 +64,7 @@
 
   <section class="pe-card pl-learning" id="plLearning" role="tabpanel" aria-labelledby="plLearningTab" hidden>
     <div class="pl-heading">
-      <div><span class="pg-eyebrow">EXPERIENCE → POLICY → EVALUATION</span><h2>Watch the policy learn.</h2><p class="pg-muted">Follow a rule through its versions, inspect its evidence, and compare decisions on the same saved cases.</p></div>
+      <div><span class="pg-eyebrow">THE LEARNING LANDSCAPE</span><h2>The shape of your strategy.</h2><p class="pg-muted">Market stories, trading rules, and the connections between them.</p></div>
       <span class="pl-readonly">Observation &amp; paper evaluation</span>
     </div>
     <div class="pl-lenses" role="tablist" aria-label="Learning map lenses">
@@ -82,17 +84,20 @@
       <div class="pl-version-row"><p id="plVersionDescription"></p><span id="plVersionChanges"></span></div>
       <div class="pl-map-tools">
         <label class="pl-search"><span class="pg-sr-only">Search learning landmarks</span><input id="plSearch" type="search" placeholder="Find a rule, lesson or theme…" autocomplete="off" /></label>
-        <label class="pl-select-label">Arrange by<select id="plLayout" aria-label="Learning map arrangement"><option value="themes">Market themes</option><option value="similarity">Text similarity</option></select></label>
+        <label class="pl-select-label">Explore<select id="plLayout" aria-label="Learning map arrangement"><option value="atlas">Semantic landscape</option><option value="themes">Taxonomy groups</option><option value="similarity">Original policy projection</option></select></label>
         <label class="pl-select-label">Market theme<select id="plMarketTheme" aria-label="Learning map market theme"><option value="">All market themes</option></select></label>
         <label class="pl-select-label">Policy section<select id="plTheme" aria-label="Learning map policy section"><option value="">All policy sections</option><option value="strategy_directives">Trading rules</option><option value="soul">Identity</option><option value="memory">Learned context</option></select></label>
         <label class="pl-checkbox"><input id="plShowRetired" type="checkbox" checked /> Show changes from previous version</label>
       </div>
       <div id="plThemeSummary" class="pl-theme-summary" aria-live="polite"></div>
-      <details id="plSourceEvidence" class="pl-methods pl-source-evidence" open>
-        <summary>News behind these themes · observations and research hypotheses</summary>
-        <div><p id="plSourceSummary" class="pl-footnote"></p><div id="plTaxonomyReview"></div><div id="plSourceList" class="pl-source-list"></div></div>
-      </details>
-      <div class="pl-map-layout">
+      <div id="plAtlasControls" class="pl-atlas-controls" hidden>
+        <div class="pl-atlas-scope"><span id="plAtlasMethod">SEMANTIC LANDSCAPE</span><span id="plAtlasStats"></span></div>
+        <label class="pl-checkbox"><input id="plAtlasSources" type="checkbox" checked /> News context</label>
+        <label class="pl-checkbox"><input id="plAtlasHistory" type="checkbox" checked /> Earlier revisions</label>
+        <div class="pl-atlas-actions"><button type="button" class="pl-button" id="plAtlasZoomOut" aria-label="Zoom out of semantic landscape">−</button><button type="button" class="pl-button" id="plAtlasZoomIn" aria-label="Zoom into semantic landscape">+</button><button type="button" class="pl-button" id="plAtlasFit">Fit space</button><button type="button" class="pl-button" id="plAtlasRefresh" title="Place new texts using the local embedding model; keep existing coordinates">Refresh map</button><button type="button" class="pl-button" id="plAtlasExpand" aria-expanded="false">Expand map</button></div>
+      </div>
+      <div class="pl-map-layout" id="plAtlasStage">
+        <button type="button" class="pl-button" id="plAtlasClose">Close expanded view · Esc</button>
         <div class="pl-map-frame">
           <div id="plMap" class="pl-map" aria-label="Policy learning landscape"></div>
           <div class="pl-map-key"><span><i class="pl-key-dot added"></i>Added</span><span><i class="pl-key-dot modified"></i>Modified</span><span><i class="pl-key-dot retired"></i>Retired</span><span class="pl-map-count" id="plMapCount"></span></div>
@@ -101,6 +106,10 @@
         </div>
         <aside id="plInspector" class="pl-inspector" aria-live="polite"><span class="pg-eyebrow">SELECT A LANDMARK</span><h3>Every rule has a history.</h3><p class="pg-muted">Choose a point to read its exact text, compare revisions, and inspect the cases and reviews connected to it.</p></aside>
       </div>
+      <details id="plSourceEvidence" class="pl-methods pl-source-evidence">
+        <summary>News behind these themes · observations and research hypotheses</summary>
+        <div><p id="plSourceSummary" class="pl-footnote"></p><div id="plTaxonomyReview"></div><div id="plSourceList" class="pl-source-list"></div></div>
+      </details>
     </div>
     <div id="plEvidence" role="tabpanel" hidden>
       <div class="pl-panel-heading"><div><h3>Which opportunities did we learn from?</h3><p class="pg-muted">Each observation keeps its decision-time context and policy version. Paper returns use a declared horizon and cost assumption; they are separate from realized trades.</p></div><label class="pl-horizon">Paper horizon <select id="plHorizon" aria-label="Paper outcome horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label></div>
@@ -125,7 +134,7 @@
       </form>
       <div id="plReplays" class="pl-replays"></div>
     </div>
-    <details class="pl-methods"><summary>How to read this map</summary><div><p>Market themes group rules by explicit topic mentions or version-matched cited observations. One rule may appear in several groups; general rules remain labeled general. A theme describes recorded context, not whether a geopolitical event or company claim is true. The inspector distinguishes a direct text match from a linked case.</p><p>Text similarity preserves the original frozen coordinates across filters and version playback. Nearby landmarks have similar text. In both arrangements color identifies node type and rings identify version changes. Neither arrangement is the Decider’s learned decision boundary or a profitability estimate.</p><p>The opportunity ledger records a bounded candidate universe. Recall and false-positive rate require matured, assessed cases from that universe. Unobserved, unassessed and pending cases stay visible as missing evidence. Theme filters change the displayed observations; the full-cohort quality metrics remain explicitly labeled.</p><p>Policy citations and co-occurring outcomes show association. An individual rule's incremental effect requires a paired policy comparison and independent future evaluation. A validated BUY/PASS boundary also needs matched full-versus-routed decisions and later outcomes; no smooth boundary is inferred here.</p><div id="plNotes"></div></div></details>
+    <details class="pl-methods"><summary>How to read this map</summary><div><p>The semantic landscape projects local text embeddings with t-SNE. Its fixed backdrop includes the fitted corpus; visible points follow your filters and selected policy version. Density contours follow actual projected texts. Region colors describe policy capabilities or market topics. Rings are guidelines, small dots are news, and diamonds are feedback hypotheses. Select a point for its original text and source.</p><p>Play history to follow additions, edits and retirements. Earlier revisions appear faintly when enabled; news points in an older version must predate that revision. New texts added through Refresh map use an approximate nearest-reference placement. Existing coordinates stay fixed.</p><p>Taxonomy groups and the original policy projection remain available under Explore. Market associations come from explicit topic mentions, version-matched cited observations or disclosed industry references. A topic describes recorded context, not whether a company or geopolitical claim is true. Proximity, color and density do not estimate profit or a validated BUY/PASS boundary.</p><p>The opportunity ledger records a bounded candidate universe. Recall and false-positive rate require matured, assessed cases from that universe. Unobserved, unassessed and pending cases stay visible as missing evidence. Theme filters change the displayed observations; the full-cohort quality metrics remain explicitly labeled.</p><p>Policy citations and co-occurring outcomes show association. An individual rule's incremental effect requires a paired policy comparison and independent future evaluation. A validated BUY/PASS boundary also needs matched full-versus-routed decisions and later outcomes.</p><div id="plNotes"></div></div></details>
   </section>
 
   <!-- Card 1b: proposals — the loop edits the graph, you approve per guideline -->
@@ -789,6 +798,7 @@
 <script defer src="{{ url_for('static', filename='js/policy-graph-schema.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/router-economics.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-graph.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/semantic-atlas.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-router-view.js') }}"></script>
 {% endblock %}

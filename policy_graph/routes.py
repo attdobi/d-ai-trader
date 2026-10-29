@@ -196,6 +196,40 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             return jsonify(service.diff_payload(engine, config_hash, agent, a, b, **common))
         return _run(go)
 
+    @app.route("/api/policy-graph/learning/atlas-refresh", methods=["POST"])
+    def policy_atlas_refresh():
+        config_hash = get_config_hash()
+        def go():
+            from .atlas_jobs import submit, AtlasJobBusy
+            origin = request.headers.get("Origin")
+            if origin and (urlsplit(origin).scheme,urlsplit(origin).netloc)!=(request.scheme,request.host):
+                raise service.BadRequest("Map refresh must come from this dashboard")
+            if request.content_length and request.content_length>2048:
+                raise service.BadRequest("Map refresh request is too large")
+            body=request.get_json(silent=True) or {}
+            if not isinstance(body,dict):
+                raise service.BadRequest("A map refresh request is required")
+            agent=body.get("agent","DeciderAgent")
+            if not isinstance(agent,str):
+                raise service.BadRequest("Choose one agent for the map refresh")
+            service._check_agent(agent)
+            try:
+                return jsonify(submit(engine,config_hash,agent,repo_root=repo_root,
+                                      is_margin_account=is_margin_account,days=90)),202
+            except AtlasJobBusy:
+                return _error("A local map refresh is already queued; try again shortly",409)
+        return _run(go)
+
+    @app.route("/api/policy-graph/learning/atlas-jobs/<job_id>", methods=["GET"])
+    def policy_atlas_refresh_status(job_id):
+        from .atlas_jobs import get
+        job=get(job_id,get_config_hash())
+        if job is None:
+            return _error("Map refresh unavailable for this configuration",404)
+        response=jsonify(job)
+        response.headers["Cache-Control"]="no-store"
+        return response
+
     @app.route("/api/policy-graph/compiled", methods=["GET"])
     def policy_graph_compiled():
         config_hash = get_config_hash()

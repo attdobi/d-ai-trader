@@ -8,6 +8,42 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Semantic learning landscape — October 29, 2026
+
+Learning map now opens as an interactive **semantic landscape**: local Nomic text
+embeddings projected with seeded t-SNE, soft density islands, named regions,
+source-aware point shapes, zoom/pan, theme focus, and curved policy-revision
+trails. News context and earlier revisions can be toggled independently. Selecting
+a point opens its exact policy text or dated source observation. Policy history
+plays on a frozen reference, so filtering and playback do not refit the space.
+
+The refined atlas taxonomy has two facets: **market topics** such as geopolitics,
+Hormuz, energy and AI; and **policy capabilities** such as entries, exits, capital,
+events, evidence, learning and identity. Generic controls now have meaningful
+capability labels while their original market associations remain intact. Topic
+labels/color annotate actual embedding locations; they do not force points into
+invented clusters or estimate a profitable decision boundary.
+
+All four local references were built with `text-embedding-nomic-embed-text-v1.5`:
+Decider **445 texts**, Summarizer **285**, Feedback **276**, Company **170**, each
+including 150 sampled source observations at build time. The browsing inventory
+normally displays 120 of those source records, so the current Decider view has
+415 available points. The build used **zero hosted API calls**. Coordinates,
+vectors, projection parameters and original-space neighbors stay in ignored,
+configuration-scoped local artifacts; `.env` and source screenshots stay private.
+
+**Refresh map** explicitly queues local placement of new texts into the frozen
+reference. It cannot refit the original geometry, call a hosted model, change
+policy, or place orders. Normal browsing is cache-only. Explicit refits remain an
+operator CLI action. The original PCA view and taxonomy groups are still
+available. [Methods, local build and provenance](docs/SEMANTIC_ATLAS.md).
+
+Validation: **1,840 tests passed, 1 skipped**. Browser checks covered theme focus,
+overlapping-point selection, source provenance, layers, history, expand/reset and
+local refresh. Refresh preserved all 445 Decider reference coordinates. The
+updated read-only preview is on port 8083; the running trader dashboard loads the
+new view at its next normal restart.
+
 ## Topic taxonomy and a week of router observation — October 29, 2026
 
 **Policy Graph → Policy Router** now has its own subtab. Select a recorded cycle

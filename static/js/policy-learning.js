@@ -153,10 +153,66 @@
     return 'Matched saved context; topic association does not verify an event';
   }
 
+  function atlasScene(data, version, options={}) {
+    const atlas=data?.semantic_atlas||{},landmarks=new Map(list(data?.landmarks).map(n=>[revisionKey(n),n]));
+    const references=list(atlas.points).filter(p=>finite(p.x)&&finite(p.y)).map(p=>({...landmarks.get(p.key),...p,
+      neighbor_keys:list(p.neighbors).map(n=>n.key)}));
+    const versions=list(data?.versions).filter(v=>finite(v.version)).sort((a,b)=>Number(a.version)-Number(b.version));
+    const current=versions.find(v=>Number(v.version)===Number(version)),previous=versions[versions.indexOf(current)-1];
+    const s=snapshot(list(data?.landmarks),version,previous?.version),active=new Map(s.points.map(p=>[revisionKey(p),p]));
+    const retired=new Map(s.retired.map(p=>[revisionKey(p),p]));
+    const cutoff=Number(version)<Math.max(...versions.map(v=>Number(v.version)))?String(current?.created_at||''):null;
+    const query=String(options.search||'').toLowerCase(),points=[];
+    let ambiguousSourceTimes=0;
+    function sourceAvailable(observed) {
+      const a=String(observed||''),b=String(cutoff||''),aware=s=>/(?:Z|[+-]\d{2}:\d{2})$/.test(s);
+      if(!a||!b)return null;
+      if(aware(a)!==aware(b))return null;
+      if(aware(a)){const x=Date.parse(a.replace(' ','T')),y=Date.parse(b.replace(' ','T'));return Number.isFinite(x)&&Number.isFinite(y)?x<=y:null;}
+      const wall=s=>{const m=s.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?$/);return m?m[1].replace('T',' ')+'.'+String(m[2]||'').padEnd(6,'0'):null;};
+      const x=wall(a),y=wall(b);return x&&y?x<=y:null;
+    }
+    for(const p of references) {
+      let lifecycle='unchanged';
+      if(p.kind==='guideline') {
+        if(active.has(p.key))lifecycle=active.get(p.key).lifecycle;
+        else if(options.includeRetired!==false&&retired.has(p.key))lifecycle='retired';
+        else if(options.includeHistory&&list(p.versions).some(v=>Number(v)<=Number(version)))lifecycle='historical';
+        else continue;
+        if(options.policySection&&(options.policySection.startsWith('tag:')?!list(p.tags).includes(options.policySection.slice(4)):p.field!==options.policySection))continue;
+      } else {
+        if(options.includeSources===false)continue;
+        if(cutoff!==null){const available=sourceAvailable(p.observed_at);if(available!==true){if(available===null)ambiguousSourceTimes++;continue;}}
+      }
+      if(options.marketTheme&&!inMarketTheme(p,options.marketTheme))continue;
+      if(options.familyId&&p.family_id!==options.familyId)continue;
+      if(query&&!`${p.title} ${p.body} ${p.family_label||''}`.toLowerCase().includes(query))continue;
+      points.push({...p,lifecycle});
+    }
+    const byKey=new Map(references.map(p=>[p.key,p])),catalog=list(atlas.taxonomy?.families);
+    const clusters=list(atlas.clusters).map(c=>{
+      const keys=list(c.member_keys||c.point_keys),members=keys.map(k=>byKey.get(k)).filter(Boolean),counts=new Map();
+      for(const p of members)counts.set(p.family_id,(counts.get(p.family_id)||0)+1);
+      const ranked=[...counts].sort((a,b)=>b[1]-a[1]||String(a[0]).localeCompare(String(b[0])));
+      const family=catalog.find(f=>f.id===ranked[0]?.[0]),second=catalog.find(f=>f.id===ranked[1]?.[0]);
+      const mixed=second&&ranked[1][1]/Math.max(1,members.length)>.27;
+      return {...c,point_keys:keys,family_id:family?.id,label:family?mixed?`${family.label} / ${second.label}`:family.label:'Related texts',
+        color:family?.color||'#76bddc',guideline_count:members.filter(p=>p.kind==='guideline').length,
+        observation_count:members.filter(p=>p.kind!=='guideline').length};
+    });
+    const visibleKeys=new Set(points.map(p=>p.key));
+    const trajectories=options.includeRetired===false?[]:s.trails.filter(t=>visibleKeys.has(revisionKey(t.to))&&byKey.has(revisionKey(t.from))&&byKey.has(revisionKey(t.to)))
+      .map(t=>({from:byKey.get(revisionKey(t.from)),to:byKey.get(revisionKey(t.to))}));
+    // Coordinates and embedding neighborhoods stay intact. The visible density
+    // regions use the independently recorded topic/capability facet, so a small
+    // geopolitical subject remains discoverable inside a broad news cluster.
+    return {points,referencePoints:references,clusters:[],semanticClusters:clusters,trajectories,taxonomy:atlas.taxonomy||{},version,cutoff,ambiguousSourceTimes};
+  }
+
   function mount(win) {
     const $ = s => document.querySelector(s);
     if (!$('#plLearning')) return;
-    const state = {active:false, lens:'evolution', layout:'themes', marketTheme:'', data:null, agent:null, version:null, index:0, search:'', theme:'', showRetired:true, selected:null, caseId:null, horizon:3, seq:0, controller:null, timer:null, loadingKey:null, replayPreview:null, previewSeq:0, replayBusy:false, jobId:null, pollTimer:null, pollCount:0, pollErrors:0, reduced:win.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false};
+    const state = {active:false, lens:'evolution', layout:win.SemanticAtlas?'atlas':'themes', atlas:null,atlasFamily:'',atlasJob:null,atlasPoll:null,atlasPollCount:0,atlasErrors:0,atlasBusy:false,includeSources:true,includeHistory:true,marketTheme:'', data:null, agent:null, version:null, index:0, search:'', theme:'', showRetired:true, selected:null, caseId:null, horizon:3, seq:0, controller:null, timer:null, loadingKey:null, replayPreview:null, previewSeq:0, replayBusy:false, jobId:null, pollTimer:null, pollCount:0, pollErrors:0, reduced:win.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false};
     const agentFromPage = () => new URLSearchParams(location.hash.slice(1)).get('agent') || document.querySelector('#pgAgentSwitch .is-active')?.dataset.agent || 'DeciderAgent';
     const versionFromPage = () => Number($('#pgVersion')?.value || new URLSearchParams(location.hash.slice(1)).get('v'));
     const versions = () => list(state.data?.versions).filter(v=>finite(v.version)).slice().sort((a,b)=>Number(a.version)-Number(b.version));
@@ -186,7 +242,7 @@
       document.querySelectorAll('[data-policy-view]').forEach(b=>{const selected=b.dataset.policyView===selectedView; b.setAttribute('aria-selected',String(selected)); b.tabIndex=selected?0:-1;});
       if (update) writeView(selectedView);
       if(typeof win.CustomEvent==='function')win.dispatchEvent(new win.CustomEvent('policygraph:viewchange',{detail:{view:selectedView}}));
-      if (active) { load(); win.requestAnimationFrame(renderMap);if(state.jobId)pollReplay(); } else {stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;}
+      if (active) { load(); win.requestAnimationFrame(renderMap);if(state.jobId)pollReplay();if(state.atlasJob)pollAtlas(); } else {stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;if(state.atlasPoll)win.clearTimeout(state.atlasPoll);state.atlasPoll=null;}
     }
     function setLens(lens) {
       if (!['evolution','evidence','comparison'].includes(lens)) return;
@@ -276,8 +332,8 @@
       const catalog=themeCatalog(state.data),theme=catalog.find(t=>t.id===state.marketTheme);
       const currentNodes=getSnapshot().points;
       const populated=catalog.filter(t=>currentNodes.some(n=>marketThemes(n).includes(t.id)));
-      const summary=theme ? `${theme.path_label||theme.label}: ${themeCounts(theme,currentNodes.filter(n=>inMarketTheme(n,theme.id)).length)} · ${number(theme.case_count,0)} displayed decision cases. ${theme.description||''}` : `${populated.length} themes contain guidelines in this version. News observations and feedback hypotheses are counted separately from learned rules. Parent/child themes overlap; do not sum them as independent events.`;
-      $('#plThemeSummary').innerHTML=`<p>${esc(summary)}</p><p class="pl-boundary-note"><span>Decision boundary: not validated</span> These regions group recorded topics. Testing a BUY/PASS boundary requires matched routed/full decisions and later outcomes; colors do not estimate profitability.</p>`;
+      const summary=theme ? `${theme.path_label||theme.label}: ${themeCounts(theme,currentNodes.filter(n=>inMarketTheme(n,theme.id)).length)} · ${number(theme.case_count,0)} displayed decision cases. ${theme.description||''}` : state.layout==='atlas'?'Explore the neighborhoods of policy and market evidence. Select a point to trace its source, or a region to focus a theme.':'News observations and feedback hypotheses are counted separately from learned rules. Parent and child themes overlap.';
+      $('#plThemeSummary').innerHTML=`<p>${esc(summary)}</p>`;
       renderSourceObservations();
     }
     function renderSourceObservations() {
@@ -290,6 +346,12 @@
     }
     function renderMap() {
       const target=$('#plMap');if(!state.data || !state.active || state.lens!=='evolution') return;
+      const isAtlas=state.layout==='atlas'&&Boolean(win.SemanticAtlas);
+      if($('#plAtlasControls'))$('#plAtlasControls').hidden=!isAtlas;
+      $('#plAtlasStage')?.classList.toggle('pl-atlas-stage',isAtlas);
+      document.querySelector('.pl-map-frame')?.classList.toggle('pl-is-atlas',isAtlas);
+      if(isAtlas){renderAtlas();return;}
+      if(state.atlas){state.atlas.destroy();state.atlas=null;}
       const focusedKey=target.contains(document.activeElement)?document.activeElement?.dataset?.landmarkKey:null;
       const s=getSnapshot(), points=s.points.filter(matches), retired=state.showRetired?s.retired.filter(matches):[];
       const themed=state.layout==='themes',catalog=themeCatalog(state.data);
@@ -339,6 +401,31 @@
       target.replaceChildren(svg);
       if(focusedKey)[...target.querySelectorAll('[data-landmark-key]')].find(g=>g.dataset.landmarkKey===focusedKey)?.focus();
     }
+    function renderAtlas() {
+      const target=$('#plMap'),atlas=state.data?.semantic_atlas||{};
+      if(!list(atlas.points).length){
+        target.innerHTML=empty('The semantic landscape is warming up.','Saved policy and source text will appear here when the local atlas is available. Taxonomy groups and the original projection remain available.');
+        $('#plProjectionNote').textContent=atlas.note||'No semantic atlas has been built.';return;
+      }
+      const scene=atlasScene(state.data,current()?.version,{includeSources:state.includeSources,includeHistory:state.includeHistory,
+        includeRetired:state.showRetired,marketTheme:state.marketTheme,policySection:state.theme,search:state.search,familyId:state.atlasFamily});
+      if(state.selected&&!scene.points.some(p=>p.key===state.selected)){state.selected=null;renderInspector();}
+      if(!state.atlas)state.atlas=win.SemanticAtlas.mount(target,{height:680,
+        onSelect:p=>{state.selected=p?.key||null;stopPlayback();renderInspector();},
+        onThemeSelect:id=>{state.atlasFamily=id;state.selected=null;renderMap();renderInspector();if(id)state.atlas?.focusFamily?.(id);}});
+      state.atlas.update({...scene,selectedKey:state.selected,selectedTheme:state.atlasFamily,fitKey:atlas.id});
+      const currentRules=scene.points.filter(p=>p.kind==='guideline'&&!['historical','retired'].includes(p.lifecycle)).length;
+      const sourceCount=scene.points.filter(p=>p.kind!=='guideline').length;
+      const history=scene.points.length-currentRules-sourceCount;
+      const semantic=String(atlas.method).startsWith('semantic_'),nonlinear=String(atlas.method).endsWith('tsne');
+      $('#plAtlasMethod').textContent=`${semantic?'LOCAL EMBEDDINGS':'LOCAL WORD FEATURES'} · ${nonlinear?'t-SNE':'PCA · SMALL CORPUS'}`;
+      $('#plAtlasStats').textContent=`${currentRules} current guidelines · ${sourceCount} observations · ${history} earlier revisions`;
+      $('#plMapCount').textContent=`${scene.points.length} visible texts`;
+      $('#plTypeKey').innerHTML='<span><i style="background:#90e4d2"></i>Guidelines · rings</span><span><i style="background:#91bad0"></i>News · dots</span><span><i style="background:#d3a0ed"></i>Feedback · diamonds</span>';
+      const approximate=scene.points.filter(p=>p.placement==='knn_extension_approximate').length;
+      $('#plProjectionNote').textContent=`${semantic?'Local Nomic embeddings':'Local word features'} · ${nonlinear?'frozen t-SNE reference':'small-corpus PCA reference'}. The full-corpus backdrop stays fixed; visible points follow the filters. Density and color do not estimate profit or a BUY/PASS boundary.${scene.cutoff!==null?' News points are limited to records dated before this policy revision.':' News shows the current sampled 90-day context.'}${scene.ambiguousSourceTimes?` ${scene.ambiguousSourceTimes} sources have incomparable timestamps and are omitted.`:''}${approximate?` ${approximate} newer texts use approximate nearest-reference placement.`:''}${atlas.pending?` ${atlas.pending} new texts await a local atlas refresh.`:''}`;
+      renderThemeSummary();
+    }
     function reviewText(value) { if(value===true)return 'Approved';if(value===false)return 'Rejected';return value===null||value===undefined||value===''?'Not recorded':String(value); }
     function membershipHTML(item, caseContext=false) {
       const catalog=themeCatalog(state.data);
@@ -350,14 +437,22 @@
     }
     function renderInspector() {
       const panel=$('#plInspector'),all=list(state.data?.landmarks),node=all.find(n=>revisionKey(n)===state.selected);
-      if(!node){panel.innerHTML='<span class="pg-eyebrow">SELECT A LANDMARK</span><h3>Every rule has a history.</h3><p class="pg-muted">Choose a point to read its exact text, compare revisions, and inspect the cases and reviews connected to it.</p>';return;}
-      const v=typeView(node),s=getSnapshot(),previous=s.previous.get(node.id),currentVersion=Number(current()?.version),entry=s.points.find(n=>revisionKey(n)===state.selected)||s.retired.find(n=>revisionKey(n)===state.selected),lifecycle=entry?.lifecycle||'Historical revision';
+      const atlasPoint=list(state.data?.semantic_atlas?.points).find(p=>p.key===state.selected);
+      if(!node&&atlasPoint){
+        panel.innerHTML=`<span class="pg-eyebrow">${esc(atlasPoint.kind==='feedback_hypothesis'?'FEEDBACK HYPOTHESIS':'NEWS OBSERVATION')}</span><h3>${esc(atlasPoint.title)}</h3><div class="pl-topic-badges"><span class="pl-topic-badge">${esc(atlasPoint.family_label||'Recorded topic')}</span></div><p class="pl-node-id">${esc(atlasPoint.record_id||atlasPoint.id)} · ${esc(atlasPoint.source_agent||'Saved source')}</p><p class="pl-footnote">${esc(dateText(atlasPoint.observed_at))}</p><div class="pl-text-block">${esc(atlasPoint.body||atlasPoint.text)}</div><h4>Source trace</h4><p class="pl-footnote">${esc(atlasPoint.claim_status||'Recorded report; not independently verified.')}</p><p class="pl-node-id">SHA-256 ${esc(atlasPoint.source_hash||atlasPoint.source_sha256||'Not recorded')}</p><h4>Why this theme</h4><p class="pl-footnote">${esc(String(atlasPoint.atlas_assignment?.basis||'Recorded topic').replaceAll('_',' '))} · ${esc(list(atlasPoint.atlas_assignment?.matched_terms).join(', '))}</p><p class="pl-footnote">Nearby texts share semantic features. This observation is separate from an approved trading rule.</p>`;return;
+      }
+      if(!node){panel.innerHTML='<span class="pg-eyebrow">EXPLORE THE LANDSCAPE</span><h3>Every point has a source.</h3><p class="pg-muted">Glowing rings are policy guidelines. Small dots are saved market observations. Select a point to inspect its exact text and provenance.</p><div class="pl-inspector-guide"><p><strong>Explore</strong> Drag to pan, scroll to zoom, or choose a region below the map.</p><p><strong>Travel through time</strong> Play policy history to follow added, changed and retired rules.</p><p><strong>Two lenses</strong> Policy capabilities describe what a rule does. Market themes describe what a source discusses.</p></div>';return;}
+      const v=typeView(node),s=getSnapshot(),currentVersion=Number(current()?.version),entry=s.points.find(n=>revisionKey(n)===state.selected)||s.retired.find(n=>revisionKey(n)===state.selected),lifecycle=entry?.lifecycle||'Historical revision';
+      const recordedVersions=list(node.versions).map(Number).filter(n=>n<=currentVersion),openVersion=entry?currentVersion:Math.max(...recordedVersions);
+      const reviewVersion=entry?currentVersion:Math.min(...recordedVersions),previous=entry?s.previous.get(node.id):null;
       const cases=casesFor(state.data).filter(c=>cited(c).includes(node.id));
-      const reviews=list(state.data?.reviews).filter(r=>Number(r.to_version)===currentVersion);
+      const reviews=list(state.data?.reviews).filter(r=>Number(r.to_version)===reviewVersion);
       const diff=previous&&revisionKey(previous)!==revisionKey(node)?lineDiff(previous.body,node.body):null;
       panel.innerHTML=`<div class="pl-type-line"><span style="color:${esc(v.color)}">${esc(v.typeLabel)}</span><span>${esc(lifecycle)}</span></div><h3>${esc(v.title)}</h3><p class="pl-node-id">${esc(node.id)}</p><div class="pl-text-block">${esc(node.body || 'No text recorded.')}</div>${diff?`<details open><summary>Exact text change from previous version</summary><div class="pl-diff">${diff.map(l=>`<span class="${l.kind}">${esc(l.kind==='added'?'+ ':l.kind==='removed'?'− ':'  ')}${esc(l.text)}</span>`).join('')}</div></details>`:''}${previous&&!diff&&revisionKey(previous)!==revisionKey(node)?`<details><summary>Previous exact text</summary><div class="pl-text-block">${esc(previous.body)}</div></details>`:''}<h4>Market themes · source of the association</h4>${membershipHTML(node)}<h4>Review of v${esc(currentVersion)}</h4>${reviews.length?reviews.map(r=>`<p class="pl-type-line"><span>Critic: ${esc(reviewText(r.critic_verdict))}</span><span>Human: ${esc(reviewText(r.human_verdict))}</span></p>`).join(''):'<p class="pl-footnote">No review record for this version. This does not imply approval.</p>'}<h4>Linked opportunity observations · ${cases.length}</h4>${cases.length?`<div class="pl-mini-list">${cases.slice(0,6).map(c=>`<button type="button" class="pl-case-link" data-case-id="${esc(c.id)}">${esc(c.ticker)} · ${esc(c.action || 'Not assessed')}<small>${esc(dateText(c.observed_at))} · policy v${esc(c.prompt_version ?? 'unknown')}</small></button>`).join('')}</div><p class="pl-footnote">Linked by citations, across recorded versions. These associations do not establish the rule’s individual effect.</p>`:'<p class="pl-footnote">No candidate observations cite this guideline yet.</p>'}<button type="button" class="pl-button" id="plOpenGraphNode">Open in policy explorer ↗</button>`;
       panel.querySelectorAll('[data-case-id]').forEach(b=>b.addEventListener('click',()=>{state.caseId=b.dataset.caseId;setLens('evidence');renderEvidence();$('#plEvidence').scrollIntoView({block:'start',behavior:'auto'});}));
-      $('#plOpenGraphNode')?.addEventListener('click',()=>openExplorer(node.id,currentVersion));
+      $('#plOpenGraphNode')?.addEventListener('click',()=>openExplorer(node.id,openVersion));
+      if(!entry){const note=document.createElement('p');note.className='pl-footnote';note.textContent=`Earlier text revision, recorded in ${recordedVersions.length} policy versions; last seen in v${openVersion}. The explorer opens that recorded text.`;panel.insertBefore(note,panel.querySelector('.pl-text-block'));const heading=[...panel.querySelectorAll('h4')].find(h=>h.textContent.startsWith('Review of'));if(heading)heading.textContent=`Review when introduced · v${reviewVersion}`;}
+      if(atlasPoint){const badge=document.createElement('p');badge.className='pl-atlas-capability';badge.textContent=`${atlasPoint.family_label||'Policy capability'} · ${String(atlasPoint.atlas_assignment?.basis||'Policy text').replaceAll('_',' ')}`;panel.insertBefore(badge,panel.querySelector('.pl-node-id'));}
     }
     function horizonMetrics() {
       const o=state.data?.opportunities||{},m=o.metrics_by_horizon?.[String(state.horizon)] || o.metrics?.by_horizon?.[String(state.horizon)];
@@ -460,6 +555,35 @@
       } catch(error) {$('#plReplayPlan').innerHTML=`<p class="pl-plan-error">Comparison was not started: ${esc(error.message)}</p>`;state.replayPreview=null;}
       finally {state.replayBusy=false;replayControls(Boolean(state.jobId));}
     }
+    async function refreshAtlas() {
+      if(state.atlasBusy)return;
+      if(state.atlasJob){state.atlasPollCount=0;state.atlasErrors=0;pollAtlas();return;}
+      state.atlasBusy=true;const button=$('#plAtlasRefresh');button.disabled=true;button.textContent='Refreshing…';
+      try {
+        const response=await fetch('/api/policy-graph/learning/atlas-refresh',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({agent:state.agent||agentFromPage()})});
+        const result=await response.json();if(!response.ok)throw new Error(result.error||'Map refresh unavailable');
+        state.atlasJob=result.job_id||result.id;state.atlasPollCount=0;state.atlasErrors=0;
+        status('Refreshing the map locally. Existing coordinates stay fixed.');
+      } catch(error){status(`Map refresh was not started: ${error.message}`,true);}
+      finally {state.atlasBusy=false;button.disabled=false;if(state.atlasJob)pollAtlas();else button.textContent='Refresh map';}
+    }
+    async function pollAtlas() {
+      if(!state.atlasJob||state.atlasBusy||!state.active||document.hidden)return;
+      if(state.atlasPoll)win.clearTimeout(state.atlasPoll);state.atlasPoll=null;state.atlasBusy=true;
+      try {
+        const response=await fetch(`/api/policy-graph/learning/atlas-jobs/${encodeURIComponent(state.atlasJob)}`,{headers:{Accept:'application/json'},cache:'no-store'});
+        const job=await response.json();if(!response.ok)throw new Error(job.error||'Map status unavailable');
+        state.atlasPollCount++;state.atlasErrors=0;
+        if(job.status==='complete') {state.atlasJob=null;$('#plAtlasRefresh').textContent='Refresh map';await load(true);}
+        else if(job.status==='error'){state.atlasJob=null;$('#plAtlasRefresh').textContent='Refresh map';status(job.error||'Local map refresh stopped. Existing coordinates remain available.',true);}
+        else $('#plAtlasRefresh').textContent='Refreshing locally…';
+      } catch(error){state.atlasErrors++;status(`Map status unavailable: ${error.message}`,true);$('#plAtlasRefresh').textContent='Check refresh';}
+      finally {
+        state.atlasBusy=false;
+        if(state.atlasJob&&state.active&&!document.hidden&&state.atlasPollCount<80&&state.atlasErrors<3)state.atlasPoll=win.setTimeout(pollAtlas,1500);
+        else if(state.atlasJob)$('#plAtlasRefresh').textContent='Check refresh';
+      }
+    }
     async function pollReplay() {
       if(!state.jobId||state.polling||!state.active||document.hidden)return;
       if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;state.polling=true;
@@ -492,8 +616,18 @@
     $('#plPlay').addEventListener('click',startPlayback);
     $('#plSearch').addEventListener('input',e=>{state.search=e.target.value.trim();renderMap();});
     $('#plTheme').addEventListener('change',e=>{state.theme=e.target.value;renderMap();});
-    $('#plLayout').addEventListener('change',e=>{state.layout=e.target.value==='similarity'?'similarity':'themes';renderMap();});
+    $('#plLayout').addEventListener('change',e=>{state.layout=['atlas','similarity'].includes(e.target.value)?e.target.value:'themes';renderMap();renderInspector();});
+    $('#plAtlasSources')?.addEventListener('change',e=>{state.includeSources=e.target.checked;renderMap();renderInspector();});
+    $('#plAtlasHistory')?.addEventListener('change',e=>{state.includeHistory=e.target.checked;renderMap();renderInspector();});
+    $('#plAtlasZoomIn')?.addEventListener('click',()=>state.atlas?.zoomBy(1.25));
+    $('#plAtlasZoomOut')?.addEventListener('click',()=>state.atlas?.zoomBy(.8));
+    $('#plAtlasFit')?.addEventListener('click',()=>{state.atlasFamily='';renderMap();state.atlas?.fit();});
+    $('#plAtlasExpand')?.addEventListener('click',()=>{const stage=$('#plAtlasStage'),expanded=!stage.classList.contains('pl-atlas-expanded');stage.classList.toggle('pl-atlas-expanded',expanded);$('#plAtlasExpand').setAttribute('aria-expanded',String(expanded));$('#plAtlasExpand').textContent=expanded?'Close expanded map':'Expand map';win.requestAnimationFrame(renderMap);});
+    $('#plAtlasClose')?.addEventListener('click',()=>$('#plAtlasExpand').click());
+    $('#plAtlasRefresh')?.addEventListener('click',refreshAtlas);
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#plAtlasStage')?.classList.contains('pl-atlas-expanded'))$('#plAtlasExpand').click();});
     function setMarketTheme(value) {
+      state.atlasFamily='';
       state.marketTheme=themeCatalog(state.data).some(t=>t.id===value)?value:'';
       for(const id of ['#plMarketTheme','#plEvidenceTheme'])$(id).value=state.marketTheme;
       const selected=list(state.data?.landmarks).find(n=>revisionKey(n)===state.selected);
@@ -509,10 +643,10 @@
     $('#plReplayRun').addEventListener('click',runReplay);
     $('#plReplayRefresh').addEventListener('click',()=>{state.pollCount=0;state.pollErrors=0;pollReplay();});
     win.addEventListener('hashchange',()=>{const p=new URLSearchParams(location.hash.slice(1));state.agent=p.get('agent')||state.agent;const v=p.get('v');if(v!==null&&finite(v))state.version=Number(v);setView(p.get('view'),false);});
-    win.addEventListener('policygraph:loaded',e=>{state.agent=e.detail?.agent||agentFromPage();state.version=e.detail?.version??versionFromPage();if(state.active)load();});
+    win.addEventListener('policygraph:loaded',e=>{const agent=e.detail?.agent||agentFromPage();if(agent!==state.agent)state.atlasFamily='';state.agent=agent;state.version=e.detail?.version??versionFromPage();if(state.active)load();});
     if(win.ResizeObserver){const observer=new ResizeObserver(()=>{if(state.active)win.requestAnimationFrame(renderMap);});observer.observe($('#plMap'));}
-    document.addEventListener('visibilitychange',()=>{if(document.hidden){stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;}else if(state.jobId)pollReplay();});
+    document.addEventListener('visibilitychange',()=>{if(document.hidden){stopPlayback();if(state.pollTimer)win.clearTimeout(state.pollTimer);state.pollTimer=null;if(state.atlasPoll)win.clearTimeout(state.atlasPoll);state.atlasPoll=null;}else{if(state.jobId)pollReplay();if(state.atlasJob)pollAtlas();}});
     setView(new URLSearchParams(location.hash.slice(1)).get('view'),false);
   }
-  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,marketThemes,inMarketTheme,themeCatalog,themePosition,themeLayout,themeEvidenceLabel,caseThemeEvidenceLabel,sourceObservations,themeCounts,sourceExcerpt,mount};
+  return {snapshot,outcomeFor,lineDiff,extent,rate,returnText,casesFor,replayInputIds,dateText,marketThemes,inMarketTheme,themeCatalog,themePosition,themeLayout,themeEvidenceLabel,caseThemeEvidenceLabel,sourceObservations,themeCounts,sourceExcerpt,atlasScene,mount};
 }));

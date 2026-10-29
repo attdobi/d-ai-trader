@@ -13,9 +13,18 @@ from this historical landscape. Citations remain associations, not causal P&L.
 
 ### Market themes and the decision boundary
 
-The default **Arrange by → Market themes** groups guidelines into Iran/geopolitics,
-oil/energy, technology, AI, semiconductors, memory manufacturing, electric vehicles
-and general policy. Market-theme and policy-section filters are separate. One
+The default **Explore → Semantic landscape** uses actual local text embeddings and
+a frozen t-SNE reference. Density contours and named regions group the projected
+texts; guideline rings, news dots and feedback diamonds retain their original
+sources. Policy capabilities and market topics are separate taxonomy facets.
+Select a region to focus it; pan, zoom, expand, or play policy history. News context
+and earlier revisions can be toggled independently. See
+[Semantic atlas methods](SEMANTIC_ATLAS.md) for the fitted corpus, provenance and
+local refresh path.
+
+**Explore → Taxonomy groups** retains the descriptive category layout, including
+Iran/geopolitics, oil/energy, technology, AI, semiconductors, memory manufacturing,
+electric vehicles and general policy. Market-theme and policy-section filters are separate. One
 guideline can belong to several groups; repeated points are the same revision,
 not additional rules. Empty groups remain visible rather than inventing lessons.
 
@@ -26,7 +35,7 @@ event, and prompt MEMORY does not mean memory-chip manufacturing. Topic matching
 is deterministic and versioned in `policy_graph/themes.py`; it adds no hosted call.
 Counts describe bounded saved observations, not all-market coverage or causal P&L.
 
-**Text similarity** retains the original frozen embedding/PCA coordinates. Theme
+**Original policy projection** retains the original frozen embedding/PCA coordinates. Theme
 arrangement uses descriptive category regions; positions inside a category aid
 legibility. Neither layout is the Decider's learned BUY/PASS decision surface.
 The interface explicitly labels the boundary unvalidated. A meaningful empirical
@@ -34,7 +43,7 @@ surface needs prospective decision-time cases, assessed BUY/PASS labels, later
 outcomes, coverage and uncertainty, and matched full/routed decisions. Do not fit
 one to selected winners or use the map coordinates as a trading rule.
 
-The existing local Nomic service supplies cached embeddings over loopback. A PCA
+For the original policy projection, the local Nomic service supplies cached embeddings over loopback. A PCA
 basis, reference identities and point coordinates are frozen in the ignored local
 artifact `agents/<agent>/policy-router/<config>/learning-projection.json`. Future
 revisions use the same basis and fixed axes. Filters and playback never refit it.
@@ -44,9 +53,12 @@ even with the same vector dimension, cannot silently share the old basis.
 If local embeddings are initially unavailable, a clearly labeled word/bigram
 projection is frozen instead. If an existing semantic service goes offline, old
 points remain visible and new revisions await compatible vectors. To deliberately
-rebuild, stop the dashboard, move its projection JSON aside and restart. This
+rebuild that legacy view, preserve its artifact and invoke an explicit build with
+an injected embedding client; ordinary dashboard reads never rebuild it. This
 changes the coordinate reference; record the change before comparing screenshots.
 It does not change the policy. **Refresh evidence** makes read-only requests.
+**Refresh map** explicitly queues local placement of new atlas texts without
+refitting existing coordinates. It uses no hosted model and changes no policy.
 Reduced-motion preferences disable automatic playback but retain version steps.
 
 ### Visual-framing observations
@@ -200,3 +212,10 @@ preservation, full-cohort metric preservation, matched prompt reconstruction,
 offline tokenizer behavior, negative router economics and unavailable historical
 captures. Browser verification used the read-only preview on port 8083. No policy
 activation, live-trader restart or order was part of this change.
+
+The October 29 semantic-atlas release passed **1,840 tests, with 1 skipped**.
+Additional checks cover actual t-SNE, compatible frozen extensions, independent
+taxonomy facets, historical timezone filtering, read-only GETs, bounded scoped
+refresh jobs, overlap-aware point selection and immutable coordinates. Browser
+verification exercised the updated preview on port 8083 and confirmed all 445
+Decider reference coordinates survived an explicit refresh.

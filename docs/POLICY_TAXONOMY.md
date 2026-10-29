@@ -48,6 +48,13 @@ associations remain labeled separately. Saved news never assigns a subject to an
 otherwise general policy node. Frozen embedding coordinates are unchanged; these
 groups are descriptive organization, not a learned decision boundary.
 
+The semantic landscape adds a separate, versioned display facet in
+`policy_graph/atlas_taxonomy.py`. Policy capabilities describe entries, exits,
+capital, events, evidence, learning and identity; market families describe source
+topics such as geopolitics, energy and AI. This preserves the canonical market
+hierarchy and source associations. Region colors annotate measured embedding
+locations without moving them. [Atlas methods and provenance](SEMANTIC_ATLAS.md).
+
 `observation_inventory` reads only allowlisted summary and scoped Feedback text,
 never raw prompts, account state, screenshots or unscoped manual responses. Its
 counts cover the declared window and safe parsed scanned records, capped at
