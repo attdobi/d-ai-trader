@@ -160,6 +160,18 @@ function feedbackUTCLabel(value) {
 function feedbackLocalLabel(value) {
   return feedbackDate(value)?.toLocaleString() || 'Not recorded';
 }
+function winRateInterval(wins, n) {
+  if (!Number.isSafeInteger(n) || n <= 0 || !Number.isSafeInteger(wins) || wins < 0 || wins > n) return null;
+  // Two-sided 95% Wilson binomial interval; nonzero uncertainty at 0/N and N/N.
+  const z=1.959963984540054, z2=z*z, denominator=n+z2;
+  const center=(wins+z2/2)/denominator;
+  const half=z*Math.sqrt(wins*(1-wins/n)+z2/4)/denominator;
+  return {lower:Math.max(0,center-half),upper:Math.min(1,center+half)};
+}
+function winRateIntervalLabel(row) {
+  const interval=winRateInterval(row?.wins,row?.n);
+  return interval ? `95% win-rate CI (Wilson): ${(interval.lower*100).toFixed(1)}%–${(interval.upper*100).toFixed(1)}%` : '95% win-rate CI: unavailable';
+}
 function performanceRows(periodData) {
   return Object.entries(periodData || {}).filter(([key]) => /^\d+d$/.test(key))
     .map(([key, value]) => {
@@ -289,7 +301,7 @@ const trendEndLabelPlugin = {
   }
 };
 
-function buildTrendChart(canvasId, { color, labels, data, rows, fmt, guideValue, yOpts, tickOpts = {}, showXTicks }) {
+function buildTrendChart(canvasId, { color, labels, data, rows, fmt, guideValue, yOpts, tickOpts = {}, showXTicks, showWinInterval = false }) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const chart = new Chart(ctx, {
     type: 'bar',
@@ -336,7 +348,11 @@ function buildTrendChart(canvasId, { color, labels, data, rows, fmt, guideValue,
               const row = item.chart.$trendRows?.[item.dataIndex];
               return `${fmt(item.parsed.y)} · ${row?.wins ?? '—'} wins / ${row?.n ?? '—'} scored closures`;
             },
-            afterBody: items => {const row=items[0]?.chart.$trendRows?.[items[0].dataIndex];return row ? [`${feedbackUTCLabel(row.metric.window?.start)} →`, feedbackUTCLabel(row.metric.window?.end)] : [];},
+            afterBody: items => {
+              const row=items[0]?.chart.$trendRows?.[items[0].dataIndex];
+              if(!row) return [];
+              return [...(showWinInterval?[winRateIntervalLabel(row),'Small samples give wide intervals.']:[]),`${feedbackUTCLabel(row.metric.window?.start)} →`,feedbackUTCLabel(row.metric.window?.end)];
+            },
           },
         },
       },
@@ -346,12 +362,13 @@ function buildTrendChart(canvasId, { color, labels, data, rows, fmt, guideValue,
   return chart;
 }
 
-function itemWindowTitle(row) {return row ? `${row.label} · ${row.n ?? '—'} scored closures` : '';}
+function itemWindowTitle(row) {return row ? `${row.label} · N=${row.n ?? '—'}` : '';}
 function renderPerformanceAudit(rows) {
   const latest = rows[rows.length-1], summary=document.getElementById('trendWindowSummary'), body=document.getElementById('trendCohortBody');
   if(summary) summary.textContent = !latest ? 'No lookback data is available.' : latest.n > 0
     ? `${latest.label}: ${latest.wins ?? '—'} wins / ${latest.n} scored closures (${formatMaybePct(latest.rate)}). ${Number.isFinite(latest.metric.net_gain_dollars) ? `Recorded P&L ${formatDollars(latest.metric.net_gain_dollars)}. ` : ''}Cutoff: ${feedbackUTCLabel(latest.metric.window?.end)}.`
     : `${latest.label}: no scored closed trades. Win rate and average return are unavailable.`;
+  if(summary) summary.title=latest?`N=${latest.n ?? '—'} · ${latest.wins ?? '—'} wins / ${latest.n ?? '—'} scored closures\n${winRateIntervalLabel(latest)}\nAssumes independent closures; related trades can add uncertainty.`:'';
   if(body) body.innerHTML = rows.map(row=>`<tr><th scope="row">${feedbackEscape(row.label)}<small>${feedbackEscape(feedbackUTCLabel(row.metric.window?.start))}<br>to ${feedbackEscape(feedbackUTCLabel(row.metric.window?.end))}</small></th><td>${row.n ?? '—'}${row.metric.unscored_trades ? `<small>${row.metric.unscored_trades} unscored</small>` : ''}</td><td>${row.wins ?? '—'} / ${row.metric.losses ?? '—'} / ${row.metric.flat_trades ?? '—'}</td><td>${formatMaybePct(row.rate)}</td><td>${fmtPct(row.mean)}</td><td>${formatDollars(row.metric.net_gain_dollars)}</td></tr>`).join('');
 }
 function formatDollars(value) {return Number.isFinite(value) ? `${value < 0 ? '−' : '+'}$${Math.abs(value).toFixed(2)}` : '—';}
@@ -360,7 +377,7 @@ function updatePerformanceChart(periodData) {
   // Widest window first → most recent (7d) lands on the right.
   const rows = performanceRows(periodData);
   renderPerformanceAudit(rows);
-  const labels = rows.map(row=>[row.label, `n = ${row.n ?? '—'}`]);
+  const labels = rows.map(row=>[row.label, `N = ${row.n ?? '—'}`]);
   const successRates = rows.map(row=>row.rate), avgProfits = rows.map(row=>row.mean);
 
   // Update in place when the panels exist and the x-axis still matches.
@@ -390,6 +407,7 @@ function updatePerformanceChart(periodData) {
       tickOpts: { stepSize: 25 },
 
       showXTicks: true,
+      showWinInterval: true,
     }),
     profit: buildTrendChart('avgProfitChart', {
       color: TREND_PROFIT_COLOR, labels, data: avgProfits, rows,

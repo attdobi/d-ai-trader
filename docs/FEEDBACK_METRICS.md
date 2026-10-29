@@ -43,6 +43,20 @@ shortest-window summary remains visible. The audit table provides exact cutoffs
 and dollars. Range-request sequencing prevents an older response from replacing
 the selected range.
 
+Hovering a win-rate column also shows **N** and a two-sided **95% Wilson binomial
+confidence interval**, calculated from the exact win/closure counts. For example,
+2 wins out of 2 gives approximately 34.2%–100.0%, rather than zero uncertainty at
+an observed 100%. Empty or invalid counts have no interval. See the
+[NIST Wilson formula](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm).
+The same information is available by hovering the visible shortest-window
+summary. No error bars or additional chart panel are added.
+
+The interval is illustrative: the binomial model assumes independent trials with
+a common win probability. Related lots/trades and changing market regimes can
+violate those assumptions. It is not a confidence interval for mean trade return
+or a forecast of future profit; the mean-return panel retains its sample count
+without reusing the win-rate interval.
+
 The donut and streak use the latest 50 recorded closures and refresh with the
 table. The donut uses stored outcome categories: the separate dollar-based
 break-even bucket can include a small positive or negative return. Streaks use

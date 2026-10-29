@@ -49,7 +49,7 @@ def test_bars_show_closure_denominators_and_an_exact_utc_audit_without_fake_empt
         '30d':{'total_trades':0,'success_rate':None,'avg_profit':None}})
     rate=result['charts'][0]
     assert rate['type'] == 'bar'
-    assert rate['data']['labels'] == [['Last 30d','n = 0'],['Last 7d','n = 2']]
+    assert rate['data']['labels'] == [['Last 30d','N = 0'],['Last 7d','N = 2']]
     assert rate['data']['datasets'][0]['data'] == [None,100]
     assert rate['options']['scales']['y']['min'] == 0 and rate['options']['scales']['y']['max'] == 100
     assert '2 wins / 2 scored closures' in result['summary'] and '+$25.60' in result['summary']
@@ -92,7 +92,7 @@ pending[1]({period_analysis:{'30d':{total_trades:2,wins:1,success_rate:.5,avg_pr
 pending[0]({period_analysis:{'90d':{total_trades:99,wins:99,success_rate:1,avg_profit:1}}});await old;
 return charts[0].data.labels;
 ''')
-    assert result == [['Last 30d','n = 2']]
+    assert result == [['Last 30d','N = 2']]
 
 
 def test_event_chart_keeps_unknown_and_flat_sales_out_of_winning_markers():
@@ -118,3 +118,38 @@ return {count:charts.length,labels:charts[0].data.labels};
 '''.replace('FUNCTION_KIND',json.dumps('benchmark' if function=='loadBenchmarkChart' else 'event')).replace('FUNCTION',function)
     result=view(script)
     assert result == {'count':1,'labels':['2026-10-29']}
+
+
+@pytest.mark.parametrize('wins,n,lower,upper',[
+    (2,2,.34238022750665303,1),
+    (0,2,0,.6576197724933469),
+    (1,2,.09453120573423074,.9054687942657693),
+    (44,110,.31331923819013874,.4934295488694941),
+])
+def test_wilson_interval_handles_small_samples_and_extreme_win_rates(wins,n,lower,upper):
+    interval=view("return vm.runInContext('winRateInterval(payload.wins,payload.n)',context);",{'wins':wins,'n':n})
+    assert interval['lower'] == pytest.approx(lower,abs=1e-12)
+    assert interval['upper'] == pytest.approx(upper,abs=1e-12)
+
+
+@pytest.mark.parametrize('wins,n',[(0,0),(None,2),(3,2),(-1,2),(1,1.5),(True,2),(1,-1)])
+def test_missing_or_invalid_counts_have_no_invented_interval(wins,n):
+    assert view("return vm.runInContext('winRateInterval(payload.wins,payload.n)',context);",{'wins':wins,'n':n}) is None
+
+
+def test_win_tooltip_shows_sample_and_interval_without_applying_it_to_mean_return():
+    result=view(r'''
+vm.runInContext('updatePerformanceChart(payload)',context);
+const items=chart=>[{chart,dataIndex:0}];
+return {title:charts[0].options.plugins.tooltip.callbacks.title(items(charts[0])),
+        win:charts[0].options.plugins.tooltip.callbacks.afterBody(items(charts[0])),
+        mean:charts[1].options.plugins.tooltip.callbacks.afterBody(items(charts[1])),
+        summaryTitle:elements.trendWindowSummary.title};
+''',{'7d':{'total_trades':2,'wins':2,'success_rate':1,'avg_profit':.0292,
+          'window':{'start':'2026-10-22T21:34:10Z','end':'2026-10-29T21:34:10Z'}}})
+    assert result['title'] == 'Last 7d · N=2'
+    assert '95% win-rate CI (Wilson): 34.2%–100.0%' in result['win']
+    assert 'Small samples give wide intervals.' in result['win']
+    assert not any('CI' in line or 'interval' in line for line in result['mean'])
+    assert 'N=2' in result['summaryTitle'] and '34.2%–100.0%' in result['summaryTitle']
+    assert 'independent closures' in result['summaryTitle']

@@ -22,6 +22,10 @@ wins/losses/flat counts and missing-return counts. A 100% result can correctly
 mean two wins out of two closures; it does not describe all purchase decisions,
 open holdings or future profitability. Empty windows show unavailable metrics.
 Returns are unweighted means of recorded closure returns, not account growth.
+Hover a win-rate column for **N** and a **95% Wilson binomial interval**. A 2/2
+sample shows approximately **34.2%–100.0%**, making the small-sample uncertainty
+visible without error bars. The interval assumes independent closures; related
+lots/trades can add uncertainty. Mean-return columns retain their sample counts.
 
 The audit also corrected the latest review's percentage scale and displayed
 timestamp, percentage-point labeling for the benchmark return spread, unknown
@@ -41,7 +45,8 @@ The policy tooling is documented together:
 The seven-day router review remains a shadow evaluation. Learning-map groupings
 organize evidence; they do not activate rules or establish decision quality.
 
-Validation: **1,876 tests passed, 1 skipped**, including window boundaries,
+Validation: **1,888 tests passed, 1 skipped**, including small-sample confidence
+intervals, window boundaries,
 configuration scope, empty/nonfinite values, percentage units, observed benchmark
 coverage, event provenance and out-of-order range requests. Browser checks used
 the updated read-only preview at `http://127.0.0.1:8083/feedback`.
