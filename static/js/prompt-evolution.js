@@ -262,6 +262,8 @@ function handleVersionToggle(agentType, version) {
   const diffPanel = document.getElementById('diffPanel');
   if (selected.length === 2) {
     loadDiff(agentType, selected[0], selected[1]);
+    diffPanel.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
   } else {
     setHidden(diffPanel, true);
   }
@@ -399,10 +401,12 @@ function setupPromptLabViews() {
   }
 
   function selectView(tab) {
+    const switchingViews = tab.getAttribute('aria-selected') !== 'true';
     showView(tab);
     const url = new URL(window.location.href);
     url.hash = tab === historyTab ? 'history' : '';
     window.history.replaceState(window.history.state, '', url);
+    if (switchingViews) window.scrollTo(0, 0);
   }
 
   for (const tab of tabs) {

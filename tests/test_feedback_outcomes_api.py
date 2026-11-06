@@ -133,27 +133,27 @@ def test_legacy_losses_use_current_severity_without_rewriting_the_ledger(
 ):
     dashboard, _ = dashboard_server_module
     cases = [
-        (-.0193, -19.30, "significant_loss"),
-        (-.0276, -27.60, "significant_loss"),
-        (-.0404, -40.40, "significant_loss"),
-        (-.016, -16.00, "significant_loss"),
-        (-.01599, -15.99, "moderate_loss"),
-        (-.0404, -3.00, "break_even"),
-        (None, -12.00, "moderate_loss"),
+        (-.0193, -19.30, "significant_loss", "moderate_loss"),
+        (-.0276, -27.60, "moderate_loss", "significant_loss"),
+        (-.0404, -40.40, "moderate_loss", "significant_loss"),
+        (-.025, -25.00, "moderate_loss", "significant_loss"),
+        (-.02499, -24.99, "moderate_loss", "moderate_loss"),
+        (-.0404, -3.00, "moderate_loss", "break_even"),
+        (None, -12.00, "moderate_loss", "moderate_loss"),
     ]
-    for ident, (fraction, amount, _) in enumerate(cases, 1):
+    for ident, (fraction, amount, stored, _) in enumerate(cases, 1):
         insert(ledger, ident, gain_loss_percentage=fraction, gain_loss_amount=amount,
-               outcome_category="moderate_loss")
+               outcome_category=stored)
     configure_api(dashboard, monkeypatch, ledger)
     outcomes = {row["id"]: row for row in body(dashboard)}
-    for ident, (fraction, amount, expected) in enumerate(cases, 1):
+    for ident, (fraction, amount, _, expected) in enumerate(cases, 1):
         assert outcomes[ident]["category"] == expected
         assert outcomes[ident]["net_gain_dollars"] == pytest.approx(amount)
         if fraction is not None:
             assert outcomes[ident]["gain_loss_pct"] == pytest.approx(fraction * 100)
     with ledger.connect() as conn:
-        stored = conn.execute(text("SELECT DISTINCT outcome_category FROM trade_outcomes")).scalars().all()
-    assert stored == ["moderate_loss"]
+        stored = conn.execute(text("SELECT outcome_category FROM trade_outcomes ORDER BY id")).scalars().all()
+    assert stored == [case[2] for case in cases]
 
 
 def test_latest_fifty_are_deterministic_and_equal_timestamp_lots_remain_distinct(ledger, dashboard_server_module, monkeypatch):

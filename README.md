@@ -11,7 +11,8 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 ## Prompt Lab and session recovery — November 6, 2026
 
 **Prompt Lab** opens on **Update prompts**, with the batch action above the
-other controls. **Version history** holds the timeline and version comparison.
+other controls. **Version history** uses page scrolling with newest versions first
+and shows the selected comparison above the timeline.
 Use the Lab for whole-agent drafts or a batch across Summarizer, Decider and
 Feedback. Use **Policy Graph** for focused guideline patches with per-guideline
 review. Both workflows activate a new version through `set_active_prompt_version`,
@@ -41,8 +42,8 @@ with a positive distance within the active 1.3% cap. Systemic distress requires
 specific evidence beyond the routine regime label. Archived policies retain their
 original wording and each new decision logs the exact rendered prompt.
 
-Trade outcomes report **Significant Loss** at −1.6% or worse beyond the existing
-$3 break-even band. This severity cut is twice the 0.8% holding exit threshold.
+Trade outcomes report **Significant Loss** at −2.5% or worse beyond the existing
+$3 break-even band.
 The dashboard and feedback use recorded returns to classify old rows on read.
 See [Feedback metrics](docs/FEEDBACK_METRICS.md) for the severity and cohort definitions.
 

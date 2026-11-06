@@ -96,12 +96,12 @@ def test_new_feedback_includes_significant_historical_loss_patterns():
     losses = [
         {"gain_loss_amount": -18, "gain_loss_percentage": -.018, "original_reason": "First setup"},
         {"gain_loss_amount": -40, "gain_loss_percentage": -.04, "original_reason": "Second setup"},
-        {"gain_loss_amount": -2, "gain_loss_percentage": -.018, "original_reason": "Small dollar change"},
+        {"gain_loss_amount": -2, "gain_loss_percentage": -.04, "original_reason": "Small dollar change"},
     ]
     outcomes = [dict(loss, outcome_category="moderate_loss", hold_duration_days=1) for loss in losses]
     result = analyze(None, outcomes)
-    assert result["outcome_distribution"] == {"significant_loss": 2, "break_even": 1}
-    assert result["unsuccessful_reasons"] == ["First setup", "Second setup"]
+    assert result["outcome_distribution"] == {"moderate_loss": 1, "significant_loss": 1, "break_even": 1}
+    assert result["unsuccessful_reasons"] == ["Second setup"]
 
 
 @pytest.fixture

@@ -454,6 +454,7 @@ async function loadRecentTrades() {
       const rowCls = gl >= 0 ? 'row-gain' : 'row-loss';
       const holdDays = t.hold_days != null ? `${t.hold_days}d` : '—';
       const sellDate = t.sell_date ? new Date(t.sell_date).toLocaleDateString() : '—';
+      const category = String(t.category || '').replace(/[^a-z_]/gi, '').replaceAll('_', ' ').toUpperCase();
 
       const tr = document.createElement('tr');
       tr.className = rowCls;
@@ -463,7 +464,7 @@ async function loadRecentTrades() {
         <td class="${cls}"><strong>${formatCurrency(gl)}</strong></td>
         <td class="${cls}"><strong>${formatPercent(glPct)}</strong></td>
         <td>${holdDays}</td>
-        <td>${t.category || '—'}</td>`;
+        <td>${category || '—'}</td>`;
       tbody.appendChild(tr);
     });
 

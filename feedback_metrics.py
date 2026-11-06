@@ -15,9 +15,8 @@ from sqlalchemy import text
 
 
 SIGNIFICANT_PROFIT_THRESHOLD = 0.05
-# A realized loss twice the approved 0.8% holding exit threshold is significant.
-# This reporting threshold does not set or predict an execution price.
-SIGNIFICANT_LOSS_THRESHOLD = -0.016
+# Reporting threshold for significant realized losses.
+SIGNIFICANT_LOSS_THRESHOLD = -0.025
 BREAK_EVEN_DOLLAR_MAX = 3.0
 
 

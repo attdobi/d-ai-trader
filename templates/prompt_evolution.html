@@ -141,7 +141,25 @@
 
   <section class="pe-card" id="promptTimelineCard" role="tabpanel" aria-labelledby="peHistoryTab" tabindex="0" hidden>
     <h2>Prompt Version Timeline</h2>
-    <p class="pe-subtitle">Select two versions in the same column to compare unified diffs.</p>
+    <p class="pe-subtitle">Newest first. Select two versions in the same column to compare them.</p>
+
+    <div id="diffPanel" class="pe-diff-panel pe-hidden" role="region" aria-label="Version comparison" tabindex="-1">
+      <p id="diffMeta" class="pe-diff-meta" role="status"></p>
+      <div class="pe-diff-grid">
+        <section class="pe-diff-block">
+          <h4>System Prompt Diff</h4>
+          <div id="systemDiff" class="pe-diff-view" role="region" aria-label="System prompt diff"></div>
+        </section>
+        <section class="pe-diff-block">
+          <h4>User Prompt Template Diff</h4>
+          <div id="userDiff" class="pe-diff-view" role="region" aria-label="User prompt template diff"></div>
+        </section>
+        <section class="pe-diff-block">
+          <h4>Strategy Directives Diff</h4>
+          <div id="strategyDiff" class="pe-diff-view" role="region" aria-label="Strategy directives diff"></div>
+        </section>
+      </div>
+    </div>
 
     <div id="historyLoading" class="pe-loading">
       <span class="pe-spinner" aria-hidden="true"></span>
@@ -169,23 +187,6 @@
 
     <div id="historyError" class="pe-error pe-hidden"></div>
 
-    <div id="diffPanel" class="pe-diff-panel pe-hidden">
-      <p id="diffMeta" class="pe-diff-meta"></p>
-      <div class="pe-diff-grid">
-        <section class="pe-diff-block">
-          <h4>System Prompt Diff</h4>
-          <div id="systemDiff" class="pe-diff-view" role="region" aria-label="System prompt diff"></div>
-        </section>
-        <section class="pe-diff-block">
-          <h4>User Prompt Template Diff</h4>
-          <div id="userDiff" class="pe-diff-view" role="region" aria-label="User prompt template diff"></div>
-        </section>
-        <section class="pe-diff-block">
-          <h4>Strategy Directives Diff</h4>
-          <div id="strategyDiff" class="pe-diff-view" role="region" aria-label="Strategy directives diff"></div>
-        </section>
-      </div>
-    </div>
   </section>
 </div>
 
@@ -202,9 +203,10 @@
 .pe-lab-related { color:var(--muted); font-size:13px; margin:0 0 12px; }
 .pe-lab-related a { color:var(--accent); text-underline-offset:3px; }
 .pe-feedback-refresh { margin:12px 0; padding:10px 14px; color:var(--text); background:var(--surface-alt); border:1px solid var(--card-border); border-left:3px solid var(--accent); border-radius:8px; font-size:.92em; }
-.pe-timeline-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
-.pe-timeline-grid .pe-timeline { max-block-size:min(50vh, 34rem); overflow-y:auto; scrollbar-gutter:stable; padding-right:5px; }
-.pe-timeline-grid .pe-version-item { flex-shrink:0; overflow-wrap:anywhere; }
+#main-content:has(#promptTimelineCard:not([hidden])) { max-width:1680px; }
+#promptTimelineCard .pe-diff-panel { margin-bottom:18px; }
+.pe-timeline-grid { grid-template-columns:repeat(4,minmax(0,1fr)); align-items:start; }
+.pe-timeline-grid .pe-version-item { overflow-wrap:anywhere; }
 @media (max-width:1100px) { .pe-timeline-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:650px) { .pe-timeline-grid { grid-template-columns:1fr; } }
 .pe-contract-panel { margin:12px 0; padding:12px 14px; border:1px solid var(--border, #344258); border-radius:8px; background:var(--bg-secondary, #101c30); font-size:12px; }

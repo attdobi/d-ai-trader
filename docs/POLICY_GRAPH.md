@@ -199,7 +199,8 @@ and `repo_root` are explicit parameters. Tests are DB-free (`tests/test_policy_g
 
 Prompt Lab opens on **Update prompts**, with the batch action and Advanced controls
 above performance context. **Version history** loads the saved timeline and diffs
-on demand. Each agent column scrolls within that view.
+on demand. Each agent column starts with its newest version and expands with the
+page. Selecting two versions brings the comparison into view above the timeline.
 
 The Prompt Lab batch refreshes feedback, drafts prompt fields for three agents,
 and sends each draft to the critic before field-level approval. Advanced uses the
