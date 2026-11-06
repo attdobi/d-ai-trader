@@ -83,7 +83,6 @@ app = Flask(__name__)
 def _policy_graph_llm(role, system_text, user_text):
     """Model call for the policy-graph proposal flow. Roles: drafter (PromptEvolutionAgent's model),
     critic (CriticAgent's model). Usage is recorded under the same agent names as the Prompt Lab."""
-    from openai import OpenAI
     agent_name = 'CriticAgent' if role == 'critic' else 'PromptEvolutionAgent'
     model = get_agent_model(agent_name)
     reasoning = get_reasoning_params(agent_name, model)
@@ -92,16 +91,7 @@ def _policy_graph_llm(role, system_text, user_text):
                                              {'role': 'user', 'content': user_text}])
     if reasoning:
         api_kwargs.update(reasoning)
-    client = OpenAI()
-    try:
-        response = client.chat.completions.create(**api_kwargs)
-    except Exception as exc:
-        if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
-            api_kwargs.pop('reasoning_effort', None)
-            response = client.chat.completions.create(**api_kwargs)
-        else:
-            raise
-    _prompt_lab_usage._record_api_usage(agent_name, model, response)
+    response = _request_prompt_review_model(agent_name, api_kwargs)
     if response and getattr(response, 'choices', None):
         return response.choices[0].message.content
     return ''
@@ -2297,7 +2287,7 @@ def get_feedback_data():
 def get_trade_outcomes():
     """Get recent trade outcomes"""
     try:
-        from feedback_metrics import finite_number, iso_utc
+        from feedback_metrics import categorize_outcome, finite_number, iso_utc
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             result = conn.execute(text("""
@@ -2315,6 +2305,8 @@ def get_trade_outcomes():
             
             outcomes = []
             for row in result:
+                amount = finite_number(row.gain_loss_amount)
+                fraction = finite_number(row.gain_loss_percentage)
                 outcomes.append({
                     'ticker': row.ticker,
                     'id': row.id,
@@ -2322,14 +2314,14 @@ def get_trade_outcomes():
                     'purchase_price': finite_number(row.purchase_price),
                     'sell_price': finite_number(row.sell_price),
                     'shares': finite_number(row.shares),
-                    'net_gain_dollars': finite_number(row.gain_loss_amount),
+                    'net_gain_dollars': amount,
                     # trade_outcomes.gain_loss_percentage is stored as a FRACTION
                     # (e.g. -0.0158). The frontend (schwab.js, feedback.js) renders
                     # gain_loss_pct as an already-percent value, so convert here.
                     # Previously the raw fraction leaked through and -1.58% showed
                     # as "-0.02%".
-                    'gain_loss_pct': finite_number(row.gain_loss_percentage) * 100.0 if finite_number(row.gain_loss_percentage) is not None else None,
-                    'category': row.outcome_category,
+                    'gain_loss_pct': fraction * 100.0 if fraction is not None else None,
+                    'category': categorize_outcome(amount, fraction, stored_category=row.outcome_category),
                     'hold_days': row.hold_duration_days
                 })
             
@@ -3654,6 +3646,7 @@ def get_prompt_evolution_performance_context():
 # ---------------------------------------------------------------------------
 
 _PROMPT_LAB_AGENTS = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent']
+_PROMPT_LAB_MODEL_TIMEOUT_SEC = 240
 _PROMPT_LAB_LABELS = {
     'SummarizerAgent': 'Summarizer',
     'DeciderAgent': 'Decider',
@@ -3666,6 +3659,42 @@ _PROMPT_LAB_AGENT_DIRS = {
     'FeedbackAgent': 'feedback',
     'CompanyExtractionAgent': 'company',
 }
+
+
+def _prompt_lab_model_settings(agent):
+    model = get_agent_model(agent)
+    return {'model': model, 'reasoning_effort': get_reasoning_params(agent, model).get('reasoning_effort')}
+
+
+def _prompt_lab_client():
+    from openai import OpenAI
+    return OpenAI(timeout=_PROMPT_LAB_MODEL_TIMEOUT_SEC, max_retries=0)
+
+
+def _request_prompt_review_model(agent_name, api_kwargs):
+    """Shared draft and critique transport for both review workflows."""
+    with _prompt_lab_client() as client:
+        try:
+            response = client.chat.completions.create(**api_kwargs)
+        except Exception as exc:
+            if 'reasoning_effort' not in api_kwargs or 'reasoning_effort' not in str(exc).lower():
+                raise
+            fallback = {key: value for key, value in api_kwargs.items() if key != 'reasoning_effort'}
+            response = client.chat.completions.create(**fallback)
+    _prompt_lab_usage._record_api_usage(agent_name, api_kwargs['model'], response)
+    return response
+
+
+def _prompt_lab_error(exc):
+    if type(exc).__name__ == 'APITimeoutError':
+        return f'Model request timed out after {_PROMPT_LAB_MODEL_TIMEOUT_SEC // 60} minutes.'
+    return str(exc)
+
+
+def _analyze_prompt_lab_feedback(config_hash):
+    with _prompt_lab_client() as client:
+        tracker = TradeOutcomeTracker(feedback_client=client)
+        return tracker.analyze_recent_outcomes_for_config(config_hash, skip_auto_prompts=True) or {}
 
 
 @app.route('/api/prompt-contracts')
@@ -3683,9 +3712,6 @@ def get_prompt_contract():
     response = jsonify(prompt_contract(agent, version))
     response.headers['Cache-Control'] = 'no-store'
     return response
-_MISSION_HEADER_LOWER = 'mission (shared across all agents'
-
-
 def _read_disk_soul(agent_type):
     """Return the contents of the live SOUL.md, or fall back to the committed
     SOUL.default.md seed. Empty string if neither exists.
@@ -3704,39 +3730,82 @@ def _read_disk_soul(agent_type):
     return ''
 
 
-def _ensure_mission_in_soul(agent_type, db_soul):
-    """Bootstrap the shared Mission/Shared-Principles block from disk SOUL.md
-    when the in-DB soul predates the Mission update.
+def _soul_draft_sections(soul):
+    """Group exact Markdown slices, including each section's nested items."""
+    from policy_graph.decompose import slice_field
+    from policy_graph.model import slug_for_heading
 
-    Idempotent: if Mission is already present in `db_soul`, returns unchanged.
-    If the disk SOUL.md lacks the marker too, returns `db_soul` unchanged
-    (we'd rather pass through than corrupt).
-    """
-    soul = db_soul or ''
-    if _MISSION_HEADER_LOWER in soul.lower():
-        return soul
+    sections = []
+    for part in slice_field('soul', soul):
+        content = soul[part.start:part.end]
+        if part.level == 3:
+            name, previous = sections[-1]
+            sections[-1] = (name, previous + content)
+        else:
+            name = slug_for_heading(part.heading) if part.heading else None
+            sections.append((name, content))
+    return sections
+
+
+def _prepare_soul_draft(agent_type, stored_soul):
+    """Preserve approved sections and fill only missing legacy defaults."""
+    from policy_graph.model import LOCKED_LAST_SEGMENTS
 
     disk_soul = _read_disk_soul(agent_type)
-    if not disk_soul or _MISSION_HEADER_LOWER not in disk_soul.lower():
-        return soul
+    base = stored_soul if (stored_soul or '').strip() else disk_soul
+    sections = _soul_draft_sections(base)
+    names = {name for name, _ in sections}
+    defaults = dict(_soul_draft_sections(disk_soul))
+    for name in ('mission', 'principles'):
+        if name not in names and name in defaults:
+            # Insert after the preamble, in Mission / Shared Principles order.
+            offset = 1
+            if name == 'principles':
+                offset = next((i + 1 for i, (key, _) in enumerate(sections) if key == 'mission'), 1)
+            sections.insert(offset, (name, '\n\n' + defaults[name].strip() + '\n\n'))
+    sections = _soul_draft_sections(''.join(content for _, content in sections))
+    if not {'mission', 'principles'} <= {name for name, _ in sections}:
+        raise ValueError('Approved Mission and Shared Principles could not be loaded for this agent.')
+    editable = {
+        str(i): content.strip()
+        for i, (name, content) in enumerate(sections)
+        if name and name not in LOCKED_LAST_SEGMENTS and content.lstrip().startswith('## ')
+    }
+    return sections, editable
 
-    if not soul.strip():
-        # DB soul empty → disk soul already contains both shared block and
-        # per-agent text; return wholesale.
-        return disk_soul
 
-    # Extract the shared block (from "## Mission" up to the "---" separator)
-    # and prepend it to the existing DB soul.
-    mission_idx = disk_soul.lower().find('## mission')
-    if mission_idx < 0:
-        return soul
-    separator_idx = disk_soul.find('\n---\n', mission_idx)
-    if separator_idx < 0:
-        shared_block = disk_soul.rstrip() + '\n'
-    else:
-        shared_block = disk_soul[mission_idx:separator_idx + 5]  # include '\n---\n'
+def _apply_soul_draft(sections, editable, proposed_edits):
+    """Replace only known editable sections. The server supplies all locked text."""
+    from policy_graph.model import LOCKED_LAST_SEGMENTS
 
-    return shared_block + '\n' + soul
+    original = ''.join(content for _, content in sections)
+    if not isinstance(proposed_edits, dict):
+        return original
+
+    parts = [content for _, content in sections]
+    for key, old in editable.items():
+        proposed = proposed_edits.get(key)
+        if not isinstance(proposed, str) or not proposed.strip():
+            continue
+        proposed = proposed.strip()
+        if proposed.splitlines()[0] != old.splitlines()[0]:
+            continue
+        # A draft for one section cannot add sibling sections or dividers.
+        proposed_sections = [part for _, part in _soul_draft_sections(proposed) if part.strip()]
+        if len(proposed_sections) != 1 or len(proposed.splitlines()) < 2:
+            continue
+        index = int(key)
+        raw = parts[index]
+        leading = raw[:len(raw) - len(raw.lstrip())]
+        trailing = raw[len(raw.rstrip()):]
+        parts[index] = leading + proposed + trailing
+
+    revised = ''.join(parts)
+    locked = [(name, body) for name, body in sections if name in LOCKED_LAST_SEGMENTS]
+    # A malformed Markdown fence/comment must not consume a later locked section.
+    if locked != [(name, body) for name, body in _soul_draft_sections(revised) if name in LOCKED_LAST_SEGMENTS]:
+        return original
+    return revised
 
 
 def _compute_unified_diffs(agent_type, before, after,
@@ -3826,12 +3895,15 @@ def _fetch_trade_evidence(config_hash, days=30, cap=40):
     worst half + best half, so the loop learns what WORKS as much as what
     fails, and states its own coverage so nobody mistakes a sample for the
     population. Returns {total_closed_trades, coverage, worst, best}."""
+    from feedback_metrics import categorize_outcome
+
     half = max(1, int(cap) // 2)
     base_select = """
         SELECT ticker, sell_timestamp::date AS sell_date,
                -- gain_loss_percentage is stored as a FRACTION (-0.079 = -7.9%)
                ROUND((gain_loss_percentage * 100)::numeric, 1) AS gain_pct,
                ROUND(gain_loss_amount::numeric, 2) AS gain_usd,
+               gain_loss_percentage AS return_fraction, gain_loss_amount AS pnl_amount,
                hold_duration_days, outcome_category,
                LEFT(COALESCE(original_reason, ''), 140) AS buy_reason,
                LEFT(COALESCE(sell_reason, ''), 140) AS sell_reason
@@ -3859,6 +3931,11 @@ def _fetch_trade_evidence(config_hash, days=30, cap=40):
             dict(r._mapping) for r in best
             if (r.ticker, str(r.sell_date), str(r.gain_pct)) not in best_keys
         ]
+        for trade in worst_rows + best_rows:
+            trade['outcome_category'] = categorize_outcome(
+                trade.pop('pnl_amount'), trade.pop('return_fraction'),
+                stored_category=trade['outcome_category'],
+            )
         omitted = max(0, int(total) - len(worst_rows) - len(best_rows))
         return {
             "total_closed_trades": int(total),
@@ -3989,8 +4066,6 @@ def _critique_candidate(candidate, feedback_summary=None):
     }
 
     try:
-        from openai import OpenAI
-        client = OpenAI()
         model = get_agent_model('CriticAgent')
         reasoning_params = get_reasoning_params('CriticAgent', model)
         print(
@@ -4015,15 +4090,7 @@ def _critique_candidate(candidate, feedback_summary=None):
         )
         if reasoning_params:
             api_kwargs.update(reasoning_params)
-        try:
-            response = client.chat.completions.create(**api_kwargs)
-        except Exception as exc:
-            if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
-                api_kwargs.pop('reasoning_effort', None)
-                response = client.chat.completions.create(**api_kwargs)
-            else:
-                raise
-        _prompt_lab_usage._record_api_usage('CriticAgent', model, response)
+        response = _request_prompt_review_model('CriticAgent', api_kwargs)
         content = ''
         if response and getattr(response, 'choices', None):
             content = response.choices[0].message.content
@@ -4054,7 +4121,7 @@ def _critique_candidate(candidate, feedback_summary=None):
         # with low confidence so the human still sees and decides.
         return {
             'verdict': 'reject',
-            'reason': f'Critic unavailable ({exc}); defer to human review.',
+            'reason': f'Critic unavailable ({_prompt_lab_error(exc)}). Defer to human review.',
             'confidence': 0.0,
             'auto': False,
         }
@@ -4178,17 +4245,15 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         'decider_feedback': (r.decider_feedback or '')[:500],
     } for r in feedback_rows]
 
-    # Batch flow always evolves all four fields, including soul + memory.
     soul_memory_instruction = (
-        "\n\nIMPORTANT: Also produce 'soul' and 'memory' fields. "
+        "\n\nReturn 'soul_edits' as an object keyed by the supplied editable_soul_sections IDs. "
+        "For each changed section, supply its complete Markdown with the existing heading. "
+        "Omit unchanged sections. The server retains the document header, Mission and Shared Principles. "
         "Evolve memory by appending dated entries (ISO date headers) using the "
         "Obsidian-friendly convention: short entries, [[wiki-links]], hashtags."
     )
 
-    # Bootstrap: if the in-DB soul predates the Mission update, prepend the
-    # shared block from agents/<name>/SOUL.md so the LLM sees (and is required
-    # to preserve) the Mission + Shared Principles.
-    bootstrapped_soul = _ensure_mission_in_soul(agent_type, current_prompt.soul or '')
+    soul_sections, editable_soul = _prepare_soul_draft(agent_type, current_prompt.soul)
 
     prompt_payload = {
         'agent_type': agent_type,
@@ -4198,7 +4263,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             'system_prompt': current_prompt.system_prompt,
             'user_prompt_template': current_prompt.user_prompt_template,
             'strategy_directives': current_prompt.strategy_directives,
-            'soul': bootstrapped_soul,
+            'editable_soul_sections': editable_soul,
             'memory': current_prompt.memory or '',
         },
         'prompt_evolution_history': prompt_history,
@@ -4221,8 +4286,6 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         ),
     }
 
-    from openai import OpenAI
-    client = OpenAI()
     model = get_agent_model('PromptEvolutionAgent')
     generation_reasoning = get_reasoning_params('PromptEvolutionAgent', model)
     print(
@@ -4242,7 +4305,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'The strategy_directives contain trading rules and personality that feedback evolves. '
                     'Soul defines persistent agent identity, and memory captures lessons learned over time. '
                     'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, '
-                    'soul, memory, reasoning, changes.\n\n'
+                    'soul_edits, memory, reasoning, changes.\n\n'
                     'THE "changes" KEY — this is how a downstream critic and a human decide whether to ship your '
                     'edit, so be rigorous. It is an array of objects, one per distinct edit you made:\n'
                     '  { "section": one of "system_prompt"|"user_prompt_template"|"strategy_directives"|"soul"|"memory",\n'
@@ -4281,10 +4344,8 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'If the portfolio is cash-only, the only valid actions are BUY or providing a cash_reason.\n'
                     '2. The "CRITICAL CONSTRAINT" in system_prompt about grounding decisions in the actual portfolio state.\n'
                     '3. All anti-hallucination language — the agent must never invent positions it does not hold.\n'
-                    '4. The "## Mission (shared across all agents — preserve verbatim)" section and the '
-                    '"## Shared Principles (preserve verbatim)" section of the soul MUST appear unchanged in your output. '
-                    'You may add new per-agent material below them; you may NOT edit the words inside those two sections. '
-                    'These sections are the system-wide charter and are reviewed by humans separately.\n'
+                    '4. Only propose Soul edits under the supplied editable_soul_sections IDs. Keep their headings. '
+                    'The server retains the protected Mission and Shared Principles sections.\n'
                     'You may rephrase rules 1-3 for clarity, but the semantic meaning and enforcement MUST survive in the output.'
                 ),
             },
@@ -4299,15 +4360,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
     )
     if generation_reasoning:
         api_kwargs.update(generation_reasoning)
-    try:
-        response = client.chat.completions.create(**api_kwargs)
-    except Exception as exc:
-        if 'reasoning_effort' in api_kwargs and 'reasoning_effort' in str(exc).lower():
-            api_kwargs.pop('reasoning_effort', None)
-            response = client.chat.completions.create(**api_kwargs)
-        else:
-            raise
-    _prompt_lab_usage._record_api_usage('PromptEvolutionAgent', model, response)
+    response = _request_prompt_review_model('PromptEvolutionAgent', api_kwargs)
 
     content = ''
     if response and getattr(response, 'choices', None):
@@ -4326,9 +4379,11 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
     user_prompt_template = _to_str(parsed.get('user_prompt_template'))
     strategy_directives = _to_str(parsed.get('strategy_directives'))
     reasoning = _to_str(parsed.get('reasoning'))
-    soul_out = _to_str(parsed.get('soul')) or _to_str(current_prompt.soul)
+    soul_out = _apply_soul_draft(soul_sections, editable_soul, parsed.get('soul_edits'))
     memory_out = _to_str(parsed.get('memory')) or _to_str(current_prompt.memory)
     changes = _normalize_changes(parsed.get('changes'))
+    if soul_out == ''.join(content for _, content in soul_sections):
+        changes = [change for change in changes if change['section'] != 'soul']
     change_summary = _summarize_changes(changes)
 
     if not system_prompt or not user_prompt_template:
@@ -4348,16 +4403,6 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
         raise ValueError(
             'Generated prompt is missing critical anti-hallucination guardrails. '
             'The evolved prompt must preserve rules that prevent HOLD/SELL for unowned tickers.'
-        )
-
-    # Mission preservation check — the prepended shared section must survive.
-    # We test for two distinctive phrases that appear only in our Mission/Shared block.
-    soul_lower = (soul_out or '').lower()
-    mission_phrases = ['mission (shared across all agents', 'shared principles (preserve verbatim']
-    if not all(phrase in soul_lower for phrase in mission_phrases):
-        raise ValueError(
-            'Generated soul is missing the verbatim Mission / Shared Principles sections. '
-            'These must survive every regeneration.'
         )
 
     # Citation contract — the Decider's template must keep the required "cited" key (policy graph
@@ -4416,8 +4461,7 @@ def refresh_feedback_for_prompt_lab():
         from config import get_current_config_hash
         config_hash = get_current_config_hash()
 
-        tracker = TradeOutcomeTracker()
-        result = tracker.analyze_recent_outcomes(skip_auto_prompts=True) or {}
+        result = _analyze_prompt_lab_feedback(config_hash)
 
         # Normalize the response — analyze_recent_outcomes can return
         # different shapes depending on which branch ran (outcomes vs
@@ -4522,7 +4566,6 @@ def _reap_stale_batch_jobs():
 def _run_batch_generation(job_id, config_hash):
     """Background worker. Updates _BATCH_JOBS in place."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    from feedback_agent import TradeOutcomeTracker
 
     def _set(state):
         state['updated_at'] = time.time()
@@ -4535,9 +4578,9 @@ def _run_batch_generation(job_id, config_hash):
             'status': 'running', 'phase': 'feedback',
             'config_hash': config_hash, 'started_at': time.time(),
             'message': 'Running FeedbackAgent against the latest trade outcomes…',
+            **_prompt_lab_model_settings('FeedbackAgent'),
         })
-        tracker = TradeOutcomeTracker()
-        feedback_result = tracker.analyze_recent_outcomes(skip_auto_prompts=True) or {}
+        feedback_result = _analyze_prompt_lab_feedback(config_hash)
         feedback_payload = feedback_result.get('feedback') or feedback_result.get('feedback_content') or {}
         feedback_summary = {
             'feedback_id': feedback_result.get('feedback_id'),
@@ -4559,6 +4602,7 @@ def _run_batch_generation(job_id, config_hash):
             'message': 'Evolving prompts for all three agents in parallel…',
             'feedback_summary': feedback_summary,
             'completed_agents': [],
+            **_prompt_lab_model_settings('PromptEvolutionAgent'),
             'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
         })
 
@@ -4575,7 +4619,7 @@ def _run_batch_generation(job_id, config_hash):
                 try:
                     candidates.append(future.result())
                 except Exception as exc:
-                    errors.append({'agent_type': agent, 'error': str(exc)})
+                    errors.append({'agent_type': agent, 'error': _prompt_lab_error(exc)})
                 completed.append(agent)
                 # Live progress update — UI can show "2/3 done".
                 with _BATCH_JOBS_LOCK:
@@ -4595,9 +4639,12 @@ def _run_batch_generation(job_id, config_hash):
             'message': 'Critic reviewing candidates…',
             'feedback_summary': feedback_summary,
             'completed_agents': completed,
+            'reviewed_candidates': 0,
+            'total_candidates': len(candidates),
+            **_prompt_lab_model_settings('CriticAgent'),
             'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
         })
-        for cand in candidates:
+        for reviewed, cand in enumerate(candidates, start=1):
             try:
                 verdict = _critique_candidate(cand, feedback_summary)
             except Exception as exc:
@@ -4605,6 +4652,10 @@ def _run_batch_generation(job_id, config_hash):
                            'confidence': 0.0, 'auto': False}
             cand['critic'] = verdict
             cand['review_id'] = _record_candidate_review(cand, config_hash)
+            with _BATCH_JOBS_LOCK:
+                if job_id in _BATCH_JOBS:
+                    _BATCH_JOBS[job_id]['reviewed_candidates'] = reviewed
+                    _BATCH_JOBS[job_id]['updated_at'] = time.time()
 
         _set({
             'status': 'done',
@@ -4622,7 +4673,7 @@ def _run_batch_generation(job_id, config_hash):
         _set({
             'status': 'failed',
             'config_hash': config_hash,
-            'error': str(e),
+            'error': _prompt_lab_error(e),
             'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
             'finished_at': datetime.utcnow().isoformat() + 'Z',
         })
@@ -4640,6 +4691,9 @@ def refresh_feedback_and_generate_all():
         job_id = uuid.uuid4().hex
 
         with _BATCH_JOBS_LOCK:
+            for existing_id, existing in _BATCH_JOBS.items():
+                if existing['config_hash'] == config_hash and existing['status'] == 'running':
+                    return jsonify({'job_id': existing_id, 'status': 'running'})
             _BATCH_JOBS[job_id] = {
                 'status': 'running', 'phase': 'starting',
                 'config_hash': config_hash,
@@ -4654,7 +4708,12 @@ def refresh_feedback_and_generate_all():
             daemon=True,
             name=f'batch-gen-{job_id[:8]}',
         )
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            with _BATCH_JOBS_LOCK:
+                _BATCH_JOBS.pop(job_id, None)
+            raise
 
         return jsonify({'job_id': job_id, 'status': 'running'})
     except Exception as e:

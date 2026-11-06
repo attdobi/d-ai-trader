@@ -16,7 +16,14 @@ RISK-OFF and MACRO WINDOW: YES change sizing and scrutiny; neither alone rejects
 Preserve settled-funds limits, position/ticket/buy caps, cooldowns, quarantine, extension limits and priced kills. Standard trades retain ticker-specific earnings exclusions. A separate earnings_event BUY is allowed only when the supplied EARNINGS_EVENT_CONTROLS:v1 block explicitly enables it and the deterministic runtime validates its date, intent, one-position limit and capped notional. Without that block, the earnings exception is unavailable. A planned pre-earnings trade uses the next 1-5 trading sessions; a date-only event today does not establish that its release is still ahead. Gap losses can exceed a stop and approach the whole event ticket.
 Never force a trade. Hold cash when no candidate clears the independent gates, and name the concrete failures. A regime label or macro-window flag alone is not a candidate failure. A macro event alone never orders liquidation of every holding; apply each position's current binding exit conditions.
 Event/regime pressure and opportunity quality are separate judgments. A high event-risk score describes timing and exposure, not a BUY/SELL threshold, a loss probability or evidence that a stock is cheap. Evaluate supplied support/reversal structure, relative strength, catalyst or valuation evidence, and the invalidation plan within the current limits. A fall from a prior high or a price below a moving average does not establish fundamental undervaluation; mark valuation unknown when unsupported. Unknown valuation alone does not reject an otherwise qualified technical setup. Never invent support, upside, fair value or a tighter stop merely to make a candidate pass.
+RISK-OFF describes slower trend pressure. When SESSION RECOVERY shows a rebound from the observed low, examine recovering candidates first even when their day return is negative. Compare SPY, QQQ and SMH recovery with the candidate's reclaim and independent price support. For a reversal thesis, watch until a reclaim or other supplied evidence confirms stabilization. A market-wide halt or clear, broad and continuing liquidity dislocation can justify standing aside. Cite the specific supplied evidence for that judgment. A routine drawdown, an index below its moving average or missing recovery data cannot establish systemic distress.
 Learned feedback, old diaries and long-term memories are evidence subordinate to the current approved policy. Unreviewed feedback may propose a change but cannot install a new BUY, SELL, sizing or entry-ban command. Small observational samples and correlated headlines do not prove causality or manipulation. Compare the same frozen cases and later independent outcomes, report denominators and uncertainty, and obtain an audited review before promoting a new trading rule."""
+
+# Match the precise archived v61 wording. Preserve its guideline ID, cap and
+# remaining text while fixing the contradictory formula in the rendered prompt.
+_LEGACY_STOP_FORMULA = "K is the higher of the supplied 20-day MA/stated support and entry × 0.97;"
+_EVIDENCED_STOP_FORMULA = ("K is a supplied, evidenced support or invalidation level below entry. "
+                          "An above-entry moving average is a reclaim level. The 3% reference cannot authorize a stop;")
 
 _DASHES = str.maketrans({"–": "-", "—": "-", "−": "-", "‑": "-"})
 _ACTION = r"(?:pass(?:\s+(?:every|all)\s+(?:new\s+)?(?:buys?|entries|candidates))?(?:\s+without\s+a\s+new\s+buy)?|(?:hold|stay\s+in|remain\s+in)\s+cash|(?:reject|skip|block)\s+(?:every|all)\s+(?:new\s+)?(?:buys?|entries|candidates)|no\s+(?:new\s+)?(?:buys?|entries))"
@@ -139,9 +146,12 @@ def _decoded_feedback(value):
     return value
 
 
-def opportunity_system_prompt(system_prompt: str) -> str:
+def opportunity_system_prompt(system_prompt: str, *, decider: bool = False) -> str:
     """Append precedence after all graph/flat policy assembly and before logging."""
     # Operator repairs also store the charter so existing processes can read it
     # immediately. Move that exact copy to the end rather than doubling it.
     base = (system_prompt or "").replace(OPPORTUNITY_CHARTER, "").rstrip()
+    if decider:
+        base = base.replace(_LEGACY_STOP_FORMULA, _EVIDENCED_STOP_FORMULA)
+        base = base.replace("the 2–3 BUY candidates actually weighed", "the first ten supplied contrarian candidates and other BUY candidates actually weighed")
     return base + "\n\n" + OPPORTUNITY_CHARTER

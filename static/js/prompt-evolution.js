@@ -12,6 +12,8 @@ const selectedVersions = {
   FeedbackAgent: [],
   CompanyExtractionAgent: []
 };
+let promptHistoryNeedsRefresh = true;
+let promptHistoryRequest = 0;
 
 // Notify any other open dashboard page (e.g. the Feedback tab) that a new
 // prompt version was activated, so it can refresh its version display
@@ -26,6 +28,7 @@ try {
     const label = (typeof AGENT_LABELS !== 'undefined' && AGENT_LABELS[data.agent]) || data.agent;
     setPromptLabMessage(`${label} v${data.version} was activated from the Policy Graph tab. Candidates drafted against an older version will be refused when applied — run the generation again to build on the current policy.`);
     document.querySelectorAll('.prompt-lab-candidate-tab, [data-candidate-agent]').forEach((el) => el.classList.add('stale'));
+    void loadPromptHistory();
   };
 } catch (_) {
   // BroadcastChannel unsupported — the server-side base_version check still protects the apply.
@@ -341,6 +344,12 @@ function renderTimeline(agentType, entries) {
 }
 
 async function loadPromptHistory() {
+  const request = ++promptHistoryRequest;
+  if (document.getElementById('promptTimelineCard')?.hidden) {
+    promptHistoryNeedsRefresh = true;
+    return;
+  }
+  promptHistoryNeedsRefresh = false;
   const loadingEl = document.getElementById('historyLoading');
   const columnsEl = document.getElementById('timelineColumns');
   const errorEl = document.getElementById('historyError');
@@ -352,6 +361,7 @@ async function loadPromptHistory() {
 
   try {
     const data = await apiJSON('/api/prompt-evolution/history');
+    if (request !== promptHistoryRequest) return;
 
     AGENT_TYPES.forEach((agentType) => {
       const entries = Array.isArray(data?.[agentType]) ? data[agentType] : [];
@@ -360,11 +370,63 @@ async function loadPromptHistory() {
 
     setHidden(columnsEl, false);
   } catch (error) {
+    if (request !== promptHistoryRequest) return;
+    promptHistoryNeedsRefresh = true;
     errorEl.textContent = `Failed to load prompt history: ${error.message}`;
     setHidden(errorEl, false);
   } finally {
-    setHidden(loadingEl, true);
+    if (request === promptHistoryRequest) setHidden(loadingEl, true);
   }
+}
+
+function setupPromptLabViews() {
+  const updateTab = document.getElementById('peUpdateTab');
+  const historyTab = document.getElementById('peHistoryTab');
+  const updateView = document.getElementById('peUpdateView');
+  const historyView = document.getElementById('promptTimelineCard');
+  if (!updateTab || !historyTab || !updateView || !historyView) return;
+
+  const tabs = [updateTab, historyTab];
+  function showView(tab) {
+    const showHistory = tab === historyTab;
+    for (const button of tabs) {
+      button.setAttribute('aria-selected', String(button === tab));
+      button.tabIndex = button === tab ? 0 : -1;
+    }
+    updateView.hidden = showHistory;
+    historyView.hidden = !showHistory;
+    if (showHistory && promptHistoryNeedsRefresh) void loadPromptHistory();
+  }
+
+  function selectView(tab) {
+    showView(tab);
+    const url = new URL(window.location.href);
+    url.hash = tab === historyTab ? 'history' : '';
+    window.history.replaceState(window.history.state, '', url);
+  }
+
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => selectView(tab));
+    tab.addEventListener('keydown', (event) => {
+      let next;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        next = tab === updateTab ? historyTab : updateTab;
+      } else if (event.key === 'Home') {
+        next = updateTab;
+      } else if (event.key === 'End') {
+        next = historyTab;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      selectView(next);
+      next.focus();
+    });
+  }
+
+  const showViewFromUrl = () => showView(window.location.hash === '#history' ? historyTab : updateTab);
+  window.addEventListener('hashchange', showViewFromUrl);
+  showViewFromUrl();
 }
 
 function setPromptLabMessage(message) {
@@ -1192,6 +1254,7 @@ function setupBatchPromptLab() {
   const origBtnLabel = btn.textContent;
   let pollTimer = null;
   let activeJobId = null;
+  let pollFailures = 0;
 
   const setRunningUI = (message) => {
     btn.disabled = true;
@@ -1208,14 +1271,23 @@ function setupBatchPromptLab() {
   };
 
   const phaseMessage = (job) => {
+    let phase = job.message || 'Working…';
     if (job.phase === 'feedback') {
-      return job.message || 'Step 1/2 — Running FeedbackAgent…';
-    }
-    if (job.phase === 'generate') {
+      phase = 'Step 1/3 — Refreshing feedback';
+    } else if (job.phase === 'generate') {
       const done = (job.completed_agents || []).length;
-      return `Step 2/2 — Evolving prompts (${done}/3 complete)…`;
+      phase = `Step 2/3 — Drafting prompts (${done}/3 complete)`;
+    } else if (job.phase === 'critique') {
+      phase = `Step 3/3 — Reviewing drafts (${job.reviewed_candidates ?? 0}/${job.total_candidates ?? 3} complete)`;
     }
-    return job.message || 'Working…';
+    const details = [phase];
+    if (job.model) details.push(job.model);
+    if (job.reasoning_effort) details.push(`${job.reasoning_effort} reasoning requested`);
+    if (Number.isFinite(job.started_at)) {
+      const seconds = Math.max(0, Math.floor(Date.now() / 1000 - job.started_at));
+      details.push(`${Math.floor(seconds / 60)}m ${seconds % 60}s elapsed`);
+    }
+    return details.join(' · ');
   };
 
   function renderFinishedJob(job) {
@@ -1232,7 +1304,7 @@ function setupBatchPromptLab() {
       statusEl.style.color = failCount ? '#b26a00' : '#2e7d32';
       statusEl.textContent = `Generated ${successCount}/3 candidates at ${ts}${
         failCount ? ` (${failCount} failed — see tab)` : ''
-      }. Review each tab and approve or reject.`;
+      }. ${successCount ? 'Review each draft before deciding whether to apply it.' : 'Open a failed tab for the reason.'}`;
     }
   }
 
@@ -1244,8 +1316,12 @@ function setupBatchPromptLab() {
   }
 
   async function pollOnce(jobId) {
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await fetch(`/api/prompt-evolution/batch-status/${encodeURIComponent(jobId)}`);
+      const res = await fetch(`/api/prompt-evolution/batch-status/${encodeURIComponent(jobId)}`, {
+        signal: controller.signal, cache: 'no-store',
+      });
       if (res.status === 404) {
         // Job is gone (server restart or TTL). Clear and surface a soft message.
         localStorage.removeItem(LS_JOB_KEY);
@@ -1262,6 +1338,10 @@ function setupBatchPromptLab() {
         throw new Error(`HTTP ${res.status}`);
       }
       const job = await res.json();
+      if (!['running', 'done', 'failed'].includes(job.status)) {
+        throw new Error('Unexpected batch status');
+      }
+      pollFailures = 0;
 
       if (job.status === 'running') {
         setRunningUI(phaseMessage(job));
@@ -1298,17 +1378,25 @@ function setupBatchPromptLab() {
         setIdleUI();
         return;
       }
-      // Unknown status — back off and try again.
-      pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS);
     } catch (err) {
-      // Transient network error — keep polling.
       console.warn('batch-status poll error:', err);
-      pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS * 2);
+      pollFailures += 1;
+      if (pollFailures >= 3) {
+        setIdleUI();
+        btn.textContent = 'Reconnect to batch';
+        if (statusEl) statusEl.textContent = 'Batch status unavailable. Reconnect to check this run.';
+      } else {
+        setRunningUI('Connection interrupted. Reconnecting to this batch…');
+        pollTimer = setTimeout(() => pollOnce(jobId), POLL_INTERVAL_MS * 2);
+      }
+    } finally {
+      clearTimeout(requestTimeout);
     }
   }
 
   function startPolling(jobId) {
     activeJobId = jobId;
+    pollFailures = 0;
     localStorage.setItem(LS_JOB_KEY, jobId);
     stopPolling();
     pollOnce(jobId);
@@ -1351,12 +1439,20 @@ function setupBatchPromptLab() {
 
   btn.addEventListener('click', async () => {
     clearBatchAlerts();
+    if (activeJobId) {
+      setRunningUI('Reconnecting to this batch…');
+      startPolling(activeJobId);
+      return;
+    }
     setHidden(resultsEl, true);
     setRunningUI('Queuing batch job…');
+    const controller = new AbortController();
+    const requestTimeout = setTimeout(() => controller.abort(), 10000);
     try {
       const data = await apiJSON('/api/prompt-evolution/refresh-and-generate-all', {
         method: 'POST',
         body: JSON.stringify({}),
+        signal: controller.signal,
       });
       if (data?.error || !data?.job_id) throw new Error(data?.error || 'No job_id returned.');
       startPolling(data.job_id);
@@ -1367,6 +1463,8 @@ function setupBatchPromptLab() {
         statusEl.style.color = '#c62828';
         statusEl.textContent = '';
       }
+    } finally {
+      clearTimeout(requestTimeout);
     }
   });
 
@@ -1374,8 +1472,8 @@ function setupBatchPromptLab() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  setupPromptLabViews();
   loadPerformanceContext();
-  loadPromptHistory();
   setupPromptLab();
   setupBatchPromptLab();
 

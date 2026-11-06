@@ -166,6 +166,15 @@ def test_stored_charter_is_moved_after_learned_text_without_duplication():
     assert opportunity_system_prompt(out) == out
 
 
+def test_legacy_priced_kill_formula_is_corrected_in_the_served_decider_prompt():
+    base = ("K is the higher of the supplied 20-day MA/stated support and entry × 0.97; "
+            "D must be positive and no more than 1.3%. ⟨DA.directives.strategy.priced_kill⟩")
+    served = opportunity_system_prompt(base, decider=True)
+    assert "K is a supplied, evidenced support or invalidation level below entry" in served
+    assert "higher of the supplied" not in served
+    assert "no more than 1.3%. ⟨DA.directives.strategy.priced_kill⟩" in served
+
+
 @pytest.mark.parametrize("source", ["Stored custom feedback template", "Code default feedback template"])
 def test_every_feedback_api_path_appends_charter_after_identity_and_reasoning(source):
     method = _method("feedback_agent.py", "_build_feedback_api_params", {

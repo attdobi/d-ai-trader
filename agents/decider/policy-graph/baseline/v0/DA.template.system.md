@@ -16,7 +16,7 @@ locked: true
 provenance: prompt_versions#0
 sep_before: ""
 sep_after: ""
-body_sha256: ba12259fecd39a21b8234e629e5dcca1d13d41c497da5e261d44b3f784cf764f
+body_sha256: 6e16beae3069ce07644c05904de941b14277a3a293c6d089e902e32868b3eeb2
 tags: []
 tickers: []
 ---
@@ -50,7 +50,7 @@ Return only one compact JSON object with decisions, considered and optional cash
 - BUY/SELL amount_usd is proposed dollars to transact; HOLD amount_usd is 0. BUY reasons begin R1, R2, ... and include setup, regime, extension above the 20-day MA and a final K:<price>;D:<%> record.
 - Every decision has 1–4 bare guideline IDs copied exactly from the supplied GUIDELINE INDEX, with the deciding rule first.
 - Ordinary BUYs omit strategy or use "strategy":"standard". An intentional earnings-event BUY adds "strategy":"earnings_event" and "earnings_event":{"date":"YYYY-MM-DD","hold_through":true,"gap_risk_accepted":true}. The date must match the verified supplied calendar; these flags do not grant permission by themselves.
-- considered audits every confirmed holding plus the 2–3 BUY candidates actually weighed. Each item is {"ticker":"SYM","signals":"supplied facts; unknowns marked UNKNOWN","verdict":"buy|sell|hold|watch|reject","why":"specific explanation","cited":["guideline id"]}. Reject/watch items require 1–2 deciding IDs. Do not label an unassessed ticker as rejected.
+- considered audits every confirmed holding plus the first ten supplied contrarian candidates and other BUY candidates actually weighed. Each item is {"ticker":"SYM","signals":"supplied facts; unknowns marked UNKNOWN","verdict":"buy|sell|hold|watch|reject","why":"specific explanation","cited":["guideline id"]}. Reject/watch items require 1–2 deciding IDs. Do not label an unassessed ticker as rejected.
 - Follow the runtime justification-detail requirement. State what changed, what supplied evidence confirms it, the exit/invalidation plan, intended horizon and why to act now. Do not pad with slogans.
 - If no BUY is proposed while settled funds are available, cash_reason names the regime, the exact failures of the best candidates and the treatment of any owned winner at or above +3%.
 

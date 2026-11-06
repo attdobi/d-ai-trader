@@ -34,7 +34,10 @@ Public API:
 import os
 import time
 import logging
+import math
 import statistics
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +75,8 @@ _DEFAULT_UNIVERSE = [
     "RUN", "CHPT", "AI", "SOUN",
 ]
 
-_BENCHMARKS = ("SPY", "QQQ")
+_BENCHMARKS = ("SPY", "QQQ", "SMH")
+_MARKET_TIMEZONE = ZoneInfo("America/New_York")
 
 
 def _universe():
@@ -103,10 +107,40 @@ def _rsi(closes, period=14):
 _CACHE = {"ts": 0.0, "data": [], "regime": None}
 
 
-def _bench_stats(df, sym, multi):
+def _session_snapshot(bars, closes, session_date):
+    """Use the current session's observed daily bar, which can be incomplete."""
+    if len(closes) < 2 or closes.index[-1].date() != session_date:
+        return {}
+    try:
+        bar = bars.loc[closes.index[-1]]
+        opening, low, high = (float(bar[name]) for name in ("Open", "Low", "High"))
+        price, previous = float(closes.iloc[-1]), float(closes.iloc[-2])
+    except (KeyError, TypeError, ValueError):
+        return {}
+    if not all(math.isfinite(n) and n > 0 for n in (opening, low, high, price, previous)):
+        return {}
+    if not (low <= min(opening, price) <= max(opening, price) <= high and high > low):
+        return {}
+    from_low = (price / low - 1) * 100
+    range_position = (price - low) / (high - low) * 100
+    return {
+        "session_date": session_date.isoformat(),
+        "session_low": round(low, 4),
+        "session_open": round(opening, 4),
+        "session_high": round(high, 4),
+        "session_from_low_pct": round(from_low, 2),
+        "session_range_pct": round(range_position, 1),
+        "session_day_pct": round((price / previous - 1) * 100, 2),
+        "session_low_distance_pct": round((price - low) / price * 100, 3),
+        "session_reclaim": low < opening <= price and from_low >= 0.5 and range_position >= 50,
+    }
+
+
+def _bench_stats(df, sym, multi, session_date):
     """{'price','vs20d','r5'} for a benchmark symbol in the batched download."""
     try:
-        closes = (df[sym] if multi else df)["Close"].dropna()
+        bars = df[sym] if multi else df
+        closes = bars["Close"].dropna()
         if len(closes) < 21:
             return None
         price = float(closes.iloc[-1])
@@ -116,6 +150,7 @@ def _bench_stats(df, sym, multi):
             "vs20d": (price / sma20 - 1) * 100 if sma20 else 0.0,
             "r5": (price / float(closes.iloc[-6]) - 1) * 100,
             "r20": (price / float(closes.iloc[-21]) - 1) * 100,
+            **_session_snapshot(bars, closes, session_date),
         }
     except Exception:
         return None
@@ -153,26 +188,47 @@ def _regime_label(spy, qqq, leaders):
     return "MIXED", "indexes/leaders not aligned"
 
 
-def get_contrarian_candidates(limit=None, exclude=None):
+def get_contrarian_candidates(limit=None, exclude=None, *, include_regime=False):
     """Return ranked non-extended front-run candidates (pull-backs / oversold reversals).
 
     `exclude`: tickers to drop (re-entry quarantine — names exited within the last 2
     sessions). Cached for DAI_CONTRARIAN_CACHE_MIN minutes so it doesn't re-download
     every cycle. Best-effort: any failure returns the last good cache (or []) so the
     decider never breaks.
+
+    With include_regime, return (candidates, regime) from the same batch.
     """
     if limit is None:
         limit = int(os.getenv("DAI_CONTRARIAN_LIMIT", "10"))
     if os.getenv("DAI_CONTRARIAN_ENABLED", "1") not in ("1", "true", "True"):
-        return []
+        return ([], None) if include_regime else []
     excluded = {str(t).upper() for t in (exclude or []) if t}
-
-    def _finish(cands):
-        return [c for c in cands if c["ticker"] not in excluded][:limit]
-
     cache_min = float(os.getenv("DAI_CONTRARIAN_CACHE_MIN", "25"))
     now = time.time()
-    if _CACHE["data"] and (now - _CACHE["ts"]) < cache_min * 60:
+    session_date = datetime.fromtimestamp(now, _MARKET_TIMEZONE).date()
+
+    def _finish(cands, *, stale=False):
+        eligible = [c for c in cands if c["ticker"] not in excluded]
+        if stale:
+            # The legacy screen can fall back to cached candidates. Strip recovery
+            # evidence so an old low cannot be presented as a current session low.
+            eligible = [dict({k: v for k, v in c.items() if not k.startswith("session_")},
+                             snapshot_stale=True) for c in eligible]
+        elif (_CACHE["regime"] or {}).get("label") in ("RISK-OFF", "MIXED"):
+            reversals = [c for c in eligible if c.get("session_reclaim")
+                         and c.get("session_date") == session_date.isoformat()
+                         and c["setup"] == "oversold-reversal"]
+            reversals.sort(key=lambda c: (0 < c["session_low_distance_pct"] <= 1.3, c["score"]), reverse=True)
+            priority = reversals[:2]
+            prioritized = {c["ticker"] for c in priority}
+            eligible = priority + [c for c in eligible if c["ticker"] not in prioritized]
+        selected = eligible[:limit]
+        if include_regime:
+            return selected, None if stale else _CACHE["regime"]
+        return selected
+
+    if (_CACHE["regime"] and (now - _CACHE["ts"]) < cache_min * 60
+            and datetime.fromtimestamp(_CACHE["ts"], _MARKET_TIMEZONE).date() == session_date):
         return _finish(_CACHE["data"])
 
     universe = _universe()
@@ -189,8 +245,9 @@ def get_contrarian_candidates(limit=None, exclude=None):
             group_by="ticker", auto_adjust=True, progress=False, threads=True,
         )
 
-        spy = _bench_stats(df, "SPY", multi)
-        qqq = _bench_stats(df, "QQQ", multi)
+        spy = _bench_stats(df, "SPY", multi, session_date)
+        qqq = _bench_stats(df, "QQQ", multi, session_date)
+        smh = _bench_stats(df, "SMH", multi, session_date)
         spy_week = spy["r5"] if spy else None
         spy_month = spy["r20"] if spy else None
 
@@ -216,6 +273,7 @@ def get_contrarian_candidates(limit=None, exclude=None):
                 hi20 = float(highs.iloc[-20:].max())
                 pullback = (hi20 - price) / hi20 * 100 if hi20 else 0.0
                 rsi = _rsi([float(x) for x in closes.values])
+                session = _session_snapshot(sub, closes, session_date)
 
                 # Momentum-leader cohort: names that WERE leading a week ago (1mo return measured
                 # 5 sessions back >= +15%). Defining leaders on today's 1mo return would drop the
@@ -232,7 +290,7 @@ def get_contrarian_candidates(limit=None, exclude=None):
 
                 # Relative volume vs the trailing 20-session average (participation).
                 rel_volume = None
-                vols = sub["Volume"].dropna()
+                vols = sub["Volume"].dropna() if "Volume" in sub else ()
                 if len(vols) > 1:
                     latest_vol = float(vols.iloc[-1])
                     avg_vol = float(vols.iloc[-21:-1].mean()) if len(vols) > 20 else float(vols.iloc[:-1].mean())
@@ -252,8 +310,9 @@ def get_contrarian_candidates(limit=None, exclude=None):
                     # Reward proximity to the 20d MA (a priced, near stop) instead of raw
                     # month return, which rewarded the most extended names.
                     score = (month - pullback + (60 - abs(rsi - 48))) - 3.0 * max(0.0, dist_sma)
-                # 2) Oversold name turning up today.
-                elif rsi < 38 and day > 0.0 and month > -30:
+                # An oversold name can recover within the session while still red
+                # versus yesterday. Require observed recovery for that path.
+                elif rsi < 38 and month > -30 and (day > 0.0 or session.get("session_reclaim")):
                     setup = "oversold-reversal"
                     score = (42 - rsi) + day * 2
 
@@ -271,6 +330,7 @@ def get_contrarian_candidates(limit=None, exclude=None):
                     "rs5_vs_spy": rs5, "rs20_vs_spy": rs20,
                     "rel_volume": rel_volume,
                     "ext_tag": ext_tag,
+                    **session,
                 })
             except Exception:
                 continue
@@ -284,7 +344,7 @@ def get_contrarian_candidates(limit=None, exclude=None):
             }
         label, why = _regime_label(spy, qqq, leader_stats)
         regime = {
-            "label": label, "why": why, "spy": spy, "qqq": qqq, "leaders": leader_stats,
+            "label": label, "why": why, "spy": spy, "qqq": qqq, "smh": smh, "leaders": leader_stats,
             "as_of": time.strftime("%Y-%m-%d %H:%M"),
         }
 
@@ -297,14 +357,13 @@ def get_contrarian_candidates(limit=None, exclude=None):
         return _finish(candidates)
     except Exception as exc:
         logger.warning("Contrarian screen failed (%s); using cache", exc)
-        return _finish(_CACHE["data"]) if _CACHE["data"] else []
+        return _finish(_CACHE["data"], stale=True)
 
 
 def get_index_regime():
-    """Latest regime read (computed alongside the screen; triggers a screen if cold)."""
-    if _CACHE["regime"] is None or not _CACHE["data"]:
-        get_contrarian_candidates()
-    return _CACHE["regime"]
+    """Read the regime from the same fresh batch as the candidates."""
+    _, regime = get_contrarian_candidates(include_regime=True)
+    return regime
 
 
 def format_index_regime(regime):
@@ -321,9 +380,18 @@ def format_index_regime(regime):
         f"{lead['share_above_20d']*100:.0f}% still above their 20d MA"
         if lead else "momentum leaders: n/a"
     )
+    recovery = []
+    for key in ("spy", "qqq", "smh"):
+        snapshot = regime.get(key) or {}
+        if snapshot.get("session_date"):
+            reclaim = "open reclaimed" if snapshot["session_reclaim"] else "reclaim unconfirmed"
+            recovery.append(f"{key.upper()} {snapshot['session_day_pct']:+.2f}% vs prior close, "
+                            f"+{snapshot['session_from_low_pct']:.2f}% off low, {reclaim} ({snapshot['session_date']})")
+    recovery_text = " | ".join(recovery) or "unavailable"
     return (
         f"# INDEX REGIME: {regime['label']} ({regime['why']}) | {_b('SPY', regime.get('spy'))} | "
         f"{_b('QQQ', regime.get('qqq'))} | {lead_txt}\n"
+        f"# SESSION RECOVERY (observed daily bars, may be incomplete): {recovery_text}\n"
         "# DEPLOYMENT RULE BY REGIME — RISK-ON: full rails, up to 3 new BUYs; extension ≤5% above 20d MA at full size, "
         "5-8% at half size. MIXED: at most 2 new BUYs at half size, extension ≤5% only. RISK-OFF: evaluate selective "
         "opportunities; at most 1 new BUY at half size, only an oversold reversal or a name ≤3% above its 20d MA; harvest at +2%; "
@@ -349,6 +417,8 @@ def format_contrarian_watchlist(candidates, quarantined=None):
         "# K must be a genuinely evidenced support/invalidation price BELOW entry. Compute positive D = (entry - K) / entry × 100.",
         "# The active D cap still applies. Without a justified below-entry K inside that cap, WATCH/PASS; do not force a BUY.",
         "# The printed 3% reference is not permission or an exception to the active cap. Never invent a tighter stop merely to pass the gate.",
+        "# Session recovery can occur while the day is still red. A reclaim and the observed low are evidence to inspect, never an automatic stop or BUY.",
+        "# A stale snapshot needs refreshed price and support evidence before entry.",
         "# EXTENDED = 5-8% above the 20d MA: half size and only in RISK-ON. Never buy a name on the QUARANTINE line.",
     ]
     for c in candidates:
@@ -360,6 +430,13 @@ def format_contrarian_watchlist(candidates, quarantined=None):
         rel_vol = c.get("rel_volume")
         vol_text = f" | rel-vol {rel_vol:.1f}× 20d-avg" if rel_vol else ""
         tag = f" | {c['ext_tag']}" if c.get("ext_tag") else ""
+        if c.get("snapshot_stale"):
+            tag += " | STALE SCREEN SNAPSHOT"
+        if c.get("session_date"):
+            reclaim = "open reclaimed" if c["session_reclaim"] else "reclaim unconfirmed"
+            tag += (f" | session {c['session_date']}: low ${c['session_low']:.4f}, open ${c['session_open']:.4f}, "
+                    f"high ${c['session_high']:.4f}, +{c['session_from_low_pct']:.2f}% off low, {reclaim}, "
+                    f"distance to observed low {c['session_low_distance_pct']:.3f}%")
         price_text = (
             f"${c['price']:.2f} | 20d MA ${c['sma20']:.2f} | 3% reference ${c['kill_3pct']:.2f} | "
             if c.get("price") and c.get("sma20") else ""

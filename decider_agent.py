@@ -2825,9 +2825,11 @@ OUTPUT (STRICT)
         "# INDEX REGIME: UNAVAILABLE this cycle — treat as MIXED: at most 2 new BUYs at half size, "
         "extension ≤5% above the 20d MA only, priced kill required."
     )
+    _contra, _quarantined, _regime = [], set(), None
     try:
-        from contrarian_screener import get_index_regime, format_index_regime
-        _regime = get_index_regime()
+        from contrarian_screener import get_contrarian_candidates, format_index_regime
+        _quarantined = recently_exited_tickers(config_hash)
+        _contra, _regime = get_contrarian_candidates(exclude=_quarantined, include_regime=True)
         if _regime:
             index_regime_text = format_index_regime(_regime)
             print(f"🌡️  Index regime: {_regime.get('label')} ({_regime.get('why')})")
@@ -2890,11 +2892,8 @@ OUTPUT (STRICT)
     # extended movers). Tickers exited within the last 2 sessions are QUARANTINED — removed
     # from the candidates and named in the block — because same-ticker re-entry within 3 days
     # was the largest measured leak (Jul-Sep 2026). Best-effort — never breaks the decider.
-    _contra = []  # also feeds each decision's news_context ("where did this candidate come from")
     try:
-        from contrarian_screener import get_contrarian_candidates, format_contrarian_watchlist
-        _quarantined = recently_exited_tickers(config_hash)
-        _contra = get_contrarian_candidates(exclude=_quarantined)
+        from contrarian_screener import format_contrarian_watchlist
         _contra_block = format_contrarian_watchlist(_contra, quarantined=_quarantined)
         if _contra_block:
             prompt += "\n\n" + _contra_block
@@ -3068,9 +3067,9 @@ OUTPUT (STRICT)
             print(f"⚠️  Could not log the policy router decision: {_rlog_exc}")
     prompt += (
         "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
-        f" If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value:,.2f} and min buy ${MIN_BUY_AMOUNT:,.0f}),"
-        " you must add a top-level \"cash_reason\" that (a) states why no BUY (caps, cooldown, min-buy unmet, lack of edge, etc.)"
-        " and (b) confirms that every ≥+3% winner was harvested or explicitly names any retained winner with its % gain and fresh catalyst justification."
+        f" Whenever you output zero BUY actions, add a top-level \"cash_reason\". Lead with the binding blocker (settled funds ${settled_cash_value:,.2f}, minimum ticket ${MIN_BUY_AMOUNT:,.0f},"
+        " whole-share feasibility, cooldown, or the best candidate's specific setup/stop failure). Give the regime afterward as sizing context."
+        " Confirm that every ≥+3% winner was harvested or name any retained winner with its % gain and fresh catalyst justification."
         " Keep the object compact: {\"decisions\":[...], \"considered\":[...], \"cash_reason\":\"...\"}."
     )
     prompt += (
@@ -3085,8 +3084,9 @@ OUTPUT (STRICT)
         "\n\nCONSIDERED SETUPS (transparency — REQUIRED every cycle, even when you BUY/SELL nothing):"
         " Add a top-level \"considered\" array that audits BOTH sides of this cycle:"
         " (1) the SELL/HOLD evaluation of EACH position you currently hold — verdict \"hold\" or \"sell\","
-        " with the reason you kept or cut it; and (2) the 2-3 best BUY candidates you weighed"
-        " (your R1..Rk ranked names plus any you seriously rejected). Each element MUST be"
+        " with the reason you kept or cut it; and (2) each of the first ten supplied contrarian candidates."
+        " Evaluate session-reclaim candidates first and give each candidate one compact buy, watch or reject reason."
+        " Include any other ranked BUY candidates you weighed. Each element MUST be"
         " {\"ticker\":\"SYM\", \"signals\":\"day/mo %chg, RS vs SPY, RSI, 20d-MA/range position, volume — concrete numbers\","
         " \"verdict\":\"buy\"|\"sell\"|\"hold\"|\"watch\"|\"reject\", \"why\":\"one specific, auditable sentence; for rejects/sells name the exact disqualifier"
         " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\","
@@ -3195,7 +3195,7 @@ OUTPUT (STRICT)
 
     # Both graph and flat policy paths meet here. Keep the code-owned charter in
     # the exact system prompt persisted for replay and sent to the model.
-    system_prompt = opportunity_system_prompt(system_prompt)
+    system_prompt = opportunity_system_prompt(system_prompt, decider=True)
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
     prompt_preview_tail = int(os.getenv("DAI_PROMPT_DEBUG_TAIL", "5000"))

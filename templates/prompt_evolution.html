@@ -1,29 +1,145 @@
 {% extends "base.html" %}
 
-{% block title %}Prompt Evolution{% endblock %}
+{% block title %}Prompt Lab{% endblock %}
 
 {% block content %}
 <div class="pe-page">
-  <section class="pe-card" id="performanceContextCard">
-    <h1>Prompt Evolution</h1>
-    <p class="pe-subtitle">Performance context for the last 7 days and recent market headlines.</p>
-
-    <div id="performanceLoading" class="pe-loading">
-      <span class="pe-spinner" aria-hidden="true"></span>
-      <span>Loading performance context…</span>
+  <header class="pe-lab-heading">
+    <h1>Prompt Lab</h1>
+    <div class="pe-lab-nav" role="tablist" aria-label="Prompt Lab views">
+      <button id="peUpdateTab" type="button" role="tab" aria-selected="true" aria-controls="peUpdateView">Update prompts</button>
+      <button id="peHistoryTab" type="button" role="tab" aria-selected="false" aria-controls="promptTimelineCard" tabindex="-1">Version history</button>
     </div>
+  </header>
 
-    <div id="performanceContent" class="pe-hidden">
-      <div id="performanceStats" class="pe-stats-grid"></div>
+  <div class="pe-lab-view" id="peUpdateView" role="tabpanel" aria-labelledby="peUpdateTab">
+    <section class="pe-card" id="promptLabCard">
+      <h2>Generate prompt updates</h2>
+      <p class="pe-subtitle">Refresh feedback, draft updates for three agents, then review and approve prompt fields for each agent.</p>
+      <p class="pe-lab-related">For a focused guideline edit, <a href="/policy-graph#pgProposalCard">draft a proposal in Policy Graph</a>.</p>
 
-      <h3>Recent Headlines</h3>
-      <ul id="recentHeadlines" class="pe-headlines"></ul>
-    </div>
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 6px;">
+        <button id="batchGenerateBtn" class="pe-btn" type="button" style="font-size: 1.05em; padding: 10px 18px;">🚀 Refresh Feedback &amp; Generate All</button>
+        <span id="batchGenerateHint" style="color: #888; font-size: 0.9em;">Feedback, drafting and review can take several minutes.</span>
+      </div>
 
-    <div id="performanceError" class="pe-error pe-hidden"></div>
-  </section>
+      <div id="batchStatus" class="pe-empty" role="status" style="font-size: 0.9em; color: #888;">No batch run yet this session.</div>
+      <div id="batchError" class="pe-error pe-hidden"></div>
+      <div id="batchSuccess" class="pe-success pe-hidden"></div>
 
-  <section class="pe-card" id="promptTimelineCard">
+      <div id="batchFeedbackSummary" class="pe-feedback-refresh pe-hidden">
+        <strong>Feedback Refresh:</strong> <span id="batchFeedbackSummaryText"></span>
+      </div>
+
+      <div id="batchResults" class="pe-hidden">
+        <!-- Tab strip -->
+        <div id="batchTabs" role="tablist" style="display: flex; gap: 4px; border-bottom: 2px solid #ddd; margin-top: 16px;"></div>
+
+        <!-- Tab panels (one per agent, populated by JS) -->
+        <div id="batchPanels"></div>
+      </div>
+
+      <!-- ===================== ADVANCED (legacy single-agent flow) ===================== -->
+      <details id="promptLabAdvanced" style="margin-top: 28px; border-top: 1px solid #e5e5e5; padding-top: 14px;">
+        <summary style="cursor: pointer; font-weight: 600; color: #555;">⚙️ Advanced — single-agent workflow</summary>
+
+        <p class="pe-subtitle" style="margin-top: 10px;">Manually drive one agent at a time. Useful for targeted tweaks or when the batch flow fails for one agent.</p>
+
+        <div class="pe-form-grid">
+          <div class="pe-field">
+            <label for="promptLabAgentType">Agent Type</label>
+            <select id="promptLabAgentType" class="pe-select">
+              <option value="SummarizerAgent">Summarizer</option>
+              <option value="DeciderAgent">Decider</option>
+              <option value="FeedbackAgent">Feedback</option>
+              <option value="CompanyExtractionAgent">Company extraction</option>
+            </select>
+          </div>
+          <div class="pe-field" style="justify-content: flex-end; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+            <button id="loadActiveBtn" class="pe-btn secondary" type="button">📋 Load Active Version</button>
+            <button id="refreshFeedbackBtn" class="pe-btn secondary" type="button" title="Run the FeedbackAgent against the latest trade outcomes so the next 'Generate' uses fresh feedback. Does NOT touch existing prompts.">🔄 Refresh Feedback</button>
+            <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
+          </div>
+        </div>
+
+        <section id="promptContractPanel" class="pe-contract-panel" aria-live="polite">
+          <div class="pe-contract-heading"><strong>What this agent actually reads</strong><a id="promptRuntimeLink" href="#" hidden target="_blank" rel="noopener">View assembled runtime prompt ↗</a></div>
+          <p id="promptRuntimeNote">Select an agent to inspect its runtime field usage.</p>
+          <p class="pe-contract-help">System: role and precedence. Guidelines: approved decisions and limits. User template: this cycle’s supplied inputs. Soul: identity and judgment. Memory: observations subordinate to current policy.</p>
+        </section>
+
+        <div id="feedbackRefreshStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">Feedback not refreshed this session — Generate will use the most recent stored feedback.</div>
+        <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
+        <div id="promptLabError" class="pe-error pe-hidden"></div>
+        <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
+
+        <div id="promptLabResults" class="pe-hidden">
+          <div class="pe-field">
+            <label>Reasoning</label>
+            <div id="generatedReasoning" class="pe-reasoning"></div>
+          </div>
+
+          <div class="pe-form-grid">
+            <div class="pe-field">
+              <label for="generatedSystemPrompt">System Prompt <span class="pe-usage-badge" data-contract-field="system_prompt">Usage pending</span></label>
+              <p class="pe-field-usage" data-contract-note="system_prompt"></p>
+              <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
+            </div>
+            <div class="pe-field" style="grid-column: 1 / -1;">
+              <label for="generatedStrategyDirectives">Guidelines / Strategy Directives <span class="pe-usage-badge" data-contract-field="strategy_directives">Usage pending</span></label>
+              <p class="pe-field-usage" data-contract-note="strategy_directives"></p>
+              <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Approved guidelines, actions, limits and exceptions. See the runtime usage note above."></textarea>
+            </div>
+            <div class="pe-field" style="grid-column: 1 / -1;">
+              <label for="generatedSoul">Soul / Identity <span class="pe-usage-badge" data-contract-field="soul">Usage pending</span></label>
+              <p class="pe-field-usage" data-contract-note="soul"></p>
+              <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent mission, evidence standards and judgment style; field usage depends on the runtime contract."></textarea>
+            </div>
+            <div class="pe-field" style="grid-column: 1 / -1;">
+              <label for="generatedMemory">Memory / Learned Evidence <span class="pe-usage-badge" data-contract-field="memory">Usage pending</span></label>
+              <p class="pe-field-usage" data-contract-note="memory"></p>
+              <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Historical observations and reviewed lessons, subordinate to approved guidelines."></textarea>
+            </div>
+            <div class="pe-field">
+              <label for="generatedUserPrompt">User Prompt Template <span class="pe-usage-badge" data-contract-field="user_prompt_template">Usage pending</span></label>
+              <p class="pe-field-usage" data-contract-note="user_prompt_template"></p>
+              <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
+            </div>
+          </div>
+
+          <div class="pe-field">
+            <label for="promptDescription">Description</label>
+            <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
+          </div>
+
+          <div style="margin-top: 14px;">
+            <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="pe-card" id="performanceContextCard">
+      <h2>Performance context</h2>
+      <p class="pe-subtitle">Performance context for the last 7 days and recent market headlines.</p>
+
+      <div id="performanceLoading" class="pe-loading">
+        <span class="pe-spinner" aria-hidden="true"></span>
+        <span>Loading performance context…</span>
+      </div>
+
+      <div id="performanceContent" class="pe-hidden">
+        <div id="performanceStats" class="pe-stats-grid"></div>
+
+        <h3>Recent Headlines</h3>
+        <ul id="recentHeadlines" class="pe-headlines"></ul>
+      </div>
+
+      <div id="performanceError" class="pe-error pe-hidden"></div>
+    </section>
+  </div>
+
+  <section class="pe-card" id="promptTimelineCard" role="tabpanel" aria-labelledby="peHistoryTab" tabindex="0" hidden>
     <h2>Prompt Version Timeline</h2>
     <p class="pe-subtitle">Select two versions in the same column to compare unified diffs.</p>
 
@@ -71,115 +187,24 @@
       </div>
     </div>
   </section>
-
-  <section class="pe-card" id="promptLabCard">
-    <h2>Prompt Lab</h2>
-    <p class="pe-subtitle">Refresh feedback → regenerate all three agents → review diffs → approve or reject per agent.</p>
-
-    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 6px;">
-      <button id="batchGenerateBtn" class="pe-btn" type="button" style="font-size: 1.05em; padding: 10px 18px;">🚀 Refresh Feedback &amp; Generate All</button>
-      <span id="batchGenerateHint" style="color: #888; font-size: 0.9em;">Runs FeedbackAgent, then evolves all three prompts in parallel (~10-30s).</span>
-    </div>
-
-    <div id="batchStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">No batch run yet this session.</div>
-    <div id="batchError" class="pe-error pe-hidden"></div>
-    <div id="batchSuccess" class="pe-success pe-hidden"></div>
-
-    <div id="batchFeedbackSummary" class="pe-hidden" style="margin: 12px 0; padding: 10px 14px; background: #f4f7fb; border-left: 3px solid #4a86e8; border-radius: 4px; font-size: 0.92em;">
-      <strong>Feedback Refresh:</strong> <span id="batchFeedbackSummaryText"></span>
-    </div>
-
-    <div id="batchResults" class="pe-hidden">
-      <!-- Tab strip -->
-      <div id="batchTabs" role="tablist" style="display: flex; gap: 4px; border-bottom: 2px solid #ddd; margin-top: 16px;"></div>
-
-      <!-- Tab panels (one per agent, populated by JS) -->
-      <div id="batchPanels"></div>
-    </div>
-
-    <!-- ===================== ADVANCED (legacy single-agent flow) ===================== -->
-    <details id="promptLabAdvanced" style="margin-top: 28px; border-top: 1px solid #e5e5e5; padding-top: 14px;">
-      <summary style="cursor: pointer; font-weight: 600; color: #555;">⚙️ Advanced — single-agent workflow</summary>
-
-      <p class="pe-subtitle" style="margin-top: 10px;">Manually drive one agent at a time. Useful for targeted tweaks or when the batch flow fails for one agent.</p>
-
-      <div class="pe-form-grid">
-        <div class="pe-field">
-          <label for="promptLabAgentType">Agent Type</label>
-          <select id="promptLabAgentType" class="pe-select">
-            <option value="SummarizerAgent">Summarizer</option>
-            <option value="DeciderAgent">Decider</option>
-            <option value="FeedbackAgent">Feedback</option>
-            <option value="CompanyExtractionAgent">Company extraction</option>
-          </select>
-        </div>
-        <div class="pe-field" style="justify-content: flex-end; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-          <button id="loadActiveBtn" class="pe-btn secondary" type="button">📋 Load Active Version</button>
-          <button id="refreshFeedbackBtn" class="pe-btn secondary" type="button" title="Run the FeedbackAgent against the latest trade outcomes so the next 'Generate' uses fresh feedback. Does NOT touch existing prompts.">🔄 Refresh Feedback</button>
-          <button id="generatePromptBtn" class="pe-btn" type="button">🧪 Generate Improved Prompt</button>
-        </div>
-      </div>
-
-      <section id="promptContractPanel" class="pe-contract-panel" aria-live="polite">
-        <div class="pe-contract-heading"><strong>What this agent actually reads</strong><a id="promptRuntimeLink" href="#" hidden target="_blank" rel="noopener">View assembled runtime prompt ↗</a></div>
-        <p id="promptRuntimeNote">Select an agent to inspect its runtime field usage.</p>
-        <p class="pe-contract-help">System: role and precedence. Guidelines: approved decisions and limits. User template: this cycle’s supplied inputs. Soul: identity and judgment. Memory: observations subordinate to current policy.</p>
-      </section>
-
-      <div id="feedbackRefreshStatus" class="pe-empty" style="font-size: 0.9em; color: #888;">Feedback not refreshed this session — Generate will use the most recent stored feedback.</div>
-      <div id="promptLabMessage" class="pe-empty">Choose an agent and generate an improved prompt.</div>
-      <div id="promptLabError" class="pe-error pe-hidden"></div>
-      <div id="promptLabSuccess" class="pe-success pe-hidden"></div>
-
-      <div id="promptLabResults" class="pe-hidden">
-        <div class="pe-field">
-          <label>Reasoning</label>
-          <div id="generatedReasoning" class="pe-reasoning"></div>
-        </div>
-
-        <div class="pe-form-grid">
-          <div class="pe-field">
-            <label for="generatedSystemPrompt">System Prompt <span class="pe-usage-badge" data-contract-field="system_prompt">Usage pending</span></label>
-            <p class="pe-field-usage" data-contract-note="system_prompt"></p>
-            <textarea id="generatedSystemPrompt" class="pe-textarea" spellcheck="false"></textarea>
-          </div>
-          <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedStrategyDirectives">Guidelines / Strategy Directives <span class="pe-usage-badge" data-contract-field="strategy_directives">Usage pending</span></label>
-            <p class="pe-field-usage" data-contract-note="strategy_directives"></p>
-            <textarea id="generatedStrategyDirectives" class="pe-textarea" spellcheck="false" placeholder="Approved guidelines, actions, limits and exceptions. See the runtime usage note above."></textarea>
-          </div>
-          <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedSoul">Soul / Identity <span class="pe-usage-badge" data-contract-field="soul">Usage pending</span></label>
-            <p class="pe-field-usage" data-contract-note="soul"></p>
-            <textarea id="generatedSoul" class="pe-textarea" spellcheck="false" rows="10" placeholder="Agent mission, evidence standards and judgment style; field usage depends on the runtime contract."></textarea>
-          </div>
-          <div class="pe-field" style="grid-column: 1 / -1;">
-            <label for="generatedMemory">Memory / Learned Evidence <span class="pe-usage-badge" data-contract-field="memory">Usage pending</span></label>
-            <p class="pe-field-usage" data-contract-note="memory"></p>
-            <textarea id="generatedMemory" class="pe-textarea" spellcheck="false" rows="8" placeholder="Historical observations and reviewed lessons, subordinate to approved guidelines."></textarea>
-          </div>
-          <div class="pe-field">
-            <label for="generatedUserPrompt">User Prompt Template <span class="pe-usage-badge" data-contract-field="user_prompt_template">Usage pending</span></label>
-            <p class="pe-field-usage" data-contract-note="user_prompt_template"></p>
-            <textarea id="generatedUserPrompt" class="pe-textarea" spellcheck="false"></textarea>
-          </div>
-        </div>
-
-        <div class="pe-field">
-          <label for="promptDescription">Description</label>
-          <input id="promptDescription" class="pe-input" type="text" placeholder="Describe what changed in this version" />
-        </div>
-
-        <div style="margin-top: 14px;">
-          <button id="applyPromptBtn" class="pe-btn secondary" type="button">✅ Apply as New Version</button>
-        </div>
-      </div>
-    </details>
-  </section>
 </div>
 
 <style>
+.pe-lab-heading { display:flex; align-items:center; flex-wrap:wrap; gap:12px 24px; }
+.pe-lab-heading h1 { margin:0; }
+.pe-lab-nav { display:flex; flex-wrap:wrap; gap:6px; padding:4px; background:var(--surface); border:1px solid var(--card-border); border-radius:12px; }
+.pe-lab-nav button { padding:8px 14px; background:transparent; color:var(--muted); border:1px solid transparent; border-radius:8px; cursor:pointer; font:inherit; }
+.pe-lab-nav button:hover { color:var(--text); }
+.pe-lab-nav button[aria-selected="true"] { background:var(--surface-alt); color:var(--accent); border-color:rgba(66,201,255,.26); }
+.pe-lab-nav button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.pe-lab-view { display:grid; gap:18px; min-width:0; }
+.pe-lab-view[hidden], #promptTimelineCard[hidden] { display:none; }
+.pe-lab-related { color:var(--muted); font-size:13px; margin:0 0 12px; }
+.pe-lab-related a { color:var(--accent); text-underline-offset:3px; }
+.pe-feedback-refresh { margin:12px 0; padding:10px 14px; color:var(--text); background:var(--surface-alt); border:1px solid var(--card-border); border-left:3px solid var(--accent); border-radius:8px; font-size:.92em; }
 .pe-timeline-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.pe-timeline-grid .pe-timeline { max-block-size:min(50vh, 34rem); overflow-y:auto; scrollbar-gutter:stable; padding-right:5px; }
+.pe-timeline-grid .pe-version-item { flex-shrink:0; overflow-wrap:anywhere; }
 @media (max-width:1100px) { .pe-timeline-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:650px) { .pe-timeline-grid { grid-template-columns:1fr; } }
 .pe-contract-panel { margin:12px 0; padding:12px 14px; border:1px solid var(--border, #344258); border-radius:8px; background:var(--bg-secondary, #101c30); font-size:12px; }

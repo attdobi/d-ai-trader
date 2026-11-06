@@ -58,8 +58,13 @@ or a forecast of future profit; the mean-return panel retains its sample count
 without reusing the win-rate interval.
 
 The donut and streak use the latest 50 recorded closures and refresh with the
-table. The donut uses stored outcome categories: the separate dollar-based
-break-even bucket can include a small positive or negative return. Streaks use
+table. The table, donut and new feedback reviews classify saved returns and
+dollars at read time, with the original label as a fallback for incomplete rows.
+The $3 break-even band can include a small positive or negative return. Beyond
+that band, a realized loss of 1.6% or worse is significant. This threshold is
+twice the current 0.8% holding exit threshold. New closure records use the same
+severity categories. Historical ledger entries and saved reviews retain their
+original values. Streaks use
 strictly positive/negative percentage returns; flat or unscored closures break a
 streak. Unknown categories remain unclassified. Table sorting binds once and
 retains the selected ordering across refreshes; unknown numbers display as

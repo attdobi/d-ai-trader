@@ -18,49 +18,12 @@ from config import engine, PromptManager, session, openai, GPT_MODEL, get_agent_
 import yfinance as yf
 import pandas as pd
 from policy_safety import feedback_policy_violations, opportunity_system_prompt
+from feedback_metrics import (
+    BREAK_EVEN_DOLLAR_MAX, SIGNIFICANT_LOSS_THRESHOLD, SIGNIFICANT_PROFIT_THRESHOLD,
+    categorize_outcome,
+)
 
-# Performance thresholds
-SIGNIFICANT_PROFIT_THRESHOLD = 0.05  # 5% gain considered significant
-SIGNIFICANT_LOSS_THRESHOLD = -0.10   # 10% loss considered significant
 FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
-
-# A trade only counts as "break even" when the realized P&L is a few dollars
-# either way. Most positions here are small, so the previous "within ±2%"
-# rule mislabeled real -$6 to -$16 losses as break-even and starved the
-# feedback agent of loss signal. Dollar delta is the honest test of whether
-# money actually changed hands.
-BREAK_EVEN_DOLLAR_MAX = 3.0  # |net P&L $| <= this → break_even
-
-
-def categorize_outcome(gain_loss_amount, gain_loss_percentage):
-    """Classify a closed trade into an outcome bucket.
-
-    Single source of truth shared by record_sell_outcome (live) and the
-    backfill migration. `gain_loss_percentage` is a FRACTION (e.g. -0.0158
-    for -1.58%), matching what's stored in trade_outcomes.gain_loss_percentage.
-
-    Rules:
-      - |net $| <= BREAK_EVEN_DOLLAR_MAX  → break_even (dollar delta, not %)
-      - else bucket by signed percentage against the significance thresholds.
-    """
-    try:
-        amount = float(gain_loss_amount)
-    except (TypeError, ValueError):
-        amount = 0.0
-    try:
-        pct = float(gain_loss_percentage)
-    except (TypeError, ValueError):
-        pct = 0.0
-
-    if abs(amount) <= BREAK_EVEN_DOLLAR_MAX:
-        return 'break_even'
-    if pct >= SIGNIFICANT_PROFIT_THRESHOLD:
-        return 'significant_profit'
-    if pct > 0:
-        return 'moderate_profit'
-    if pct <= SIGNIFICANT_LOSS_THRESHOLD:
-        return 'significant_loss'
-    return 'moderate_loss'
 
 # PromptManager instance
 prompt_manager = PromptManager(client=openai, session=session)
@@ -99,15 +62,16 @@ def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label
     return api_params
 
 
-def _execute_feedback_api(api_params: dict, agent_label: str):
+def _execute_feedback_api(api_params: dict, agent_label: str, client=None):
     """Execute feedback API call with a one-time fallback if reasoning_effort is rejected."""
+    client = prompt_manager.client if client is None else client
     try:
-        response = prompt_manager.client.chat.completions.create(**api_params)
+        response = client.chat.completions.create(**api_params)
     except Exception as exc:
         if "reasoning_effort" in api_params and "reasoning_effort" in str(exc).lower():
             print(f"⚠️ reasoning_effort rejected for {agent_label}; retrying without it.")
             api_params = {k: v for k, v in api_params.items() if k != "reasoning_effort"}
-            response = prompt_manager.client.chat.completions.create(**api_params)
+            response = client.chat.completions.create(**api_params)
         else:
             raise
     # Log tokens/cost to api_usage like every other agent (previously these
@@ -119,7 +83,8 @@ def _execute_feedback_api(api_params: dict, agent_label: str):
 class TradeOutcomeTracker:
     """Tracks outcomes of completed trades and provides feedback"""
     
-    def __init__(self):
+    def __init__(self, *, feedback_client=None):
+        self._feedback_client = feedback_client
         self.ensure_outcome_tables_exist()
     
     def ensure_outcome_tables_exist(self):
@@ -305,7 +270,7 @@ class TradeOutcomeTracker:
         with engine.connect() as conn:
             # Get recent outcomes (exclude N/A actions from feedback analysis)
             result = conn.execute(text("""
-                SELECT ticker, gain_loss_percentage, outcome_category, 
+                SELECT ticker, gain_loss_amount, gain_loss_percentage, outcome_category,
                        hold_duration_days, original_reason, sell_reason,
                        market_context
                 FROM trade_outcomes 
@@ -485,14 +450,17 @@ class TradeOutcomeTracker:
         # Group by outcome category
         by_category = {}
         for outcome in outcomes:
-            category = outcome['outcome_category']
+            category = categorize_outcome(
+                outcome.get('gain_loss_amount'), outcome['gain_loss_percentage'],
+                stored_category=outcome['outcome_category'],
+            )
             if category not in by_category:
                 by_category[category] = []
             by_category[category].append(outcome)
         
         # Analyze reasons for good vs bad outcomes
         good_outcomes = [o for o in outcomes if o['gain_loss_percentage'] > SIGNIFICANT_PROFIT_THRESHOLD]
-        bad_outcomes = [o for o in outcomes if o['gain_loss_percentage'] < SIGNIFICANT_LOSS_THRESHOLD]
+        bad_outcomes = by_category.get('significant_loss', [])
         
         good_reasons = [o['original_reason'] for o in good_outcomes if o['original_reason']]
         bad_reasons = [o['original_reason'] for o in bad_outcomes if o['original_reason']]
@@ -518,6 +486,7 @@ class TradeOutcomeTracker:
                     sell_price,
                     shares,
                     sell_timestamp,
+                    gain_loss_amount,
                     gain_loss_percentage,
                     outcome_category,
                     original_reason,
@@ -541,7 +510,10 @@ class TradeOutcomeTracker:
                     "sell_date": row.sell_timestamp.strftime("%Y-%m-%d"),
                     "hold_days": row.hold_duration_days,
                     "gain_loss_pct": float(row.gain_loss_percentage),
-                    "outcome": row.outcome_category,
+                    "outcome": categorize_outcome(
+                        row.gain_loss_amount, row.gain_loss_percentage,
+                        stored_category=row.outcome_category,
+                    ),
                     "buy_reasoning": row.original_reason,
                     "sell_reasoning": row.sell_reason,
                     "market_context": row.market_context
@@ -1150,7 +1122,7 @@ CRITICAL INSTRUCTIONS:
             )
 
             print(f"🔧 Using simple JSON mode for FeedbackAgent (reasoning={get_agent_reasoning_level('FeedbackAgent')}, token_cap={token_cap})")
-            response = _execute_feedback_api(api_params, "FeedbackAgent")
+            response = _execute_feedback_api(api_params, "FeedbackAgent", client=self._feedback_client)
             ai_response = response.choices[0].message.content.strip()
 
             # Parse the response to extract summarizer and decider feedback
@@ -1175,6 +1147,8 @@ CRITICAL INSTRUCTIONS:
                 }
 
         except Exception as e:
+            if self._feedback_client is not None:
+                raise  # The on-demand job reports the failure instead of drafting from a placeholder.
             print(f"Failed to generate AI feedback: {e}")
             return {
                 "summarizer_feedback": "Unable to generate AI feedback",

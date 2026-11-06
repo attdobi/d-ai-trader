@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from policy_safety import feedback_policy_violations, blanket_entry_vetoes
+from feedback_metrics import SIGNIFICANT_PROFIT_THRESHOLD, categorize_outcome
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,6 +86,22 @@ def test_feedback_collection_stays_before_review_hook_and_returns_original_recor
     assert min(writes) < min(review_hooks)
     # The reviewed-learning change does not disable collection or replace the record API.
     assert len(writes) >= 3
+
+
+def test_new_feedback_includes_significant_historical_loss_patterns():
+    analyze = method("feedback_agent.py", "_analyze_patterns", {
+        "categorize_outcome": categorize_outcome,
+        "SIGNIFICANT_PROFIT_THRESHOLD": SIGNIFICANT_PROFIT_THRESHOLD,
+    })
+    losses = [
+        {"gain_loss_amount": -18, "gain_loss_percentage": -.018, "original_reason": "First setup"},
+        {"gain_loss_amount": -40, "gain_loss_percentage": -.04, "original_reason": "Second setup"},
+        {"gain_loss_amount": -2, "gain_loss_percentage": -.018, "original_reason": "Small dollar change"},
+    ]
+    outcomes = [dict(loss, outcome_category="moderate_loss", hold_duration_days=1) for loss in losses]
+    result = analyze(None, outcomes)
+    assert result["outcome_distribution"] == {"significant_loss": 2, "break_even": 1}
+    assert result["unsuccessful_reasons"] == ["First setup", "Second setup"]
 
 
 @pytest.fixture

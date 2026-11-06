@@ -167,7 +167,7 @@
 
 <div class="feedback-section">
   <h2 id="recentTradeOutcomesHeading">📊 Recent Trade Outcomes</h2>
-  <p class="feedback-scroll-hint" id="tradeOutcomesScrollHint">Scroll for older closed trades. Select a column heading to sort.</p>
+  <p class="feedback-scroll-hint" id="tradeOutcomesScrollHint">Scroll for older closed trades. Select a column heading to sort. Returns of −1.6% or worse are significant losses when the recorded loss exceeds $3.</p>
   <div class="feedback-scroll-region trade-outcomes-scroll" tabindex="0" role="region" aria-labelledby="recentTradeOutcomesHeading" aria-describedby="tradeOutcomesScrollHint">
     <table class="outcomes-table" id="outcomesTable">
       <thead>
@@ -210,7 +210,7 @@
   <div class="chart-canvas-box trend-panel"><canvas id="successRateChart"></canvas></div>
   <div class="trend-panel-title"><span class="trend-swatch" style="background:#42c9ff;"></span>Mean return per closure — unweighted, not account growth</div>
   <div class="chart-canvas-box trend-panel"><canvas id="avgProfitChart"></canvas></div>
-  <details class="trend-audit"><summary>Window counts, exact cutoffs and recorded dollars</summary><div class="trend-audit-scroll"><table class="trend-cohort-table"><thead><tr><th>Rolling window · UTC</th><th>Scored closures</th><th>Wins / losses / flat</th><th>Win rate</th><th>Mean return</th><th>Recorded P&amp;L</th></tr></thead><tbody id="trendCohortBody"></tbody></table></div><p class="bench-footnote">One observation is a recorded outcome row; partial sales or separate lots can produce several rows. Missing returns are unscored. Win rate uses strictly positive returns; the outcome-category donut uses the separate stored break-even bucket. Closure returns and dollars use recorded entry/exit prices, with no separate fee adjustment.</p></details>
+  <details class="trend-audit"><summary>Window counts, exact cutoffs and recorded dollars</summary><div class="trend-audit-scroll"><table class="trend-cohort-table"><thead><tr><th>Rolling window · UTC</th><th>Scored closures</th><th>Wins / losses / flat</th><th>Win rate</th><th>Mean return</th><th>Recorded P&amp;L</th></tr></thead><tbody id="trendCohortBody"></tbody></table></div><p class="bench-footnote">One observation is a recorded outcome row; partial sales or separate lots can produce several rows. Missing returns are unscored. Win rate uses strictly positive returns. The outcome-category donut uses a separate $3 break-even band. Closure returns and dollars use recorded entry/exit prices, with no separate fee adjustment.</p></details>
 </div>
 
 <div class="chart-container">

@@ -72,9 +72,9 @@ No explanatory text, no markdown, just pure JSON array."""
 # ask_decision_agent: the seven `prompt += (...)` paragraphs, in source order
 _CASH_DISCLOSURE = (
     "\n\nCASH & PROFIT-TAKING DISCLOSURE:"
-    " If you output zero BUY actions while settled funds are available (≥ ${settled_cash_value} and min buy ${MIN_BUY_AMOUNT}),"
-    " you must add a top-level \"cash_reason\" that (a) states why no BUY (caps, cooldown, min-buy unmet, lack of edge, etc.)"
-    " and (b) confirms that every ≥+3% winner was harvested or explicitly names any retained winner with its % gain and fresh catalyst justification."
+    " Whenever you output zero BUY actions, add a top-level \"cash_reason\". Lead with the binding blocker (settled funds ${settled_cash_value}, minimum ticket ${MIN_BUY_AMOUNT},"
+    " whole-share feasibility, cooldown, or the best candidate's specific setup/stop failure). Give the regime afterward as sizing context."
+    " Confirm that every ≥+3% winner was harvested or name any retained winner with its % gain and fresh catalyst justification."
     " Keep the object compact: {\"decisions\":[...], \"considered\":[...], \"cash_reason\":\"...\"}."
 )
 _JUSTIFICATION_DETAIL = (
@@ -89,8 +89,9 @@ _CONSIDERED_SETUPS = (
     "\n\nCONSIDERED SETUPS (transparency — REQUIRED every cycle, even when you BUY/SELL nothing):"
     " Add a top-level \"considered\" array that audits BOTH sides of this cycle:"
     " (1) the SELL/HOLD evaluation of EACH position you currently hold — verdict \"hold\" or \"sell\","
-    " with the reason you kept or cut it; and (2) the 2-3 best BUY candidates you weighed"
-    " (your R1..Rk ranked names plus any you seriously rejected). Each element MUST be"
+    " with the reason you kept or cut it; and (2) each of the first ten supplied contrarian candidates."
+    " Evaluate session-reclaim candidates first and give each candidate one compact buy, watch or reject reason."
+    " Include any other ranked BUY candidates you weighed. Each element MUST be"
     " {\"ticker\":\"SYM\", \"signals\":\"day/mo %chg, RS vs SPY, RSI, 20d-MA/range position, volume — concrete numbers\","
     " \"verdict\":\"buy\"|\"sell\"|\"hold\"|\"watch\"|\"reject\", \"why\":\"one specific, auditable sentence; for rejects/sells name the exact disqualifier"
     " (e.g. 'extended +14% near highs = chase', 'held: fresh entry, thesis intact, normal drawdown', 'sold: thesis broken, support lost')\","
@@ -192,6 +193,8 @@ _WATCHLIST_HEADER = "\n".join([
     "# K must be a genuinely evidenced support/invalidation price BELOW entry. Compute positive D = (entry - K) / entry × 100.",
     "# The active D cap still applies. Without a justified below-entry K inside that cap, WATCH/PASS; do not force a BUY.",
     "# The printed 3% reference is not permission or an exception to the active cap. Never invent a tighter stop merely to pass the gate.",
+    "# Session recovery can occur while the day is still red. A reclaim and the observed low are evidence to inspect, never an automatic stop or BUY.",
+    "# A stale snapshot needs refreshed price and support evidence before entry.",
     "# EXTENDED = 5-8% above the 20d MA: half size and only in RISK-ON. Never buy a name on the QUARANTINE line.",
 ])
 # format_contrarian_watchlist: the QUARANTINE line prefix (tickers are appended per cycle)

@@ -1,0 +1,12 @@
+{
+ "code_sha": "955a0155377c",
+ "git_sha": "baseline",
+ "kind": "code",
+ "sha": "955a0155377c",
+ "node_ids": [
+  "FA.code.system_base",
+  "FA.code.base_instructions",
+  "FA.code.json_format",
+  "FA.code.opportunity_charter"
+ ]
+}

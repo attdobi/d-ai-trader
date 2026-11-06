@@ -195,6 +195,28 @@ for a one-at-a-time plain-language pass.
 Rules for the package: stdlib only, never imports `config`, never reads `os.environ`; `config_hash`
 and `repo_root` are explicit parameters. Tests are DB-free (`tests/test_policy_graph_*.py`).
 
+## Prompt Lab and guideline proposals
+
+Prompt Lab opens on **Update prompts**, with the batch action and Advanced controls
+above performance context. **Version history** loads the saved timeline and diffs
+on demand. Each agent column scrolls within that view.
+
+The Prompt Lab batch refreshes feedback, drafts prompt fields for three agents,
+and sends each draft to the critic before field-level approval. Advanced uses the
+same draft generator for one agent. Policy Graph drafts a focused patch to one
+agent's guidelines and supports approval per guideline. A graph proposal can
+rebase onto a newer active version when the guidelines it edits still match its
+base. Prompt Lab requires a fresh draft if the active version has moved.
+
+Both paths use the configured drafting and critique roles, the same computed
+diagnostics and trade evidence, and the same version store. Draft and critique
+requests share the network timeout, reasoning fallback and usage recording.
+They apply through
+`set_active_prompt_version`, which validates the policy and records an auditable
+activation for undo. Policy Graph materialization follows activation. The two
+interfaces retain their review scopes while sharing the active version and audit
+trail.
+
 ## Phase 2 — the loop edits the graph
 
 Built 2026-09-03 (`policy_graph/proposals.py`, the **Proposed changes** card on the tab).

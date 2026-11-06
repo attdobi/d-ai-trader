@@ -2,8 +2,8 @@
 
 The ledger writes naive UTC sale timestamps. Each counted item is a recorded
 closed-outcome row, which may be a lot/partial closure rather than a distinct
-purchase or round trip. No guessed deduplication or outcome recategorization is
-performed here, and no model, broker or policy module is imported.
+purchase or round trip. Performance metrics use recorded returns independently
+of the outcome labels, and no model, broker or policy module is imported.
 """
 from __future__ import annotations
 
@@ -12,6 +12,13 @@ import math
 from collections.abc import Mapping
 
 from sqlalchemy import text
+
+
+SIGNIFICANT_PROFIT_THRESHOLD = 0.05
+# A realized loss twice the approved 0.8% holding exit threshold is significant.
+# This reporting threshold does not set or predict an execution price.
+SIGNIFICANT_LOSS_THRESHOLD = -0.016
+BREAK_EVEN_DOLLAR_MAX = 3.0
 
 
 def finite_number(value):
@@ -23,6 +30,27 @@ def finite_number(value):
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
+
+
+def categorize_outcome(gain_loss_amount, gain_loss_percentage, *, stored_category=None):
+    """Label a closure from recorded dollars and its return fraction.
+
+    Incomplete legacy rows retain their saved category. The dollar break-even
+    convention is separate from the sign-based win rate and closure streak.
+    """
+    amount = finite_number(gain_loss_amount)
+    fraction = finite_number(gain_loss_percentage)
+    if amount is None or fraction is None:
+        return stored_category
+    if abs(amount) <= BREAK_EVEN_DOLLAR_MAX:
+        return "break_even"
+    if fraction >= SIGNIFICANT_PROFIT_THRESHOLD:
+        return "significant_profit"
+    if fraction > 0:
+        return "moderate_profit"
+    if fraction <= SIGNIFICANT_LOSS_THRESHOLD:
+        return "significant_loss"
+    return "moderate_loss"
 
 
 def _finite_sum(values):

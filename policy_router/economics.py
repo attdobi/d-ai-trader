@@ -79,7 +79,7 @@ def _system(template, assembled):
             system += "\n\n" + assembled.strategy_directives
     if assembled.memory:
         system += "\n\n## LESSONS FROM EXPERIENCE\n" + assembled.memory
-    return opportunity_system_prompt(system)
+    return opportunity_system_prompt(system, decider=True)
 
 
 def _ltm(rows, health, excluded=(), *, tail=None):

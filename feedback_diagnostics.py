@@ -38,6 +38,8 @@ SUPPLIED_DECIDER_FIELDS = (
     "CONTRARIAN WATCHLIST (screener): price, 20d MA level, setup type, day/wk/mo %, RS vs SPY 5d/20d, RSI, "
     "% from 20d high, % vs 20d MA, rel-vol, EXTENDED tag, 3% downside reference (not an authorized stop). "
     "INDEX REGIME line: SPY and QQQ vs their 20d MA and 5d return, momentum-leader cohort health, label RISK-ON/MIXED/RISK-OFF. "
+    "SESSION RECOVERY: same-session SPY/QQQ/SMH day return, distance from observed low and opening-price reclaim, when bars are available. "
+    "Candidate rows may supply the session low/open/high and distance to the low. An incomplete daily bar is not a verified intraday bottom. "
     "QUARANTINE line: tickers exited within the last 2 sessions. "
     "EVENT CALENDAR block: today's date and ET time, sessions to the next FOMC decision / CPI / jobs report with a MACRO "
     "WINDOW flag (FOMC within 2 sessions, CPI/jobs next session), the next earnings date and sessions-to of every holding "

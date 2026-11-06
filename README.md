@@ -8,6 +8,44 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Prompt Lab and session recovery — November 6, 2026
+
+**Prompt Lab** opens on **Update prompts**, with the batch action above the
+other controls. **Version history** holds the timeline and version comparison.
+Use the Lab for whole-agent drafts or a batch across Summarizer, Decider and
+Feedback. Use **Policy Graph** for focused guideline patches with per-guideline
+review. Both workflows activate a new version through `set_active_prompt_version`,
+which validates the policy and records the activation for undo.
+
+The Lab preserves the approved Mission and Shared Principles directly and gives
+the model only editable Soul sections to revise. This fixes rejection of drafts
+against the current Shared Principles heading. Progress shows the feedback,
+generation and review phases, with elapsed time, requested reasoning and model.
+For the audited run, all three model roles resolved to GPT-6.1 Sol at high
+reasoning. Lab requests have a four-minute network timeout and a disconnected
+browser can reconnect to its existing job.
+
+**Session recovery** comes from the same daily-bar batch as the watchlist and
+slower index regime. SPY, QQQ and SMH show the day return, distance above the
+observed session low and whether price reclaimed its opening level. A still-red
+oversold stock can enter the reversal screen after reclaiming its open, bouncing
+at least 0.5% from its low and reaching the upper half of the observed range.
+Up to two such reversals get priority in MIXED and RISK-OFF, favoring nearby
+invalidation levels. These are screening heuristics based on potentially
+incomplete bars. Price support and the execution gates determine eligibility.
+
+The Decider assesses the first ten screened candidates and leads cash reasons
+with the binding blocker. The code corrects the known legacy stop formula when
+rendering saved policies. A BUY still needs supported below-entry invalidation
+with a positive distance within the active 1.3% cap. Systemic distress requires
+specific evidence beyond the routine regime label. Archived policies retain their
+original wording and each new decision logs the exact rendered prompt.
+
+Trade outcomes report **Significant Loss** at −1.6% or worse beyond the existing
+$3 break-even band. This severity cut is twice the 0.8% holding exit threshold.
+The dashboard and feedback use recorded returns to classify old rows on read.
+See [Feedback metrics](docs/FEEDBACK_METRICS.md) for the severity and cohort definitions.
+
 ## Risk pressure and opportunity context — October 29, 2026
 
 The Event Risk Landscape measures **regime and scheduled-event pressure**, not

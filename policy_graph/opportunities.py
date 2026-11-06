@@ -23,7 +23,9 @@ SIDE_COST_BPS = 10.0  # explicit fee + slippage assumption, each side
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 FEATURE_KEYS = ("setup", "score", "rsi", "price", "sma20", "dist_sma", "extension_pct", "day_change_pct",
                 "change_pct", "r5", "rs5_vs_spy", "rs20_vs_spy", "rel_volume", "ext_tag", "regime",
-                "day", "week", "month", "dist_from_20d_ma", "pullback_from_20d_high", "kill_3pct")
+                "day", "week", "month", "dist_from_20d_ma", "pullback_from_20d_high", "kill_3pct",
+                "session_date", "session_low", "session_open", "session_high", "session_from_low_pct",
+                "session_range_pct", "session_day_pct", "session_low_distance_pct")
 
 DDL_POSTGRES = """
 CREATE TABLE IF NOT EXISTS learning_opportunities (
