@@ -26,6 +26,13 @@ For the audited run, all three model roles resolved to GPT-6.1 Sol at high
 reasoning. Lab requests have a four-minute network timeout and a disconnected
 browser can reconnect to its existing job.
 
+Decider drafts and field-level approvals check for the required `cited` array in
+either prompt field. The current system prompt defines it. Older templates may
+define it in the user prompt. Prompt Lab shows the core logic and the critic's
+short verdict above the diffs. Trade examples and cohort details are available
+in the review details. Drafts should generalize across tickers and dates, with
+individual cases kept in evidence or dated memory.
+
 **Session recovery** comes from the same daily-bar batch as the watchlist and
 slower index regime. SPY, QQQ and SMH show the day return, distance above the
 observed session low and whether price reclaimed its opening level. A still-red

@@ -204,8 +204,12 @@ page. Selecting two versions brings the comparison into view above the timeline.
 
 The Prompt Lab batch refreshes feedback, drafts prompt fields for three agents,
 and sends each draft to the critic before field-level approval. Advanced uses the
-same draft generator for one agent. Policy Graph drafts a focused patch to one
-agent's guidelines and supports approval per guideline. A graph proposal can
+same draft generator for one agent. The Decider's decision JSON contract must
+include the `cited` array in the system or user prompt, both in the draft and
+after merging approved fields. The critic sees the proposed diffs. The batch
+review leads with a short statement of the change and the verdict, with the full
+evidence explanation available under **Review details**. Policy Graph drafts a
+focused patch to one agent's guidelines and supports approval per guideline. A graph proposal can
 rebase onto a newer active version when the guidelines it edits still match its
 base. Prompt Lab requires a fresh draft if the active version has moved.
 

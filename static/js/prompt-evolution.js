@@ -1017,15 +1017,31 @@ function setupBatchPromptLab() {
         <span class="pe-impact-hint">— click a chip below to see why each change was made</span>`;
       panel.appendChild(summaryWrap);
 
-      // Reasoning
       const reasoningWrap = document.createElement('div');
       reasoningWrap.className = 'pe-field';
-      reasoningWrap.innerHTML = `<label>Reasoning <span style="color:#888; font-weight:normal;">— v${candidate.current_version} → v${candidate.current_version + 1}</span></label>`;
+      reasoningWrap.innerHTML = `<label>Core logic <span style="color:#888; font-weight:normal;">— v${candidate.current_version} → v${candidate.current_version + 1}</span></label>`;
       const reasoningBox = document.createElement('div');
       reasoningBox.className = 'pe-reasoning';
-      reasoningBox.textContent = candidate.reasoning || 'No reasoning returned by API.';
+      reasoningBox.textContent = candidate.reasoning || 'No summary was returned.';
       reasoningWrap.appendChild(reasoningBox);
       panel.appendChild(reasoningWrap);
+
+      const critic = candidate.critic || {};
+      const criticRejected = critic.verdict === 'reject';
+      const criticBanner = document.createElement('div');
+      criticBanner.className = `pe-critic-banner ${criticRejected ? 'reject' : 'approve'}`;
+      const confPct = typeof critic.confidence === 'number' ? ` · ${Math.round(critic.confidence * 100)}% conf` : '';
+      const autoTag = critic.auto ? ' · auto' : '';
+      criticBanner.innerHTML = `
+        <span class="pe-critic-verdict">${criticRejected ? 'CRITIC: REJECT' : 'CRITIC: APPROVE'}${confPct}${autoTag}</span>
+        <span class="pe-critic-meta">${escapeHtml(critic.summary || critic.reason || 'No critic verdict.')}</span>`;
+      if (critic.summary && critic.reason && critic.summary !== critic.reason) {
+        const audit = document.createElement('details');
+        audit.className = 'pe-critic-audit';
+        audit.innerHTML = `<summary>Review details</summary><p>${escapeHtml(critic.reason)}</p>`;
+        criticBanner.appendChild(audit);
+      }
+      panel.appendChild(criticBanner);
 
       // Group the generator's changes by section so each diff block shows its chips.
       const changesBySection = {};
@@ -1060,19 +1076,6 @@ function setupBatchPromptLab() {
         const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open, changesBySection[sec] || [], toggle);
         panel.appendChild(section);
       });
-
-      // Critic verdict banner — the critic reviews before the human. The human
-      // gate is on the critic's APPROVALS; rejects require an explicit override.
-      const critic = candidate.critic || {};
-      const criticRejected = critic.verdict === 'reject';
-      const criticBanner = document.createElement('div');
-      criticBanner.className = `pe-critic-banner ${criticRejected ? 'reject' : 'approve'}`;
-      const confPct = typeof critic.confidence === 'number' ? ` · ${Math.round(critic.confidence * 100)}% conf` : '';
-      const autoTag = critic.auto ? ' · auto' : '';
-      criticBanner.innerHTML = `
-        <span class="pe-critic-verdict">${criticRejected ? 'CRITIC: REJECT' : 'CRITIC: APPROVE'}</span>
-        <span class="pe-critic-meta">${escapeHtml(critic.reason || 'No critic verdict.')}${confPct}${autoTag}</span>`;
-      panel.appendChild(criticBanner);
 
       let overrideOn = !criticRejected; // critic-approved → human can act immediately
       if (criticRejected) {

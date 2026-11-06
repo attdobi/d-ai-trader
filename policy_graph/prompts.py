@@ -16,7 +16,9 @@ CRITIC_DOCTRINE = (
     '(b) The rationale cites relevant supplied evidence and its limits. Observational loss '
     'buckets, citations and selected examples are not causal proof; state population and '
     'sample size, selection bias, regime and uncertainty. A small sample can motivate a '
-    'bounded experiment but cannot establish a reliable edge.\n'
+    'bounded experiment but cannot establish a reliable edge. Look for a mechanism that '
+    'can recur on other tickers and dates. Reject new thresholds or ticker-specific exceptions '
+    'chosen just to fit the sample. Keep case details in the evidence or dated memory.\n'
     '(c) The review protocol is in proposal metadata, separate from the live instruction. '
     'It identifies the eligible population, metric, net/gross and cost convention, entry/exit '
     'timestamps or fixed horizon, sample size, and comparison method. Use the same frozen '
@@ -48,8 +50,12 @@ CRITIC_DOCTRINE = (
 CRITIC_DOCTRINE += '\n\n' + OPPORTUNITY_CHARTER + '\n\n'
 
 CRITIC_OUTPUT_CANDIDATE = (
-    'Return ONLY valid JSON: {"verdict":"approve"|"reject","reason":one to three specific '
-    'sentences,"confidence":number 0-1,"ship_first":string or null,"unexecutable_gates":[strings]}.'
+    'Return ONLY valid JSON: {"verdict":"approve"|"reject","summary":string,"reason":string,'
+    '"confidence":number 0-1,"ship_first":string or null,"unexecutable_gates":[strings]}. '
+    'In summary, use one or two short, plain-language sentences. State the proposed change '
+    'in behavior and the main reason to approve or reject it. Include any condition or limit '
+    'that defines the change. If it only clarifies wording, say so. Leave ticker examples, '
+    'cohort counts and validation details in reason, the audit explanation.'
 )
 
 CRITIC_OUTPUT_FILES = (

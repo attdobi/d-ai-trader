@@ -53,6 +53,7 @@ from decider_agent import (
 )
 import json
 import pandas as pd
+import re
 import threading
 import time
 import uuid
@@ -4052,6 +4053,7 @@ def _critique_candidate(candidate, feedback_summary=None):
         'agent_type': candidate.get('agent_type'),
         'change_summary': summary,
         'changes': changes,
+        'diffs': candidate.get('diffs', {}),
         'reasoning': candidate.get('reasoning', ''),
         'recent_performance': {
             'success_rate': perf.get('success_rate'),
@@ -4112,6 +4114,7 @@ def _critique_candidate(candidate, feedback_summary=None):
             reason += " Unexecutable gates: " + "; ".join(str(g) for g in gates[:4]) + "."
         return {
             'verdict': verdict,
+            'summary': str(parsed.get('summary') or '').strip(),
             'reason': reason,
             'confidence': confidence,
             'auto': False,
@@ -4184,6 +4187,14 @@ def _auto_generate_version_description(agent_type, current_version, feedback_sum
     return ' · '.join(parts)
 
 
+def _decider_has_citation_contract(system_prompt, user_prompt_template):
+    """Accept the required array in either approved template layout."""
+    return any(
+        re.search(r'"cited"\s*:\s*\[', template)
+        for template in (system_prompt, user_prompt_template)
+    )
+
+
 def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None):
     """Generate one prompt candidate via the LLM and compute the diff vs active.
 
@@ -4192,8 +4203,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
     description, diffs (5-key dict), diff_stats {added, removed}.
 
     Raises ValueError with a descriptive message on hard-fail conditions
-    (no active prompt, malformed LLM output, missing anti-hallucination guards,
-    Mission section stripped from soul).
+    (no active prompt, malformed LLM output or a missing required contract).
     """
     with engine.connect() as conn:
         current_prompt = conn.execute(text("""
@@ -4288,6 +4298,11 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
 
     model = get_agent_model('PromptEvolutionAgent')
     generation_reasoning = get_reasoning_params('PromptEvolutionAgent', model)
+    citation_instruction = (
+        '\nKeep the Decider output schema and its explicit "cited": [...] guideline-ID array '
+        'in the existing system prompt or user template. A prose mention alone is insufficient.'
+        if agent_type == 'DeciderAgent' else ''
+    )
     print(
         f"🧬 Prompt-lab generation ({agent_type}): model={model} "
         f"reasoning={get_agent_reasoning_level('PromptEvolutionAgent')}"
@@ -4320,17 +4335,24 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'is MINOR and behavioral=false, even if you rewrote a whole paragraph. If you only reworded '
                     'things, say so honestly with minor/false entries — do not inflate. The goal is to improve '
                     'win rate by learning from past wins and losses, not to churn text.\n\n'
+                    'CORE LOGIC (reasoning): In one or two short sentences, explain what the agent will do '
+                    'differently, when it applies and why. State any changed limit or exception that matters. '
+                    'If only wording changed, state what is clearer. Keep tickers, dates, cohort counts and '
+                    'evaluation details in evidence notes or change metadata. Write each what as a plain-language '
+                    'description of the edit, and use why for supporting evidence and its limits.\n\n'
                     'LEARN FROM PAST VERDICTS (past_review_verdicts): earlier candidates were judged by a '
                     'skeptical critic and a human (the final RLHF authority). A new candidate that repeats a '
                     'rejected pattern without addressing the stated objection WILL be rejected again. The '
-                    'recurring bar to clear: (1) ground every behavioral change in specific rows of '
-                    'trade_level_evidence — cite tickers and their gain_pct in the "why" fields; (2) propose '
-                    'FEW, testable changes rather than bundling many edits whose impact cannot be attributed; '
-                    '(3) never claim trade-level facts (stop breaches, loss tails, outliers) that the evidence '
-                    'rows do not show. If the evidence does not support a change, do not propose it.\n\n'
-                    'ONE CHANGE PER CANDIDATE: ship exactly ONE primary behavioral change (plus at most one minor '
-                    'supporting edit) so its realized effect is attributable; a bundle of 4-5 "major" edits cannot be '
-                    'scored and will be split or rejected. computed_diagnostics are population-level facts computed in '
+                    'Ground behavioral changes in supplied diagnostics or trade evidence. In why, explain '
+                    'the pattern and the limits of the evidence. Cite individual trades there when needed to '
+                    'support a specific claim. Do not infer stop breaches or other trade facts that the records '
+                    'do not show.\n\n'
+                    'ONE CHANGE PER CANDIDATE: propose at most ONE primary behavioral change (plus at most one '
+                    'minor supporting edit) so its realized effect is attributable. If the evidence does not support '
+                    'one, keep the approved behavior. Base live instructions on a mechanism that can recur across '
+                    'tickers and dates. Do not add exceptions or tune thresholds to fit individual trades. '
+                    'Keep examples in dated memory and evaluation protocols in change metadata. '
+                    'computed_diagnostics are population-level facts computed in '
                     'code over ALL closed campaigns — they outrank the 20+20 trade sample; target the top ranked leak '
                     'first (regime, entry extension above the 20d MA, kill distance, same-ticker re-entry, loss tail). '
                     'Every gate you add must be executable from decider_supplied_fields — never require data the '
@@ -4347,6 +4369,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     '4. Only propose Soul edits under the supplied editable_soul_sections IDs. Keep their headings. '
                     'The server retains the protected Mission and Shared Principles sections.\n'
                     'You may rephrase rules 1-3 for clarity, but the semantic meaning and enforcement MUST survive in the output.'
+                    + citation_instruction
                 ),
             },
             {
@@ -4405,13 +4428,10 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             'The evolved prompt must preserve rules that prevent HOLD/SELL for unowned tickers.'
         )
 
-    # Citation contract — the Decider's template must keep the required "cited" key (policy graph
-    # attribution). The code-owned block re-states it every cycle, but a template that says
-    # "No extra keys" without naming "cited" makes the model drop it.
-    if agent_type == 'DeciderAgent' and '"cited"' not in user_prompt_template:
+    if agent_type == 'DeciderAgent' and not _decider_has_citation_contract(system_prompt, user_prompt_template):
         raise ValueError(
-            'Generated user_prompt_template dropped the required "cited" guideline-id list from the '
-            'decision JSON contract. Keep it (see GUIDELINE CITATIONS); regenerate.'
+            'Generated Decider prompt dropped the required "cited" guideline-ID array from its output schema. '
+            'Keep the array in the system prompt or user template and regenerate.'
         )
 
     description = _auto_generate_version_description(
@@ -4813,9 +4833,9 @@ def apply_prompt_evolution_candidate():
 
         if not system_prompt or not user_prompt_template:
             return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
-        if agent_type == 'DeciderAgent' and '"cited"' not in user_prompt_template:
-            return jsonify({'error': ('the Decider user_prompt_template must keep the required "cited" guideline-id '
-                                      'list in its decision JSON contract (policy graph citations)')}), 400
+        if agent_type == 'DeciderAgent' and not _decider_has_citation_contract(system_prompt, user_prompt_template):
+            return jsonify({'error': ('The selected Decider sections must keep the required "cited" guideline-ID '
+                                      'array in the output schema of the system prompt or user template.')}), 400
 
         with engine.begin() as conn:
             version_row = conn.execute(text("""
