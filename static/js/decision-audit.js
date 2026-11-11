@@ -49,7 +49,7 @@
     $('daDetail').innerHTML = `<h3>${esc(labelTime(cycle))} PT</h3>
       <p class="pg-muted">${esc(meta.filter(Boolean).join(' · '))}</p>
       ${cycle.run_id ? `<p class="pg-muted">Run <code>${esc(cycle.run_id)}</code></p>` : ''}
-      ${cycle.router ? `<p class="pg-muted"><a class="pg-link" href="#view=router&amp;comparison=${encodeURIComponent(cycle.router.id)}">Decisions shadow comparison</a> · ${esc(cycle.router.status)}</p>` : ''}
+      ${cycle.router ? `<p class="pg-muted"><a class="pg-link" href="#view=router&amp;comparison=${encodeURIComponent(cycle.router.id)}">Decisions router trace</a> · ${esc(cycle.router.status)}</p>` : ''}
       <div class="da-pipeline">${tile('Model BUYs', cycle.model_buys ?? 'Unavailable')}${tile('Recorded BUYs', cycle.stored_buys)}${tile('Confirmed BUY fills', cycle.filled_buys)}</div>
       ${cash ? `<div class="da-cash"><strong>Cash rationale</strong><p>${esc(cash)}</p>${cycle.cash_cited.length ? citations(cycle, cycle.cash_cited) : ''}</div>` : ''}
       ${cycle.missing_decisions.length ? group('Model proposals without a matching stored decision', rows(cycle.missing_decisions, row => row.action.toUpperCase()), true) : ''}

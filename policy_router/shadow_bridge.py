@@ -29,6 +29,7 @@ def submit_shadow(scorer, *args, log=print, **kwargs):
 
 def record_when_ready(job, engine, config_hash, prompt_version, run_id, *,
                       served_ids=(), local_result=None, source_input_id=None, prompt_capture=None,
+                      requested_mode="shadow", applied=False, fallback_reason=None,
                       recorder=None, log=print):
     """Attach an audit writer and return immediately, including on slow APIs."""
     if job is None:
@@ -44,10 +45,14 @@ def record_when_ready(job, engine, config_hash, prompt_version, run_id, *,
                 write = recorder
             result = future.result()  # the callback runs only after completion
             extra = {}
+            if requested_mode != "shadow":
+                extra.update(requested_mode=requested_mode, applied=applied, fallback_reason=fallback_reason)
             if prompt_capture is not None:
                 from .economics import measure, unavailable
                 try:
-                    extra["economics"] = measure(prompt_capture, result)
+                    extra["economics"] = measure(
+                        prompt_capture, result, applied=applied if requested_mode == "active" else None,
+                    )
                 except Exception as exc:
                     extra["economics"] = unavailable("Frozen prompt comparison failed: " + type(exc).__name__)
             write(engine, config_hash, prompt_version, run_id, result,

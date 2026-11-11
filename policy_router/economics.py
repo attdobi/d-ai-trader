@@ -1,4 +1,4 @@
-"""Frozen full-prompt counterfactuals for a shadow router. No config, SQL or HTTP.
+"""Estimate router input cost from frozen prompts. No config, SQL or HTTP.
 
 Counts cover system + user text, citation indexes, routed-out ID tails, memory
 formatting and the client's reasoning-guidance suffix. The default token count
@@ -131,21 +131,27 @@ class PromptCapture:
     input_rate: float | None
     token_cache_dir: str | None
     image_manifest: dict | None
+    baseline_ltm_rows: tuple | None = None
 
-    def render(self, selected_ids=None, *, order=None):
+    def render(self, selected_ids=None, *, order=None, incumbent=False):
         version, context = self.graph["version"], self.graph["context"]
-        if selected_ids is None:  # Exact actual-policy reconstruction validation.
+        if incumbent:
+            if self.baseline_ltm_rows is None or selected_ids is not None:
+                raise ValueError("missing_exact_incumbent_ltm")
+            rows = list(self.baseline_ltm_rows)
+            actual_graph = True
+        elif selected_ids is None:  # Exact actual-policy reconstruction validation.
             selected_ids = {i for i in self.eligible if i in self.actual_graph_ids}
             selected_ids |= {f"DA.ltm.{r['id']}" for r in self.actual_ltm_rows}
             rows = list(self.actual_ltm_rows)
-            actual = True
+            actual_graph = True
         else:
             selected_ids = set(selected_ids)
-            actual = False
+            actual_graph = False
             row_ids = list(order or sorted(selected_ids))
             rows = [r for r in self.actual_ltm_rows if f"DA.ltm.{r['id']}" not in self.eligible]
             rows += [self.ltm_rows[i] for i in row_ids if i in selected_ids and i in self.ltm_rows]
-        override = {i: (i in self.actual_graph_ids if actual else i in selected_ids)
+        override = {i: (i in self.actual_graph_ids if actual_graph else i in selected_ids)
                     for i, kind in self.eligible.items() if kind != "ltm"}
         # Pin any noncandidate entry to its actual presence; the scorer may only
         # change its declared candidate universe, not the surrounding policy.
@@ -158,15 +164,15 @@ class PromptCapture:
             # the "routed out" wording merely because we counted memory rows.
             override = self.graph.get("override")
         assembled = assemble(version, context, health=self.graph["health"],
-                             override=self.graph.get("override") if actual else override or None)
+                             override=self.graph.get("override") if actual_graph else override or None)
         system = _system(self.graph["template"], assembled) + self.client_suffix
         graph_ids = {s.node_id for s in assembled.served}
         index = [f"{i} — {title}" for i, title in citable_nodes(version)
                  if i in graph_ids or i.split(".")[1:2] == ["code"]]
         index += ltm_index_lines(rows)
-        excluded = [] if actual else [i for i, kind in self.eligible.items() if kind == "ltm" and i not in selected_ids]
+        excluded = [] if actual_graph else [i for i, kind in self.eligible.items() if kind == "ltm" and i not in selected_ids]
         block = _ltm(rows, self.ltm_health, excluded,
-                     tail=self.actual_ltm_tail if actual else None)
+                     tail=self.actual_ltm_tail if actual_graph else None)
         user = _replace_spans(self.actual_user, [(*self.ltm_span, block),
                              (*self.index_span, INDEX_PREFIX + "\n".join(index) if index else "")])
         return system, user
@@ -175,16 +181,22 @@ class PromptCapture:
 def capture_prompt(*, graph, system_prompt, user_prompt, actual_graph_ids, actual_ltm_rows,
                    ltm_rows, ltm_health, ltm_span, index_span, eligible, model,
                    input_rate=None, client_suffix="", actual_ltm_tail="", token_cache_dir=None,
-                   image_manifest=None):
+                   image_manifest=None, baseline_ltm_rows=None):
     """Freeze an assembly, rejecting incompatible/ambiguous reconstruction."""
     if not graph or ltm_span is None or index_span is None:
         raise ValueError("missing_frozen_assembly")
     rate = input_rate if isinstance(input_rate, (int, float)) and not isinstance(input_rate, bool) else None
     rate = float(rate) if rate is not None and math.isfinite(rate) and rate > 0 else None
+    baseline = None
+    if baseline_ltm_rows is not None:
+        baseline = tuple(deepcopy(baseline_ltm_rows))
+        actual_ids = {row["id"] for row in actual_ltm_rows}
+        if tuple(row for row in baseline if row["id"] in actual_ids) != tuple(actual_ltm_rows):
+            raise ValueError("actual_ltm_is_not_an_ordered_incumbent_subset")
     capture = PromptCapture(deepcopy(graph), system_prompt + client_suffix, user_prompt,
         frozenset(actual_graph_ids), tuple(deepcopy(actual_ltm_rows)), deepcopy(ltm_rows), deepcopy(ltm_health),
         tuple(ltm_span), tuple(index_span), str(actual_ltm_tail), dict(eligible), str(client_suffix), str(model), rate,
-        str(token_cache_dir) if token_cache_dir is not None else None, deepcopy(image_manifest))
+        str(token_cache_dir) if token_cache_dir is not None else None, deepcopy(image_manifest), baseline)
     if capture.render() != (capture.actual_system, capture.actual_user):
         raise ValueError("frozen_assembly_does_not_match_actual_prompt")
     return capture
@@ -195,28 +207,44 @@ def unavailable(note="No frozen full-prompt capture for this comparison"):
             "realized_input_savings_usd": 0.0, "quality_status": "not_evaluated"}
 
 
-def measure(capture, result):
-    """Count three identical-format variants off-thread; never activates routing."""
+def measure(capture, result, *, applied=None):
+    """Compare the recorded prompt against the appropriate same-cycle baseline."""
     if capture is None:
         return unavailable()
-    if result.status != "ok" or result.selection is None:
-        return unavailable("Router did not return a usable selection")
-    selected = [d.node_id for d in result.selection.included]
-    if set(result.nodes) != set(capture.eligible):
-        return unavailable("Frozen candidate universe does not match the router response")
     actual = (capture.actual_system, capture.actual_user)
-    full = capture.render(set(capture.eligible))
-    routed = capture.render(set(selected), order=selected)
-    prompts = {"actual_served": actual, "all_candidates": full, "decisions_selected": routed}
+    active = capture.baseline_ltm_rows is not None
+    if active:
+        incumbent = capture.render(incumbent=True)
+        text_changed = incumbent != actual
+        if applied is not None and text_changed != applied:
+            return unavailable("Captured text change does not match the recorded routing outcome")
+        prompts = {"incumbent_full": incumbent, "actual_served": actual}
+        baseline_key, comparison_key = "incumbent_full", "actual_served"
+        capture_basis = "frozen_ltm_baseline_v1"
+        prefix = "Estimates compare the incumbent and served text with the same cycle evidence."
+        realized = None if text_changed else 0.0
+    else:
+        if result.status != "ok" or result.selection is None:
+            return unavailable("Router did not return a usable selection")
+        if set(result.nodes) != set(capture.eligible):
+            return unavailable("Frozen candidate universe does not match the router response")
+        selected = [d.node_id for d in result.selection.included]
+        full = capture.render(set(capture.eligible))
+        routed = capture.render(set(selected), order=selected)
+        prompts = {"actual_served": actual, "all_candidates": full, "decisions_selected": routed}
+        baseline_key, comparison_key = "actual_served", "decisions_selected"
+        capture_basis = "frozen_full_prompt_v1"
+        prefix = "Shadow serves the actual prompt unchanged."
+        realized = 0.0
     encoder = _offline_encoding(capture.token_cache_dir)
     method = "o200k_base_text_estimate" if encoder is not None else TOKEN_METHOD
     counts = {key: _tokens(*value, encoder=encoder) for key, value in prompts.items()}
-    saved = counts["actual_served"] - counts["decisions_selected"]
+    saved = counts[baseline_key] - counts[comparison_key]
     gross = saved * capture.input_rate / 1_000_000 if capture.input_rate is not None else None
     fee = result.cost_usd
     image_count = int((capture.image_manifest or {}).get("image_count") or 0)
-    text_reduction = saved * 100 / counts["actual_served"] if counts["actual_served"] else None
-    return {"schema_version": SCHEMA_VERSION, "status": "estimated", "capture_basis": "frozen_full_prompt_v1",
+    text_reduction = saved * 100 / counts[baseline_key] if counts[baseline_key] else None
+    return {"schema_version": SCHEMA_VERSION, "status": "estimated", "capture_basis": capture_basis,
         "token_method": method, "token_estimates": counts,
         "token_scope": "text_only" if image_count else "system_and_user_text",
         "image_count": image_count, "image_input_tokens": None if image_count else 0,
@@ -231,6 +259,8 @@ def measure(capture, result):
         "text_input_reduction_pct": text_reduction,
         "gross_input_savings_usd_uncached_estimate": gross, "router_cost_usd": fee,
         "net_input_savings_usd_uncached_estimate": gross - fee if gross is not None and fee is not None else None,
-        "cache_adjusted_savings_usd": None, "realized_input_savings_usd": 0.0,
-        "shadow_incremental_cost_usd": fee, "quality_status": "not_evaluated",
-        "note": "Shadow serves the actual prompt unchanged. Local text token counts are estimates, not provider-billed tokens or message framing. Supplied images are identical across all three Decider variants and never counted as removed context; their token profile is not inferred from pixels or base64 length. Decider model is the configured primary request model; provider fallbacks/retries are not measured here. Dollar potential assumes uncached standard text input pricing and subtracts the complete recorded router fee, including its image input. Cache effects, completion/reasoning and quality changes are unknown."}
+        "cache_adjusted_savings_usd": None, "realized_input_savings_usd": realized,
+        "shadow_incremental_cost_usd": fee if not active else None, "quality_status": "not_evaluated",
+        "note": prefix + " Local text estimates exclude provider framing and image tokens. The same screenshots remain in each variant. "
+                "Dollar estimates use the configured Decider's uncached text rate and subtract the complete router fee. "
+                "Billed counterfactuals, cache effects, completion/reasoning costs and quality changes are unknown."}

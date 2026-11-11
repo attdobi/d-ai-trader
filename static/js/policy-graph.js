@@ -2304,27 +2304,26 @@
     const economics = qs('#pgDecisionsEconomics');
     if (!note || !stats || !details || !rows) return;
     const last = data.last_cycle || null, total = data.totals || {};
-    note.textContent = (data.note || 'No Decisions shadow comparison recorded yet. The actual prompt remains unchanged.')
-      + (last?.source_kind === 'replay' ? ' Latest result replays saved input; it is not forward trading evidence.' : '')
-      + (last && last.note ? ` Last result: ${last.note}` : '');
+    const source = last ? window.PolicyRouterView?.sourceInfo(last) : null;
+    note.textContent = source?.note || 'Awaiting a recorded cycle.';
     if (!last) { stats.innerHTML = ''; if(economics)economics.innerHTML=''; details.hidden = true; rows.innerHTML = ''; return; }
-    if(economics)economics.innerHTML=window.DAIRouterEconomics?.render(last.economics)||'';
+    if(economics)economics.innerHTML=window.DAIRouterEconomics?.render(last.economics, source?.routing || 'unknown')||'';
     const tile = (key, value, sub) => `<div class="pg-router-stat"><div class="k">${esc(key)}</div><div class="v">${esc(value)}</div><div class="s">${esc(sub)}</div></div>`;
     const dollars = n => n === null || n === undefined ? '—' : `$${Number(n).toFixed(5)}`;
     const images = last.image_manifest || {};
     const imageCount = Number.isInteger(images.image_count) ? images.image_count : null;
-    stats.innerHTML = tile(last.source_kind === 'replay' ? 'Saved-cycle replay' : 'Live shadow comparison', last.status || 'unknown', `${fmtPT(last.decided_at)} · policy v${last.prompt_version ?? '?'} · ${last.model || data.model || ''}`)
+    stats.innerHTML = tile('Routing outcome', source?.label || 'Recorded cycle', `${fmtPT(last.decided_at)} · policy v${last.prompt_version ?? '?'} · ${last.model || data.model || ''}`)
       + tile('Router API cost', dollars(last.cost_usd), `${Number(last.input_tokens || 0).toLocaleString()} input tokens · ${Number(last.latency_ms || 0).toLocaleString()} ms`)
       + tile('Router image evidence', imageCount === null ? 'Not recorded' : `${imageCount} screenshots`, imageCount === null ? 'No image manifest on this historical or image-disabled comparison' : `${images.coverage_status || 'unknown'} coverage · ${Number(images.offered_count || 0)} offered · frozen source IDs and hashes`)
-      + tile('Proposed routable context', `${kChars(last.chars_selected)} chars`, `${kChars(last.chars_today)} chars actually served · hypothetical; excludes pinned policy`)
-      + tile('Comparisons in window', String(total.runs ?? (data.runs || []).length), `${total.live_runs || 0} live · ${total.replay_runs || 0} replay · ${total.ok || 0} completed · ${total.fallback || 0} fell back · ${dollars(total.known_cost_usd ?? total.cost_usd)} ${total.unknown_cost_calls ? 'known subtotal' : 'total'}${total.unknown_cost_calls ? ` · ${total.unknown_cost_calls} cost unknown` : ''}`);
+      + tile('Optional context served', `${kChars(last.chars_today)} chars`, `${kChars(last.chars_selected)} chars selected by the router`)
+      + tile('Comparisons in window', String(total.runs ?? (data.runs || []).length), `${total.applied_runs || 0} active routes applied · ${total.live_runs || 0} in-cycle · ${total.replay_runs || 0} replay · ${dollars(total.known_cost_usd ?? total.cost_usd)} ${total.unknown_cost_calls ? 'known subtotal' : 'total'}${total.unknown_cost_calls ? ` · ${total.unknown_cost_calls} cost unknown` : ''}`);
     const nodes = last.nodes || [];
     details.hidden = !nodes.length;
     const probability = p => p === null || p === undefined ? '—' : Number(p).toFixed(2);
     const choice = c => c === 'include' ? 'keep' : c === 'exclude' ? 'omit' : '—';
-    rows.innerHTML = `<p class="pg-muted">Run ${esc(last.run_id || '')}. Both columns are proposed selections; the final column records the actual prompt. Relevance probabilities are estimates, not calibrated trade-success probabilities.</p>`
-      + `<details><summary>Planned node-selection JSON</summary><pre>${esc(JSON.stringify(window.DAIRouterEconomics?.selectionFor(last)||{},null,2))}</pre><p class="pg-muted">Pinned and selected IDs form the proposed subgraph. Skipped IDs are optional context. These are relevance choices, not BUY/SELL instructions.</p></details>`
-      + `<table><thead><tr><th>Guideline</th><th>Local p / choice</th><th>Decisions p / choice</th><th>Actually read</th></tr></thead><tbody>${nodes.map(n => `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button></td><td>${esc(probability(n.local_p))} / ${choice(n.local_choice)}</td><td>${esc(probability(n.decisions_p))} / ${choice(n.decisions_choice)}</td><td>${n.served_in_prompt ? 'yes' : 'no'}</td></tr>`).join('')}</tbody></table>`;
+    rows.innerHTML = `<p class="pg-muted">Run ${esc(last.run_id || '')}. The final column records which guidelines were included in the Decider prompt.</p>`
+      + `<details><summary>Recorded guideline selection JSON</summary><pre>${esc(JSON.stringify(window.DAIRouterEconomics?.selectionFor(last)||{},null,2))}</pre></details>`
+      + `<table><thead><tr><th>Guideline</th><th>Local p / choice</th><th>Decisions p / choice</th><th>Served</th></tr></thead><tbody>${nodes.map(n => `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(n.node_id)}">${esc(n.node_id)}</button></td><td>${esc(probability(n.local_p))} / ${choice(n.local_choice)}</td><td>${esc(probability(n.decisions_p))} / ${choice(n.decisions_choice)}</td><td>${typeof n.served_in_prompt === 'boolean' ? (n.served_in_prompt ? 'yes' : 'no') : 'unknown'}</td></tr>`).join('')}</tbody></table>`;
     rows.querySelectorAll('[data-node-id]').forEach(button => button.addEventListener('click', () => pgOpenNode(button.dataset.nodeId)));
   }
 

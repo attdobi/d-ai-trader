@@ -116,6 +116,7 @@ class DAITraderOrchestrator:
         self._startup_date_et = datetime.now(EASTERN_TIMEZONE).date()
         self._startup_time_et = datetime.now(EASTERN_TIMEZONE)
         self._cadence_minutes = int(os.environ.get('DAI_CADENCE_MINUTES', '180'))
+        self._startup_cadence_anchor_et = self._startup_time_et + timedelta(minutes=self._cadence_minutes)
         self._next_cadence_run_et = None
         self._learning_outcomes_lock = threading.Lock()
         self._learning_outcomes_thread = None
@@ -766,7 +767,7 @@ class DAITraderOrchestrator:
         now_et = datetime.now(EASTERN_TIMEZONE)
         # Switch anchor depending on whether it's the startup day
         if now_et.date() == self._startup_time_et.date():
-            anchor = self._startup_time_et + timedelta(minutes=self._cadence_minutes)
+            anchor = self._startup_cadence_anchor_et
         else:
             market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
             anchor = market_open + timedelta(minutes=self._cadence_minutes)
@@ -774,6 +775,24 @@ class DAITraderOrchestrator:
             self._next_cadence_run_et = anchor
         elif self._next_cadence_run_et < anchor:
             self._next_cadence_run_et = anchor
+
+    def _configure_resume_cadence(self):
+        """Optionally keep the previous process's next slot on a no-startup restart."""
+        value = os.getenv("DAI_RESUME_CADENCE_AT", "").strip()
+        if not value:
+            return
+        try:
+            target = datetime.fromisoformat(value)
+            if target.utcoffset() is None:
+                raise ValueError("missing UTC offset")
+            target = target.astimezone(EASTERN_TIMEZONE)
+            if target.date() != self._startup_time_et.date() or target <= datetime.now(EASTERN_TIMEZONE):
+                raise ValueError("resume slot must be later today")
+        except (ValueError, OverflowError):
+            logger.warning("Invalid DAI_RESUME_CADENCE_AT. Waiting one full cadence after startup.")
+            return
+        self._startup_cadence_anchor_et = target
+        logger.info("Resuming cadence at %s ET.", target.strftime("%H:%M:%S"))
 
     def cadence_tick(self):
         """Run cadence-aligned summarizer/decider cycles."""
@@ -826,7 +845,7 @@ class DAITraderOrchestrator:
             return False
         return True
 
-    def setup_schedule(self):
+    def setup_schedule(self, *, catch_up=True):
         """Setup the scheduling for all jobs with configurable cadence"""
         def _et_to_local_time_str(et_hhmm: str) -> str:
             """Convert an ET HH:MM string to local-time HH:MM for the scheduler."""
@@ -856,7 +875,7 @@ class DAITraderOrchestrator:
         logger.info(f"      - {market_open_local} {LOCAL_TZ_ABBR} / 9:30:00 ET: Analyze news at the bell")
         logger.info(f"      - 9:30:05 AM ET: Execute opening trades (5 sec after bell)")
         logger.info(f"   📈 Regular Cadence:")
-        logger.info(f"      - Day 1 anchor: startup time + cadence")
+        logger.info("      - Day 1 anchor: startup time + cadence, or the explicit resume slot")
         logger.info(f"      - Subsequent days: first cadence run at 9:30 AM ET + cadence, then every {cadence_minutes} minutes")
         logger.info(f"   📊 Feedback: Weekly on Thursday at 8:30 PM ET ({weekly_feedback_local} {LOCAL_TZ_ABBR})")
         logger.info("   🧭 Learning paper outcomes: daily 5:15 PM ET, separate background worker")
@@ -865,18 +884,23 @@ class DAITraderOrchestrator:
             cycles = int(390 / cadence_minutes)
             logger.info(f"   ⚡ AGGRESSIVE: Up to {cycles + 1} trading cycles per day!")
         logger.info("="*60)
-        self._run_market_open_catchup_if_needed()
+        if catch_up:
+            self._run_market_open_catchup_if_needed()
     
     def run(self):
         """Main run loop"""
         logger.info("Starting D-AI-Trader automation system")
+        decisions_mode = os.getenv("DAI_DECISIONS_ROUTER", "off").strip().lower()
+        logger.info("Hosted Decisions routing: %s", decisions_mode if decisions_mode in {"off", "shadow", "active"} else "off")
+        skip_cycle = os.getenv("DAI_SKIP_STARTUP_CYCLE", "0").lower() in {"1", "true", "yes"}
+        if skip_cycle:
+            self._configure_resume_cadence()
         self.sync_policy_graph_latest("startup")
-        self.setup_schedule()
+        self.setup_schedule(catch_up=not skip_cycle)
         
         # Get cadence for display
         cadence_minutes = self._cadence_minutes
         
-        skip_cycle = os.getenv("DAI_SKIP_STARTUP_CYCLE", "0").lower() in {"1", "true", "yes"}
         now_et = datetime.now(EASTERN_TIMEZONE)
         market_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
         if skip_cycle:
@@ -899,7 +923,7 @@ class DAITraderOrchestrator:
                 else:
                     logger.warning("⚠️  Startup decider run failed (see earlier logs for details).")
                 # Anchor cadence after the startup run to avoid double-running immediately
-                self._next_cadence_run_et = self._startup_time_et + timedelta(minutes=self._cadence_minutes)
+                self._next_cadence_run_et = self._startup_cadence_anchor_et
             except Exception as exc:
                 logger.error(f"❌ Startup cycle failed: {exc}")
                 import traceback

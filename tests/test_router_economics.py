@@ -159,6 +159,52 @@ def test_ltm_only_selection_does_not_change_graph_or_its_dropped_diary_tail():
     assert e.TAIL_PREFIX in user
 
 
+def test_applied_memory_pruning_uses_the_exact_incumbent_and_served_text():
+    _, args = fixture_capture()
+    baseline_rows = [args["ltm_rows"]["DA.ltm.2"], args["ltm_rows"]["DA.ltm.1"]]
+    args["baseline_ltm_rows"] = baseline_rows
+    capture = e.capture_prompt(**args)
+    system, user = capture.render(incumbent=True)
+    assert system == capture.actual_system
+    assert user.index(baseline_rows[0]["content"].rstrip()) < user.index(baseline_rows[1]["content"].rstrip())
+    assert user.index("DA.ltm.2 —") < user.index("DA.ltm.1 —")
+    assert "DA.ltm.2 —" not in capture.actual_user
+    assert e.TAIL_PREFIX not in user and e.TAIL_PREFIX not in capture.actual_user
+    output = result(capture, {"DA.ltm.1"})
+    before = e.measure(capture, output, applied=True)
+    assert before["capture_basis"] == "frozen_ltm_baseline_v1"
+    counts = before["token_estimates"]
+    assert set(counts) == {"incumbent_full", "actual_served"}
+    saved = counts["incumbent_full"] - counts["actual_served"]
+    assert saved > 0 and before["potential_input_tokens_saved"] == saved
+    assert before["net_input_savings_usd_uncached_estimate"] == pytest.approx(saved * 2 / 1_000_000 - .002)
+    assert before["realized_input_savings_usd"] is None
+    assert before["shadow_incremental_cost_usd"] is None
+    assert e.measure(capture, output, applied=False)["status"] == "unavailable"
+    baseline_rows[0]["content"] = "Changed after capture"
+    assert e.measure(capture, output, applied=True) == before
+
+
+def test_active_fallback_captures_unchanged_text_with_the_known_router_fee():
+    _, args = fixture_capture()
+    args["baseline_ltm_rows"] = args["actual_ltm_rows"]
+    capture = e.capture_prompt(**args)
+    failure = DecisionsShadowResult(status="fallback", cost_usd=.002)
+    metrics = e.measure(capture, failure, applied=False)
+    assert metrics["status"] == "estimated"
+    assert metrics["prompt_hashes"]["incumbent_full"] == metrics["prompt_hashes"]["actual_served"]
+    assert metrics["potential_input_tokens_saved"] == 0
+    assert metrics["net_input_savings_usd_uncached_estimate"] == -.002
+    assert metrics["realized_input_savings_usd"] == 0
+
+
+def test_active_capture_rejects_an_incompatible_incumbent_snapshot():
+    _, args = fixture_capture()
+    args["baseline_ltm_rows"] = [args["ltm_rows"]["DA.ltm.2"]]
+    with pytest.raises(ValueError, match="actual_ltm_is_not_an_ordered_incumbent_subset"):
+        e.capture_prompt(**args)
+
+
 def test_ledger_has_full_selection_json_and_never_reconstructs_old_rows_from_current_state():
     engine = create_engine("sqlite://")
     capture, _ = fixture_capture()

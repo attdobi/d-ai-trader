@@ -86,7 +86,7 @@ def test_already_completed_request_still_dispatches_audit_off_the_trading_path()
 
 
 @pytest.mark.parametrize("remote_mode,local_mode,queued", [
-    ("off", "shadow", False), ("active", "shadow", False),
+    ("off", "shadow", False), ("active", "shadow", True), ("active", "active", True),
     ("shadow", "off", True), ("shadow", "shadow", True),
 ])
 def test_decider_bridge_is_independent_of_local_mode_and_keeps_hard_policy_pinned(monkeypatch, remote_mode, local_mode, queued):
@@ -137,17 +137,46 @@ def test_decider_bridge_is_independent_of_local_mode_and_keeps_hard_policy_pinne
     sink = {}
     actual = ns[function.name](59, "run", regime="RISK-OFF", holdings=[], watchlist=["GM"],
                                quarantined=[], shadow_sink=sink)
-    assert actual is (None if local_mode == "off" else local)
+    assert actual is (None if local_mode == "off" or remote_mode == "active" else local)
     assert bool(submissions) is queued
     if queued:
         args, kwargs = submissions[0]
         assert isinstance(args[2], CycleContext)
-        assert {n.node_id for n in args[3]} == {entry.node_id, memory.node_id}
+        expected = {memory.node_id} if remote_mode == "active" else {entry.node_id, memory.node_id}
+        assert {n.node_id for n in args[3]} == expected
         assert "DA.directives.strategy.priced_kill" in kwargs["pinned_ids"]
         assert lesson.node_id in kwargs["pinned_ids"]
         assert "OPPORTUNITY CHARTER" in kwargs["pinned_policy"]
-        assert sink["flat_ids"] == {entry.node_id}
+        assert sink["flat_ids"] == expected - {memory.node_id}
+        assert sink["requested_mode"] == remote_mode
         assert sink["job"] == "job"
+
+
+def test_active_memory_application_is_bounded_and_falls_back_without_graph():
+    from concurrent.futures import Future
+    from time import monotonic
+    from policy_router.decisions import DecisionsShadowResult
+    from policy_router.select import select_subgraph
+
+    tree = ast.parse((ROOT / "decider_agent.py").read_text())
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_decisions_memory_rows")
+    ns = {}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "decider_agent.py", "exec"), ns)
+    apply = ns[fn.name]
+    probabilities = {"DA.ltm.2": .01, "DA.ltm.1": .95}
+    selection = select_subgraph([(ident, "ltm", p, 10) for ident, p in probabilities.items()])
+    ready = Future()
+    ready.set_result(DecisionsShadowResult(status="ok", probabilities=probabilities, selection=selection, nodes=probabilities))
+    rows = [{"id": 2}, {"id": 3}, {"id": 1}]
+    audit = {"job": ready, "deadline": monotonic() + 1, "eligible": probabilities}
+    assert apply(audit, rows, graph_ready=True) == [rows[1], rows[2]]
+    assert audit["fallback_reason"] is None
+    assert apply(audit, rows, graph_ready=False) == rows
+    assert audit["fallback_reason"] == "graph_unavailable"
+    assert apply({**audit, "eligible": {"DA.ltm.42"}}, rows, graph_ready=True) == rows
+    pending = {**audit, "job": Future(), "deadline": monotonic()}
+    assert apply(pending, rows, graph_ready=True) == rows
+    assert pending["fallback_reason"] == "deadline_exceeded"
 
 
 def test_comparison_schema_is_part_of_startup_migration():

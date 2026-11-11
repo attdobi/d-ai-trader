@@ -3009,18 +3009,25 @@ OUTPUT (STRICT)
         from decider_memory import get_relevant_memories, format_long_term_memory, build_working_memory
         _mem_cfg = config_hash
         _mem_tks = [h['ticker'] for h in stock_holdings] if stock_holdings else []
-        _mem_rows, _ltm_tail = _router_memory_rows(_router, get_relevant_memories(_mem_cfg, tickers=_mem_tks))
+        _baseline_memories = _decisions_shadow.get("baseline_ltm_rows")
+        if _baseline_memories is None:
+            _baseline_memories = get_relevant_memories(_mem_cfg, tickers=_mem_tks)
+        _mem_rows, _ltm_tail = _router_memory_rows(_router, _baseline_memories)
         # Legacy rules stay in the database for audit but cannot override the
         # current selective entry policy or be logged as served/citable.
         _mem_rows = [m for m in _mem_rows if not blanket_entry_vetoes(m.get("content"))]
+        _health_rows = _mem_rows
+        if _decisions_shadow.get("requested_mode") == "active":
+            _decisions_shadow["baseline_ltm_rows"] = _mem_rows
+            _mem_rows = _decisions_memory_rows(_decisions_shadow, _mem_rows, graph_ready=_graph_served is not None)
         _ltm_tag = None
         try:
             from policy_graph.assembly import health_tag as _ltm_health_tag
             _ltm_health = {}
-            if _mem_rows:
+            if _health_rows:
                 try:
                     from policy_graph.citations import health_for_prompt as _ltm_health_for
-                    _ltm_health = _ltm_health_for(engine, _mem_cfg, [f"DA.ltm.{m['id']}" for m in _mem_rows
+                    _ltm_health = _ltm_health_for(engine, _mem_cfg, [f"DA.ltm.{m['id']}" for m in _health_rows
                                                                       if isinstance(m, dict) and m.get("id")])
                 except Exception as _lh_exc:
                     print(f"⚠️  Memory-row health unavailable: {_lh_exc}")
@@ -3035,6 +3042,8 @@ OUTPUT (STRICT)
             prompt += "\n\n" + _lt
             _ltm_prompt_span = (_ltm_prompt_start, len(prompt))
             _ltm_injected = [m for m in _mem_rows if isinstance(m, dict) and m.get("id")]
+            if _decisions_shadow.get("requested_mode") == "active":
+                _decisions_shadow["applied"] = len(_ltm_injected) < len(_health_rows)
             # the injected rows are graph nodes (DA.ltm.<row id>): record them as served (route "ltm")
             try:
                 if _graph_served is not None and prompt_version is not None:
@@ -3260,7 +3269,7 @@ OUTPUT (STRICT)
             holdings=stock_holdings, quarantined=locals().get("_quarantined") or ())
     except Exception as _opportunity_exc:
         print(f"⚠️ Opportunity snapshot skipped ({type(_opportunity_exc).__name__})")
-    # Comparison outputs never supply an assembly override or trade action.
+    # Attach the provider result to the exact prompt sent to the Decider.
     if _decisions_shadow.get("job") is not None:
         try:
             from policy_router.shadow_bridge import record_when_ready as _record_shadow_ready
@@ -3279,6 +3288,7 @@ OUTPUT (STRICT)
                     ltm_span=_ltm_prompt_span, index_span=_index_prompt_span,
                     actual_ltm_tail=locals().get("_ltm_tail") or "",
                     eligible=_decisions_shadow.get("eligible") or {}, model=_capture_model,
+                    baseline_ltm_rows=_decisions_shadow.get("baseline_ltm_rows"),
                     input_rate=(load_model_pricing().get(_capture_model) or {}).get("input"),
                     token_cache_dir=os.getenv("TIKTOKEN_CACHE_DIR", os.getenv("DATA_GYM_CACHE_DIR")),
                     image_manifest=_decider_images.public_manifest() if _decider_images is not None else None,
@@ -3288,7 +3298,10 @@ OUTPUT (STRICT)
             _record_shadow_ready(_decisions_shadow["job"], engine,
                                  _decisions_shadow["config_hash"], prompt_version, run_id,
                                  served_ids=_actual_shadow_ids, local_result=_router, source_input_id=_input_id,
-                                 prompt_capture=_prompt_capture)
+                                 prompt_capture=_prompt_capture,
+                                 requested_mode=_decisions_shadow.get("requested_mode", "shadow"),
+                                 applied=_decisions_shadow.get("applied", False),
+                                 fallback_reason=_decisions_shadow.get("fallback_reason"))
         except Exception as _shadow_log_exc:
             print(f"⚠️ Decisions comparison logging skipped ({type(_shadow_log_exc).__name__})")
     ai_response = prompt_manager.ask_openai(
@@ -3782,9 +3795,9 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
     if image_bundle is not None and image_bundle.manifest().get("config_hash") != _cfg:
         raise ValueError("screenshot evidence does not match the router configuration")
     settings = _RSettings.from_mapping(os.environ, repo_root=_root, config_hash=_cfg)
-    _shadow_enabled = (str(os.getenv("DAI_DECISIONS_ROUTER", "off")).strip().lower() == "shadow"
-                       and shadow_sink is not None)
-    if (settings.mode == "off" and not _shadow_enabled) or prompt_version is None:
+    hosted_mode = str(os.getenv("DAI_DECISIONS_ROUTER", "off")).strip().lower()
+    hosted = hosted_mode in ("shadow", "active") and shadow_sink is not None
+    if (settings.mode == "off" and not hosted) or prompt_version is None:
         return None
     from decider_memory import get_all_active_memories, get_relevant_memories
     from policy_graph import service as _pg_service
@@ -3798,16 +3811,24 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
                 entities=[t for t in entities if t], trend=[t for t in trend if t],
                 summaries=[s for s in (parsed_summaries or []) if isinstance(s, dict)], event_block=event_block or "",
                 today=datetime.now())
-    ltm_rows = get_all_active_memories(_cfg)
-    nodes = _version_nodes(_version, ("entry", "lesson")) + _ltm_nodes(ltm_rows)
+    today_rows = get_relevant_memories(_cfg, tickers=list(ctx.holdings))
+    ltm_rows = today_rows if hosted and hosted_mode == "active" else get_all_active_memories(_cfg)
+    nodes = _ltm_nodes(ltm_rows)
+    if not (hosted and hosted_mode == "active"):
+        nodes = _version_nodes(_version, ("entry", "lesson")) + nodes
     # what today's prompt serves of these nodes: the deterministic graph query + the fixed memory sort
     served_today, _dropped_today = _pg_select(_version, ctx.assembly_context())
     today_ids = {s.node_id for s in served_today}
-    today_ids |= {f"DA.ltm.{m['id']}" for m in get_relevant_memories(_cfg, tickers=list(ctx.holdings)) if m.get("id")}
-    if _shadow_enabled:
+    today_ids |= {f"DA.ltm.{m['id']}" for m in today_rows if m.get("id")}
+    if hosted:
+        from concurrent.futures import Future
+        from time import monotonic
+        from policy_router.decisions import DecisionsSettings, DecisionsShadowResult, route_shadow_cycle
+        shadow_sink.update(config_hash=_cfg, requested_mode=hosted_mode)
+        if hosted_mode == "active":
+            shadow_sink["baseline_ltm_rows"] = today_rows
         try:
             import config as _shadow_config
-            from policy_router.decisions import DecisionsSettings, route_shadow_cycle
             from policy_router.shadow_bridge import submit_shadow
             from policy_safety import OPPORTUNITY_CHARTER
             _eligible = [n for n in nodes if n.kind in settings.routable and n.kind in ("entry", "ltm")
@@ -3821,20 +3842,49 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
             _shadow_settings = DecisionsSettings(
                 timeout_s=float(os.getenv("DAI_DECISIONS_TIMEOUT_S", "8")),
                 recall_target=settings.recall_target, ltm_limit=settings.ltm_limit)
-            shadow_sink.update(config_hash=_cfg, flat_ids={n.node_id for n in _eligible if n.kind != "ltm"},
+            shadow_sink.update(flat_ids={n.node_id for n in _eligible if n.kind != "ltm"},
                                eligible={n.node_id: n.kind for n in _eligible},
                                ltm_rows={f"DA.ltm.{m['id']}": dict(m) for m in ltm_rows if m.get("id")})
+            shadow_sink["deadline"] = monotonic() + _shadow_settings.timeout_s
             shadow_sink["job"] = submit_shadow(
                 route_shadow_cycle, _shadow_settings, ctx, _eligible,
                 pinned_policy=_pinned_text, pinned_ids=[n.id for n in _pinned], today_ids=today_ids,
                 api_key=_shadow_config.api_key, image_bundle=image_bundle)
         except Exception as _shadow_exc:
             print(f"⚠️ Decisions comparison skipped ({type(_shadow_exc).__name__})")
+        if hosted_mode == "active":
+            if shadow_sink.get("job") is None:
+                job = Future()
+                job.set_result(DecisionsShadowResult(note="request_not_started"))
+                shadow_sink["job"] = job
+                shadow_sink["deadline"] = monotonic()
+            return None  # Hosted active routing owns the optional-memory decision.
     result = _route_cycle(settings, ctx, nodes, today_ids=today_ids, log=print)
     if result is not None:
         result.extras["ltm_rows"] = {f"DA.ltm.{m['id']}": m for m in ltm_rows if m.get("id")}
         result.extras["config_hash"] = _cfg
     return result
+
+
+def _decisions_memory_rows(audit, rows, *, graph_ready):
+    from concurrent.futures import TimeoutError
+    from time import monotonic
+    from policy_router.decisions import prune_incumbent_memories
+
+    if not graph_ready:
+        audit["fallback_reason"] = "graph_unavailable"
+        return rows
+    try:
+        job = audit["job"]
+        remaining = max(0.0, audit["deadline"] - monotonic())
+        result = job.result(timeout=remaining)
+        kept, reason = prune_incumbent_memories(result, rows, audit.get("eligible", {}))
+    except TimeoutError:
+        kept, reason = rows, "deadline_exceeded"
+    except Exception as exc:
+        kept, reason = rows, "selection_error:" + type(exc).__name__
+    audit["fallback_reason"] = reason
+    return kept
 
 
 def _router_memory_rows(router, todays_rows):

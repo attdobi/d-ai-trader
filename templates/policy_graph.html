@@ -232,20 +232,20 @@
   </section>
 
   <section class="pe-card pr-router" id="prRouter" role="tabpanel" aria-labelledby="prRouterTab" hidden>
-    <div class="pr-heading"><div><span class="pg-eyebrow">CONTEXT → RELEVANCE → SUBGRAPH</span><h2>The router, cycle by cycle.</h2><p class="pg-muted">Follow the proposed route through recorded evidence and guidelines. During this trial the Decider keeps its full approved context.</p></div><span class="pr-mode-badge">SHADOW · NO PROMPT PRUNING</span></div>
-    <div id="prTrial" class="pr-trial" aria-live="polite"></div>
+    <div class="pr-heading"><div><h2>Policy Router</h2><p class="pg-muted">Inspect the evidence, optional guideline selection and context served in each recorded cycle.</p></div><span id="prModeBadge" class="pr-mode-badge">RECORDED ROUTING</span></div>
     <div id="prSummary" class="pr-summary"></div>
+    <div id="prTrial" class="pr-trial" aria-live="polite"></div>
     <div class="pr-toolbar"><div><p id="prStatus" class="pr-status" role="status" aria-live="polite">Open Policy Router to load saved cycles.</p><span class="pr-passive-note">Refresh reads saved logs. It never runs a model.</span></div><label class="pr-filter-label">Cycles<select id="prSourceFilter" aria-label="Router cycle source"><option value="all">All recorded cycles</option><option value="forward">Forward observations</option><option value="replay">Saved-cycle replays</option></select></label><label class="pr-auto"><input type="checkbox" id="prAutoRefresh" checked /> Auto-refresh</label><button type="button" class="pl-button" id="prRefresh">Refresh cycles</button></div>
     <div class="pr-workspace">
       <aside class="pr-cycle-sidebar" aria-label="Recorded router cycles"><div class="pr-list-head"><h3>Decision cycles</h3><span id="prCycleCount"></span></div><div id="prCycles" class="pr-cycle-list" aria-label="Choose a router cycle"></div></aside>
-      <div class="pr-cycle-main"><div id="prEmpty" class="pr-empty"><span class="pg-eyebrow">A TRACE FOR EVERY CYCLE</span><h3>Waiting for a recorded comparison.</h3><p>The one-week trial will add evidence as new decision inputs arrive. Earlier probes remain labeled replay.</p></div><div id="prCycleDetail" hidden>
+      <div class="pr-cycle-main"><div id="prEmpty" class="pr-empty"><h3>No cycle selected</h3><p>Choose a recorded cycle to inspect its routing outcome.</p></div><div id="prCycleDetail" hidden>
         <div class="pr-cycle-heading"><div><span class="pg-eyebrow" id="prCycleKicker"></span><h3 id="prCycleTitle"></h3><p id="prCycleMeta" class="pg-muted"></p></div><button type="button" id="prPlayFlow" class="pl-button">▶ Play recorded flow</button></div>
         <div class="pr-scrubber"><button id="prPrevious" type="button" class="pl-button" aria-label="Older router cycle">←</button><input type="range" id="prCycleSlider" min="0" max="0" value="0" aria-label="Recorded router cycle" /><button id="prNext" type="button" class="pl-button" aria-label="Newer router cycle">→</button><span id="prSliderLabel"></span></div>
-        <div id="prFlow" class="pr-flow" aria-label="Recorded policy routing flow"></div><p id="prFlowCaption" class="pr-footnote">Recorded sequence, not a live model trace. Relevance is not a probability of trading profit.</p>
+        <div id="prFlow" class="pr-flow" aria-label="Recorded policy routing flow"></div><p id="prFlowCaption" class="pr-footnote"></p>
         <div id="prCycleStats" class="pr-cycle-stats"></div><div id="prCycleEconomics" class="pr-cycle-economics"></div>
-        <div class="pr-node-tabs" role="tablist" aria-label="Guideline selection"><button type="button" data-router-nodes="selected" role="tab" aria-controls="prNodeTable" aria-selected="true">Proposed to keep <span id="prSelectedCount"></span></button><button type="button" data-router-nodes="skipped" role="tab" aria-controls="prNodeTable" aria-selected="false">Proposed to skip <span id="prSkippedCount"></span></button><button type="button" data-router-nodes="pinned" role="tab" aria-controls="prNodeTable" aria-selected="false">Always pinned <span id="prPinnedCount"></span></button><button type="button" data-router-nodes="actual" role="tab" aria-controls="prNodeTable" aria-selected="false">Actually served <span id="prActualCount"></span></button></div>
+        <div class="pr-node-tabs" role="tablist" aria-label="Guideline selection"><button type="button" data-router-nodes="selected" role="tab" aria-controls="prNodeTable" aria-selected="true">Selected by router <span id="prSelectedCount"></span></button><button type="button" data-router-nodes="skipped" role="tab" aria-controls="prNodeTable" aria-selected="false">Excluded by router <span id="prSkippedCount"></span></button><button type="button" data-router-nodes="pinned" role="tab" aria-controls="prNodeTable" aria-selected="false">Pinned <span id="prPinnedCount"></span></button><button type="button" data-router-nodes="actual" role="tab" aria-controls="prNodeTable" aria-selected="false">Served optional <span id="prActualCount"></span></button></div>
         <div id="prNodeTable" class="pr-node-table" role="tabpanel" aria-label="Recorded guideline selections"></div><p id="prSelectionNote" class="pr-footnote"></p>
-        <details class="pr-method"><summary>What this trace can establish</summary><p>Selected and skipped lists describe the router’s relevance proposal. Always-pinned controls stay included. Actually served describes the captured trading prompt, not a claim that the model consciously used every guideline. In shadow mode the proposal changes no trading input and realizes no token savings. Image processing, output and reasoning costs are not inferred from text length.</p><p>Replay probes, delayed forward observers and in-cycle comparisons have different timing and remain labeled separately. Decision-quality comparisons require matched model decisions and later outcomes; a relevance score, citation match or one profitable trade does not establish preservation of quality. Trial expiry never activates pruning.</p></details>
+        <details class="pr-method"><summary>How to read these records</summary><p>Active cycles record the applied route or the full eligible context. The served list tracks the optional guidelines in the Decider input. Pinned policy applies to every route.</p><p>Matched token estimates compare prompt variants. Measuring cost savings requires matched billed usage. Evaluating decision quality requires matched decisions and later outcomes.</p></details>
       </div></div>
     </div>
     <details class="pr-legacy"><summary>Local router history and latest comparison</summary>
@@ -263,11 +263,10 @@
       <div id="pgRouterBars" class="pg-router-bars"></div>
     </details>
     <section id="pgDecisionsComparison" class="pg-comparison">
-      <h3>OpenAI Decisions · shadow comparison</h3>
-      <p id="pgDecisionsNote" class="pg-muted">No comparison recorded yet. Shadow selections do not change the prompt or place trades.</p>
+      <h3>Latest hosted Decisions cycle</h3>
+      <p id="pgDecisionsNote" class="pg-muted">Awaiting a recorded cycle.</p>
       <div id="pgDecisionsStats" class="pg-router-stats"></div>
       <div id="pgDecisionsEconomics" class="pg-router-stats" aria-label="Router token and cost comparison"></div>
-      <p class="pg-muted">The router can read the selected cycle's frozen screenshots alongside summary text; image coverage records what was actually supplied. The trading Decider can receive the same originals. Standing controls stay pinned. Shadow selections do not reduce the actual Decider input.</p>
       <details id="pgDecisionsDetails" hidden><summary>Compare guideline selections</summary>
         <div id="pgDecisionsRows" class="pg-comparison-rows"></div>
       </details>

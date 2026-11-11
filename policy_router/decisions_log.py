@@ -1,6 +1,6 @@
-"""Separate audit trail for hosted Decisions comparisons; never active routing.
+"""Audit trail for hosted Decisions scoring and application.
 
-One row is one attempted shadow cycle, not one question. Failed requests may
+One row records one cycle's hosted router outcome. Failed requests may
 have unknown cost; a refusal with valid usage retains its billed input cost.
 Only identifiers, hashes, numeric decisions and bounded local diagnostics are
 stored. Credentials and full remote/request bodies are never written here.
@@ -8,6 +8,7 @@ stored. Credentials and full remote/request bodies are never written here.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from sqlalchemy import text
@@ -54,12 +55,27 @@ def ensure_schema(engine) -> None:
         conn.execute(text(INDEX))
 
 
+def _fallback_code(value) -> str | None:
+    if value is None:
+        return None
+    # Accept local diagnostic codes only. Provider error messages can include
+    # request details and credentials.
+    if isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_]{1,63}(?::[A-Za-z][A-Za-z0-9_]{0,63})?", value):
+        return value
+    return "unavailable"
+
+
 def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result, *, local_result=None,
                   served_ids=(), source_input_id=None, source_kind="live", decided_at=None, economics=None,
-                  context_summary=None) -> int:
-    """Append one comparison, including unavailable/failed providers, atomically."""
+                  context_summary=None, requested_mode="shadow", applied=False, fallback_reason=None) -> int:
+    """Append the scoring result and whether the selection changed the live prompt."""
     if source_kind not in ("live", "replay", "observer"):
         raise ValueError("source_kind must be live, replay or observer")
+    if requested_mode not in ("shadow", "active"):
+        raise ValueError("requested_mode must be shadow or active")
+    applied = bool(applied)
+    if applied and (requested_mode != "active" or source_kind != "live" or result.status != "ok"):
+        raise ValueError("only a successful live active selection can change the prompt")
     ensure_schema(engine)
     local = {d.node_id: d for d in ((local_result.selection.decisions if local_result and local_result.selection else []))
              if not d.pinned}
@@ -87,7 +103,10 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         "comparable": len(comparable),
         "agreements": sum(n["local_choice"] == n["decisions_choice"] for n in comparable),
         "disagreements": sum(n["local_choice"] != n["decisions_choice"] for n in comparable),
-        "actual_prompt_changed": False,
+        "requested_mode": requested_mode,
+        "applied": applied,
+        "actual_prompt_changed": applied,
+        "fallback_reason": None if applied else _fallback_code(fallback_reason),
         "image_manifest": dict(getattr(result, "image_manifest", None) or {}),
     }
     if economics is not None:
@@ -95,6 +114,9 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
     if context_summary is not None:
         comparison["context_summary"] = _safe_context_summary(context_summary)
     usage = result.usage or {}
+    note = (result.note or "")[:500]
+    if requested_mode == "active" and result.status == "ok":
+        note = "Hosted selection applied." if applied else "Hosted selection left the prompt unchanged."
     params = {
         "cfg": config_hash, "run": run_id, "version": prompt_version, "input_id": source_input_id,
         "source": source_kind,
@@ -104,7 +126,7 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         "attempted": bool(result.request_attempted),
         "input": usage.get("input_tokens"), "cached": usage.get("cached_input_tokens"),
         "write": usage.get("cache_write_tokens"), "output": usage.get("output_tokens"),
-        "cost": result.cost_usd, "latency": result.latency_ms, "note": (result.note or "")[:500],
+        "cost": result.cost_usd, "latency": result.latency_ms, "note": note,
         "nodes": json.dumps(nodes, allow_nan=False), "comparison": json.dumps(comparison, allow_nan=False),
         "pinned": json.dumps(sorted(set(result.pinned_ids))),
     }
@@ -125,11 +147,19 @@ def _row_public(row, *, nodes: bool = False) -> dict:
     data = dict(row)
     raw_nodes = json.loads(data.pop("nodes_json") or "[]")
     data.update(json.loads(data.pop("comparison_json") or "{}"))
+    data["requested_mode"] = "active" if data.get("requested_mode") == "active" else "shadow"
+    data["applied"] = (data["requested_mode"] == "active" and data.get("applied") is True
+                       and data["source_kind"] == "live" and data["status"] == "ok")
+    data["actual_prompt_changed"] = data["applied"]
+    data["fallback_reason"] = None if data["applied"] else _fallback_code(data.get("fallback_reason"))
     if "context_summary" in data:
         data["context_summary"] = _safe_context_summary(data["context_summary"])
     data["pinned_ids"] = json.loads(data.pop("pinned_json") or "[]")
     from .economics import unavailable
     data.setdefault("economics", unavailable())
+    if data["applied"]:
+        # A served routed prompt has no provider-billed incumbent counterpart.
+        data["economics"]["realized_input_savings_usd"] = None
     data["selection"] = {
         "pinned_ids": data["pinned_ids"],
         "selected_ids": [n["node_id"] for n in raw_nodes if n.get("decisions_choice") == "include"],
@@ -222,11 +252,12 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     out = {"provider": PROVIDER, "model": MODEL, "runs": [], "last_cycle": None,
            "totals": {"runs": 0, "ok": 0, "fallback": 0, "request_attempts": 0,
                       "cost_usd": None, "known_cost_usd": None, "unknown_cost_calls": 0,
+                      "active_requested_runs": 0, "applied_runs": 0,
                       "live_runs": 0, "replay_runs": 0, "observer_runs": 0, "input_tokens": 0,
                       "cached_input_tokens": 0, "cache_write_tokens": 0, "output_tokens": 0,
                       "economics_captured_runs": 0, "economics_unavailable_runs": 0,
                       "realized_input_savings_usd": 0.0},
-           "note": "Shadow comparison only; no prompt changes or realized savings."}
+           "note": "Saved hosted Decisions scoring and application results."}
     try:
         with engine.connect() as conn:
             rows = conn.execute(text("""
@@ -242,7 +273,9 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     totals = out["totals"]
     totals.update(runs=len(rows), ok=sum(r["status"] == "ok" for r in rows),
                   fallback=sum(r["status"] != "ok" for r in rows),
-                  request_attempts=sum(bool(r["request_attempted"]) for r in rows))
+                  request_attempts=sum(r["request_attempted"] for r in out["runs"]),
+                  active_requested_runs=sum(r["requested_mode"] == "active" for r in out["runs"]),
+                  applied_runs=sum(r["applied"] for r in out["runs"]))
     known = [float(r["cost_usd"]) for r in rows if r["cost_usd"] is not None]
     totals["known_cost_usd"] = sum(known) if known else None
     totals["unknown_cost_calls"] = sum(bool(r["request_attempted"]) and r["cost_usd"] is None for r in rows)
@@ -255,8 +288,8 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     captured = [r for r in out["runs"] if r["economics"].get("status") == "estimated"]
     totals["economics_captured_runs"] = len(captured)
     totals["economics_unavailable_runs"] = len(rows) - len(captured)
-    totals["realized_input_savings_usd"] = 0.0
-    totals["economics_note"] = "Bounded recent comparisons. Potential savings require frozen captures; replay and live runs remain identified. Shadow has zero realized input savings."
+    totals["realized_input_savings_usd"] = None if totals["applied_runs"] else 0.0
+    totals["economics_note"] = "Estimates require same-cycle prompt captures. Billed savings for applied selections are unknown."
     return out
 
 

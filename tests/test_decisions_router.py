@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 from policy_router.decisions import (
     DecisionsSettings, build_request, decisions_cost, parse_usage, route_shadow_cycle,
 )
-from policy_router.decisions_log import comparison_panel, record_shadow
+from policy_router.decisions_log import comparison_panel, cycle_detail, record_shadow
 from policy_router.features import CycleContext
 from policy_router.nodes import RouterNode
 from policy_router.select import select_subgraph
@@ -200,6 +200,7 @@ def test_comparison_log_is_config_scoped_and_distinguishes_hypothetical_selectio
     assert last["id"] == ident and last["source_input_id"] == 148 and last["prompt_version"] == 59
     assert last["chars_today"] == 180 and last["chars_selected"] == 120 and last["chars_saved"] == 60
     assert not last["actual_prompt_changed"] and last["disagreements"] == 1
+    assert last["requested_mode"] == "shadow" and not last["applied"] and last["fallback_reason"] is None
     assert all(n["served_in_prompt"] for n in last["nodes"])
     assert panel["totals"]["request_attempts"] == 1
     assert panel["totals"]["cost_usd"] == result.cost_usd
@@ -207,6 +208,50 @@ def test_comparison_log_is_config_scoped_and_distinguishes_hypothetical_selectio
     with engine.connect() as conn:
         raw = str(conn.execute(text("SELECT * FROM policy_router_comparisons")).fetchall())
     assert KEY not in raw and "Holding-specific context" not in raw
+
+
+def test_hosted_mode_audit_distinguishes_applied_selection_from_safety_fallback_and_legacy_shadow():
+    engine = create_engine("sqlite://")
+    result, _ = run()
+    full = {n.node_id for n in nodes()}
+    selected = result.selection.include_ids
+    legacy_id = record_shadow(engine, CFG, 59, "legacy", result, served_ids=full)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE policy_router_comparisons SET comparison_json = :payload WHERE id = :id"),
+                     {"payload": '{"actual_prompt_changed":false}', "id": legacy_id})
+    active_id = record_shadow(engine, CFG, 59, "active", result, served_ids=selected,
+                              requested_mode="active", applied=True)
+    fallback_id = record_shadow(engine, CFG, 59, "guarded", result, served_ids=full,
+                                requested_mode="active", fallback_reason="pinned_policy_mismatch")
+    panel = comparison_panel(engine, CFG)
+    assert panel["totals"]["active_requested_runs"] == 2 and panel["totals"]["applied_runs"] == 1
+    assert panel["totals"]["realized_input_savings_usd"] is None
+    assert [row["id"] for row in panel["runs"]] == [fallback_id, active_id, legacy_id]
+    for row, mode, applied, reason, served in zip(
+        panel["runs"], ["active", "active", "shadow"], [False, True, False],
+        ["pinned_policy_mismatch", None, None], [full, selected, full]
+    ):
+        detail = cycle_detail(engine, CFG, row["id"])
+        for record in (row, detail):
+            assert record["status"] == "ok"
+            assert record["requested_mode"] == mode
+            assert record["applied"] is record["actual_prompt_changed"] is applied
+            assert record["fallback_reason"] == reason
+            assert set(record["selection"]["actual_optional_ids"]) == served
+            assert record["economics"]["realized_input_savings_usd"] == (None if applied else 0)
+
+
+def test_fallback_audit_never_stores_raw_exception_text():
+    engine = create_engine("sqlite://")
+    failed = route_shadow_cycle(DecisionsSettings(), context(), nodes())
+    ident = record_shadow(engine, CFG, 59, "failed", failed, requested_mode="active",
+                          fallback_reason="HTTP 401 Bearer " + KEY)
+    row = cycle_detail(engine, CFG, ident)
+    assert row["status"] == "fallback" and row["fallback_reason"] == "unavailable"
+    assert not row["actual_prompt_changed"]
+    with engine.connect() as conn:
+        stored = conn.execute(text("SELECT comparison_json FROM policy_router_comparisons")).scalar_one()
+    assert KEY not in stored
 
 
 def test_unknown_cost_attempts_and_preflight_skips_are_reported_separately():

@@ -26,6 +26,21 @@ def test_timing_preserves_replay_observer_and_native_distinctions():
     assert 'after' in out[1]['note']
 
 
+def test_active_outcomes_distinguish_application_retention_and_fallback():
+    live = {'source_kind': 'live', 'requested_mode': 'active', 'status': 'ok'}
+    applied = {**live, 'applied': True, 'actual_prompt_changed': True}
+    out = js('d.map(R.sourceInfo)', [applied,
+        {**live, 'applied': False, 'fallback_reason': 'candidate_mismatch'},
+        {**live, 'applied': False, 'fallback_reason': None},
+        {**applied, 'source_kind': 'replay'}, {'source_kind': 'live', 'status': 'ok'}])
+    assert [row['routing'] for row in out] == ['applied', 'fallback', 'retained', 'replay', 'shadow']
+    assert 'differed' in out[1]['note']
+    assert 'retained' in out[2]['note']
+    flow = js('R.flowHTML(d)', {**applied, 'selection': {'actual_optional_ids': ['keep']}})
+    assert 'ACTIVE ROUTE APPLIED' in flow and 'Routed context' in flow
+    assert '1<small>optional guidelines served' in flow
+
+
 def test_selection_does_not_substitute_proposed_ids_for_what_was_actually_read():
     out=js('R.selectionFor(d)',{'status':'ok','pinned_ids':['risk.stop'],'selection':{'selected_ids':['keep','keep'],'skipped_ids':['skip'],'actual_optional_ids':['keep','skip']}})
     assert out['pinned']==['risk.stop'] and out['selected']==['keep']
@@ -39,19 +54,19 @@ def test_cycles_are_filtered_by_recorded_timing_and_sorted_without_mutation():
     assert out=={'all':[4,3,2,1],'forward':[3,1],'replay':[4],'original':[1,4,3,2]}
 
 
-def test_trial_end_is_review_time_and_never_an_activation_instruction():
+def test_trial_end_displays_a_historical_shadow_evaluation():
     out=js('R.trialModel(d,Date.parse("2026-11-06T00:00:00Z"))',{'status':'active','starts_at':'2026-10-29T00:00:00Z','ends_at':'2026-11-05T00:00:00Z'})
     assert out['expired'] and out['progress']==1 and out['status']=='complete'
-    assert out['label']=='Review before activation' and 'never enables' in out['note']
+    assert out['label']=='Completed' and 'Historical shadow evaluation' in out['note']
     missing=js('R.trialModel(d,0)',{'status':'active','starts_at':'2026-10-29T00:00:00','ends_at':'2026-11-05T00:00:00'})
     assert missing['progress'] is None and missing['days_remaining'] is None
 
 
-def test_flow_escapes_source_text_keeps_images_unknown_and_never_claims_active_pruning():
-    out=js('R.flowHTML(d)',{'status':'ok','prompt_version':61,'context_summary':{'regime':'<img onerror=bad>','summary_count':6},'selection':{'selected_ids':['one'],'skipped_ids':['two'],'actual_optional_ids':['one','two']},'pinned_ids':['risk']})
+def test_shadow_flow_escapes_source_text_and_keeps_images_unknown():
+    out=js('R.flowHTML(d)',{'source_kind':'live','status':'ok','prompt_version':61,'context_summary':{'regime':'<img onerror=bad>','summary_count':6},'selection':{'selected_ids':['one'],'skipped_ids':['two'],'actual_optional_ids':['one','two']},'pinned_ids':['risk']})
     assert '<img' not in out and '&lt;img' in out
-    assert 'Unknown screenshots' in out and 'SHADOW · UNCHANGED INPUT' in out
-    assert 'saved no actual input tokens' in out and '2<small>optional IDs recorded' in out
+    assert 'Unknown screenshots' in out and 'SHADOW COMPARISON' in out
+    assert '2<small>optional guidelines served' in out and 'ACTIVE ROUTE APPLIED' not in out
 
 
 def test_node_table_uses_actual_membership_separate_from_relevance_and_escapes_ids():
@@ -93,7 +108,7 @@ const row={id:5,status:'ok',source_kind:'live',prompt_version:61,selection:{pinn
 global.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>url.includes('?')?{runs:[row],totals:{live_runs:1,replay_runs:0,cost_usd:.005},trial:{status:'active'}}:{cycle:row}};};
 const win={addEventListener(){},setTimeout(fn,delay){timers.push({fn,delay});return timers.length;},clearTimeout(){},matchMedia(){return {matches:false};}};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-(async()=>{R.mount(win);await tick();await tick();assert.equal(calls.length,2);assert.equal(calls[0].url,'/api/policy-graph/router-cycles?limit=100');assert.equal(calls[1].url,'/api/policy-graph/router-cycles/5');assert.ok(calls.every(c=>!c.options.body&&!c.options.method));assert.equal(elements.prCycleDetail.hidden,false);assert.ok(elements.prFlow.innerHTML.includes('SHADOW · UNCHANGED INPUT'));assert.ok(timers.some(t=>t.delay===30000));document.hidden=true;docEvents.visibilitychange();assert.equal(calls.length,2,'hidden page does not fetch or trigger API calls');})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{R.mount(win);await tick();await tick();assert.equal(calls.length,2);assert.equal(calls[0].url,'/api/policy-graph/router-cycles?limit=100');assert.equal(calls[1].url,'/api/policy-graph/router-cycles/5');assert.ok(calls.every(c=>!c.options.body&&!c.options.method));assert.equal(elements.prCycleDetail.hidden,false);assert.ok(elements.prFlow.innerHTML.includes('SHADOW COMPARISON'));assert.equal(elements.prModeBadge.textContent,'LATEST IN-CYCLE · SHADOW');assert.ok(timers.some(t=>t.delay===30000));document.hidden=true;docEvents.visibilitychange();assert.equal(calls.length,2,'hidden page does not fetch or trigger API calls');})().catch(e=>{console.error(e);process.exitCode=1;});
 '''
     out=subprocess.run([NODE,'-e',script,str(ROOT/'static/js/policy-router-view.js'),str(ROOT/'templates/policy_graph.html')],capture_output=True,text=True,timeout=10)
     assert out.returncode==0,out.stderr or out.stdout

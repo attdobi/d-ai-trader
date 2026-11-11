@@ -19,12 +19,51 @@
     if(!/(?:Z|[+-]\d{2}:?\d{2})$/.test(s))return s.replace('T',' ').slice(0,16)+' (as logged)';
     const date=new Date(s);return Number.isNaN(date.getTime())?'Time not recorded':date.toLocaleString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' PT';
   }
-  function sourceInfo(row){
-    const source=String(row?.source_kind||'unknown');
-    if(source==='replay')return {key:'replay',label:'Saved-cycle replay',short:'Replay',forward:false,note:'Saved evidence evaluated later; not a forward comparison.'};
-    if(source==='observer'||source==='forward_observer'||row?.execution_mode==='observer'||row?.context_summary?.timing==='post_decision'||row?.observer===true)return {key:'observer',label:'Forward observer',short:'Observer',forward:true,note:'Observed after the saved trading decision; did not alter its prompt.'};
-    if(source==='live')return {key:'live',label:'In-cycle shadow',short:'In-cycle',forward:true,note:'Shadow relevance comparison; the trading prompt is unchanged.'};
-    return {key:'unknown',label:'Timing not recorded',short:'Unknown',forward:false,note:'This record does not establish when routing ran.'};
+  const fallbackLabels = {
+    candidate_mismatch: 'The scored candidates differed from the eligible memory rows.',
+    deadline_exceeded: 'The routing deadline elapsed.',
+    empty_memory_selection: 'The selection would have omitted all eligible memory.',
+    graph_unavailable: 'The policy graph was unavailable.',
+    missing_api_key: 'The hosted router lacked credentials.',
+    request_not_started: 'The hosted request could not start.',
+    selection_error: 'The selection could not be applied.',
+    selection_unavailable: 'A complete selection was unavailable.',
+    transport_or_scoring_error: 'The hosted request or scoring step failed.',
+  };
+  function fallbackLabel(reason) {
+    if (typeof reason !== 'string' || !reason) return 'The cycle used the full eligible prompt.';
+    const code = reason.split(':', 1)[0];
+    return Object.hasOwn(fallbackLabels, code) ? fallbackLabels[code] : `Fallback reason ${code.replaceAll('_', ' ')}.`;
+  }
+  function sourceInfo(row) {
+    const source = row?.source_kind;
+    if (source === 'replay') {
+      return {key: 'replay', routing: 'replay', label: 'Saved-cycle replay', short: 'Replay', forward: false,
+        badge: 'SAVED INPUT REPLAY', note: 'The router scored a previously saved decision input.'};
+    }
+    if (source === 'observer' || source === 'forward_observer' || row?.execution_mode === 'observer' ||
+        row?.context_summary?.timing === 'post_decision' || row?.observer === true) {
+      return {key: 'observer', routing: 'observer', label: 'Forward observer', short: 'Observer', forward: true,
+        badge: 'POST-DECISION OBSERVER', note: 'The observer scored the saved input after the Decider ran.'};
+    }
+    if (source === 'live') {
+      if (row.requested_mode === 'active' && row.applied === true && row.actual_prompt_changed === true) {
+        return {key: 'live', routing: 'applied', label: 'In-cycle routing applied', short: 'Applied', forward: true,
+          badge: 'ACTIVE ROUTE APPLIED', note: 'The Decider received the routed optional context alongside its pinned policy.'};
+      }
+      if (row.requested_mode === 'active') {
+        if (row.status === 'ok' && !row.fallback_reason) {
+          return {key: 'live', routing: 'retained', label: 'In-cycle context retained', short: 'Full context', forward: true,
+            badge: 'ACTIVE · FULL CONTEXT', note: 'The active routing check retained the full eligible context.'};
+        }
+        return {key: 'live', routing: 'fallback', label: 'In-cycle fallback', short: 'Full fallback', forward: true,
+          badge: 'FULL CONTEXT FALLBACK', note: fallbackLabel(row.fallback_reason)};
+      }
+      return {key: 'live', routing: 'shadow', label: 'In-cycle shadow', short: 'Shadow', forward: true,
+        badge: 'SHADOW COMPARISON', note: 'Shadow records relevance alongside the prompt served by the Decider.'};
+    }
+    return {key: 'unknown', routing: 'unknown', label: 'Timing unavailable', short: 'Unknown', forward: false,
+      badge: 'OUTCOME UNAVAILABLE', note: 'Routing timing is unavailable for this cycle.'};
   }
   function selectionFor(row){
     const nodes=list(row?.nodes),selection=row?.selection||{};
@@ -48,10 +87,11 @@
     const configured=!['not_started','not_configured','unavailable','none'].includes(status);
     const progress=start!==null&&end!==null&&end>start?Math.max(0,Math.min(1,(now-start)/(end-start))):null;
     return {status,configured,expired,progress,starts_at:trial.starts_at||trial.started_at||null,ends_at:trial.ends_at||trial.expires_at||null,
-      heading:expired?'Observation window complete':status==='active'||status==='running'?'One week in shadow':configured?'Shadow evaluation':'No shadow window recorded',
-      label:expired?'Review before activation':status==='active'||status==='running'?'Observing':configured?status.replaceAll('_',' '):'Not configured',
+      heading:expired?'Shadow evaluation complete':status==='active'||status==='running'?'One week in shadow':configured?'Shadow evaluation':'No shadow window recorded',
+      label:expired?'Completed':status==='active'||status==='running'?'Observing':configured?status.replaceAll('_',' '):'Not configured',
       days_remaining:end===null?null:Math.max(0,(end-now)/86400000),
-      note:typeof trial.note==='string'?trial.note:'Trial expiry never enables prompt pruning. Review matched costs, coverage and decision quality before changing routing.'};
+      note:expired?'Historical shadow evaluation. Each cycle below shows its own recorded routing outcome.':
+        configured?'The evaluation records relevance scores alongside the full Decider input.':'Shadow evaluation details are unavailable.'};
   }
   function flowModel(row){
     const selected=selectionFor(row),ctx=row?.context_summary||{},image=row?.image_manifest||{};
@@ -66,7 +106,33 @@
   function flowHTML(row){
     const m=flowModel(row),s=m.selected;
     const keep=s.available?number(s.selected.length):'—',skip=s.available?number(s.skipped.length):'—';
-    return `<section class="pr-flow-column evidence" data-flow-stage="0"><span class="pr-flow-step">01 · CYCLE EVIDENCE</span><h4>What was supplied</h4><span class="pr-flow-value">${esc(number(m.summaryCount))}<small>summaries</small></span><p>${esc(number(m.imageCount))} screenshots · ${esc(m.coverage)} coverage</p><p class="pr-flow-cue">Regime: ${esc(m.regime)}</p><p>${m.imageCount!==null&&m.imageCount>0?'Frozen source IDs and hashes preserve the saved image evidence.':m.imageCount===0?'Text-only input; no image pixels were supplied.':'Image input was not recorded for this comparison.'}</p>${m.tickers.length?`<div class="pr-mini-tags">${m.tickers.map(t=>`<span>${esc(t)}</span>`).join('')}</div>`:''}</section><div class="pr-flow-arrow" aria-hidden="true">→</div><section class="pr-flow-column router" data-flow-stage="1"><span class="pr-flow-step">02 · DECISIONS SUBGRAPH</span><h4>Relevance, rule by rule</h4><p>OpenAI Decisions · GPT-6 Luna</p><div class="pr-pinned-line"><strong>${esc(number(s.pinned.length))}</strong> controls always pinned</div><div class="pr-route-split"><div class="pr-route-bucket"><strong>${esc(keep)}</strong><span>Proposed keep</span></div><div class="pr-route-bucket skip"><strong>${esc(skip)}</strong><span>Proposed skip</span></div></div><p style="margin-top:10px">${s.available?'Only optional context is scored. Gates, identity and execution limits stay pinned.':'No valid complete selection was recorded. The existing prompt remains in place.'}</p></section><div class="pr-flow-arrow" aria-hidden="true">→</div><section class="pr-flow-column decider" data-flow-stage="2"><span class="pr-flow-step">03 · ACTUAL DECIDER INPUT</span><h4>Full approved context</h4><span class="pr-flow-value">${esc(s.actualKnown?number(s.actual.length):'Unknown')}<small>optional IDs recorded</small></span><p>Plus the standing policy and code-owned context. ${m.prompt_version!==null?`Policy v${esc(m.prompt_version)}.`:''}</p><span class="pr-flow-unchanged">SHADOW · UNCHANGED INPUT</span><p style="margin-top:10px">This selection placed no order and saved no actual input tokens.</p></section>`;
+    const deciderTitle = {
+      applied: 'Routed context', fallback: 'Full eligible context', retained: 'Full eligible context', shadow: 'Decider context',
+      replay: 'Saved context', observer: 'Saved context', unknown: 'Recorded context',
+    }[m.source.routing];
+    return `<section class="pr-flow-column evidence" data-flow-stage="0">
+      <h4>Cycle evidence</h4>
+      <span class="pr-flow-value">${esc(number(m.summaryCount))}<small>summaries</small></span>
+      <p>${esc(number(m.imageCount))} screenshots · ${esc(m.coverage)} coverage</p>
+      <p class="pr-flow-cue">Regime ${esc(m.regime)}</p>
+      ${m.tickers.length ? `<div class="pr-mini-tags">${m.tickers.map(t => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+    </section><div class="pr-flow-arrow" aria-hidden="true">→</div>
+    <section class="pr-flow-column router" data-flow-stage="1">
+      <h4>Hosted Decisions selection</h4>
+      <p>${esc(row?.model || 'Model unavailable')}</p>
+      <div class="pr-pinned-line"><strong>${esc(number(s.pinned.length))}</strong> pinned guidelines</div>
+      <div class="pr-route-split">
+        <div class="pr-route-bucket"><strong>${esc(keep)}</strong><span>Selected</span></div>
+        <div class="pr-route-bucket skip"><strong>${esc(skip)}</strong><span>Excluded</span></div>
+      </div>
+      ${s.available ? '' : '<p style="margin-top:10px">Selection unavailable for this cycle.</p>'}
+    </section><div class="pr-flow-arrow" aria-hidden="true">→</div>
+    <section class="pr-flow-column decider" data-flow-stage="2">
+      <h4>${deciderTitle}</h4>
+      <span class="pr-flow-value">${esc(s.actualKnown ? number(s.actual.length) : 'Unknown')}<small>optional guidelines served</small></span>
+      ${m.prompt_version === null ? '' : `<p>Decider policy v${esc(m.prompt_version)}</p>`}
+      <span class="pr-flow-unchanged">${esc(m.source.badge)}</span>
+    </section>`;
   }
   function tableHTML(row,bucket){
     const selection=selectionFor(row),items=list(selection[bucket]),nodes=new Map(list(row?.nodes).map(n=>[n.node_id,n]));
@@ -83,20 +149,46 @@
     const api='/api/policy-graph/router-cycles';
     const status=(text,error=false)=>{$('#prStatus').textContent=text;$('#prStatus').classList.toggle('is-error',error);};
     const rows=()=>filteredRuns(state.data?.runs,state.filter);
-    const stopFlow=()=>{if(state.playTimer)win.clearTimeout(state.playTimer);state.playTimer=null;state.playing=false;$('#prPlayFlow').textContent='▶ Play recorded flow';$('#prFlow').querySelectorAll('[data-flow-stage]').forEach(e=>e.classList.remove('is-playing'));};
+    const stopFlow=()=>{if(state.playTimer)win.clearTimeout(state.playTimer);state.playTimer=null;state.playing=false;$('#prPlayFlow').textContent='▶ Play recorded flow';$('#prFlow').querySelectorAll('[data-flow-stage]').forEach(e=>e.classList.remove('is-playing'));if(state.detail)$('#prFlowCaption').textContent=sourceInfo(state.detail).note;};
     function clearTimer(){if(state.timer)win.clearTimeout(state.timer);state.timer=null;}
     function schedule(){clearTimer();if(state.active&&!document.hidden&&$('#prAutoRefresh').checked&&state.failures<3)state.timer=win.setTimeout(()=>refresh(),30000);}
     function renderTrial(){
       const t=trialModel(state.data?.trial),start=t.starts_at?dateText(t.starts_at):'Start not recorded',end=t.ends_at?dateText(t.ends_at):'End not recorded';
-      $('#prTrial').innerHTML=`<div class="pr-trial-head"><div><h3>${esc(t.heading)}</h3><p>${esc(start)} → ${esc(end)}</p></div><span class="pr-trial-label">${esc(t.label)}</span></div>${t.progress!==null?`<div class="pr-trial-track" role="progressbar" aria-label="Shadow observation window elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(t.progress*100)}"><div class="pr-trial-fill" style="width:${(t.progress*100).toFixed(2)}%"></div></div>`:''}<p style="margin-top:10px">${esc(t.note)} <strong>No automatic go-live.</strong></p>`;
+      $('#prTrial').innerHTML=`<div class="pr-trial-head"><div><h3>${esc(t.heading)}</h3><p>${esc(start)} → ${esc(end)}</p></div><span class="pr-trial-label">${esc(t.label)}</span></div>${t.progress!==null?`<div class="pr-trial-track" role="progressbar" aria-label="Shadow observation window elapsed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(t.progress*100)}"><div class="pr-trial-fill" style="width:${(t.progress*100).toFixed(2)}%"></div></div>`:''}<p style="margin-top:10px">${esc(t.note)}</p>`;
       const trial=state.data?.trial||{};
       if(finite(trial.cycles))$('#prTrial').insertAdjacentHTML('beforeend',`<p class="pr-footnote">This evaluation window: ${esc(number(trial.cycles))} new cycles · ${esc(money(trial.cost_usd))} recorded spend. The cycle browser also includes earlier comparisons and replay probes.</p>`);
-      const totals=state.data?.totals||{},known=finite(totals.known_cost_usd)?money(totals.known_cost_usd):money(totals.cost_usd);
-      $('#prSummary').innerHTML=metric('Forward comparisons',number(totals.forward_runs??((Number(totals.live_runs)||0)+(Number(totals.observer_runs)||0))),'Observer and in-cycle timing remain labeled')+metric('Replay probes',number(totals.replay_runs),'Historical inputs, separate from forward evidence')+metric('Recorded router spend',finite(totals.cost_usd)?money(totals.cost_usd):known,(Number(totals.unknown_cost_calls)||0)>0?`${number(totals.unknown_cost_calls)} calls have unknown cost; shown amount is known subtotal`:'Complete router fee in the displayed window')+metric('Realized routing savings','$0.00000','Shadow keeps the actual trading prompt unchanged');
+      const history = filteredRuns(state.data?.runs);
+      const inCycle = history.map(sourceInfo).filter(source => source.key === 'live');
+      $('#prModeBadge').textContent = inCycle.length ? `LATEST IN-CYCLE · ${inCycle[0].short.toUpperCase()}` : 'RECORDED ROUTING';
+      const totals = state.data?.totals || {};
+      const applied = count(totals.applied_runs) ?? inCycle.filter(source => source.routing === 'applied').length;
+      const retained = inCycle.filter(source => source.routing === 'retained').length;
+      const fallbacks = inCycle.filter(source => source.routing === 'fallback').length;
+      const spend = finite(totals.cost_usd) ? money(totals.cost_usd) : money(totals.known_cost_usd);
+      const spendNote = Number(totals.unknown_cost_calls) > 0
+        ? `Known subtotal · ${number(totals.unknown_cost_calls)} calls with unknown cost`
+        : 'Usage estimates across the displayed cycles';
+      $('#prSummary').innerHTML =
+        metric('Forward cycles', number(totals.forward_runs ?? history.filter(row => sourceInfo(row).forward).length), 'In-cycle records and observers') +
+        metric('Active routes applied', number(applied), `${number(retained)} full context retained · ${number(fallbacks)} full context fallbacks`) +
+        metric('Replay probes', number(totals.replay_runs), 'Routing on previously saved inputs') +
+        metric('Recorded router spend', spend, spendNote);
     }
     function renderList(){
       const values=rows();$('#prCycleCount').textContent=number(values.length);
-      $('#prCycles').innerHTML=values.length?values.map(row=>{const source=sourceInfo(row),selection=selectionFor(row);return `<button type="button" class="pr-cycle-row${String(row.id)===String(state.selected)?' is-selected':''}" data-router-cycle="${esc(row.id)}" aria-pressed="${String(String(row.id)===String(state.selected))}"><span class="pr-cycle-row-head"><strong>#${esc(row.id)} · v${esc(row.prompt_version??'?')}</strong><span class="pr-source${source.forward?' forward':''}">${esc(source.short)}</span></span><small>${esc(dateText(row.decided_at))}</small><span class="pr-row-line"><i class="pr-cycle-dot${row.status==='ok'?'':' failed'}" aria-hidden="true"></i>${esc(selection.available?`${selection.selected.length} keep · ${selection.skipped.length} skip`:row.status||'Unknown')}<span style="margin-left:auto">${esc(money(row.cost_usd))}</span></span></button>`;}).join(''):'<div class="pr-empty"><p>No saved cycles match this filter.</p></div>';
+      $('#prCycles').innerHTML = values.length ? values.map(row => {
+        const source = sourceInfo(row), selection = selectionFor(row);
+        const selected = String(row.id) === String(state.selected);
+        const warning = source.routing === 'fallback' || row.status !== 'ok';
+        const counts = source.routing === 'applied' && selection.actualKnown
+          ? `${selection.actual.length} optional served`
+          : selection.available ? `${selection.selected.length} selected · ${selection.skipped.length} excluded` : 'Selection unavailable';
+        return `<button type="button" class="pr-cycle-row${selected ? ' is-selected' : ''}" data-router-cycle="${esc(row.id)}" aria-pressed="${selected}">
+          <span class="pr-cycle-row-head"><strong>#${esc(row.id)} · v${esc(row.prompt_version ?? '?')}</strong><span class="pr-source${source.forward ? ' forward' : ''}">${esc(source.short)}</span></span>
+          <small>${esc(dateText(row.decided_at))}</small>
+          <span class="pr-row-line"><i class="pr-cycle-dot${warning ? ' failed' : ''}" aria-hidden="true"></i>${esc(counts)}<span style="margin-left:auto">${esc(money(row.cost_usd))}</span></span>
+        </button>`;
+      }).join('') : '<div class="pr-empty"><p>No saved cycles match this filter.</p></div>';
       const asc=values.slice().reverse(),index=asc.findIndex(r=>String(r.id)===String(state.selected));
       $('#prCycleSlider').max=String(Math.max(0,asc.length-1));$('#prCycleSlider').value=String(Math.max(0,index));$('#prCycleSlider').disabled=asc.length<2;$('#prPrevious').disabled=index<=0;$('#prNext').disabled=index<0||index>=asc.length-1;$('#prSliderLabel').textContent=index>=0?`${index+1}/${asc.length}`:'—';
     }
@@ -109,12 +201,12 @@
       stopFlow();state.detail=row;const m=flowModel(row),s=m.selected;
       $('#prEmpty').hidden=true;$('#prCycleDetail').hidden=false;
       $('#prCycleKicker').textContent=m.source.label;$('#prCycleTitle').textContent=`Cycle #${row.id} · ${dateText(row.decided_at)}`;
-      $('#prCycleMeta').textContent=`${row.run_id||'Run ID not recorded'} · policy v${row.prompt_version??'?'} · ${row.model||'Model not recorded'} · ${m.source.note}`;
-      $('#prFlow').innerHTML=flowHTML(row);$('#prFlowCaption').textContent=`${m.source.note} Recorded sequence, not a live model trace. Relevance does not estimate trading profit.`;
-      $('#prCycleStats').innerHTML=metric('Router API fee',money(row.cost_usd),'Standard-rate usage estimate')+metric('Router input tokens',number(row.input_tokens),'Includes supplied images')+metric('Router latency',finite(row.latency_ms)?`${number(row.latency_ms)} ms`:'Unknown','Measured request duration')+metric('Screenshot evidence',number(m.imageCount),`${m.coverage} coverage`);
-      $('#prCycleEconomics').innerHTML=win.DAIRouterEconomics?.render(row.economics)||'<p class="pr-footnote">Matched full-prompt token estimates were not captured for this cycle.</p>';
+      $('#prCycleMeta').textContent=`${row.run_id||'Run ID not recorded'} · policy v${row.prompt_version??'?'} · ${row.model||'Model not recorded'}`;
+      $('#prFlow').innerHTML=flowHTML(row);$('#prFlowCaption').textContent=m.source.note;
+      $('#prCycleStats').innerHTML=metric('Router API fee',money(row.cost_usd),'Standard-rate usage estimate')+metric('Router input tokens',number(row.input_tokens),'Usage reported by the router')+metric('Router latency',finite(row.latency_ms)?`${number(row.latency_ms)} ms`:'Unknown','Measured request duration')+metric('Screenshot evidence',number(m.imageCount),`${m.coverage} coverage`);
+      $('#prCycleEconomics').innerHTML=win.DAIRouterEconomics?.render(row.economics, m.source.routing)||'<p class="pr-footnote">Token estimates are unavailable for this cycle.</p>';
       for(const [id,key]of[['#prSelectedCount','selected'],['#prSkippedCount','skipped'],['#prPinnedCount','pinned'],['#prActualCount','actual']])$(id).textContent=key==='actual'&&!s.actualKnown?'?':s[key].length;
-      $('#prSelectionNote').textContent=row.note||'Optional context is scored for relevance. Standing controls stay pinned. The proposed skip list is not applied during shadow evaluation.';
+      $('#prSelectionNote').textContent='The relevance scores apply to optional guidelines. The served list records the Decider’s input.';
       renderNodes();
     }
     async function selectCycle(id,manual=true){
@@ -157,7 +249,9 @@
       if(state.playing){stopFlow();return;}if(!state.detail)return;
       state.playing=true;$('#prPlayFlow').textContent='■ Stop recorded flow';let stage=0;
       const reduced=win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      const next=()=>{if(!state.playing||!state.active)return;$('#prFlow').querySelectorAll('[data-flow-stage]').forEach(e=>e.classList.toggle('is-playing',Number(e.dataset.flowStage)===stage));$('#prFlowCaption').textContent=['01 · Inspect the recorded context and image coverage.','02 · Read the stored relevance proposal; pinned controls stay included.','03 · Shadow leaves the actual trading prompt unchanged.'][stage];stage++;state.playTimer=win.setTimeout(stage<3?next:stopFlow,reduced?1500:1150);};next();
+      const captions = ['Inspect the saved context and image coverage.',
+        'Review the optional guidelines selected by the router.', sourceInfo(state.detail).note];
+      const next=()=>{if(!state.playing||!state.active)return;$('#prFlow').querySelectorAll('[data-flow-stage]').forEach(e=>e.classList.toggle('is-playing',Number(e.dataset.flowStage)===stage));$('#prFlowCaption').textContent=captions[stage];stage++;state.playTimer=win.setTimeout(stage<3?next:stopFlow,reduced?1500:1150);};next();
     }
     $('#prRefresh').addEventListener('click',()=>{state.failures=0;refresh();});$('#prAutoRefresh').addEventListener('change',schedule);
     $('#prSourceFilter').addEventListener('change',e=>{state.filter=e.target.value;state.followLatest=true;const values=rows();renderList();if(values.length)selectCycle(values[0].id,false);else{$('#prEmpty').hidden=false;$('#prCycleDetail').hidden=true;}});

@@ -1,4 +1,4 @@
-"""OpenAI Decisions as a shadow-only, per-guideline relevance scorer.
+"""OpenAI Decisions as a per-guideline relevance scorer.
 
 Configuration, credentials and cycle data are injected. This module never changes
 the prompt or exposes an active routing override. Probabilities are model estimates,
@@ -176,6 +176,22 @@ def parse_probabilities(response: dict, expected_ids) -> dict:
     return out
 
 
+def prune_incumbent_memories(result, rows, eligible_ids, *, max_skip_probability=0.05):
+    """Keep incumbent order and only omit scored low-relevance exclusions."""
+    eligible = set(eligible_ids)
+    if result.status != "ok" or result.selection is None:
+        return rows, result.note or "selection_unavailable"
+    if (not eligible or set(result.nodes) != eligible or set(result.probabilities) != eligible
+            or not eligible.issubset({f"DA.ltm.{row['id']}" for row in rows if row.get("id")})):
+        return rows, "candidate_mismatch"
+    omitted = {d.node_id for d in result.selection.excluded
+               if d.node_id in eligible and result.probabilities[d.node_id] <= max_skip_probability}
+    if not omitted:
+        return rows, None
+    kept = [row for row in rows if f"DA.ltm.{row.get('id')}" not in omitted]
+    return (kept, None) if kept else (rows, "empty_memory_selection")
+
+
 def parse_usage(response: dict) -> dict:
     """Cache reads/writes are subsets of input_tokens; Decisions output is free."""
     raw = response.get("usage")
@@ -273,7 +289,7 @@ def route_shadow_cycle(settings: DecisionsSettings, ctx, nodes, *, pinned_policy
             tau_min=settings.tau_min, recall_target=settings.recall_target,
             max_per_kind={"ltm": settings.ltm_limit} if settings.ltm_limit else None)
         result.status = "ok"
-        result.note = "Shadow only; estimates are uncalibrated for this policy and never change the prompt."
+        result.note = "Relevance estimates are uncalibrated for this policy."
     except DecisionsResponseError as exc:
         result.note = str(exc)  # fixed local diagnostic; contains no remote text
     except Exception as exc:  # credentials/request bodies can appear in driver exception strings

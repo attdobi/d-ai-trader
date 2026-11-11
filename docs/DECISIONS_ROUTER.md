@@ -1,9 +1,28 @@
-# Decisions shadow router
+# OpenAI Decisions policy router
 
 The OpenAI Decisions API is a second relevance scorer beside the existing local
 policy router. Its question is **which optional guidelines add useful context to
 this cycle?** The approved trading policy, its risk controls and the trade decision
 remain with the existing assembly and Decider.
+
+## Production routing
+
+Set `DAI_DECISIONS_ROUTER=active` to let hosted Decisions trim optional long-term
+memory from the incumbent Decider prompt. It scores the memory rows the incumbent
+would serve and can omit only a row that the selector excludes at a probability
+of 0.05 or lower. Retained rows keep their original order. The graph assembly,
+standing rules, execution limits and screenshots supplied to the Decider continue
+through their existing paths. The local selector yields to hosted active mode.
+An incomplete answer, refusal, timeout, assembly failure or empty selection
+falls back to the incumbent. `DAI_DECISIONS_ROUTER=off` disables hosted calls.
+
+Use a named `predicate` question per memory ID. The API's JSON supplies the ID
+and a probability. The application checks for one finite score in `[0, 1]` per
+candidate and computes keep/omit locally. Record the requested mode, served IDs,
+fallback reason, policy and question hashes, latency and fees. Tune relevance
+examples and thresholds against later labeled cases. The configured 98% target
+describes retained score mass. Estimate active savings against the frozen
+incumbent input, with the router fee included in the net estimate.
 
 ## Policy Router view and the October 29–November 5 evaluation
 
@@ -180,20 +199,18 @@ flowchart LR
     V --> C
 ```
 
-`decider_agent._policy_router_cycle` builds the shared cycle context once. When
-enabled, it submits a background comparison, then runs the existing local router.
+In shadow mode, `decider_agent._policy_router_cycle` builds the shared cycle
+context once, submits a background comparison, and runs the existing local router.
 The comparison receives eligible diary entries and long-term memory rows. Standing
 gates, lessons, identity, structure and code-owned rules are pinned. It uses the
 existing high-recall selection algorithm and the same memory cap, currently 14.
-Parent structure remains in the pinned graph. General rule routing and model
-activation are outside this first rollout.
+Parent structure remains in the pinned graph.
 
-The Decisions response never enters `assembly_override`, `_router_memory_rows`
-or trade actions. Its result type always reports `active=False` and exposes no
-assembly override. It can run even when the local router is off. One hosted
-comparison may be outstanding per process. The request and its SQL audit both
-run off the trading thread; actual served IDs and the main `decider_inputs` row
-are attached once known.
+The scorer returns a proposed selection. The active Decider path applies its
+memory filter before building the citation index. One hosted request may be
+outstanding per process. Active mode waits only until the configured deadline.
+SQL audit writes run separately and use the captured prompt's served IDs and
+the associated `decider_inputs` row.
 
 Each API request asks one predicate per candidate, up to 400. The predicate asks
 for information relevant beyond the pinned policy, rather than ticker coincidence

@@ -261,11 +261,13 @@ DAI_ROUTER_IMAGES=1
 DAI_DECIDER_IMAGES=1
 ```
 
-`DAI_DECISIONS_ROUTER=shadow` still controls whether the hosted router runs. Images
-do not activate routing or change trading constraints. The `.env` file remains
-local, and screenshot pixels are not committed or copied into public audit JSON.
-Loading changed Python code requires the existing trader to restart; starting a
-second trader is not a rollout method.
+`DAI_DECISIONS_ROUTER=active` applies hosted selections to optional long-term
+memory in the incumbent Decider prompt. The default low-relevance cutoff for
+omissions is 0.05, with a full-context fallback on failures. The Policy Router tab
+shows applied routes and estimated net input cost. A coordinated mid-session
+restart can use `DAI_SKIP_STARTUP_CYCLE=1` and an explicit
+`DAI_RESUME_CADENCE_AT` timestamp with UTC offset to preserve the next scheduled
+slot. [Router documentation](docs/DECISIONS_ROUTER.md#production-routing)
 
 `policy_graph/visual_policy.py` adds a reviewed visual-context supplement. The
 Summarizer puts relevant **VISUAL FRAMING:** observations inside its existing
@@ -718,7 +720,7 @@ DAI_ROUTER_LLM_MODEL=               # optional chat model for the uncertain band
 DAI_ROUTER_RECALL_TARGET=0.98       # active needs an artifact certified at >= this held-out recall
 DAI_ROUTER_ROUTABLE=entry,ltm       # add "lesson" to let the router drop lessons too (needs its own certification)
 DAI_ROUTER_CERTIFY=either           # target (held-out recall >= target) | beats_today (recall >= today's prompt with fewer chars) | either
-DAI_DECISIONS_ROUTER=off            # off | shadow: separate hosted relevance comparison; never active routing
+DAI_DECISIONS_ROUTER=off            # off | shadow | active: hosted optional-memory routing
 DAI_DECISIONS_TIMEOUT_S=8           # request deadline; hosted comparison runs off the trading thread
 
 # Contrarian watchlist

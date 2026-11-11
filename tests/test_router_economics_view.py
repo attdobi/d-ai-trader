@@ -22,7 +22,7 @@ def js(expression, data):
 
 def test_old_character_only_record_stays_unavailable_and_shadow_realized_zero():
     out = js('R.tiles(d)',{'status':'unavailable'})
-    assert out[0]['value']=='Not captured' and 'Character differences' in out[0]['note']
+    assert out[0]['value']=='Not captured' and 'matched prompt variants' in out[0]['note']
     assert out[1]['value']=='$0.00000'
 
 
@@ -32,7 +32,7 @@ def test_router_fee_can_outweigh_gross_input_savings_and_output_is_not_assumed_s
         'potential_input_reduction_pct':.5,'net_input_savings_usd_uncached_estimate':-.0028,
         'realized_input_savings_usd':0,'shadow_incremental_cost_usd':.003})
     assert out[0]['value']=='20,000' and out[1]['value']=='19,900'
-    assert out[2]['value']=='−$0.00280' and 'output/reasoning' in out[2]['note']
+    assert out[2]['value']=='−$0.00280' and 'output and reasoning' in out[2]['note']
     assert out[3]['value']=='$0.00000' and '$0.00300' in out[3]['note']
 
 
@@ -60,13 +60,13 @@ def test_screenshot_comparisons_use_text_reduction_without_inventing_total_input
         'net_input_savings_usd_uncached_estimate':-.0033,'shadow_incremental_cost_usd':.0035,
         'realized_input_savings_usd':0})
     assert len(out)==5
-    assert 'text input' in out[0]['label'] and 'image tokens excluded' in out[0]['note']
+    assert 'text input' in out[0]['label'] and 'system and user text' in out[0]['note']
     assert 'text input' in out[1]['label'] and '0.50% potential text reduction' in out[1]['note']
     assert '45' not in json.dumps(out)
     assert out[2]['value']=='−$0.00330' and 'complete router fee, including its images' in out[2]['note']
     assert out[3]['value']=='$0.00000'
-    assert out[4]['value']=='12 images' and 'Identical screenshots' in out[4]['note']
-    assert 'Image-only tokens and cost are unavailable' in out[4]['note']
+    assert out[4]['value']=='12 images' and 'identical screenshots' in out[4]['note']
+    assert 'estimate covers text input' in out[4]['note']
 
 
 def test_missing_image_token_profile_does_not_fall_back_to_text_as_total_or_free_images():
@@ -74,6 +74,28 @@ def test_missing_image_token_profile_does_not_fall_back_to_text_as_total_or_free
         'token_estimates':{'actual_served':2000,'decisions_selected':1800},
         'potential_input_reduction_pct':10,'images_preserved_across_variants':False})
     assert 'Text reduction unknown' in out[1]['note'] and '10.00%' not in out[1]['note']
-    assert out[4]['value']=='1 image' and 'not confirmed' in out[4]['note']
-    assert 'no image savings are credited' in out[4]['note']
+    assert out[4]['value']=='1 image' and 'Image usage requires separate measurement' in out[4]['note']
     assert '$0.00000' not in json.dumps(out)
+
+
+def test_applied_route_uses_baseline_and_served_estimates_with_unmeasured_savings():
+    out = js('R.tiles(d,"applied")', {'status': 'estimated', 'capture_basis': 'frozen_ltm_baseline_v1',
+        'image_count': 12, 'token_scope': 'text_only',
+        'token_estimates': {'incumbent_full': 20000, 'actual_served': 19900},
+        'text_input_reduction_pct': .5, 'net_input_savings_usd_uncached_estimate': -.0028,
+        'realized_input_savings_usd': 0, 'router_cost_usd': .003})
+    assert out[0]['label'].startswith('Baseline') and out[0]['value'] == '20,000'
+    assert out[1]['label'].startswith('Served') and out[1]['value'] == '19,900'
+    assert out[2]['value'] == '−$0.00280'
+    assert out[3]['value'] == 'Unmeasured'
+    assert js('R.tiles(d,"applied")[1].value', None) == 'Unmeasured'
+
+
+def test_active_fallback_preserves_fee_and_equal_baseline_and_served_estimates():
+    out = js('R.tiles(d,"fallback")', {'status': 'estimated', 'capture_basis': 'frozen_ltm_baseline_v1',
+        'token_estimates': {'incumbent_full': 20000, 'actual_served': 20000},
+        'potential_input_reduction_pct': 0, 'net_input_savings_usd_uncached_estimate': -.003,
+        'realized_input_savings_usd': 0, 'router_cost_usd': .003})
+    assert out[0]['value'] == out[1]['value'] == '20,000'
+    assert out[2]['value'] == '−$0.00300'
+    assert out[3]['value'] == '$0.00000' and '$0.00300' in out[3]['note']
