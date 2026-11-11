@@ -83,6 +83,15 @@ def test_holdings_quarantine_and_explicit_untradable_are_excluded(engine):
     assert all(not r["eligible_for_recall"] for r in cases(engine))
 
 
+def test_screener_holding_from_sqlalchemy_is_excluded_from_recall(engine):
+    with engine.connect() as conn:
+        holding = conn.execute(text("SELECT 'AAPL' AS ticker")).mappings().one()
+    snapshot(engine, holdings=[holding])
+    row = cases(engine)[0]
+    assert row["coverage"] == "prospective_screener"
+    assert not row["eligible_for_recall"]
+
+
 def test_invalid_tickers_nonfinite_features_and_future_quote_do_not_leak(engine):
     O.record_snapshot(engine,"cfg","r",[
         {"ticker":"CASH"}, {"ticker":"AAPL; DROP TABLE x"}, {"ticker":""},
@@ -115,6 +124,17 @@ def test_absent_assessment_stays_unknown_instead_of_becoming_pass(engine):
     O.record_decisions(engine,"cfg","r1",{"cash_reason":"nothing","considered":True},recorded_at=NOW)
     assert cases(engine)[0]["action"]=="NOT_ASSESSED"
     assert O.metrics(cases(engine))["unassessed"]==1
+
+
+@pytest.mark.parametrize("field, verdict", [("verdict", " watch "), ("action", "WATCH"),
+                                            ("verdict", "passed"), ("verdict", "avoid")])
+def test_explicit_watch_and_pass_aliases_count_as_assessed(engine, field, verdict):
+    snapshot(engine)
+    reply = {"considered": [{"ticker": "AAPL", field: verdict, "why": "Await support"}]}
+    O.record_decisions(engine, "cfg", "r1", reply, recorded_at=NOW)
+    rows = cases(engine)
+    assert rows[0]["action"] == "PASS"
+    assert O.metrics(rows)["assessed"] == 1
 
 
 def test_action_write_is_scoped_and_parses_json_without_evaluation(engine):

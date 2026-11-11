@@ -5,6 +5,7 @@
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-learning.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-router.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/decision-audit.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/policy-taxonomy.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/semantic-atlas.css') }}" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/learning-atlas-layout.css') }}" />
@@ -57,6 +58,7 @@
 
   <div class="pl-subnav" role="tablist" aria-label="Policy Graph views">
     <button type="button" id="plExplorerTab" role="tab" aria-selected="true" aria-controls="pgGraphCard" data-policy-view="explorer">Policy explorer</button>
+    <button type="button" id="pgDecisionAuditTab" role="tab" aria-selected="false" aria-controls="pgDecisionAudit" data-policy-view="audit">Decision audit</button>
     <button type="button" id="plLearningTab" role="tab" aria-selected="false" aria-controls="plLearning" data-policy-view="learning">Learning map <span class="pl-new-mark" aria-hidden="true"></span></button>
     <button type="button" id="prRouterTab" role="tab" aria-selected="false" aria-controls="prRouter" data-policy-view="router">Policy Router</button>
     <span class="pl-subnav-note">From experience to a reviewed policy</span>
@@ -275,6 +277,25 @@
     </details>
   </section>
 
+  <div id="pgDecisionAudit" role="tabpanel" aria-labelledby="pgDecisionAuditTab" hidden>
+    <section class="pe-card da-audit">
+      <div class="pg-change-head">
+        <div><h2>Decision audit</h2><p class="pg-muted">Follow the saved Decider reply through recorded decisions and confirmed fills. Select a cycle to inspect its evidence and cited rules.</p></div>
+        <div class="da-controls">
+          <label>Cycles <select id="daLimit" class="pe-select"><option value="20">Latest 20</option><option value="40">Latest 40</option><option value="60">Latest 60</option></select></label>
+          <label>Regime <select id="daRegime" class="pe-select"><option value="">All regimes</option></select></label>
+          <button type="button" id="daRefresh" class="pl-button">Refresh</button>
+        </div>
+      </div>
+      <p id="daStatus" class="pg-muted" role="status"></p>
+      <div id="daSummary" class="da-summary"></div>
+      <div id="daGates" class="da-gates"></div>
+      <div class="da-layout">
+        <div><h3>Entry activity by cycle</h3><p class="pg-muted da-legend"><span><i></i> Model BUYs</span><span><i></i> Confirmed BUY fills</span></p><div id="daCycles" class="da-cycles" aria-label="Select a saved decision cycle"></div></div>
+        <section id="daDetail" class="da-detail" aria-label="Selected cycle"></section>
+      </div>
+    </section>
+
   <!-- Decision paths: associations across the selected date window. -->
   <section class="pe-card" id="pgPathsCard">
     <div class="pg-change-head">
@@ -310,6 +331,7 @@
       </div>
     </div>
   </section>
+  </div>
 
 </div>
 
@@ -801,4 +823,5 @@
 <script defer src="{{ url_for('static', filename='js/semantic-atlas.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-router-view.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/decision-audit.js') }}"></script>
 {% endblock %}

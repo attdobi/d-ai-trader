@@ -643,6 +643,13 @@ function setupPromptLab() {
         body: JSON.stringify({ agent_type: agentType, generate_soul: generateSoul, generate_memory: generateMemory })
       });
       if (sequence !== editorSequence || agentSelect.value !== agentType) return;
+      if (data.no_change === true) {
+        loadedAgent = null;
+        loadedVersion = null;
+        setHidden(resultsEl, true);
+        setPromptLabMessage(`No change proposed for ${AGENT_LABELS[agentType]} v${data.current_version}.`);
+        return;
+      }
       loadedAgent = agentType; loadedVersion = data.current_version;
 
       reasoningEl.textContent = data.reasoning || 'No reasoning returned by API.';
@@ -722,6 +729,10 @@ function setupPromptLab() {
       if (!data?.success) {
         throw new Error('API did not confirm success.');
       }
+      if (data.no_change === true) {
+        setPromptLabMessage(`No change to apply. v${data.version} is active.`);
+        return;
+      }
 
       showPromptLabSuccess(`Applied successfully as version v${data.version}.`);
       if (sequence === editorSequence && loadedAgent === agentType) loadedVersion = data.version;
@@ -777,12 +788,20 @@ function countDiffStats(diffLines) {
   let added = 0;
   let removed = 0;
   if (!Array.isArray(diffLines)) return { added, removed };
-  for (const line of diffLines) {
+  const hasHeaders = typeof diffLines[0] === 'string' && diffLines[0].startsWith('--- ')
+    && typeof diffLines[1] === 'string' && diffLines[1].startsWith('+++ ');
+  for (const line of diffLines.slice(hasHeaders ? 2 : 0)) {
     if (typeof line !== 'string') continue;
-    if (line.startsWith('+') && !line.startsWith('+++')) added++;
-    else if (line.startsWith('-') && !line.startsWith('---')) removed++;
+    if (line.startsWith('+')) added++;
+    else if (line.startsWith('-')) removed++;
   }
   return { added, removed };
+}
+
+function hasNoPromptChanges(candidate) {
+  if (candidate.no_change === true) return true;
+  const sections = Object.values(candidate.diffs || {});
+  return sections.length > 0 && sections.every((lines) => Array.isArray(lines) && lines.length === 0);
 }
 
 function buildDiffSection(label, diffLines, openByDefault, sectionChanges, sectionToggle) {
@@ -792,16 +811,11 @@ function buildDiffSection(label, diffLines, openByDefault, sectionChanges, secti
 
   const summary = document.createElement('summary');
   const { added, removed } = countDiffStats(diffLines);
-  const totalChanged = added + removed;
-  summary.innerHTML = `${label} <span style="color:#888; font-weight:normal; font-size:0.9em;">— ${
-    totalChanged
-      ? `<span style="color:#2e7d32;">+${added}</span> / <span style="color:#c62828;">-${removed}</span>`
-      : '<span style="color:#888;">no changes</span>'
-  }</span>`;
+  summary.innerHTML = `${label} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">−${removed}</span></span>`;
 
   // Per-section approval checkbox — only on sections the candidate actually
   // changes. Checked = ship this section; unchecked = keep the current text.
-  if (sectionToggle && totalChanged) {
+  if (sectionToggle) {
     const toggleWrap = document.createElement('label');
     toggleWrap.className = 'pe-section-toggle';
     toggleWrap.title = 'Checked = ship this section; unchecked = keep the current version of it';
@@ -840,14 +854,7 @@ function buildDiffSection(label, diffLines, openByDefault, sectionChanges, secti
 
   const view = document.createElement('div');
   view.className = 'pe-diff-view';
-  if (!totalChanged) {
-    const empty = document.createElement('div');
-    empty.className = 'pe-diff-empty';
-    empty.textContent = 'No changes from active version.';
-    view.appendChild(empty);
-  } else {
-    renderDiff(diffLines, view);
-  }
+  renderDiff(diffLines, view);
   wrap.appendChild(view);
   return wrap;
 }
@@ -880,7 +887,7 @@ function showChangePopup(change, anchorEl) {
   const pop = document.createElement('div');
   pop.className = 'pe-change-popup';
   const kindLabel = change.kind === 'major' ? 'MAJOR' : 'minor';
-  const behavioral = change.behavioral ? 'behavioral' : 'cosmetic';
+  const behavioral = change.behavioral ? 'Behavioral' : 'Wording';
   pop.innerHTML = `
     <div class="pe-change-popup-head">
       <span class="pe-chip-kind ${change.kind === 'major' ? 'major' : 'minor'}">${kindLabel}</span>
@@ -937,7 +944,10 @@ function setupBatchPromptLab() {
 
   function activateTab(agentType) {
     tabsEl.querySelectorAll('.pe-tab-btn').forEach((b) => {
-      b.classList.toggle('active', b.dataset.agent === agentType);
+      const active = b.dataset.agent === agentType;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', String(active));
+      b.tabIndex = active ? 0 : -1;
     });
     panelsEl.querySelectorAll('.pe-tab-panel').forEach((p) => {
       p.classList.toggle('active', p.dataset.agent === agentType);
@@ -948,24 +958,28 @@ function setupBatchPromptLab() {
     tabsEl.innerHTML = '';
     panelsEl.innerHTML = '';
 
-    // Failed-generation tabs first (so they're visible)
     const errorByAgent = {};
     (errors || []).forEach((e) => { errorByAgent[e.agent_type] = e.error; });
 
     const order = ['SummarizerAgent', 'DeciderAgent', 'FeedbackAgent'];
-    order.forEach((agentType) => {
+    order.forEach((agentType, index) => {
       const candidate = candidates.find((c) => c.agent_type === agentType);
-      const errMsg = errorByAgent[agentType];
+      const unchanged = candidate && hasNoPromptChanges(candidate);
+      const errMsg = errorByAgent[agentType] || (candidate ? '' : 'No result returned.');
 
       // Tab button
       const tabBtn = document.createElement('button');
       tabBtn.type = 'button';
       tabBtn.className = 'pe-tab-btn';
       tabBtn.dataset.agent = agentType;
+      tabBtn.id = `batch-tab-${agentType}`;
       tabBtn.setAttribute('role', 'tab');
+      tabBtn.setAttribute('aria-controls', `batch-panel-${agentType}`);
 
       const label = AGENT_LABELS[agentType] || agentType;
-      if (candidate) {
+      if (unchanged) {
+        tabBtn.innerHTML = `${label} <span class="pe-diff-badge">No change</span>`;
+      } else if (candidate) {
         // Total diff stats across all 5 fields
         let added = 0;
         let removed = 0;
@@ -976,25 +990,39 @@ function setupBatchPromptLab() {
         });
         const cs = candidate.change_summary || {};
         const impactDot = cs.is_substantive
-          ? '<span class="pe-tab-impact substantive" title="substantive: has behaviorally-major changes">●</span>'
-          : '<span class="pe-tab-impact cosmetic" title="cosmetic only: reword/no behavior change">●</span>';
-        const cv = (candidate.critic || {}).verdict;
+          ? '<span class="pe-tab-impact substantive" title="Behavioral changes">●</span>'
+          : '';
+        const cv = candidate.critic?.auto ? null : candidate.critic?.verdict;
         const criticMark = cv === 'approve'
           ? '<span class="pe-critic-mark approve" title="critic approved">✓</span>'
           : (cv === 'reject' ? '<span class="pe-critic-mark reject" title="critic rejected">⊘</span>' : '');
         tabBtn.innerHTML = `${impactDot}${label}${criticMark} <span class="pe-diff-badge"><span class="add">+${added}</span> / <span class="rem">-${removed}</span></span>`;
       } else {
         tabBtn.classList.add('failed');
-        tabBtn.innerHTML = `${label} <span class="pe-diff-badge" style="color:#c62828;">⚠ failed</span>`;
+        tabBtn.innerHTML = `${label} <span class="pe-diff-badge">Failed</span>`;
       }
       tabBtn.addEventListener('click', () => activateTab(agentType));
+      tabBtn.addEventListener('keydown', (event) => {
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % order.length;
+        else if (event.key === 'ArrowLeft') next = (index + order.length - 1) % order.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = order.length - 1;
+        else return;
+        event.preventDefault();
+        activateTab(order[next]);
+        document.getElementById(`batch-tab-${order[next]}`)?.focus();
+      });
       tabsEl.appendChild(tabBtn);
 
       // Tab panel
       const panel = document.createElement('div');
       panel.className = 'pe-tab-panel';
       panel.dataset.agent = agentType;
+      panel.id = `batch-panel-${agentType}`;
       panel.setAttribute('role', 'tabpanel');
+      panel.setAttribute('aria-labelledby', tabBtn.id);
+      panel.tabIndex = 0;
 
       if (errMsg) {
         const errBox = document.createElement('div');
@@ -1006,20 +1034,35 @@ function setupBatchPromptLab() {
         return;
       }
 
+      if (unchanged) {
+        const message = document.createElement('div');
+        message.className = 'pe-no-change';
+        message.innerHTML = `<h3>No change proposed</h3><p>Active version v${escapeHtml(String(candidate.current_version ?? '?'))}</p>`;
+        if (candidate.reasoning) {
+          const explanation = document.createElement('p');
+          explanation.textContent = candidate.reasoning;
+          message.appendChild(explanation);
+        }
+        panel.appendChild(message);
+        panelsEl.appendChild(panel);
+        return;
+      }
+
       // Behavioral-impact summary — the headline for "is this change worth it?"
       const cs = candidate.change_summary || {};
       const summaryWrap = document.createElement('div');
       summaryWrap.className = 'pe-impact-summary';
       const substantive = cs.is_substantive;
+      const wordingOnly = cs.wording_only ?? (!substantive && cs.total > 0 && cs.behavioral === 0);
+      const impactLabel = substantive ? 'Behavioral changes' : wordingOnly ? 'Wording-only draft' : 'Impact unclassified';
       summaryWrap.innerHTML = `
-        <span class="pe-impact-pill ${substantive ? 'substantive' : 'cosmetic'}">${substantive ? 'SUBSTANTIVE' : 'COSMETIC ONLY'}</span>
-        <span class="pe-impact-counts">${cs.major || 0} major · ${cs.minor || 0} minor · ${cs.behavioral || 0} behavioral</span>
-        <span class="pe-impact-hint">— click a chip below to see why each change was made</span>`;
+        <span class="pe-impact-pill ${substantive ? 'substantive' : 'cosmetic'}">${impactLabel}</span>
+        <span class="pe-impact-counts">Based on v${escapeHtml(String(candidate.current_version ?? '?'))}</span>`;
       panel.appendChild(summaryWrap);
 
       const reasoningWrap = document.createElement('div');
       reasoningWrap.className = 'pe-field';
-      reasoningWrap.innerHTML = `<label>Core logic <span style="color:#888; font-weight:normal;">— v${candidate.current_version} → v${candidate.current_version + 1}</span></label>`;
+      reasoningWrap.innerHTML = '<label>Draft rationale</label>';
       const reasoningBox = document.createElement('div');
       reasoningBox.className = 'pe-reasoning';
       reasoningBox.textContent = candidate.reasoning || 'No summary was returned.';
@@ -1028,20 +1071,21 @@ function setupBatchPromptLab() {
 
       const critic = candidate.critic || {};
       const criticRejected = critic.verdict === 'reject';
-      const criticBanner = document.createElement('div');
-      criticBanner.className = `pe-critic-banner ${criticRejected ? 'reject' : 'approve'}`;
-      const confPct = typeof critic.confidence === 'number' ? ` · ${Math.round(critic.confidence * 100)}% conf` : '';
-      const autoTag = critic.auto ? ' · auto' : '';
-      criticBanner.innerHTML = `
-        <span class="pe-critic-verdict">${criticRejected ? 'CRITIC: REJECT' : 'CRITIC: APPROVE'}${confPct}${autoTag}</span>
-        <span class="pe-critic-meta">${escapeHtml(critic.summary || critic.reason || 'No critic verdict.')}</span>`;
-      if (critic.summary && critic.reason && critic.summary !== critic.reason) {
-        const audit = document.createElement('details');
-        audit.className = 'pe-critic-audit';
-        audit.innerHTML = `<summary>Review details</summary><p>${escapeHtml(critic.reason)}</p>`;
-        criticBanner.appendChild(audit);
+      if (critic.verdict && !critic.auto) {
+        const criticBanner = document.createElement('div');
+        criticBanner.className = `pe-critic-banner ${criticRejected ? 'reject' : 'approve'}`;
+        const confPct = typeof critic.confidence === 'number' ? ` · ${Math.round(critic.confidence * 100)}% confidence` : '';
+        criticBanner.innerHTML = `
+          <span class="pe-critic-verdict">${criticRejected ? 'Critic recommends rejecting' : 'Critic recommends approval'}${confPct}</span>
+          <span class="pe-critic-meta">${escapeHtml(critic.summary || critic.reason || '')}</span>`;
+        if (critic.summary && critic.reason && critic.summary !== critic.reason) {
+          const audit = document.createElement('details');
+          audit.className = 'pe-critic-audit';
+          audit.innerHTML = `<summary>Review details</summary><p>${escapeHtml(critic.reason)}</p>`;
+          criticBanner.appendChild(audit);
+        }
+        panel.appendChild(criticBanner);
       }
-      panel.appendChild(criticBanner);
 
       // Group the generator's changes by section so each diff block shows its chips.
       const changesBySection = {};
@@ -1070,10 +1114,9 @@ function setupBatchPromptLab() {
         }
       });
       diffMap.forEach(({ key, section: sec, label: lbl, open }) => {
-        const toggle = changedSections.includes(sec)
-          ? { initial: true, onChange: (on) => { sectionApproval[sec] = on; updateApproveState(); } }
-          : null;
-        const section = buildDiffSection(lbl, candidate.diffs?.[key] || [], open, changesBySection[sec] || [], toggle);
+        if (!changedSections.includes(sec)) return;
+        const toggle = { initial: true, onChange: (on) => { sectionApproval[sec] = on; updateApproveState(); } };
+        const section = buildDiffSection(lbl, candidate.diffs[key], open, changesBySection[sec] || [], toggle);
         panel.appendChild(section);
       });
 
@@ -1081,7 +1124,8 @@ function setupBatchPromptLab() {
       if (criticRejected) {
         const overrideWrap = document.createElement('label');
         overrideWrap.className = 'pe-override';
-        overrideWrap.innerHTML = `<input type="checkbox" /> I disagree with the critic — let me approve anyway`;
+        const label = critic.auto ? 'I reviewed the edits and their impact.' : 'I reviewed the critic’s recommendation and want to proceed.';
+        overrideWrap.innerHTML = `<input type="checkbox" /> ${label}`;
         panel.appendChild(overrideWrap);
         overrideWrap.querySelector('input').addEventListener('change', (e) => {
           overrideOn = e.target.checked;
@@ -1186,8 +1230,14 @@ function setupBatchPromptLab() {
           if (!data?.success) throw new Error('API did not confirm success.');
 
           approveBtn.dataset.done = '1';
+          if (data.no_change === true) {
+            approveBtn.textContent = `Active v${data.version}`;
+            statusSpan.textContent = 'No change to apply.';
+            descInput.disabled = true;
+            return;
+          }
           tabBtn.classList.add('approved');
-          statusSpan.style.color = '#2e7d32';
+          statusSpan.style.color = 'var(--success)';
           statusSpan.textContent = isPartial
             ? `✓ Activated as v${data.version} (partial: ${approved.join(', ')})`
             : `✓ Activated as v${data.version}`;
@@ -1230,9 +1280,9 @@ function setupBatchPromptLab() {
       panelsEl.appendChild(panel);
     });
 
-    // Activate first successful candidate's tab (or first tab if all failed)
-    const firstSuccessful = candidates[0]?.agent_type || order[0];
-    activateTab(firstSuccessful);
+    const drafts = candidates.filter((candidate) => !hasNoPromptChanges(candidate));
+    const firstDraft = drafts.find((candidate) => candidate.change_summary?.is_substantive) || drafts[0];
+    activateTab(firstDraft?.agent_type || errors?.[0]?.agent_type || candidates[0]?.agent_type || order[0]);
   }
 
   function renderFeedbackBanner(summary) {
@@ -1304,14 +1354,17 @@ function setupBatchPromptLab() {
     renderTabsAndPanels(candidates, errors);
     setHidden(resultsEl, false);
 
-    const successCount = candidates.length;
+    const unchangedCount = candidates.filter(hasNoPromptChanges).length;
+    const draftCount = candidates.length - unchangedCount;
     const failCount = errors.length;
     const ts = new Date(job.finished_at || Date.now()).toLocaleString();
     if (statusEl) {
-      statusEl.style.color = failCount ? '#b26a00' : '#2e7d32';
-      statusEl.textContent = `Generated ${successCount}/3 candidates at ${ts}${
-        failCount ? ` (${failCount} failed — see tab)` : ''
-      }. ${successCount ? 'Review each draft before deciding whether to apply it.' : 'Open a failed tab for the reason.'}`;
+      const results = [];
+      if (draftCount) results.push(`${draftCount} ${draftCount === 1 ? 'draft' : 'drafts'} to review`);
+      if (unchangedCount) results.push(unchangedCount === 3 ? 'No changes proposed for all three agents' : `${unchangedCount} with no change proposed`);
+      if (failCount) results.push(`${failCount} failed`);
+      statusEl.style.color = failCount ? 'var(--warning)' : 'var(--text)';
+      statusEl.textContent = `${results.join(' · ') || 'No results returned'} · ${ts}`;
     }
   }
 

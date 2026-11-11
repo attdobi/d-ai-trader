@@ -315,7 +315,27 @@ every historical version, so the graph remains a byte-exact mirror of the databa
    the 30-day citation count in their footer. `citations.backfill_hits_from_decisions` fills `unserved` rows
    for decisions made before the log existed.
 
-## Decision paths (bottom of the tab)
+## Decision audit
+
+**Policy Graph → Decision audit** reads the latest 20, 40 or 60 saved decision
+records for the selected configuration. Its entry chart compares the BUYs in
+the captured Decider reply, BUYs retained in the decision record, and confirmed
+BUY fills. Select a cycle to see its cash rationale, market regime, event pressure,
+session-recovery input coverage, candidate assessments and execution status.
+Model proposals missing a stored decision remain visible. Missing or unreadable
+model replies appear as unavailable. Citations open the graph at the recorded
+policy version and indicate when the serving log confirms the cited guideline
+was in the prompt. A citation records the model's explanation. A captured
+forward Decisions comparison links to the same cycle's Policy Router trace.
+
+The pass-gate chart counts the first cited guideline per pass or watch assessment.
+The screener table shows the saved distance to the 20-day average and flags held
+tickers from the captured context. Other supplied support levels can also qualify.
+Prompt Lab uses a compact entry-coverage summary from the same records when
+drafting and reviewing Decider changes. Opportunity evidence in the Learning map
+tracks subsequent paper outcomes for the declared cohort.
+
+### Historical decision paths
 
 `policy_graph/paths.py` + `GET /api/policy-graph/paths?agent=&days=30|90|365`. A decision's path is
 context → route that served a guideline → guideline cited → action → outcome. **Path frequency** is a

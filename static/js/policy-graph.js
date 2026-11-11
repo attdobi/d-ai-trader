@@ -361,8 +361,13 @@
     params.set('agent', state.agent);
     if (state.version !== null && state.version !== undefined) params.set('v', String(state.version));
     if (state.selected) params.set('node', state.selected);
-    const policyView=new URLSearchParams(location.hash.replace(/^#/, '')).get('view');
-    if (['learning','router'].includes(policyView)) params.set('view', policyView);
+    const viewParams = new URLSearchParams(location.hash.slice(1));
+    const policyView = viewParams.get('view');
+    if (['learning','router','audit'].includes(policyView)) params.set('view', policyView);
+    const auditCycle = viewParams.get('cycle');
+    if (policyView === 'audit' && auditCycle) params.set('cycle', auditCycle);
+    const comparison = viewParams.get('comparison');
+    if (policyView === 'router' && comparison) params.set('comparison', comparison);
     const next = `#${params.toString()}`;
     if (location.hash === next) return;
     state.hashWriting = true;
@@ -2115,7 +2120,6 @@
       await loadAgents();
       await loadVersions(state.agent);
       await loadProposals(state.agent, { quiet: true });
-      loadPaths(state.agent);
       populateVersions(res.version);
       renderTimeline();
       await loadGraph(state.agent, res.version, { pulse: true });
@@ -2161,21 +2165,27 @@
   }
 
   // ------------------------------------------------------------------ decision paths (route → guideline → action → outcome)
-  async function loadPaths(agent, { quiet = true } = {}) {
+  async function loadPaths({ quiet = true } = {}) {
     const box = qs('#pgPathsCard');
-    if (!box || !agent) return;
+    if (!box) return;
     const days = Number(qs('#pgPathsDays')?.value || 90);
     let data;
     try {
-      data = await apiGet(`${API}/paths?agent=${encodeURIComponent(agent)}&days=${days}`);
+      data = await apiGet(`${API}/paths?agent=DeciderAgent&days=${days}`);
     } catch (error) {
       if (!quiet) toast(`Decision paths: ${error.message}`, 'error');
       renderPaths({ empty: true, note: `Decision paths unavailable: ${error.message}`, frequency: {}, quality: [] });
       return;
     }
-    if (agent !== state.agent) return;
+    if (days !== Number(qs('#pgPathsDays')?.value || 90)) return;
     state.paths = data;
     renderPaths(data);
+  }
+
+  function openPathNode(id) {
+    const params = new URLSearchParams({ agent: 'DeciderAgent', node: id });
+    if (state.agent === 'DeciderAgent' && state.current != null) params.set('v', state.current);
+    location.hash = params.toString();
   }
 
   function renderPaths(data) {
@@ -2203,7 +2213,7 @@
       bits.push(`<div><strong>Served but never cited</strong> (${f.served_never_cited_total} guidelines): ${f.served_never_cited.map(g => `<button type="button" class="pg-link-chip" data-node-id="${esc(g.id)}">${esc(truncate(g.title, 28))}</button>`).join(' ')}</div>`);
     }
     gaps.innerHTML = bits.join('');
-    gaps.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => pgOpenNode(btn.dataset.nodeId)));
+    gaps.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => openPathNode(btn.dataset.nodeId)));
     renderPathQuality(quality, data.quality || []);
     renderFactorQuality(data.factors);
   }
@@ -2362,12 +2372,10 @@
       const acts = Object.entries(f.actions || {}).sort((a, b) => b[1] - a[1]).map(([a, n]) => `${n} ${a[0].toUpperCase()}`).join(' ');
       const wr = f.win_rate === null || f.win_rate === undefined ? '—' : pct(f.win_rate);
       const pnl = Number(f.pnl || 0);
-      const nodeId = `${(state.payload && state.payload.prefix) || 'DA'}.factor.${f.key}`;
+      const nodeId = `DA.factor.${f.key}`;
       return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(nodeId)}" title="${esc(nodeId)}">${esc(truncate(f.label, 30))}</button><div class="pg-muted">${esc(FACTOR_KIND_LABEL[f.kind] || f.kind)}</div></td><td>${esc(f.cycles)}</td><td>${esc(acts || '—')}</td><td>${esc(f.closed)}${f.closed ? ` <span class="pg-muted">(${f.wins}W/${f.losses}L/${f.break_even || 0}BE)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(f.guidelines) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
     }).join('')}</tbody></table>`;
-    table.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
-      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
-    }));
+    table.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => openPathNode(btn.dataset.nodeId)));
   }
 
   // Three-column flow drawn by hand (no d3-sankey): routes | guidelines | actions.
@@ -2411,7 +2419,7 @@
     const heads = `<text x="${colX[0]}" y="10" class="pg-flow-count">${esc(opts.leftHead || 'route (cited)')}</text><text x="${colX[1]}" y="10" class="pg-flow-count">${esc(opts.guideHead || 'guideline (cited / served)')}</text><text x="${colX[2]}" y="10" class="pg-flow-count">action</text>`;
     container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Decision paths">${heads}${links.join('')}${nodes.join('')}</svg>`;
     container.querySelectorAll('.pg-flow-node-g[data-node-id]').forEach(g => g.addEventListener('click', () => {
-      if (!pgOpenNode(g.dataset.nodeId)) toast(`${g.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
+      openPathNode(g.dataset.nodeId);
     }));
   }
 
@@ -2426,9 +2434,7 @@
       const pnl = Number(r.pnl || 0);
       return `<tr><td><button type="button" class="pg-link-chip" data-node-id="${esc(r.id)}" title="${esc(r.id)}">${esc(truncate(r.title, 30))}</button></td><td>${esc(r.cited)}<span class="pg-muted">/${esc(r.served)}</span></td><td>${esc(r.closed)}${r.closed ? ` <span class="pg-muted">(${r.wins}W/${r.losses}L/${r.break_even || 0}BE)</span>` : ''}</td><td>${esc(wr)}</td><td class="${pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : ''}">${pnl ? `${pnl > 0 ? '+' : '−'}$${Math.abs(pnl).toFixed(0)}` : '—'}</td><td><div class="pg-co">${chips(r.co_on_wins) || '<span class="pg-muted">—</span>'}</div></td><td><div class="pg-co">${chips(r.co_on_losses) || '<span class="pg-muted">—</span>'}</div></td></tr>`;
     }).join('')}</tbody></table>`;
-    container.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => {
-      if (!pgOpenNode(btn.dataset.nodeId)) toast(`${btn.dataset.nodeId} is not on the graph for v${state.version}`, 'info');
-    }));
+    container.querySelectorAll('.pg-link-chip').forEach(btn => btn.addEventListener('click', () => openPathNode(btn.dataset.nodeId)));
   }
 
   // ------------------------------------------------------------------ agent / version flow
@@ -2442,7 +2448,6 @@
     lsSet(LS_AGENT, agent);
     const data = await loadVersions(agent);
     await loadProposals(agent, { quiet: true });
-    loadPaths(agent);
     loadRouter(agent);
     if (!data) { populateVersions(null); renderTimeline(); return; }
     if (!state.versions.length) {
@@ -2483,7 +2488,8 @@
     });
     qs('#pgVersion')?.addEventListener('change', onVersionChange);
     qs('#pgProposeForm')?.addEventListener('submit', proposeChange);
-    qs('#pgPathsDays')?.addEventListener('change', () => { loadPaths(state.agent, { quiet: false }); state.nodeCache.clear(); loadGraph(state.agent, state.version, { keepSelection: true }); });
+    qs('#pgPathsDays')?.addEventListener('change', () => { loadPaths({ quiet: false }); state.nodeCache.clear(); loadGraph(state.agent, state.version, { keepSelection: true }); });
+    window.addEventListener('policygraph:viewchange', event => { if (event.detail?.view === 'audit') loadPaths(); });
     setupVersionStepper();
     qs('#pgLayer')?.addEventListener('change', event => {
       state.layer = event.target.value === 'stored' ? 'stored' : 'effective';

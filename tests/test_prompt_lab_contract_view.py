@@ -113,3 +113,80 @@ async function select(agent) {
         check=False, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+@pytest.mark.skipif(not Path(NODE).exists(), reason="Node.js is unavailable")
+def test_prompt_lab_restores_cached_no_change_and_focuses_real_draft():
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+class Element {
+  constructor() {
+    this.children = [];
+    this.dataset = {};
+    this.style = {};
+    this.attrs = {};
+    this.handlers = {};
+    this.textContent = '';
+    this.className = '';
+    this.classList = {
+      add: name => this.classList.toggle(name, true),
+      toggle: (name, enabled) => {
+        const classes = new Set(this.className.split(' '));
+        if (enabled) classes.add(name); else classes.delete(name);
+        this.className = [...classes].join(' ');
+      }
+    };
+  }
+  set innerHTML(value) {
+    this.markup = value;
+    this.children = value.includes('<input') ? [new Element()] : [];
+  }
+  setAttribute(name, value) { this.attrs[name] = value; }
+  addEventListener(name, handler) { this.handlers[name] = handler; }
+  appendChild(child) { this.children.push(child); }
+  querySelectorAll(selector) { return this.children.filter(el => el.className.split(' ').includes(selector.slice(1))); }
+  querySelector(selector) { return selector === 'input' ? this.children[0] : null; }
+  focus() { this.focused = true; }
+  content() { return `${this.markup || ''} ${this.textContent} ${this.children.map(child => child.content()).join(' ')}`; }
+}
+const ids = ['batchGenerateBtn', 'batchStatus', 'batchResults', 'batchTabs', 'batchPanels'];
+const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
+const byId = id => elements[id] || elements.batchTabs.children.find(el => el.id === id) || null;
+const cache = {
+  stored_at: Date.now(),
+  candidates: [
+    {agent_type: 'SummarizerAgent', current_version: 33, diffs: {system_prompt_diff: []},
+     critic: {verdict: 'reject', confidence: 0.9, auto: true}},
+    {agent_type: 'DeciderAgent', current_version: 62, no_change: true, diffs: {}},
+    {agent_type: 'FeedbackAgent', current_version: 17,
+     diffs: {memory_diff: ['--- old', '+++ new', '@@ -1 +1 @@', '-Original', '+Clarification'], soul_diff: []},
+     change_summary: {wording_only: true}, critic: {verdict: 'reject', confidence: 0.9, auto: true}}
+  ]
+};
+const context = {console, document: {addEventListener() {}, getElementById: byId,
+  createElement: () => new Element(), createTextNode: value => Object.assign(new Element(), {textContent: value})},
+  localStorage: {getItem: key => key === 'pe.lastBatchResult' ? JSON.stringify(cache) : null, removeItem() {}}};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+context.setupBatchPromptLab();
+const [summarizer, decider, feedback] = elements.batchPanels.children;
+assert.match(summarizer.content(), /No change proposed/);
+assert.match(decider.content(), /Active version v62/);
+assert.doesNotMatch(summarizer.content(), /Approve|confidence|v34/);
+assert.doesNotMatch(decider.content(), /Approve|confidence|v63/);
+assert.match(feedback.content(), /Wording-only draft/);
+assert.doesNotMatch(feedback.content(), /No changes from active version|90%|Critic recommends rejecting/);
+assert.equal(feedback.querySelectorAll('.pe-diff-section').length, 1);
+assert.match(elements.batchStatus.textContent, /1 draft to review · 2 with no change proposed/);
+assert.equal(byId('batch-tab-FeedbackAgent').attrs['aria-selected'], 'true');
+byId('batch-tab-FeedbackAgent').handlers.keydown({key: 'ArrowRight', preventDefault() {}});
+assert.equal(byId('batch-tab-SummarizerAgent').attrs['aria-selected'], 'true');
+assert.equal(byId('batch-tab-SummarizerAgent').focused, true);
+"""
+    result = subprocess.run(
+        [NODE, "-e", script, str(ROOT / "static/js/prompt-evolution.js")],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout

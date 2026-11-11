@@ -8,6 +8,21 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Decision audit and Prompt Lab — November 11, 2026
+
+**Policy Graph → Decision audit** shows the latest saved cycles. Select a cycle
+to compare model BUYs, recorded decisions and confirmed fills. Filter by regime
+or a cited pass gate. Each cycle shows its policy version, session-recovery input
+coverage, cash rationale, candidate assessments and versioned citation links.
+The historical Decision paths charts are on the same tab.
+
+Prompt Lab labels equivalent drafts **No change proposed** and avoids creating
+a version for an unchanged approval. The Decider draft and review receive recent
+entry and pass coverage alongside closed-trade diagnostics. The prospective
+ledger excludes holdings supplied as SQLAlchemy row mappings and records WATCH
+as an explicit pass for the cycle. Those ledger corrections apply to new captures
+after the trader loads the code.
+
 ## Prompt Lab and session recovery — November 6, 2026
 
 **Prompt Lab** opens on **Update prompts**, with the batch action above the
@@ -122,6 +137,7 @@ The policy tooling is documented together:
 | Policy Graph → Explorer | Inspect versioned rules and their source connections | [Policy graph](docs/POLICY_GRAPH.md) |
 | Policy Graph → Learning map | Browse fixed local embeddings, taxonomy facets and source evidence | [Semantic landscape](docs/SEMANTIC_ATLAS.md), [taxonomy](docs/POLICY_TAXONOMY.md) |
 | Policy Graph → Policy Router | Inspect per-cycle pinned/kept/skipped rules, cost and matched token estimates | [Router](docs/POLICY_ROUTER.md), [Decisions shadow evaluation](docs/DECISIONS_ROUTER.md) |
+| Policy Graph → Decision audit | Follow a saved reply through decisions, fills and cited rules | [Decision audit](docs/POLICY_GRAPH.md#decision-audit) |
 
 The seven-day router review remains a shadow evaluation. Learning-map groupings
 organize evidence; they do not activate rules or establish decision quality.
@@ -393,7 +409,7 @@ Every activation by these writers goes through `prompt_manager.set_active_prompt
 
 **How the Decider reads it.** Each cycle the Decider's soul, directives and memory are rebuilt from the active graph by a deterministic query, with no model call. Every gate, lesson and soul section is served every cycle; only dated diary entries are routed (by regime, held or watched tickers, news tickers, extracted companies, trend tickers, quarantine, recency and shared tags), plus up to 14 long-term memory rows. Over the 30 days to 2026-10-02, about 40 guidelines were served per cycle and about 1 was dropped, roughly 4.7k tokens. Each served guideline and memory row carries its id and record (`⟨id · cited 7d/30d/90d · win %⟩`). Every decision must cite 1 to 4 guideline ids, and every rejected setup cites the 1 or 2 guidelines that rejected it, so each rule accumulates its own record of trades and rejections. A **policy router** (`policy_router/`, [docs/POLICY_ROUTER.md](docs/POLICY_ROUTER.md)) scores every diary entry and memory row with a calibrated probability of being needed this cycle, using a local embedding model in LM Studio. It runs in shadow mode by default: it logs its choice next to today's prompt and changes nothing until you switch it on. Every Decider call is also stored in `decider_inputs` (prompts, policy as rendered, context, raw reply), so any cycle can be replayed.
 
-**Decision paths.** The bottom of the Policy Graph tab draws *route or world factor → guideline cited → buy / sell / hold*, lists guidelines cited but never served (the query missed them) and served but never cited (dead weight), and scores each guideline over the closed trades that cited it. Details: [docs/POLICY_GRAPH.md](docs/POLICY_GRAPH.md), with the short form in [docs/POLICY_GRAPH_AND_ROUTING.md](docs/POLICY_GRAPH_AND_ROUTING.md) (also as `.docx`).
+**Decision paths.** The bottom of the Decision audit tab draws *route or world factor → guideline cited → action*. It flags missing served records and shows outcomes of closed trades with citations. [Policy Graph documentation](docs/POLICY_GRAPH.md#decision-audit)
 
 ```
         policy = prompt (soul + strategy directives + memory), stored as a guideline graph

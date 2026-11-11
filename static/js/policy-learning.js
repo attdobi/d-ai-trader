@@ -223,7 +223,9 @@
 
     function writeView(selectedView) {
       const p = new URLSearchParams(location.hash.slice(1));
-      if (['learning','router'].includes(selectedView)) p.set('view',selectedView); else p.delete('view');
+      if (['learning','router','audit'].includes(selectedView)) p.set('view',selectedView); else p.delete('view');
+      if (selectedView !== 'audit') p.delete('cycle');
+      if (selectedView !== 'router') p.delete('comparison');
       history.replaceState(null,'',`#${p.toString()}`);
     }
     function openExplorer(id,version) {
@@ -233,11 +235,13 @@
       if(finite(version))p.set('v',String(version));p.set('node',id);p.delete('view');location.hash=p.toString();
     }
     function setView(value, update=true) {
-      const active=value===true||value==='learning',selectedView=active?'learning':value==='router'?'router':'explorer';
+      const active=value===true||value==='learning',selectedView=active?'learning':['router','audit'].includes(value)?value:'explorer';
       state.active=active;
       document.querySelector('.pg-page')?.classList.toggle('pl-learning-active',active);
       document.querySelector('.pg-page')?.classList.toggle('pr-router-active',selectedView==='router');
+      document.querySelector('.pg-page')?.classList.toggle('da-audit-active',selectedView==='audit');
       const routerPanel=$('#prRouter');if(routerPanel)routerPanel.hidden=selectedView!=='router';
+      const auditPanel=$('#pgDecisionAudit');if(auditPanel)auditPanel.hidden=selectedView!=='audit';
       $('#plLearning').hidden=!active;
       document.querySelectorAll('[data-policy-view]').forEach(b=>{const selected=b.dataset.policyView===selectedView; b.setAttribute('aria-selected',String(selected)); b.tabIndex=selected?0:-1;});
       if (update) writeView(selectedView);

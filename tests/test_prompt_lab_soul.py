@@ -77,8 +77,8 @@ def test_prompt_lab_generation_preserves_contracts(dashboard_server_module, monk
 def test_apply_validates_citation_array_after_merging_approved_sections(dashboard_server_module, monkeypatch, approve_system):
     dashboard, _ = dashboard_server_module
     current = SimpleNamespace(
-        system_prompt='Return {"decisions":[{"cited":["guideline id"]}]}',
-        user_prompt_template='Analyze {summaries}.', strategy_directives='Original rules',
+        system_prompt='Return {"decisions":[{"cited":["guideline id"]}]}\n',
+        user_prompt_template='Analyze {summaries}.\n', strategy_directives='Original rules',
         soul='Original soul', memory='Original memory',
     )
     payload = {
@@ -111,6 +111,76 @@ def test_apply_validates_citation_array_after_merging_approved_sections(dashboar
         assert writes[0]['system_prompt'] == current.system_prompt
         assert writes[0]['user_prompt_template'] == current.user_prompt_template
         assert writes[0]['strategy_directives'] == payload['strategy_directives']
+
+
+@pytest.mark.parametrize('explicit_no_change', [False, True])
+def test_generation_accepts_unchanged_fields(dashboard_server_module, monkeypatch, explicit_no_change):
+    dashboard, _ = dashboard_server_module
+    source = Path(dashboard.__file__).parent / 'agents/decider/SOUL.default.md'
+    current = SimpleNamespace(
+        version=62, description='Current', soul=source.read_text(), memory='Memory\n',
+        system_prompt='Use the holdings source of truth. Never invent holdings.\nReturn {"cited":["guideline id"]}.\n',
+        user_prompt_template='Analyze {summaries}.\n', strategy_directives='Keep the rules.\n',
+    )
+    monkeypatch.setattr(dashboard, 'engine', SimpleNamespace(connect=lambda: Connection(current)))
+    for name in ('_load_prompt_evolution_context', '_fetch_prompt_review_history', '_fetch_trade_evidence', '_safe_diagnostics'):
+        monkeypatch.setattr(dashboard, name, lambda *args, **kwargs: {})
+    if explicit_no_change:
+        draft = {'no_change': True, 'reasoning': 'Retain the current prompt.'}
+    else:
+        draft = {
+            'system_prompt': current.system_prompt.strip(),
+            'user_prompt_template': current.user_prompt_template.strip(),
+            'strategy_directives': current.strategy_directives.strip(),
+            'memory': current.memory.strip(),
+            'changes': [{'section': 'system_prompt', 'kind': 'major', 'what': 'Claimed change'}],
+        }
+    reply = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(draft)))])
+    monkeypatch.setattr(dashboard, '_request_prompt_review_model', lambda *args: reply)
+    candidate = dashboard._generate_candidate_for_agent('DeciderAgent', 'test-config')
+    assert candidate['no_change'] is True
+    assert candidate['current_version'] == 62
+    assert candidate['changes'] == []
+    assert candidate['diffs'] == {}
+
+
+@pytest.mark.parametrize('approval', [None, ['system_prompt']])
+@pytest.mark.parametrize('terminal_newline', ['', '\n'])
+def test_apply_preserves_active_version_for_equivalent_text(dashboard_server_module, monkeypatch, approval, terminal_newline):
+    dashboard, _ = dashboard_server_module
+    fields = {
+        'system_prompt': 'Return {"cited":["guideline id"]}.',
+        'user_prompt_template': 'Analyze {summaries}.',
+        'strategy_directives': 'Keep the rules.',
+        'soul': 'Current soul.',
+        'memory': 'Current memory.',
+    }
+    current = SimpleNamespace(version=62, **{name: value + terminal_newline for name, value in fields.items()})
+    payload = {'agent_type': 'DeciderAgent', 'description': 'No actual edit', **fields}
+    if approval is not None:
+        payload['approved_sections'] = approval
+    monkeypatch.setattr(dashboard.request, 'get_json', lambda silent: payload, raising=False)
+    monkeypatch.setattr(dashboard, 'engine', SimpleNamespace(
+        connect=lambda: Connection(current), begin=lambda: pytest.fail('Equivalent prompt must not create a version'),
+    ))
+
+    response = dashboard.apply_prompt_evolution_candidate()
+    assert response['args'][0] == {'success': True, 'no_change': True, 'version': 62}
+
+
+def test_batch_does_not_review_unchanged_results(dashboard_server_module, monkeypatch):
+    dashboard, _ = dashboard_server_module
+    monkeypatch.setattr(dashboard, '_BATCH_JOBS', {})
+    monkeypatch.setattr(dashboard, '_analyze_prompt_lab_feedback', lambda *_: {})
+    monkeypatch.setattr(dashboard, '_generate_candidate_for_agent',
+                        lambda agent, *_: {'agent_type': agent, 'no_change': True})
+    monkeypatch.setattr(dashboard, '_critique_candidate', lambda *_: pytest.fail('No draft to critique'))
+    monkeypatch.setattr(dashboard, '_record_candidate_review', lambda *_: pytest.fail('No draft to record'))
+    dashboard._run_batch_generation('test-job', 'test-config')
+    job = dashboard._BATCH_JOBS['test-job']
+    assert job['status'] == 'done'
+    assert len(job['candidates']) == 3
+    assert job['errors'] == []
 
 
 class Connection:

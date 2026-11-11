@@ -3884,9 +3884,7 @@ def _summarize_changes(changes):
         'minor': minor,
         'behavioral': behavioral,
         'total': len(changes),
-        # "substantive" = at least one behaviorally-major edit. This is what the
-        # critic will use to auto-reject cosmetic-only candidates in Phase 3.
-        'is_substantive': major > 0,
+        'is_substantive': behavioral > 0,
     }
 
 
@@ -4023,7 +4021,7 @@ def _critique_candidate(candidate, feedback_summary=None):
     step small — never a reason to reject on its own.
 
     Returns {verdict: 'approve'|'reject', reason, confidence (0-1), auto (bool)}.
-    Cosmetic-only candidates are auto-rejected without an LLM call.
+    Wording-only and unclassified drafts use the automatic approval gate.
     """
     summary = candidate.get('change_summary') or {}
     changes = candidate.get('changes') or []
@@ -4031,8 +4029,10 @@ def _critique_candidate(candidate, feedback_summary=None):
     if not summary.get('is_substantive'):
         return {
             'verdict': 'reject',
-            'reason': 'Cosmetic only — no behaviorally-major change. Rewording/restating existing rules does not move win rate, and churning prompt versions adds noise.',
-            'confidence': 0.9,
+            'reason': ('Review the wording before deciding whether to activate this draft.'
+                       if summary.get('wording_only') else
+                       'Review the impact of the changed fields before deciding whether to activate this draft.'),
+            'confidence': None,
             'auto': True,
         }
 
@@ -4066,6 +4066,8 @@ def _critique_candidate(candidate, feedback_summary=None):
         'trade_level_evidence': trade_evidence,
         'your_recent_verdicts_and_human_response': own_track_record,
     }
+    if 'recent_entry_evidence' in candidate:
+        critic_payload['recent_entry_evidence'] = candidate['recent_entry_evidence']
 
     try:
         model = get_agent_model('CriticAgent')
@@ -4195,6 +4197,10 @@ def _decider_has_citation_contract(system_prompt, user_prompt_template):
     )
 
 
+def _same_prompt_text(before, after):
+    return (before or '').strip().splitlines() == (after or '').strip().splitlines()
+
+
 def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None):
     """Generate one prompt candidate via the LLM and compute the diff vs active.
 
@@ -4295,6 +4301,12 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             + soul_memory_instruction
         ),
     }
+    if agent_type == 'DeciderAgent':
+        try:
+            from policy_graph.decision_audit import entry_evidence
+            prompt_payload['recent_entry_evidence'] = entry_evidence(engine, config_hash)
+        except Exception as exc:
+            print(f"Prompt Lab entry evidence unavailable ({type(exc).__name__})")
 
     model = get_agent_model('PromptEvolutionAgent')
     generation_reasoning = get_reasoning_params('PromptEvolutionAgent', model)
@@ -4321,6 +4333,7 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'Soul defines persistent agent identity, and memory captures lessons learned over time. '
                     'Return ONLY valid JSON with keys: system_prompt, user_prompt_template, strategy_directives, '
                     'soul_edits, memory, reasoning, changes.\n\n'
+                    'If no update is supported, return {"no_change": true, "reasoning": "brief explanation"}.\n\n'
                     'THE "changes" KEY — this is how a downstream critic and a human decide whether to ship your '
                     'edit, so be rigorous. It is an array of objects, one per distinct edit you made:\n'
                     '  { "section": one of "system_prompt"|"user_prompt_template"|"strategy_directives"|"soul"|"memory",\n'
@@ -4342,19 +4355,20 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
                     'description of the edit, and use why for supporting evidence and its limits.\n\n'
                     'LEARN FROM PAST VERDICTS (past_review_verdicts): earlier candidates were judged by a '
                     'skeptical critic and a human (the final RLHF authority). A new candidate that repeats a '
-                    'rejected pattern without addressing the stated objection WILL be rejected again. The '
+                    'rejected pattern without addressing the stated objection WILL be rejected again. '
                     'Ground behavioral changes in supplied diagnostics or trade evidence. In why, explain '
                     'the pattern and the limits of the evidence. Cite individual trades there when needed to '
                     'support a specific claim. Do not infer stop breaches or other trade facts that the records '
-                    'do not show.\n\n'
+                    'do not show. When investigating cash holds, use recent_entry_evidence to check whether '
+                    'the Decider proposed entries, what gates it cited on passes, and where assessments are missing. '
+                    'A pass citation or a low buy count alone does not justify loosening a gate.\n\n'
                     'ONE CHANGE PER CANDIDATE: propose at most ONE primary behavioral change (plus at most one '
                     'minor supporting edit) so its realized effect is attributable. If the evidence does not support '
                     'one, keep the approved behavior. Base live instructions on a mechanism that can recur across '
                     'tickers and dates. Do not add exceptions or tune thresholds to fit individual trades. '
                     'Keep examples in dated memory and evaluation protocols in change metadata. '
-                    'computed_diagnostics are population-level facts computed in '
-                    'code over ALL closed campaigns — they outrank the 20+20 trade sample; target the top ranked leak '
-                    'first (regime, entry extension above the 20d MA, kill distance, same-ticker re-entry, loss tail). '
+                    'Use computed_diagnostics for patterns across closed campaigns and individual trade rows for '
+                    'specific examples. Propose a change only when the evidence supports a recurring issue. '
                     'Every gate you add must be executable from decider_supplied_fields — never require data the '
                     'Decider is not given (a candidate that demanded a "quoted entry reference and fixed kill" nothing '
                     'supplied locked the system in cash on 2026-09-02). Do not hedge rules into "consider prospectively '
@@ -4398,22 +4412,51 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             return '\n'.join(str(v) for v in val).strip()
         return str(val).strip()
 
-    system_prompt = _to_str(parsed.get('system_prompt'))
-    user_prompt_template = _to_str(parsed.get('user_prompt_template'))
-    strategy_directives = _to_str(parsed.get('strategy_directives'))
-    reasoning = _to_str(parsed.get('reasoning'))
-    soul_out = _apply_soul_draft(soul_sections, editable_soul, parsed.get('soul_edits'))
-    memory_out = _to_str(parsed.get('memory')) or _to_str(current_prompt.memory)
-    changes = _normalize_changes(parsed.get('changes'))
-    if soul_out == ''.join(content for _, content in soul_sections):
-        changes = [change for change in changes if change['section'] != 'soul']
+    before = {field: _to_str(getattr(current_prompt, field)) for field in _VALID_CHANGE_SECTIONS}
+    if parsed.get('no_change') is True:
+        fields = before.copy()
+    else:
+        fields = {
+            'system_prompt': _to_str(parsed.get('system_prompt')),
+            'user_prompt_template': _to_str(parsed.get('user_prompt_template')),
+            'strategy_directives': _to_str(parsed.get('strategy_directives')),
+            'soul': _apply_soul_draft(soul_sections, editable_soul, parsed.get('soul_edits')).strip(),
+            'memory': _to_str(parsed.get('memory')) or before['memory'],
+        }
+    changed_sections = {field for field in fields if not _same_prompt_text(before[field], fields[field])}
+    no_change = not changed_sections
+    changes = [change for change in _normalize_changes(parsed.get('changes'))
+               if change['section'] in changed_sections]
     change_summary = _summarize_changes(changes)
+    change_summary['wording_only'] = (
+        bool(changed_sections)
+        and not change_summary['is_substantive']
+        and changed_sections == {change['section'] for change in changes}
+    )
 
+    candidate = {
+        'agent_type': agent_type,
+        'agent_label': _PROMPT_LAB_LABELS.get(agent_type, agent_type),
+        'current_version': current_prompt.version,
+        **fields,
+        'reasoning': _to_str(parsed.get('reasoning')),
+        'changes': changes,
+        'change_summary': change_summary,
+        'no_change': no_change,
+    }
+    if no_change:
+        return {**candidate, 'description': '', 'diffs': {}, 'diff_stats': {'added': 0, 'removed': 0}}
+
+    if 'recent_entry_evidence' in prompt_payload:
+        candidate['recent_entry_evidence'] = prompt_payload['recent_entry_evidence']
+
+    system_prompt = fields['system_prompt']
+    user_prompt_template = fields['user_prompt_template']
     if not system_prompt or not user_prompt_template:
         raise ValueError('Generated payload missing required prompt fields (system_prompt / user_prompt_template).')
 
     # Anti-hallucination guardrails (unchanged from prior /generate behavior).
-    combined_text = (system_prompt + ' ' + (strategy_directives or '')).lower()
+    combined_text = (system_prompt + ' ' + fields['strategy_directives']).lower()
     hallucination_guards = [
         ('holdings', 'source of truth', 'ground truth', 'actual portfolio'),
         ('hold', 'sell', 'only valid for tickers', 'currently own', 'you own'),
@@ -4434,37 +4477,14 @@ def _generate_candidate_for_agent(agent_type, config_hash, feedback_summary=None
             'Keep the array in the system prompt or user template and regenerate.'
         )
 
-    description = _auto_generate_version_description(
+    candidate['description'] = _auto_generate_version_description(
         agent_type, current_prompt.version, feedback_summary
     )
-
-    candidate = {
-        'agent_type': agent_type,
-        'agent_label': _PROMPT_LAB_LABELS.get(agent_type, agent_type),
-        'current_version': current_prompt.version,
-        'system_prompt': system_prompt,
-        'user_prompt_template': user_prompt_template,
-        'strategy_directives': strategy_directives,
-        'soul': soul_out,
-        'memory': memory_out,
-        'reasoning': reasoning,
-        'description': description,
-        'changes': changes,
-        'change_summary': change_summary,
-    }
-
-    before = {
-        'system_prompt': current_prompt.system_prompt,
-        'user_prompt_template': current_prompt.user_prompt_template,
-        'strategy_directives': current_prompt.strategy_directives,
-        'soul': current_prompt.soul or '',
-        'memory': current_prompt.memory or '',
-    }
     diffs = _compute_unified_diffs(agent_type, before, candidate,
                                     version_label_a=f'v{current_prompt.version}',
                                     version_label_b='candidate')
-    added = sum(1 for d in diffs.values() for line in d if line.startswith('+') and not line.startswith('+++'))
-    removed = sum(1 for d in diffs.values() for line in d if line.startswith('-') and not line.startswith('---'))
+    added = sum(1 for diff in diffs.values() for line in diff[2:] if line.startswith('+'))
+    removed = sum(1 for diff in diffs.values() for line in diff[2:] if line.startswith('-'))
     candidate['diffs'] = diffs
     candidate['diff_stats'] = {'added': added, 'removed': removed}
     return candidate
@@ -4561,6 +4581,7 @@ def generate_prompt_evolution_candidate():
             'current_version': candidate['current_version'],
             'changes': candidate['changes'],
             'change_summary': candidate['change_summary'],
+            'no_change': candidate['no_change'],
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -4650,21 +4671,21 @@ def _run_batch_generation(job_id, config_hash):
         agent_order = {a: i for i, a in enumerate(_PROMPT_LAB_AGENTS)}
         candidates.sort(key=lambda c: agent_order.get(c.get('agent_type'), 99))
 
-        # Critic pass — score each candidate and record a review row. Runs after
-        # generation so the UI can surface the critic's verdict and auto-collapse
-        # cosmetic-only candidates. Cheap (cosmetic ones skip the LLM).
-        _set({
-            'status': 'running', 'phase': 'critique',
-            'config_hash': config_hash,
-            'message': 'Critic reviewing candidates…',
-            'feedback_summary': feedback_summary,
-            'completed_agents': completed,
-            'reviewed_candidates': 0,
-            'total_candidates': len(candidates),
-            **_prompt_lab_model_settings('CriticAgent'),
-            'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
-        })
-        for reviewed, cand in enumerate(candidates, start=1):
+        # Review only drafts with actual edits.
+        drafts = [candidate for candidate in candidates if not candidate.get('no_change')]
+        if drafts:
+            _set({
+                'status': 'running', 'phase': 'critique',
+                'config_hash': config_hash,
+                'message': 'Critic reviewing candidates…',
+                'feedback_summary': feedback_summary,
+                'completed_agents': completed,
+                'reviewed_candidates': 0,
+                'total_candidates': len(drafts),
+                **_prompt_lab_model_settings('CriticAgent'),
+                'started_at': _BATCH_JOBS.get(job_id, {}).get('started_at', time.time()),
+            })
+        for reviewed, cand in enumerate(drafts, start=1):
             try:
                 verdict = _critique_candidate(cand, feedback_summary)
             except Exception as exc:
@@ -4781,49 +4802,46 @@ def apply_prompt_evolution_candidate():
         if agent_type == "feedback_analyzer":
             agent_type = "FeedbackAgent"
 
-        # Keep the Prompt Lab and the Policy Graph tab in sync: a candidate is drafted against one
-        # active version; if a policy-graph proposal (or another apply) activated a newer version
-        # meanwhile, shipping this candidate would silently overwrite that change in every
-        # approved section. Refuse and ask for a fresh draft.
         base_version = data.get('base_version')
         if base_version is not None and str(base_version).strip() != '':
             try:
                 base_version = int(base_version)
             except (TypeError, ValueError):
                 return jsonify({'error': 'base_version must be an integer'}), 400
-            with engine.connect() as conn:
-                active_row = conn.execute(text("""
-                    SELECT version, created_by, description FROM prompt_versions
-                    WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
-                    ORDER BY version DESC LIMIT 1
-                """), {'agent_type': agent_type, 'config_hash': config_hash}).fetchone()
-            if active_row is not None and int(active_row.version) != base_version:
-                who = 'a policy graph proposal' if active_row.created_by == 'policy_graph' else f"'{active_row.created_by}'"
-                return jsonify({'error': (f"the active {agent_type} version moved to v{active_row.version} ({who}) after this "
-                                          f"candidate was drafted against v{base_version} — regenerate the candidate so "
-                                          f"it builds on the current policy")}), 409
+        else:
+            base_version = None
+
+        with engine.connect() as conn:
+            current = conn.execute(text("""
+                SELECT version, created_by, system_prompt, user_prompt_template,
+                       strategy_directives, soul, memory
+                FROM prompt_versions
+                WHERE agent_type = :agent_type AND config_hash = :config_hash AND is_active = TRUE
+                ORDER BY version DESC LIMIT 1
+            """), {'agent_type': agent_type, 'config_hash': config_hash}).fetchone()
+
+        if current is not None and base_version is not None and int(current.version) != base_version:
+            who = 'a policy graph proposal' if current.created_by == 'policy_graph' else f"'{current.created_by}'"
+            return jsonify({'error': (f"the active {agent_type} version moved to v{current.version} ({who}) after this "
+                                      f"candidate was drafted against v{base_version} — regenerate the candidate so "
+                                      f"it builds on the current policy")}), 409
 
         # Per-section approval: take only the approved sections from the
         # candidate and keep the current active version's text for the rest.
         # Omitted/None approved_sections = ship the full candidate (legacy).
         approved_sections = data.get('approved_sections')
+        approved = set(candidate_fields)
         if isinstance(approved_sections, list):
-            approved = {s for s in approved_sections if s in candidate_fields}
-            with engine.connect() as conn:
-                current = conn.execute(text("""
-                    SELECT system_prompt, user_prompt_template, strategy_directives,
-                           soul, memory
-                    FROM prompt_versions
-                    WHERE agent_type = :agent_type AND config_hash = :config_hash
-                      AND is_active = TRUE
-                    ORDER BY version DESC LIMIT 1
-                """), {'agent_type': agent_type, 'config_hash': config_hash}).fetchone()
-            if current is None and approved != set(candidate_fields):
-                return jsonify({'error': 'No active version to keep unapproved sections from'}), 400
-            if current is not None:
-                for field in candidate_fields:
-                    if field not in approved:
-                        candidate_fields[field] = (getattr(current, field) or '').strip()
+            approved = {field for field in candidate_fields if field in approved_sections}
+        if current is None and approved != set(candidate_fields):
+            return jsonify({'error': 'No active version to keep unapproved sections from'}), 400
+        if current is not None:
+            for field, proposed in candidate_fields.items():
+                active_text = getattr(current, field)
+                if field not in approved or _same_prompt_text(active_text, proposed):
+                    candidate_fields[field] = active_text
+            if all(candidate_fields[field] == getattr(current, field) for field in candidate_fields):
+                return jsonify({'success': True, 'no_change': True, 'version': current.version})
 
         system_prompt = candidate_fields['system_prompt']
         user_prompt_template = candidate_fields['user_prompt_template']
@@ -4831,7 +4849,7 @@ def apply_prompt_evolution_candidate():
         soul = candidate_fields['soul']
         memory = candidate_fields['memory']
 
-        if not system_prompt or not user_prompt_template:
+        if not (system_prompt or '').strip() or not (user_prompt_template or '').strip():
             return jsonify({'error': 'system_prompt and user_prompt_template are required'}), 400
         if agent_type == 'DeciderAgent' and not _decider_has_citation_contract(system_prompt, user_prompt_template):
             return jsonify({'error': ('The selected Decider sections must keep the required "cited" guideline-ID '

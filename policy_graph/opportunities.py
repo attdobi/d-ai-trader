@@ -10,10 +10,13 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
+
+from .citations import REJECT_VERDICTS
 
 ET = ZoneInfo("America/New_York")
 HORIZONS = (1, 3, 5)
@@ -150,7 +153,7 @@ def record_snapshot(engine, config_hash, run_id, candidates, *, input_id=None, p
         return 0
     ensure_schema(engine)
     now = _now(observed_at)
-    held = {_ticker(x.get("ticker") if isinstance(x, dict) else x) for x in holdings}
+    held = {_ticker(x.get("ticker") if isinstance(x, Mapping) else x) for x in holdings}
     blocked = {_ticker(x) for x in quarantined}
     records = {}
     for raw in candidates or ():
@@ -217,8 +220,7 @@ def _reply_items(reply):
     else:
         return []
     out = {}
-    mapping = {"BUY": "BUY", "SELL": "SELL", "HOLD": "HOLD", "PASS": "PASS", "REJECT": "PASS",
-               "REJECTED": "PASS", "SKIP": "PASS", "NO BUY": "PASS", "NO_BUY": "PASS"}
+    actions = {"buy": "BUY", "sell": "SELL", "hold": "HOLD"}
     # Explicit decisions win over a conflicting considered/setup verdict.
     for item in list(considered) + list(decisions):
         if not isinstance(item, dict):
@@ -226,7 +228,11 @@ def _reply_items(reply):
         ticker = _ticker(item.get("ticker"))
         if not ticker:
             continue
-        action = mapping.get(str(item.get("action") or item.get("verdict") or "").strip().upper(), "NOT_ASSESSED")
+        verb = str(item.get("action") or item.get("verdict") or "").strip().lower()
+        if verb in REJECT_VERDICTS or verb in ("no buy", "no_buy"):
+            action = "PASS"
+        else:
+            action = actions.get(verb, "NOT_ASSESSED")
         cites = item.get("cited") or []
         if not isinstance(cites, list):
             cites = []

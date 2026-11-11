@@ -303,6 +303,23 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
             return jsonify(service.paths_payload(engine, config_hash, agent, days=days, **common))
         return _run(go)
 
+    @app.route("/api/policy-graph/decision-audit", methods=["GET"])
+    def policy_graph_decision_audit():
+        config_hash = get_config_hash()
+
+        def go():
+            from .decision_audit import audit_cycles
+            raw = request.args.get("limit", "20")
+            if not _VERSION_RE.fullmatch(raw) or not 1 <= int(raw) <= 60:
+                raise service.BadRequest("limit must be an integer between 1 and 60")
+            result = audit_cycles(engine, config_hash, limit=int(raw))
+            response = jsonify(result)
+            if hasattr(response, "headers"):
+                response.headers["Cache-Control"] = "no-store"
+            return response
+
+        return _run(go)
+
     @app.route("/api/policy-graph/router", methods=["GET"])
     def policy_graph_router():
         config_hash = get_config_hash()

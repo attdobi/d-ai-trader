@@ -119,6 +119,11 @@
     }
     async function selectCycle(id,manual=true){
       if(!finite(id))return;state.selected=Number(id);if(manual)state.followLatest=false;renderList();stopFlow();
+      if (manual) {
+        const params = new URLSearchParams(location.hash.slice(1));
+        params.set('comparison', state.selected);
+        history.replaceState(null, '', `#${params}`);
+      }
       const seq=++state.detailSeq;
       if(state.details.has(state.selected)){renderDetail(state.details.get(state.selected));return;}
       status('Loading the saved cycle trace…');
@@ -140,7 +145,13 @@
       }catch(error){if(seq===state.seq){state.failures++;status(`Saved cycles unavailable: ${error.message}${state.failures>=3?' Auto-refresh paused; use Refresh cycles to retry.':''}`,true);}}
       finally{state.busy=false;$('#prRefresh').disabled=false;schedule();}
     }
-    function setActive(active){state.active=active;if(active){refresh();}else{++state.detailSeq;clearTimer();stopFlow();}}
+    function setActive(active){
+      state.active=active;
+      if (!active) { ++state.detailSeq; clearTimer(); stopFlow(); return; }
+      const id = Number(new URLSearchParams(location.hash.slice(1)).get('comparison'));
+      if (Number.isSafeInteger(id) && id > 0) { state.selected=id; state.followLatest=false; }
+      refresh();
+    }
     function step(delta){const asc=rows().slice().reverse(),i=asc.findIndex(r=>String(r.id)===String(state.selected)),next=asc[i+delta];if(next)selectCycle(next.id);}
     function playFlow(){
       if(state.playing){stopFlow();return;}if(!state.detail)return;

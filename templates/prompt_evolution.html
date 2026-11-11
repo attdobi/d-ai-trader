@@ -33,7 +33,7 @@
 
       <div id="batchResults" class="pe-hidden">
         <!-- Tab strip -->
-        <div id="batchTabs" role="tablist" style="display: flex; gap: 4px; border-bottom: 2px solid #ddd; margin-top: 16px;"></div>
+        <div id="batchTabs" role="tablist" aria-label="Draft results by agent"></div>
 
         <!-- Tab panels (one per agent, populated by JS) -->
         <div id="batchPanels"></div>
@@ -220,6 +220,7 @@
 .pe-usage-badge.is-runtime { color:#8de0c6; border-color:#376b61; }
 .pe-usage-badge.is-reference { color:#e1c383; border-color:#6e5e39; }
 /* Batch flow — tabs and per-agent panels */
+#batchTabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--card-border); margin-top:16px; }
 .pe-tab-btn {
   background: transparent;
   border: none;
@@ -228,50 +229,58 @@
   cursor: pointer;
   font-size: 1em;
   font-weight: 500;
-  color: #666;
+  color: var(--text);
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
-.pe-tab-btn:hover { color: #222; background: #f7f9fc; }
+.pe-tab-btn:hover { background: var(--surface-alt); }
 .pe-tab-btn.active {
-  color: #1a73e8;
-  border-bottom-color: #1a73e8;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
-.pe-tab-btn .pe-diff-badge {
+#batchResults :is(button, summary, input, [role="tabpanel"]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pe-diff-badge {
   font-size: 0.8em;
-  color: #888;
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.pe-tab-btn .pe-diff-badge .add { color: #2e7d32; }
-.pe-tab-btn .pe-diff-badge .rem { color: #c62828; }
-.pe-tab-btn.failed { color: #c62828; }
-.pe-tab-btn.approved { color: #2e7d32; }
-.pe-tab-btn.rejected { color: #999; text-decoration: line-through; }
+.pe-diff-badge .add { color: var(--success); }
+.pe-diff-badge .rem { color: var(--danger); }
+.pe-tab-btn.failed, .pe-tab-btn.failed .pe-diff-badge { color: var(--danger); }
+.pe-tab-btn.approved { color: var(--success); }
+.pe-tab-btn.rejected { color: var(--muted); text-decoration: line-through; }
 .pe-tab-panel { display: none; padding: 18px 4px; }
 .pe-tab-panel.active { display: block; }
+.pe-no-change { padding:14px 16px; border:1px solid var(--card-border); border-radius:8px; background:var(--surface-alt); }
+.pe-no-change h3 { font-size:1rem; margin:0 0 6px; }
+.pe-no-change p { color:var(--text); margin:6px 0 0; white-space:pre-wrap; }
 .pe-diff-section {
   margin: 12px 0;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--card-border);
   border-radius: 6px;
   overflow: hidden;
 }
 .pe-diff-section > summary {
   cursor: pointer;
   padding: 8px 12px;
-  background: #f7f9fc;
+  background: var(--surface-alt);
+  color: var(--text);
   font-weight: 600;
   font-size: 0.95em;
   user-select: none;
 }
-.pe-diff-section > summary:hover { background: #eef2f8; }
+.pe-diff-section > summary:hover { background: var(--card); }
 .pe-section-toggle {
   float: right;
   font-weight: 500;
   font-size: 0.85em;
-  color: #345;
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -282,41 +291,18 @@
 .pe-diff-section .pe-diff-view {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;
-  background: #ffffff;
+  background: var(--surface);
   padding: 10px 14px;
   white-space: pre;
   overflow-x: auto;
   max-height: 420px;
   overflow-y: auto;
 }
-/* GitHub light-theme diff colors. High specificity so they override the
-   dark-theme .pe-diff-line rules in app.css (which are unreadable on the
-   light batch-flow background). */
 .pe-diff-section .pe-diff-view .pe-diff-line {
   display: block;
   white-space: pre-wrap;
   word-break: break-word;
   padding: 0 4px;
-  color: #1f2328;
-}
-.pe-diff-section .pe-diff-view .pe-diff-line.add {
-  background: #e6ffec;
-  color: #0a5128;
-}
-.pe-diff-section .pe-diff-view .pe-diff-line.remove {
-  background: #ffebe9;
-  color: #82071e;
-}
-.pe-diff-section .pe-diff-view .pe-diff-line.hunk {
-  background: #ddf4ff;
-  color: #0550ae;
-  font-weight: 600;
-}
-.pe-diff-empty {
-  padding: 14px;
-  color: #888;
-  font-style: italic;
-  text-align: center;
 }
 .pe-decision-bar {
   display: flex;
@@ -325,7 +311,7 @@
   flex-wrap: wrap;
   margin-top: 16px;
   padding: 12px 14px;
-  background: #f7f9fc;
+  background: var(--surface-alt);
   border-radius: 6px;
 }
 .pe-btn.approve { background: #2e7d32; color: #fff; }
@@ -344,11 +330,9 @@
 }
 .pe-impact-pill.substantive { background: #e6ffec; color: #0a5128; }
 .pe-impact-pill.cosmetic { background: #fff4e5; color: #8a5300; }
-.pe-impact-counts { color: #444; font-family: ui-monospace, Menlo, monospace; }
-.pe-impact-hint { color: #999; }
+.pe-impact-counts { color: var(--muted); }
 .pe-tab-impact { font-size: 0.8em; margin-right: 5px; vertical-align: middle; }
-.pe-tab-impact.substantive { color: #2e7d32; }
-.pe-tab-impact.cosmetic { color: #d08300; }
+.pe-tab-impact.substantive { color: var(--success); }
 .pe-chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 4px; }
 .pe-change-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -367,19 +351,19 @@
 .pe-chip-kind.minor, .pe-change-chip.minor .pe-chip-kind { background: #eef1f4; color: #6b7280; }
 .pe-change-popup {
   z-index: 1000; width: 340px; max-width: 90vw;
-  background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+  background: var(--surface-alt); border: 1px solid var(--card-border); border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0,0,0,0.18); font-size: 0.9em;
 }
 .pe-change-popup-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-bottom: 1px solid #eee;
+  padding: 8px 12px; border-bottom: 1px solid var(--card-border);
 }
-.pe-change-popup-tag { color: #888; font-size: 0.85em; }
+.pe-change-popup-tag { color: var(--text); font-size: 0.85em; }
 .pe-change-popup-close {
   margin-left: auto; border: none; background: none; cursor: pointer;
-  font-size: 1.2em; line-height: 1; color: #888;
+  font-size: 1.2em; line-height: 1; color: var(--text);
 }
-.pe-change-popup-body { padding: 10px 12px; color: #24292f; }
+.pe-change-popup-body { padding: 10px 12px; color: var(--text); }
 .pe-change-popup-body p { margin: 0 0 8px; line-height: 1.45; }
 .pe-change-popup-what { font-weight: 600; }
 
@@ -388,21 +372,21 @@
   display: grid; gap: 6px;
   margin: 14px 0; padding: 9px 13px; border-radius: 6px; font-size: 0.9em;
 }
-.pe-critic-banner.approve { background: #e6ffec; border-left: 3px solid #2e7d32; }
-.pe-critic-banner.reject { background: #fff4e5; border-left: 3px solid #d08300; }
+.pe-critic-banner.approve { background: rgba(41,214,151,.1); border-left: 3px solid var(--success); }
+.pe-critic-banner.reject { background: rgba(250,219,95,.1); border-left: 3px solid var(--warning); }
 .pe-critic-verdict { font-weight: 700; font-size: 0.82em; letter-spacing: 0.4px; }
-.pe-critic-banner.approve .pe-critic-verdict { color: #0a5128; }
-.pe-critic-banner.reject .pe-critic-verdict { color: #8a5300; }
-.pe-critic-meta, .pe-critic-audit { color: #444; }
+.pe-critic-banner.approve .pe-critic-verdict { color: var(--success); }
+.pe-critic-banner.reject .pe-critic-verdict { color: var(--warning); }
+.pe-critic-meta, .pe-critic-audit { color: var(--text); }
 .pe-critic-audit summary { cursor: pointer; width: fit-content; }
 .pe-critic-audit p { margin: 6px 0 0; }
 .pe-override {
   display: inline-flex; align-items: center; gap: 7px;
-  margin: 4px 0 0; font-size: 0.88em; color: #8a5300; cursor: pointer;
+  margin: 4px 0 0; font-size: 0.88em; color: var(--warning); cursor: pointer;
 }
 .pe-tab-btn .pe-critic-mark { font-size: 0.85em; margin-left: 4px; }
-.pe-tab-btn .pe-critic-mark.approve { color: #2e7d32; }
-.pe-tab-btn .pe-critic-mark.reject { color: #d08300; }
+.pe-tab-btn .pe-critic-mark.approve { color: var(--success); }
+.pe-tab-btn .pe-critic-mark.reject { color: var(--warning); }
 </style>
 {% endblock %}
 
