@@ -42,7 +42,7 @@ def env_first(key: str, default=None):
         return val
     return default
 
-# Database connection (with fallback to SQLite so the system can boot without Postgres)
+# PostgreSQL is required by the launcher. Standalone clients can still use SQLite.
 DEFAULT_DB_URI = env_first(
     "DATABASE_URI",
     env_first("DATABASE_URL", f"postgresql://{os.getenv('USER', 'postgres')}@localhost/{os.getenv('USER', 'postgres')}")
@@ -54,19 +54,38 @@ FALLBACK_DB_URI = env_first(
 
 def _create_engine():
     """Create the primary engine, falling back to SQLite if Postgres is unavailable."""
+    require_postgres = os.getenv("DAI_REQUIRE_POSTGRES") == "1"
     if DEFAULT_DB_URI:
+        primary_engine = None
         try:
             primary_engine = create_engine(DEFAULT_DB_URI, pool_pre_ping=True)
+            backend = getattr(getattr(primary_engine, "dialect", None), "name", "configured")
+            if require_postgres and backend != "postgresql":
+                raise SystemExit("Database startup requires a PostgreSQL DATABASE_URI (or DATABASE_URL).")
             # Force an early connection so failures happen on startup instead of mid-run
             with primary_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            backend = getattr(getattr(primary_engine, "dialect", None), "name", "configured")
             print(f"🗄️  Using database backend: {backend}")
             return primary_engine
         except OperationalError as exc:
-            # URLs and driver errors can include passwords or connection parameters.
+            if primary_engine is not None:
+                primary_engine.dispose()
+            if require_postgres:
+                # Translate recognized failures to fixed text. Driver messages can contain secrets.
+                detail = str(getattr(exc, "orig", exc)).lower()
+                if "peer authentication failed" in detail:
+                    reason = "PostgreSQL rejected the local Unix-socket login (peer authentication)."
+                elif "postgres.app" in detail and "authentication" in detail:
+                    reason = "Postgres.app could not authorize the local client. Check its client permissions."
+                elif "authentication failed" in detail or "no password supplied" in detail:
+                    reason = "PostgreSQL rejected the configured login. Check its authentication settings."
+                else:
+                    reason = "Could not connect to PostgreSQL. Check the server and configured connection."
+                raise SystemExit(f"Database startup stopped. {reason}") from None
             print(f"⚠️  Primary database connection failed ({type(exc).__name__})")
             print("   ➜ Falling back to SQLite")
+    if require_postgres:
+        raise SystemExit("Database startup requires a PostgreSQL DATABASE_URI (or DATABASE_URL).")
     fallback_engine = create_engine(FALLBACK_DB_URI, pool_pre_ping=True)
     print("🗄️  Using fallback database backend: sqlite")
     return fallback_engine

@@ -173,6 +173,7 @@ export DAI_POLICY_SEED="${POLICY_SEED}"
 export DAI_BIND_HOST="${BIND_HOST}"
 export TRADING_MODE="${TRADING_MODE}"
 export DAI_CADENCE_MINUTES="${CADENCE_MINUTES}"
+export DAI_REQUIRE_POSTGRES=1
 if [[ -n "${CONFIG_HASH_OVERRIDE}" ]]; then
   export CURRENT_CONFIG_HASH="${CONFIG_HASH_OVERRIDE}"
 fi
@@ -238,6 +239,10 @@ resolve_redirect_port() {
   fi
 }
 
+# Validate the database and initialize the schema before replacing listeners.
+echo "🗄️ Initializing database schema ..."
+python "${PROJECT_ROOT}/init_database.py"
+
 # Ensure requested port is free before launching
 echo "🧹 Ensuring port ${PORT} is free ..."
 cleanup_port "${PORT}"
@@ -247,9 +252,6 @@ if [[ -n "${redirect_port}" ]]; then
   echo "🧹 Ensuring Schwab redirect port ${redirect_port} is free ..."
   cleanup_port "${redirect_port}"
 fi
-
-echo "🗄️ Initializing database schema ..."
-python "${PROJECT_ROOT}/init_database.py"
 
 # Start the dashboard and automation concurrently.
 # Avoid passing CLI flags that may not exist in your local files;

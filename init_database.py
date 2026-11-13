@@ -15,6 +15,9 @@ from typing import Dict
 
 from sqlalchemy import text
 
+if __name__ == "__main__":
+    os.environ["DAI_REQUIRE_POSTGRES"] = "1"
+
 from config import engine, get_current_config_hash
 from initialize_prompts import DEFAULT_PROMPTS
 
@@ -378,6 +381,8 @@ def deactivate_superseded_v0_prompts(conn, stats: InitStats) -> None:
 
 
 def initialize_database() -> None:
+    if engine.dialect.name != "postgresql":
+        raise SystemExit("Schema initialization requires PostgreSQL. Check the configured database connection.")
     stats = InitStats()
 
     # This is the active runtime config hash for the current process profile.

@@ -540,6 +540,9 @@ createdb adobi
 ```
 
 The launcher runs `init_database.py` on every start; it creates and migrates the tables and seeds v0 prompts.
+It checks PostgreSQL before stopping existing listeners. If the connection fails,
+startup prints a short diagnostic. With Postgres.app, check client permissions
+for the app making the connection. [Postgres.app client permissions](https://postgresapp.com/documentation/app-permissions.html)
 
 ### 3. Run in simulation
 
@@ -655,8 +658,8 @@ Under `start_d_ai_trader.sh`, the launcher exports `DAI_GPT_MODEL` (from `-m`, d
 ```bash
 # Required
 OPENAI_API_KEY=
-# Database: defaults to postgresql://<you>@localhost/<you> (DATABASE_URL also accepted);
-# falls back to SQLite (d_ai_trader.sqlite3) if Postgres is unreachable
+# PostgreSQL is required by the launcher and schema initializer.
+# Defaults to postgresql://<you>@localhost/<you> (DATABASE_URL also accepted).
 DATABASE_URI=
 
 # Models: global fallback (also -m) and per-agent overrides (aliases: sol / terra / luna)

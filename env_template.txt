@@ -2,11 +2,11 @@
 # Copy to .env and edit values as needed.
 
 # --- Database ---
-# Primary Postgres URI (recommended)
-DATABASE_URI=postgresql://$(whoami)@localhost/adobi
+# Set your PostgreSQL URI before launching. Example: postgresql://your_user@localhost/adobi
+DATABASE_URI=
 # Optional alias checked by config.py
 DATABASE_URL=
-# Fallback if Postgres is unavailable
+# SQLite fallback for standalone clients. The launcher requires PostgreSQL.
 FALLBACK_DATABASE_URI=sqlite:///d_ai_trader.sqlite3
 
 # --- Required ---

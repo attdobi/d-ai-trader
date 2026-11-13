@@ -40,3 +40,28 @@ def test_database_failure_omits_url_and_driver_exception_text(monkeypatch, capsy
     assert "OperationalError" in output and "sqlite" in output
     for secret in (primary_uri, fallback_uri, "unit-test-db-password", "private-db", "unit-test-sensitive-path"):
         assert secret not in output
+
+
+def test_postgres_startup_stops_before_fallback_and_reports_safe_auth_error(monkeypatch, capsys):
+    cfg = _import_config(monkeypatch)
+    capsys.readouterr()
+    monkeypatch.setenv("DAI_REQUIRE_POSTGRES", "1")
+    engine = types.SimpleNamespace(dialect=types.SimpleNamespace(name="postgresql"))
+    calls = []
+
+    def connect():
+        raise cfg.OperationalError("Peer authentication failed for private-db-role")
+
+    engine.connect = connect
+    engine.dispose = lambda: calls.append("dispose")
+
+    def create_engine(uri, **kwargs):
+        assert uri == cfg.DEFAULT_DB_URI
+        return engine
+
+    monkeypatch.setattr(cfg, "create_engine", create_engine)
+    with pytest.raises(SystemExit, match="local Unix-socket login \\(peer authentication\\)") as exc:
+        cfg._create_engine()
+    assert "private-db-role" not in str(exc.value)
+    assert "SQLite" not in capsys.readouterr().out
+    assert calls == ["dispose"]
