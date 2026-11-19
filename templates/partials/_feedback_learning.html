@@ -1,0 +1,24 @@
+<section id="learningPerformance" class="learn-performance" aria-labelledby="learningHeading">
+  <header>
+    <div><h2 id="learningHeading">Learning performance</h2>
+      <p>Compare saved decisions and source signals against subsequent market returns.</p></div>
+    <div class="learn-switch" aria-label="Agent">
+      <button type="button" data-agent="decider" aria-pressed="true">Decider</button>
+      <button type="button" data-agent="summarizer" aria-pressed="false">Summarizer</button>
+    </div>
+  </header>
+  <div class="learn-controls">
+    <label>Group by <select data-filter="group"><option value="version">Prompt version</option><option value="week">Observation week</option></select></label>
+    <label>Lookback <select data-filter="days"><option value="30">30 days</option><option value="90">90 days</option></select></label>
+    <label>Paper holding period <select data-filter="horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label>
+  </div>
+  <p data-status role="status">Loading saved observations…</p>
+  <div class="learn-scroll" tabindex="0" role="region" aria-label="Policy comparison" hidden>
+    <table><thead></thead><tbody></tbody></table>
+  </div>
+  <details class="learn-help"><summary>How to read these measures</summary>
+    <p>Each eligible screener ticker counts once until its paper holding period ends, including across policy versions. Paper returns use the next session’s open through the chosen session’s close, with 10 basis points of costs each way. Different versions saw different markets. Gaps in eligible candidate coverage limit comparisons.</p>
+    <p>Gain recall is the share of later winners selected. Loss false-positive rate is the share of later losers selected. Precision is the share of selected winners among selected winners and losers. The ranges are 95% Wilson intervals. Break-even outcomes contribute to average BUY return. Pending marks are still within the holding period. Overdue marks have passed the 5 p.m. Eastern cutoff. Missing marks have incomplete price data, calendar or labels.</p>
+    <p data-summary-method hidden>A complete source summary contains headlines and insights. A source signal needs a recognized ticker card, an exact source summary ID in the Decider image manifest and a later candidate snapshot for that ticker. “Actionable now” counts as selected. Watch and avoid count as passed. Unmatched or conflicting signals are excluded. Prompt versions come from capture-time stamps. Weeks start Monday in Pacific time.</p>
+  </details>
+</section>

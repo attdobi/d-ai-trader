@@ -861,6 +861,9 @@ def initialize_database() -> None:
             """,
         )
 
+        for name, sql_type in (("cached_input_tokens", "INTEGER"), ("cache_write_tokens", "INTEGER"), ("cache_retention", "TEXT")):
+            ensure_column(conn, stats, "api_usage", name, f"ALTER TABLE api_usage ADD COLUMN IF NOT EXISTS {name} {sql_type}")
+
         ensure_table(
             conn,
             stats,

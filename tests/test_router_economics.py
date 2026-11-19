@@ -19,6 +19,20 @@ from policy_router.nodes import RouterNode
 from policy_router.select import select_subgraph
 
 
+def test_preflight_uses_formatted_ltm_and_keeps_an_incumbent():
+    rows = [{"id":1, "content":"One lesson"}, {"id":2, "content":"Long lesson " * 15, "ticker":"ABC"}]
+    ids = {"DA.ltm.1", "DA.ltm.2"}
+    estimate = e.savings_preflight(rows, ids, {}, 2.0, .002, 3, cache_dir="")
+    assert estimate["optional_text_tokens_estimate"] > len(rows[1]["content"]) / 4
+    assert estimate["max_gross_savings_usd_estimate"] == estimate["optional_text_tokens_estimate"] * 2 / 1e6
+    assert estimate["decision"] == "bypass"
+    assert e.savings_preflight(rows, ids, {}, 2.0, .000001, 3)["decision"] == "score"
+    assert e.savings_preflight(rows, ids, {}, 2.0, None, 0)["decision"] == "score"
+    assert e.savings_preflight(rows, ids, {}, None, .002, 3)["decision"] == "score"
+    only = e.savings_preflight(rows[:1], ids, {}, None, None, 0)
+    assert only["decision"] == "bypass" and only["optional_text_tokens_estimate"] == 0
+
+
 def fixture_capture(**overrides):
     def node(ident, kind, field, body, order):
         return Node(ident, "DeciderAgent", ident.rsplit(".", 1)[-1], kind, None, field, body,

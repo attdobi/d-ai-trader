@@ -8,8 +8,10 @@ stored. Credentials and full remote/request bodies are never written here.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
-from datetime import datetime
+from statistics import median
+from datetime import datetime, timedelta
 
 from sqlalchemy import text
 
@@ -65,6 +67,33 @@ def _fallback_code(value) -> str | None:
     return "unavailable"
 
 
+def recent_router_fee(engine, config_hash, image_count, *, model=MODEL):
+    """A measured fee proxy for similar native calls, independent of outcomes.
+
+    Limit lookback and match image count/model. A cold ledger or unknown usage
+    is explicit. Never use replay probes, bypass estimates or a zero placeholder.
+    """
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT cost_usd, comparison_json FROM policy_router_comparisons
+                WHERE config_hash=:cfg AND provider=:provider AND model=:model AND source_kind='live'
+                  AND request_attempted=TRUE AND cost_usd>0 AND decided_at>=:since
+                ORDER BY id DESC LIMIT 60
+            """), {"cfg": config_hash, "provider": PROVIDER, "model": model,
+                   "since": datetime.now() - timedelta(days=14)}).all()
+        fees = []
+        for cost, payload in rows:
+            manifest = (json.loads(payload) or {}).get("image_manifest") or {}
+            if manifest.get("image_count", 0) == image_count:
+                fees.append(float(cost))
+                if len(fees) == 10:
+                    break
+        return (median(fees), len(fees)) if fees else (None, 0)
+    except Exception:
+        return None, 0
+
+
 def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result, *, local_result=None,
                   served_ids=(), source_input_id=None, source_kind="live", decided_at=None, economics=None,
                   context_summary=None, requested_mode="shadow", applied=False, fallback_reason=None) -> int:
@@ -87,6 +116,7 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         nodes.append({
             "node_id": ident, "kind": node.kind, "chars": int(node.chars),
             "title": str((getattr(node, "meta", None) or {}).get("title") or ident)[:160],
+            "text_sha256": hashlib.sha256(node.text.encode()).hexdigest(),
             "local_p": float(ld.p) if ld else None, "local_choice": ld.choice if ld else None,
             "decisions_p": float(rd.p) if rd else None, "decisions_choice": rd.choice if rd else None,
             "served_in_prompt": ident in served,
@@ -108,6 +138,8 @@ def record_shadow(engine, config_hash: str, prompt_version, run_id: str, result,
         "actual_prompt_changed": applied,
         "fallback_reason": None if applied else _fallback_code(fallback_reason),
         "image_manifest": dict(getattr(result, "image_manifest", None) or {}),
+        "preflight": dict(getattr(result, "preflight", None) or {}),
+        "timing_ms": dict(getattr(result, "timing_ms", None) or {}),
     }
     if economics is not None:
         comparison["economics"] = economics
@@ -166,6 +198,12 @@ def _row_public(row, *, nodes: bool = False) -> dict:
         "skipped_ids": [n["node_id"] for n in raw_nodes if n.get("decisions_choice") == "exclude"],
         "actual_optional_ids": [n["node_id"] for n in raw_nodes if n.get("served_in_prompt")],
     }
+    live_active = data["requested_mode"] == "active" and data["source_kind"] == "live"
+    data["selection"]["actual_omitted_ids"] = (
+        [n["node_id"] for n in raw_nodes if not n["served_in_prompt"]] if live_active else None)
+    data["selection"]["retained_despite_skip_ids"] = (
+        [n["node_id"] for n in raw_nodes if n["served_in_prompt"] and n.get("decisions_choice") == "exclude"]
+        if live_active else None)
     data["request_attempted"] = bool(data["request_attempted"])
     at = data.get("decided_at")
     data["decided_at"] = at.isoformat() if hasattr(at, "isoformat") else at
@@ -250,7 +288,7 @@ def _source_context_summary(engine, config_hash, source_input_id):
 def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     """Bounded UI DTO; safely empty before initialization. Never creates tables."""
     out = {"provider": PROVIDER, "model": MODEL, "runs": [], "last_cycle": None,
-           "totals": {"runs": 0, "ok": 0, "fallback": 0, "request_attempts": 0,
+           "totals": {"runs": 0, "ok": 0, "fallback": 0, "bypassed": 0, "request_attempts": 0,
                       "cost_usd": None, "known_cost_usd": None, "unknown_cost_calls": 0,
                       "active_requested_runs": 0, "applied_runs": 0,
                       "live_runs": 0, "replay_runs": 0, "observer_runs": 0, "input_tokens": 0,
@@ -272,7 +310,8 @@ def comparison_panel(engine, config_hash: str, *, last_n: int = 30) -> dict:
     out["last_cycle"] = _row_public(rows[0], nodes=True)
     totals = out["totals"]
     totals.update(runs=len(rows), ok=sum(r["status"] == "ok" for r in rows),
-                  fallback=sum(r["status"] != "ok" for r in rows),
+                  fallback=sum(r["status"] == "fallback" for r in rows),
+                  bypassed=sum(r["status"] == "bypassed" for r in rows),
                   request_attempts=sum(r["request_attempted"] for r in out["runs"]),
                   active_requested_runs=sum(r["requested_mode"] == "active" for r in out["runs"]),
                   applied_runs=sum(r["applied"] for r in out["runs"]))

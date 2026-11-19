@@ -435,7 +435,7 @@ def report(engine, config_hash, *, days=90, case_limit=500):
         if truncated:
             for key in ("prospective_candidates","episodes","deduplicated","assessed","unassessed",
                         "matured","unmatured","tp","fp","fn","tn","winner_denominator","loser_denominator",
-                        "buy_denominator","break_even"):
+                        "buy_denominator","break_even","matured_buys"):
                 summary[key]=None
             summary["candidate_rows"]=cohort_total
             summary["note"]="Quality rates unavailable: the declared prospective cohort exceeds the 50,000-candidate report limit. No partial-sample rates are shown."
@@ -476,7 +476,8 @@ def _interval(n, d):
     return [max(0, center-half), min(1, center+half)]
 
 
-def metrics(cases, *, horizon=3) -> dict:
+def prospective_episodes(cases, *, horizon=3):
+    """Keep the first non-overlapping eligible observation per ticker in the cohort."""
     if horizon not in HORIZONS:
         raise ValueError("unsupported paper horizon")
     prospective = [c for c in cases if c.get("coverage") == "prospective_screener" and c.get("eligible_for_recall")]
@@ -494,6 +495,19 @@ def metrics(cases, *, horizon=3) -> dict:
             continue
         last_exit[ticker] = dates[-1]
         episodes.append(c)
+    return prospective, episodes
+
+
+def metrics(cases, *, horizon=3) -> dict:
+    prospective, episodes = prospective_episodes(cases, horizon=horizon)
+    result = episode_metrics(episodes, horizon=horizon)
+    result.update(candidate_rows=len(cases), prospective_candidates=len(prospective),
+                  deduplicated=len(prospective) - len(episodes))
+    return result
+
+
+def episode_metrics(episodes, *, horizon):
+    """Score previously deduplicated episodes so a version switch cannot reset overlap."""
     assessed = [c for c in episodes if c.get("action") in {"BUY", "PASS"}]
     mature = [(c, c.get("outcomes", {}).get(str(horizon), {})) for c in assessed]
     mature = [(c,o) for c,o in mature if o.get("status") == "matured"
@@ -507,8 +521,7 @@ def metrics(cases, *, horizon=3) -> dict:
     net = [_number(o.get("net_return_pct")) for o in buys]
     net = [n for n in net if n is not None]
     return {"horizon": horizon, "spec_id": SPEC_ID, "scope": "prospective screener candidates, first non-overlapping ticker episode",
-            "paper_only": True, "candidate_rows": len(cases), "prospective_candidates": len(prospective),
-            "episodes": len(episodes), "deduplicated": len(prospective)-len(episodes),
+            "paper_only": True, "episodes": len(episodes),
             "assessed": len(assessed), "unassessed": len(episodes)-len(assessed),
             "matured": len(mature), "unmatured": len(assessed)-len(mature),
             "coverage": _ratio(len(assessed), len(episodes)), "tp": tp, "fp": fp, "fn": fn, "tn": tn,
@@ -516,7 +529,7 @@ def metrics(cases, *, horizon=3) -> dict:
             "precision": _ratio(tp,tp+fp), "recall": _ratio(tp,tp+fn), "fpr": _ratio(fp,fp+tn),
             "precision_interval": _interval(tp,tp+fp), "recall_interval": _interval(tp,tp+fn), "fpr_interval": _interval(fp,fp+tn),
             "break_even": sum(o["label"] == "break_even" for _,o in mature),
-            "net_expectancy_pct": sum(net)/len(net) if net else None,
+            "matured_buys": len(net), "net_expectancy_pct": sum(net)/len(net) if net else None,
             "net_pnl_per_1000": sum(net)*10 if net else None,
             "note": "Model BUY/PASS only; paper returns assume 10 bps each side. Not realized portfolio P&L, all-market recall, or causal rule attribution."}
 

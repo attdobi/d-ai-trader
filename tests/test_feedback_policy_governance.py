@@ -152,3 +152,68 @@ def test_legacy_memory_update_flag_cannot_activate_research(monkeypatch):
     result = update(tracker, "DeciderAgent", "A hypothesis", "cfg", rules=["Candidate idea"], write_prompt_row=True)
     assert result["active_memory_updated"] is False and len(calls) == 1
     assert calls[0][1]["source"] == "feedback"
+
+
+def test_decision_only_review_receives_prospective_evidence_and_archives_once():
+    from datetime import datetime, timedelta
+    from feedback_learning import review_evidence_text
+    import contextlib
+    packet = {"status": "ok", "distinct_episodes": 19}
+    conn = SimpleNamespace(execute=lambda *args: [])
+    db = SimpleNamespace(connect=lambda: contextlib.nullcontext(conn))
+    calls = []
+    analyze = method("feedback_agent.py", "analyze_recent_outcomes_for_config",
+                     {"datetime": datetime, "timedelta":timedelta, "engine":db,"text":str,
+                      "FEEDBACK_LOOKBACK_DAYS":30,"review_evidence":lambda *args:packet})
+    def pattern(days, cfg, *, prospective):
+        assert prospective == packet and cfg == "cfg"
+        return {"analysis":{"parsing_success_rate":1}, "total_decisions":3,
+                "feedback":{"decision_quality":"reviewed"}}
+    tracker = SimpleNamespace(_analyze_decision_patterns=pattern,
+                              _store_feedback_for_config=lambda *args: calls.append(args) or 9)
+    result = analyze(tracker, "cfg", skip_auto_prompts=True)
+    assert len(calls)==1 and result["feedback_id"]==9 and result["total_trades"]==0
+    assert calls[0][5]["prospective_policy_evidence"] == packet
+    assert result["feedback_content"]["decision_quality"] == "reviewed"
+    # Check the actual decision-only model input without a provider client.
+    sent = []
+    def collect(params, agent, client):
+        sent.append(params["user_prompt"])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"decision_quality":"ok"}'))])
+    review = method("feedback_agent.py", "_generate_decision_pattern_feedback",{
+        "review_evidence_text":review_evidence_text,"get_reasoning_token_cap":lambda *a:1,
+        "get_agent_model":lambda *a:"fake","get_agent_reasoning_level":lambda *a:"low",
+        "_build_feedback_api_params":lambda **kw:kw, "_execute_feedback_api":collect,"json":json})
+    payload = dict(total_decisions=3, buy_decisions=0, deferred_decisions=0, recent_tickers=[],
+                   decision_reasons=[], prospective_policy_evidence=packet)
+    assert review(SimpleNamespace(_feedback_client=None),[],payload)["decision_quality"]=="ok"
+    assert '"distinct_episodes":19' in sent[0]
+
+
+def test_weekly_feedback_model_receives_operator_prospective_packet(monkeypatch):
+    from feedback_learning import review_evidence_text
+    packet = {"status":"ok", "distinct_episodes":13, "summarizer":{"unversioned_summaries":12}}
+    sent = []
+    def capture(params, agent, client):
+        sent.append(params["user_prompt"])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"key_insights":[]}'))])
+    def unavailable(*args, **kwargs):
+        raise LookupError()
+    for module, values in {
+        "feedback_diagnostics":{"compute_trade_diagnostics":unavailable,"format_diagnostics":str,"SUPPLIED_DECIDER_FIELDS":""},
+        "visual_learning":{"recent_visual_context":unavailable},
+        "policy_graph.taxonomy":{"observation_inventory":unavailable},
+        "prompt_manager":{"get_active_prompt":unavailable},
+    }.items():
+        monkeypatch.setitem(sys.modules, module, SimpleNamespace(**values))
+    review=method("feedback_agent.py", "_generate_ai_feedback",{
+        "json":json,"review_evidence_text":review_evidence_text,"engine":object(),
+        "FEEDBACK_LOOKBACK_DAYS":30,"get_agent_model":lambda *a:"fake","get_reasoning_token_cap":lambda *a:1,
+        "get_agent_reasoning_level":lambda *a:"low","_execute_feedback_api":capture,
+        "_build_feedback_api_params":lambda **kw:kw})
+    tracker=SimpleNamespace(_get_detailed_trade_analysis=lambda **kw:[],_get_prompt_review_lessons=lambda **kw:"",
+                            _feedback_client=object())
+    analysis=dict(prospective_policy_evidence=packet, outcome_distribution={},successful_reasons=[],
+                  unsuccessful_reasons=[],avg_hold_duration_profitable=0,avg_hold_duration_unprofitable=0)
+    assert review(tracker,[],0,0,analysis,config_hash="cfg")["key_insights"]==[]
+    assert len(sent)==1 and '"distinct_episodes":13' in sent[0] and '"unversioned_summaries":12' in sent[0]

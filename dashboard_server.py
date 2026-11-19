@@ -1550,22 +1550,22 @@ def trade_decisions():
         # for that run) so the Trades tab shows the $ that produced the trades.
         run_ids = [t.get('run_id') for t in trades if t.get('run_id')]
         if run_ids:
-            from config import compute_api_cost
-            cost_rows = conn.execute(text("""
-                SELECT run_id, model,
-                       COALESCE(SUM(prompt_tokens), 0) AS p,
-                       COALESCE(SUM(completion_tokens), 0) AS c,
-                       COALESCE(SUM(total_tokens), 0) AS tokens
+            from config import compute_api_cost, load_model_pricing
+            from api_cost_usage import cache_select_sql
+            pricing = load_model_pricing()
+            cost_rows = conn.execute(text(f"""
+                SELECT run_id, model, prompt_tokens AS p, completion_tokens AS c, total_tokens AS tokens, {cache_select_sql(conn)}
                 FROM api_usage
                 WHERE run_id = ANY(:rids)
-                  AND agent_type IN ('DeciderAgent', 'CompanyExtractionAgent')
-                GROUP BY run_id, model
-            """), {"rids": run_ids}).fetchall()
+                  AND agent_type IN ('DeciderAgent', 'CompanyExtractionAgent') AND config_hash=:h
+            """), {"rids": run_ids, "h": config_hash}).fetchall()
             cost_by_run = {}
             for r in cost_rows:
                 acc = cost_by_run.setdefault(r.run_id, {'cost': 0.0, 'tokens': 0})
-                acc['cost'] += compute_api_cost(r.model, int(r.p), int(r.c))
-                acc['tokens'] += int(r.tokens)
+                cost = compute_api_cost(r.model, r.p, r.c, cached_input_tokens=r.cached_input_tokens,
+                                        cache_write_tokens=r.cache_write_tokens, cache_retention=r.cache_retention, pricing=pricing)
+                acc['cost'] = acc['cost'] + cost if acc['cost'] is not None and cost is not None else None
+                acc['tokens'] += int(r.tokens or 0)
             for t in trades:
                 info = cost_by_run.get(t.get('run_id'))
                 t['decision_cost'] = info['cost'] if info else None
@@ -1742,7 +1742,9 @@ def summaries():
         # and api_usage record run_ids that can drift by ~1s, so match each
         # summary to the NEAREST summarizer cycle by timestamp and use that
         # cycle's per-call cost (cycle summarizer spend ÷ calls in the cycle).
-        from config import compute_api_cost
+        from config import compute_api_cost, load_model_pricing
+        from api_cost_usage import cache_select_sql
+        pricing = load_model_pricing()
         from datetime import datetime as _dt
 
         def _parse_rid(rid):
@@ -1751,20 +1753,18 @@ def summaries():
             except (ValueError, TypeError):
                 return None
 
-        usage_rows = conn.execute(text("""
-            SELECT run_id, model,
-                   COALESCE(SUM(prompt_tokens), 0) AS p,
-                   COALESCE(SUM(completion_tokens), 0) AS c,
-                   COUNT(*) AS calls
+        usage_rows = conn.execute(text(f"""
+            SELECT run_id, model, prompt_tokens AS p, completion_tokens AS c, {cache_select_sql(conn)}
             FROM api_usage
-            WHERE agent_type = 'SummarizerAgent' AND ts >= CURRENT_DATE - 7
-            GROUP BY run_id, model
-        """)).fetchall()
+            WHERE agent_type = 'SummarizerAgent' AND ts >= CURRENT_DATE - 7 AND config_hash=:h
+        """), {'h': config_hash}).fetchall()
         cycle = {}  # run_id -> {"cost", "calls", "t"}
         for r in usage_rows:
             acc = cycle.setdefault(r.run_id, {"cost": 0.0, "calls": 0, "t": _parse_rid(r.run_id)})
-            acc["cost"] += compute_api_cost(r.model, int(r.p), int(r.c))
-            acc["calls"] += int(r.calls)
+            cost = compute_api_cost(r.model, r.p, r.c, cached_input_tokens=r.cached_input_tokens,
+                                    cache_write_tokens=r.cache_write_tokens, cache_retention=r.cache_retention, pricing=pricing)
+            acc["cost"] = acc["cost"] + cost if acc["cost"] is not None and cost is not None else None
+            acc["calls"] += 1
         cycles = [v for v in cycle.values() if v["t"] and v["calls"]]
 
         # Only older summaries (no stamped per-source cost) need the cycle-average
@@ -1779,7 +1779,7 @@ def summaries():
                     d = abs((v["t"] - st).total_seconds())
                     if best_d is None or d < best_d:
                         best, best_d = v, d
-            s["summary_cost"] = (best["cost"] / best["calls"]) if (best and best_d is not None and best_d <= 180) else None
+            s["summary_cost"] = (best["cost"] / best["calls"]) if (best and best["cost"] is not None and best_d is not None and best_d <= 180) else None
 
         return render_template("summaries.html", summaries=summaries,
                                page=page, total_pages=total_pages,
@@ -2100,52 +2100,58 @@ def get_cost_usage():
         from zoneinfo import ZoneInfo as _ZoneInfo
         today = _datetime.now(_ZoneInfo('America/Los_Angeles')).date()
         today_str = today.isoformat()
-        start_date = today - _timedelta(days=days)
+        start_date = today - _timedelta(days=days - 1)
+        end_date = today + _timedelta(days=1)
 
+        from api_cost_usage import cache_select_sql
         with engine.connect() as conn:
-            # Group by (agent, model) so cost can be computed from CURRENT rates
-            # at display time — editing model_pricing.json reprices all history.
-            rows = conn.execute(text("""
-                SELECT agent_type, model, DATE(ts) AS day,
-                       COUNT(*) AS calls,
-                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-                       COALESCE(SUM(total_tokens), 0) AS total_tokens
-                FROM api_usage
-                WHERE config_hash = :h AND ts >= :start
-                GROUP BY agent_type, model, DATE(ts)
-            """), {"h": config_hash, "start": start_date}).fetchall()
+            rows = conn.execute(text(f"""
+                SELECT agent_type, model, DATE(ts) AS day, prompt_tokens, completion_tokens,
+                       reasoning_tokens, total_tokens, {cache_select_sql(conn)}
+                FROM api_usage WHERE config_hash = :h AND ts >= :start AND ts < :end
+            """), {"h": config_hash, "start": start_date, "end": end_date}).mappings().all()
 
         per_agent = {}
         daily_map = {}
-        today_cost = today_tokens = today_calls = 0.0
+        today_cost = today_tokens = today_calls = 0
+        unknown_cost_calls = unknown_token_calls = 0
+        today_unknown_cost = today_unknown_tokens = 0
         for r in rows:
-            cost = compute_api_cost(r.model, int(r.prompt_tokens), int(r.completion_tokens))
-            a = per_agent.setdefault(r.agent_type, {
-                'agent': r.agent_type, 'calls': 0, 'prompt_tokens': 0,
-                'completion_tokens': 0, 'reasoning_tokens': 0, 'cost': 0.0})
-            a['calls'] += int(r.calls)
-            a['prompt_tokens'] += int(r.prompt_tokens)
-            a['completion_tokens'] += int(r.completion_tokens)
-            a['reasoning_tokens'] += int(r.reasoning_tokens)
-            a['cost'] += cost
-            day = r.day.isoformat() if hasattr(r.day, 'isoformat') else (str(r.day) if r.day else None)
-            dkey = (day, r.agent_type)
-            dd = daily_map.setdefault(dkey, {'day': dkey[0], 'agent': r.agent_type, 'cost': 0.0, 'tokens': 0})
-            dd['cost'] += cost
-            dd['tokens'] += int(r.total_tokens)
+            # The long-context tier is determined for each individual request.
+            cost = compute_api_cost(r["model"], r["prompt_tokens"], r["completion_tokens"],
+                                    cached_input_tokens=r["cached_input_tokens"], cache_write_tokens=r["cache_write_tokens"],
+                                    cache_retention=r["cache_retention"], pricing=pricing)
+            day = str(r["day"])
+            agent = r["agent_type"]
+            a = per_agent.setdefault(agent, {"agent": agent, "calls": 0, "known_cost": 0.0,
+                "unknown_cost_calls": 0, "unknown_token_calls": 0, "cached_input_tokens": 0,
+                "cache_write_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0, "reasoning_tokens": 0})
+            a["calls"] += 1
+            for key in ("cached_input_tokens", "cache_write_tokens", "prompt_tokens", "completion_tokens", "reasoning_tokens"):
+                a[key] += int(r[key] or 0)
+            unknown_tokens = r["prompt_tokens"] is None or r["completion_tokens"] is None
+            tokens = int(r["total_tokens"] or 0)
+            dd = daily_map.setdefault((day, agent), {"day": day, "agent": agent, "known_cost": 0.0,
+                "unknown_cost_calls": 0, "unknown_token_calls": 0, "tokens": 0})
+            dd["tokens"] += tokens
+            for item in (a, dd):
+                item["known_cost"] += cost or 0
+                item["unknown_cost_calls"] += cost is None
+                item["unknown_token_calls"] += unknown_tokens
+                item["cost"] = None if item["unknown_cost_calls"] else item["known_cost"]
+            unknown_cost_calls += cost is None
+            unknown_token_calls += unknown_tokens
             if day == today_str:
-                today_cost += cost
-                today_tokens += int(r.total_tokens)
-                today_calls += int(r.calls)
+                today_cost += cost or 0
+                today_unknown_cost += cost is None
+                today_unknown_tokens += unknown_tokens
+                today_tokens += tokens
+                today_calls += 1
 
         # Hosted Decisions is billed at a different endpoint tariff. Its audit
         # table is the sole source: never insert/reprice it as a Chat call too.
         from api_cost_usage import DECISIONS_AGENT, decisions_daily_usage
-        router_usage = decisions_daily_usage(engine, config_hash, start_date)
-        unknown_cost_calls = unknown_token_calls = 0
-        today_unknown_cost = today_unknown_tokens = 0
+        router_usage = decisions_daily_usage(engine, config_hash, start_date, end_date)
         for r in router_usage['daily']:
             a = per_agent.setdefault(DECISIONS_AGENT, {
                 'agent': DECISIONS_AGENT, 'calls': 0, 'prompt_tokens': 0,
@@ -2185,7 +2191,7 @@ def get_cost_usage():
         return jsonify({
             'pricing_configured': bool(priced_models),
             'priced_models': priced_models,
-            'window_days': days,
+            'window_days': days, 'first_date': start_date.isoformat(), 'last_date': today_str,
             'today': {'cost': None if today_unknown_cost else today_cost,
                       'known_cost': today_cost, 'tokens': int(today_tokens), 'calls': int(today_calls),
                       'unknown_cost_calls': today_unknown_cost, 'unknown_token_calls': today_unknown_tokens},
@@ -2201,6 +2207,24 @@ def get_cost_usage():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/feedback/learning', methods=['GET'])
+def get_feedback_learning():
+    """Recorded policy cohorts only. Reading this endpoint never requests market bars or model output."""
+    from feedback_learning import learning_report
+    try:
+        days = int(request.args.get('days', '30'))
+        horizon = int(request.args.get('horizon', '3'))
+        if days not in (30, 90) or horizon not in (1, 3, 5):
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Choose 30 or 90 days and a 1, 3 or 5 session horizon."}), 400
+    try:
+        return jsonify(learning_report(engine, get_current_config_hash(), days=days, horizon=horizon))
+    except Exception as exc:
+        app.logger.warning("Feedback learning statistics unavailable (%s)", type(exc).__name__)
+        return jsonify({"error": "Saved learning statistics are unavailable."}), 503
 
 
 @app.route('/api/feedback/benchmarks')

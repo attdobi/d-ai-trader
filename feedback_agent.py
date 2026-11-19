@@ -18,6 +18,7 @@ from config import engine, PromptManager, session, openai, GPT_MODEL, get_agent_
 import yfinance as yf
 import pandas as pd
 from policy_safety import feedback_policy_violations, opportunity_system_prompt
+from feedback_learning import review_evidence, review_evidence_text
 from feedback_metrics import (
     BREAK_EVEN_DOLLAR_MAX, SIGNIFICANT_LOSS_THRESHOLD, SIGNIFICANT_PROFIT_THRESHOLD,
     categorize_outcome,
@@ -283,44 +284,27 @@ class TradeOutcomeTracker:
             
             outcomes = [dict(row._mapping) for row in result]
         
+        prospective = review_evidence(engine, config_hash)
         if not outcomes:
             print(f"No completed trades to analyze for config {config_hash} - analyzing decision patterns and generating feedback")
             # If no completed trades, analyze decision patterns and generate feedback anyway
-            decision_analysis = self._analyze_decision_patterns_for_config(days_back, config_hash)
+            decision_analysis = self._analyze_decision_patterns(days_back, config_hash, prospective=prospective) or {}
             
             # Generate feedback based on decision patterns even without trade outcomes
             if decision_analysis.get('total_decisions', 0) > 0:
                 print(f"✅ Found {decision_analysis['total_decisions']} decisions to analyze for feedback")
                 
-                # Create synthetic feedback based on decision patterns
-                synthetic_feedback = self._generate_decision_pattern_feedback_for_config(decision_analysis, config_hash)
-                if synthetic_feedback:
-                    print(f"🔄 Generated feedback from decision patterns for config {config_hash}")
-                    
-                    # Archive the evidence before marking it for review.
-                    feedback_id = self._store_feedback_for_config(
-                        days_back, 
-                        decision_analysis.get('total_attempts', decision_analysis.get('total_decisions', 0)), 
-                        decision_analysis.get('parsing_success_rate', 1.0), 
-                        0.0,  # No profit data 
-                        decision_analysis, 
-                        synthetic_feedback, 
-                        config_hash
-                    )
-                    
-                    # Retain compatibility with scheduled callers, without policy promotion.
-                    if feedback_id and not skip_auto_prompts:
-                        self._auto_generate_prompts_from_feedback_for_config(synthetic_feedback, feedback_id, config_hash)
-                    elif feedback_id and skip_auto_prompts:
-                        print("⏭️  Feedback archived; pending-review notification skipped")
-
-                    return {
-                        'feedback_generated': True,
-                        'feedback_source': 'decision_patterns',
-                        'decisions_analyzed': decision_analysis['total_decisions'],
-                        'feedback_content': synthetic_feedback,
-                        'feedback_id': feedback_id
-                    }
+                # The decision report already has the model review and the true parsing counts.
+                # Archive it once. Completed-trade metrics have no denominator in this branch.
+                decision_feedback = decision_analysis['feedback']
+                decision_feedback['prospective_policy_evidence'] = prospective
+                feedback_id = self._store_feedback_for_config(
+                    days_back, 0, 0.0, 0.0, decision_analysis['analysis'], decision_feedback, config_hash)
+                if feedback_id and not skip_auto_prompts:
+                    self._auto_generate_prompts_from_feedback_for_config(decision_feedback, feedback_id, config_hash)
+                return {**decision_analysis, 'feedback_generated': True, 'feedback_source': 'decision_patterns',
+                        'decisions_analyzed': decision_analysis['total_decisions'], 'total_trades': 0,
+                        'feedback_content': decision_feedback, 'feedback_id': feedback_id}
             else:
                 print(f"⚠️  No decisions found for config {config_hash} - recording the evidence gap for review")
                 
@@ -329,16 +313,17 @@ class TradeOutcomeTracker:
                     print(f"🔄 Config {config_hash} is in AUTO mode - archiving a no-data review")
                     
                     minimal_feedback = {
-                        'summarizer_feedback': 'No new decision or trade evidence is available for this review; retain the approved extraction policy.',
-                        'decider_feedback': 'No new decision or trade evidence is available for this review; retain the approved trading policy and code-owned limits.',
+                        'summarizer_feedback': 'This review window has no scored closures or parseable decision records. Review the separate prospective paper evidence if available.',
+                        'decider_feedback': 'This review window has no scored closures or parseable decision records. Retain the approved trading policy.',
                         'summarizer_rules': [],
                         'decider_rules': [],
-                        'key_insights': ['No trading data yet', 'No policy change supported by this review', 'Collect decision-time evidence before proposing a change']
+                        'key_insights': ['No scored closures or parseable decisions in this window. Paper evidence and its coverage are recorded separately.']
                     }
                     
+                    minimal_feedback['prospective_policy_evidence'] = prospective
                     # Store minimal feedback
                     feedback_id = self._store_feedback_for_config(
-                        days_back, 0, 1.0, 0.0, {'total_decisions': 0}, minimal_feedback, config_hash
+                        days_back, 0, 0.0, 0.0, {'total_decisions': 0}, minimal_feedback, config_hash
                     )
                     
                     # No-data reviews never manufacture new prompt versions.
@@ -355,7 +340,7 @@ class TradeOutcomeTracker:
                         'feedback_id': feedback_id
                     }
             
-            return decision_analysis
+            return dict(decision_analysis, prospective_policy_evidence=prospective)
         
         # Calculate metrics
         total_trades = len(outcomes)
@@ -365,10 +350,12 @@ class TradeOutcomeTracker:
         
         # Analyze patterns
         analysis = self._analyze_patterns(outcomes)
+        analysis["prospective_policy_evidence"] = prospective
         
         # Generate AI feedback
         feedback = self._generate_ai_feedback_for_config(outcomes, success_rate, avg_profit, analysis, config_hash)
         
+        feedback["prospective_policy_evidence"] = prospective
         # Store feedback
         feedback_id = self._store_feedback_for_config(days_back, total_trades, success_rate, 
                                                     avg_profit, analysis, feedback, config_hash)
@@ -473,10 +460,9 @@ class TradeOutcomeTracker:
             "avg_hold_duration_unprofitable": sum(o['hold_duration_days'] for o in bad_outcomes) / len(bad_outcomes) if bad_outcomes else 0
         }
     
-    def _get_detailed_trade_analysis(self):
+    def _get_detailed_trade_analysis(self, config_hash=None):
         """Get detailed individual trade data for pattern analysis"""
-        from config import get_current_config_hash
-        config_hash = get_current_config_hash()
+        config_hash = config_hash or get_current_config_hash()
         
         with engine.begin() as conn:
             result = conn.execute(text("""
@@ -903,11 +889,7 @@ class TradeOutcomeTracker:
             print(f"❌ Error creating prompt version for {agent_type} in config {config_hash}: {e}")
             return 0
     
-    def _analyze_decision_patterns_for_config(self, days_back, config_hash):
-        """Analyze decision patterns for a specific config"""
-        return self._analyze_decision_patterns(days_back, config_hash)
-
-    def _get_prompt_review_lessons(self, limit=8):
+    def _get_prompt_review_lessons(self, limit=8, *, config_hash=None):
         """Recent prompt-change reviews as compact lesson lines: the critic's
         verdict/objection and the human's RLHF response (agree/override), plus
         realized outcome when measured. Empty string when none exist.
@@ -920,7 +902,7 @@ class TradeOutcomeTracker:
         dropped; heuristic auto-verdicts stay, labeled as such."""
         try:
             from shared.review_window import fetch_review_window
-            config_hash = get_current_config_hash()
+            config_hash = config_hash or get_current_config_hash()
             with engine.connect() as conn:
                 rows = fetch_review_window(conn, config_hash, reason_chars=250, limit=limit)
             lines = []
@@ -967,11 +949,11 @@ class TradeOutcomeTracker:
         }, indent=2)
 
         # Get recent individual trades for detailed analysis
-        recent_trades = self._get_detailed_trade_analysis()
+        recent_trades = self._get_detailed_trade_analysis(config_hash=config_hash)
 
         # RLHF loop-closure: what happened to past prompt-change proposals —
         # the critic's verdicts and the human's response.
-        critic_lessons = self._get_prompt_review_lessons()
+        critic_lessons = self._get_prompt_review_lessons(config_hash=config_hash)
 
         # Deterministic diagnostics over the whole population (no LLM).
         diagnostics_block = ""
@@ -1041,6 +1023,8 @@ ANALYSIS REQUIREMENTS:
     "sector_insights": "supported finding or unavailable"
 }
 Use supplied dollars for usd, otherwise null. decider_rules accepts 0-2 proposals; summarizer_rules 0-1. Empty arrays mean no supported change. Each compact proposal is at most 220 characters, with one observable condition and one action. Label changed behavior as a proposal. Put its predeclared outcome, sample requirement, matched comparator and exact horizon in key_insights. Never manufacture findings or fill a rule quota. No Markdown, code fences or prose outside JSON.'''
+
+        performance_guidance += "\n\n" + review_evidence_text(analysis["prospective_policy_evidence"])
 
         # Recorded visual hypotheses remain observational research. This reads
         # exact saved input/image IDs and does not infer a fill from a model BUY.
@@ -1563,7 +1547,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             
             return prompts
 
-    def _analyze_decision_patterns(self, days_back, config_hash):
+    def _analyze_decision_patterns(self, days_back, config_hash, *, prospective):
         """Analyze recent trading decisions when no completed trades exist"""
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
@@ -1669,14 +1653,11 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             "avg_hold_duration_unprofitable": 0
         }
         
+        decision_analysis["prospective_policy_evidence"] = prospective
         # Generate AI feedback on decision patterns
         feedback = self._generate_decision_pattern_feedback(parsed_decisions, decision_analysis)
         
-        # Store feedback
-        feedback_id = self._store_feedback_for_config(days_back, total_decisions, 0, 0, decision_analysis, feedback, config_hash)
-        
         return {
-            "feedback_id": feedback_id,
             "type": "decision_pattern_analysis",
             "total_decisions": total_decisions,
             "buy_decisions": buy_decisions,
@@ -1685,59 +1666,6 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             "feedback": feedback
         }
         
-    def _generate_decision_pattern_feedback_for_config(self, analysis, config_hash):
-        """Generate AI feedback on decision-making patterns for a specific config"""
-        try:
-            # Focus on JSON parsing and response quality issues
-            total_decisions = analysis.get('total_decisions', 0)
-            parsing_success_rate = analysis.get('parsing_success_rate', 0)
-            action_distribution = analysis.get('action_distribution', {})
-            
-            # Generate specific feedback for configs with parsing issues
-            if parsing_success_rate < 0.8:  # Less than 80% parsing success
-                feedback_text = f"""
-Configuration {config_hash} is experiencing significant JSON parsing failures ({parsing_success_rate:.1%} success rate).
-
-CRITICAL ISSUES IDENTIFIED:
-1. AI responses are returning markdown/text instead of valid JSON
-2. This causes "Unable to parse AI response" errors and defaults to hold
-3. No actual buy/sell decisions are being executed
-4. Prompt evolution is blocked due to lack of trade outcomes
-
-IMMEDIATE FIXES NEEDED:
-1. Enhance JSON formatting instructions in prompts
-2. Add retry logic with simplified instructions for parsing failures  
-3. Consider model-specific prompt templates (GPT-5 vs GPT-4)
-4. Strengthen system prompt JSON requirements
-
-DECISION PATTERN ANALYSIS:
-- Total decisions attempted: {total_decisions}
-- Parsing failures: {total_decisions * (1 - parsing_success_rate):.0f}
-- Action distribution: {action_distribution}
-
-RECOMMENDATIONS:
-- Add explicit JSON schema examples to prompts
-- Use clearer, simpler JSON format requirements
-- Implement model-specific handling for GPT-5 series
-- Test prompt modifications with sample data before deployment
-"""
-                return {
-                    'summarizer_feedback': feedback_text,
-                    'decider_feedback': feedback_text,
-                    'key_insights': [
-                        'JSON parsing failures preventing trade execution',
-                        'Model-specific prompt formatting needed',
-                        'Retry logic should include simplified instructions',
-                        'Prompt evolution blocked without trade outcomes'
-                    ]
-                }
-            
-            return None
-            
-        except Exception as e:
-            print(f"❌ Error generating decision pattern feedback: {e}")
-            return None
-
     def _generate_decision_pattern_feedback(self, decisions, analysis):
         """Generate AI feedback on decision-making patterns"""
         try:
@@ -1755,9 +1683,11 @@ RECOMMENDATIONS:
             {chr(10).join([f"- {reason}" for reason in analysis['decision_reasons']])}
             """
             
-            user_prompt = f"""Analyze these recent trading decisions and provide feedback on decision-making quality, even though no trades have been executed yet.
+            user_prompt = f"""Review these recorded decisions. There are no scored closures in this review window. Keep paper opportunity evidence separate from broker execution and realized performance.
 
 {decision_summary}
+
+{review_evidence_text(analysis["prospective_policy_evidence"])}
 
 Provide structured feedback focusing on:
 1. Decision logic quality and consistency
@@ -1780,12 +1710,14 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
                 base_max_tokens=1000,
             )
             print(f"🔧 Decision-only feedback run (reasoning={get_agent_reasoning_level(agent_label)}, token_cap={token_cap})")
-            response = _execute_feedback_api(api_params, agent_label)
+            response = _execute_feedback_api(api_params, agent_label, client=self._feedback_client)
             ai_response = response.choices[0].message.content.strip()
             
             try:
                 feedback_data = json.loads(ai_response)
-                return feedback_data
+                if isinstance(feedback_data, dict):
+                    return feedback_data
+                return {"decision_quality": "Unavailable: expected a JSON object."}
             except json.JSONDecodeError:
                 return {
                     "decision_quality": ai_response,
@@ -1797,6 +1729,8 @@ Return as JSON with keys: decision_quality, stock_selection, risk_management, ti
                 }
                 
         except Exception as e:
+            if self._feedback_client is not None:
+                raise
             print(f"Failed to generate decision pattern feedback: {e}")
             return {
                 "decision_quality": "Unable to generate feedback",

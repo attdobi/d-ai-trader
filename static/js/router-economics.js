@@ -15,6 +15,7 @@
     const activeCapture = e.capture_basis === 'frozen_ltm_baseline_v1';
     const fee = money(e.router_cost_usd ?? e.shadow_incremental_cost_usd);
     const realizedNotes = {
+      bypass: 'The preflight served the incumbent prompt without a hosted request.',
       applied: 'Measuring savings requires a matched baseline request with billed usage.',
       fallback: `The full eligible prompt was served. Recorded router fee ${fee}.`,
       retained: `The full eligible prompt was retained. Recorded router fee ${fee}.`,

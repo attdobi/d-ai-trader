@@ -1,9 +1,9 @@
-"""Read hosted-router usage at its own tariff, separate from Chat repricing.
+"""Read and record aggregate API usage, separating Chat and Decisions tariffs.
 
 The Decisions provider writes one comparison row per request attempt. Its
 recorded estimate already accounts for cached input, cache writes and free
 output, so applying the Chat model's token prices here would misstate spend.
-No configuration imports, schema creation or database writes occur here.
+The dashboard reads are side-effect free. Chat usage is written after a model response.
 """
 from __future__ import annotations
 
@@ -12,7 +12,39 @@ from sqlalchemy import inspect, text
 DECISIONS_AGENT = "PolicyRouterDecisions"
 
 
-def decisions_daily_usage(engine, config_hash: str, start_date) -> dict:
+CACHE_COLUMNS = ("cached_input_tokens", "cache_write_tokens", "cache_retention")
+
+
+def cache_columns(conn):
+    """Detect legacy token ledgers without changing them."""
+    columns = {col["name"] for col in inspect(conn).get_columns("api_usage")}
+    return [name for name in CACHE_COLUMNS if name in columns]
+
+
+def cache_select_sql(conn):
+    available = cache_columns(conn)
+    return ", ".join(name if name in available else f"NULL AS {name}" for name in CACHE_COLUMNS)
+
+
+def record_chat_usage(engine, *, config_hash, run_id, agent, model, usage, cost):
+    """Append a single metered response. Preserve basic telemetry on older installations."""
+    serial = "SERIAL PRIMARY KEY" if engine.dialect.name == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    with engine.begin() as conn:
+        conn.execute(text(f"""CREATE TABLE IF NOT EXISTS api_usage (
+            id {serial}, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, config_hash TEXT, run_id TEXT,
+            agent_type TEXT, model TEXT, prompt_tokens INTEGER, completion_tokens INTEGER,
+            reasoning_tokens INTEGER, total_tokens INTEGER, cost_usd DOUBLE PRECISION,
+            cached_input_tokens INTEGER, cache_write_tokens INTEGER, cache_retention TEXT)"""))
+        row = {"config_hash": config_hash, "run_id": run_id, "agent_type": agent, "model": model,
+               "cost_usd": cost}
+        for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "total_tokens", *cache_columns(conn)):
+            row[key] = usage.get(key)
+        columns = ", ".join(row)
+        params = ", ".join(":" + key for key in row)
+        conn.execute(text(f"INSERT INTO api_usage ({columns}) VALUES ({params})"), row)
+
+
+def decisions_daily_usage(engine, config_hash: str, start_date, end_date) -> dict:
     """Bounded daily totals; missing optional tables are a normal fresh install.
 
     Preflight failures with no request attempt are not API calls. A failed or
@@ -34,11 +66,11 @@ def decisions_daily_usage(engine, config_hash: str, start_date) -> dict:
                    SUM(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL
                             THEN 1 ELSE 0 END) AS unknown_token_calls
             FROM policy_router_comparisons
-            WHERE config_hash = :h AND decided_at >= :start
+            WHERE config_hash = :h AND decided_at >= :start AND decided_at < :end
                   AND provider = 'openai_decisions' AND request_attempted = TRUE
             GROUP BY DATE(decided_at)
             ORDER BY DATE(decided_at)
-        """), {"h": config_hash, "start": start_date}).mappings().all()
+        """), {"h": config_hash, "start": start_date, "end": end_date}).mappings().all()
     daily = []
     for row in rows:
         item = dict(row)

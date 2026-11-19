@@ -867,6 +867,9 @@ class DAITraderOrchestrator:
 
         # Explicit ET timezone follows DST without changing the trading schedule.
         schedule.every().day.at("17:15", "America/New_York").do(self.scheduled_learning_outcomes_job)
+        # Drain additional batches while the app is awake. Per-case retry_after
+        # and the completed-session cutoff also apply to these catch-up runs.
+        schedule.every(2).hours.do(self.scheduled_learning_outcomes_job)
         
         logger.info("="*60)
         logger.info("Schedule setup completed")

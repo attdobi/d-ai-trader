@@ -349,7 +349,7 @@ def initialize_database():
             )
         '''))
 
-def get_openai_summary(agent_name, html_content, image_paths, *, event_context=None):
+def get_openai_summary(agent_name, html_content, image_paths, *, event_context=None, prompt_provenance=None):
     from policy_safety import opportunity_system_prompt, safe_feedback_context
     from summary_event_context import freeze_summary_calendar, render_summary_calendar
     if event_context is None:
@@ -395,9 +395,13 @@ def get_openai_summary(agent_name, html_content, image_paths, *, event_context=N
         if memory:
             system_prompt_template = f"{system_prompt_template}\n\n## LESSONS FROM EXPERIENCE\n{memory}"
 
+        if prompt_provenance is not None:
+            prompt_provenance.update(version=prompt_version, source=prompt_data.get("version_source", "config"))
         print(f"🔧 Using SummarizerAgent prompt v{prompt_version} (UNIFIED)")
     except Exception as e:
         print(f"⚠️  Could not load unified prompt: {e}, using fallback")
+        if prompt_provenance is not None:
+            prompt_provenance.update(version=None, source="fallback")
         # Fallback to basic prompts
         system_prompt_template = "You are a financial analysis assistant specialized in extracting actionable trading insights from news articles."
         user_prompt_template = """Analyze the following financial news and extract the most important actionable insights.
@@ -865,8 +869,10 @@ def summarize_page(agent_name, url, web_driver, *, event_context=None):
         saved_screenshots.append(screenshot_path_2)
 
     call_usage = None
+    prompt_provenance = {}
     try:
-        summary_data = get_openai_summary(agent_name, html, saved_screenshots, event_context=event_context)
+        summary_data = get_openai_summary(agent_name, html, saved_screenshots, event_context=event_context,
+                                          prompt_provenance=prompt_provenance)
         if isinstance(summary_data, list):
             summary_data = summary_data[0] if summary_data else {}
         print(f"🧾 {agent_name} summary response: {summary_data}")
@@ -888,6 +894,7 @@ def summarize_page(agent_name, url, web_driver, *, event_context=None):
         "tokens": (call_usage or {}).get("total_tokens"),
         "model": (call_usage or {}).get("model"),
         "operator_calendar": summary_calendar_metadata(event_context),
+        "prompt_provenance": prompt_provenance,
     }
 
     return summary

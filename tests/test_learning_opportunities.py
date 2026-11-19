@@ -342,8 +342,9 @@ def test_scheduler_registers_daily_1715_eastern_worker_without_invoking_it():
     host.scheduled_learning_outcomes_job=MethodType(ns["scheduled_learning_outcomes_job"],host)
     ns["setup_schedule"](host)
     learning=[j for j in scheduler.jobs if j.job_func.func==host.scheduled_learning_outcomes_job]
-    assert len(learning)==1 and str(learning[0].at_time)=="17:15:00"
-    assert learning[0].at_time_zone.zone=="America/New_York"
+    daily, catch_up = learning
+    assert str(daily.at_time)=="17:15:00" and daily.at_time_zone.zone=="America/New_York"
+    assert catch_up.interval==2 and catch_up.unit=="hours"
     assert host._learning_outcomes_thread is None
 
 

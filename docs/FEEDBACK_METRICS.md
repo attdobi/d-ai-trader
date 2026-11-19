@@ -123,3 +123,31 @@ coverage. Missing dates do not establish an event-free window. The published BLS
 2027 schedule is loaded, while future coverage exhaustion remains explicit.
 See [risk versus opportunity context](RISK_OPPORTUNITY_CONTEXT.md) for the
 Summarizer/Decider pipeline, corrected screener guidance and provenance rules.
+
+## Forward learning evidence
+
+The Feedback learning panel groups the prospective Decider ledger by policy
+version or week. Gain recall is BUY winners divided by all assessed winners.
+Loss false-positive rate is BUY losers divided by all assessed losers. Returns
+use the next session's open, the selected horizon's close and the ledger's
+10-basis-point cost assumption on each side. BUY expectancy uses the average
+net paper return of matured BUY episodes. Counts and Wilson intervals show
+sample size. Overlapping ticker episodes are removed before grouping.
+
+Summarizer extraction coverage tracks whether timestamped summaries supply
+usable output. Forward card metrics require a recognized action, a ticker and
+a link to a supplied summary inside the saved cycle. New rows record the
+prompt version used to generate the summary. Version and weekly comparisons
+are observational. Coverage, regime mix and operator edits can all vary across
+cohorts.
+
+The weekly Feedback agent and its decision-only review receive the same 30-day,
+three-session evidence. Each packet includes the newest three groups per agent,
+the denominators for gain recall and loss false-positive rate, Wilson intervals
+and missing or pending outcomes. The packet is archived alongside the review
+so an operator can see which market evidence was available when a change was
+proposed. A decision-only review records zero closed trades.
+
+The maintenance worker refreshes paper marks at 17:15 Eastern and checks the
+bounded retry queue every two hours while the trader is running. Matured marks
+are frozen. A dashboard read never requests market data or runs a model.

@@ -37,9 +37,15 @@ def env(monkeypatch):
                 (1, :cfg, :day, 'SummarizerAgent', 'gpt-6-luna', 1000, 100, 20, 1100, 999)
         """), {"cfg": CFG, "day": TODAY.isoformat() + " 12:00:00"})
     calls = []
-    def reprice(model, prompt, completion):
+    def reprice(model, prompt, completion, **kwargs):
         calls.append((model, prompt, completion))
-        return (prompt * .10 + completion * .50) / 1_000_000
+        from shared.chat_pricing import usage_cost
+        return usage_cost(model, {
+            "prompt_tokens": prompt, "completion_tokens": completion,
+            "cached_input_tokens": kwargs.get("cached_input_tokens") or 0,
+            "cache_write_tokens": kwargs.get("cache_write_tokens") or 0,
+            "cache_retention": kwargs.get("cache_retention"),
+        }, kwargs["pricing"])
     stub = types.ModuleType("config")
     stub.load_model_pricing = lambda: {"gpt-6-luna": {"input": .10, "output": .50}}
     stub.compute_api_cost = reprice
@@ -115,10 +121,11 @@ def test_router_cache_writes_and_free_output_use_recorded_tariff_once(env):
 
 def test_provider_totals_are_scoped_to_config_window_and_actual_attempts(env):
     _comparison(env, cfg="another-config", cost=50)
-    _comparison(env, day=TODAY - timedelta(days=8), cost=60)
+    _comparison(env, day=TODAY - timedelta(days=7), cost=60)
+    _comparison(env, day=TODAY + timedelta(days=1), cost=70)
     _comparison(env, attempted=False, status="fallback", prompt=None, cached=None,
                 writes=None, output=None, cost=None)
-    _comparison(env, day=TODAY - timedelta(days=7), cost=.000069)
+    _comparison(env, day=TODAY - timedelta(days=6), cost=.000069)
     data = _get(env)
     assert _agent(data, DECISIONS_AGENT)["calls"] == 1
     assert data["total_cost"] == pytest.approx(.000219)
@@ -150,3 +157,48 @@ def test_yesterdays_unknown_request_does_not_hide_todays_known_total(env):
     assert data["total_cost"] is None
     assert data["today"]["cost"] == pytest.approx(.00015)
     assert data["today"]["unknown_cost_calls"] == 0
+
+
+def test_chat_unknown_tariff_marks_window_incomplete(env):
+    with env["engine"].begin() as conn:
+        conn.execute(text("""INSERT INTO api_usage VALUES
+            (2,:cfg,:day,'DeciderAgent','unpriced',1000,50,5,1050,NULL)"""),
+            {"cfg":CFG, "day": TODAY.isoformat()})
+    data = _get(env)
+    assert data["known_total_cost"] == pytest.approx(.00015)
+    assert data["unknown_cost_calls"] == 1 and data["total_cost"] is None
+    assert _agent(data, "DeciderAgent")["cost"] is None
+
+
+def test_chat_cache_reprices_and_uses_per_request_context_tier(env, monkeypatch):
+    model = "gpt-6.2-sol"
+    monkeypatch.setattr(sys.modules["config"], "load_model_pricing", lambda: {
+        "gpt-6-luna": {"input": .1, "output": .5},
+        model: {"input": 2, "output": 10, "cached_input": .1, "cache_write": 2.5,
+                "long_input_threshold": 272000}})
+    with env["engine"].begin() as conn:
+        for col in ("cached_input_tokens INT", "cache_write_tokens INT", "cache_retention TEXT"):
+            conn.execute(text(f"ALTER TABLE api_usage ADD COLUMN {col}"))
+        for ident in (2, 3):
+            conn.execute(text("""INSERT INTO api_usage VALUES
+                (:id,:cfg,:day,'DeciderAgent',:m,200000,3000,1500,203000,NULL,100000,50000,'30m')"""),
+                {"id": ident, "cfg":CFG, "day": TODAY.isoformat(), "m": model})
+    data = _get(env)
+    decider = _agent(data, "DeciderAgent")
+    # Each call was below the long-context threshold.
+    assert data["cost_complete"] and decider["cost"] == pytest.approx(2 * .265)
+    assert decider["cached_input_tokens"] == 200_000 and decider["cache_write_tokens"] == 100_000
+
+
+@pytest.mark.parametrize("days", [1, 7])
+def test_inclusive_pacific_report_has_exactly_days_calendar_dates(env, days):
+    start = TODAY - timedelta(days=days-1)
+    for day in {start - timedelta(days=1), start, TODAY + timedelta(days=1)}:
+        with env["engine"].begin() as conn:
+            conn.execute(text("""INSERT INTO api_usage (config_hash,ts,agent_type,model,prompt_tokens,
+                completion_tokens,reasoning_tokens,total_tokens) VALUES (:h,:d,'SummarizerAgent','gpt-6-luna',100,50,1,150)"""),
+                {"h": CFG, "d": day.isoformat()+" 23:59:59"})
+    data = _get(env, days)
+    assert data["first_date"] == start.isoformat() and data["last_date"] == TODAY.isoformat()
+    assert _agent(data, "SummarizerAgent")["calls"] == 2
+    assert {r["day"] for r in data["daily"]} == {start.isoformat(), TODAY.isoformat()}

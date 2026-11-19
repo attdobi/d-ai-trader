@@ -52,6 +52,10 @@
           badge: 'ACTIVE ROUTE APPLIED', note: 'The Decider received the routed optional context alongside its pinned policy.'};
       }
       if (row.requested_mode === 'active') {
+        if (row.status === 'bypassed') {
+          return {key: 'live', routing: 'bypass', label: 'Routing bypassed', short: 'Bypass', forward: true,
+            badge: 'FULL CONTEXT · NO CALL', note: 'The preflight kept the incumbent prompt and avoided the hosted call.'};
+        }
         if (row.status === 'ok' && !row.fallback_reason) {
           return {key: 'live', routing: 'retained', label: 'In-cycle context retained', short: 'Full context', forward: true,
             badge: 'ACTIVE · FULL CONTEXT', note: 'The active routing check retained the full eligible context.'};
@@ -107,7 +111,7 @@
     const m=flowModel(row),s=m.selected;
     const keep=s.available?number(s.selected.length):'—',skip=s.available?number(s.skipped.length):'—';
     const deciderTitle = {
-      applied: 'Routed context', fallback: 'Full eligible context', retained: 'Full eligible context', shadow: 'Decider context',
+      applied: 'Routed context', bypass: 'Full eligible context', fallback: 'Full eligible context', retained: 'Full eligible context', shadow: 'Decider context',
       replay: 'Saved context', observer: 'Saved context', unknown: 'Recorded context',
     }[m.source.routing];
     return `<section class="pr-flow-column evidence" data-flow-stage="0">
@@ -162,6 +166,9 @@
       $('#prModeBadge').textContent = inCycle.length ? `LATEST IN-CYCLE · ${inCycle[0].short.toUpperCase()}` : 'RECORDED ROUTING';
       const totals = state.data?.totals || {};
       const applied = count(totals.applied_runs) ?? inCycle.filter(source => source.routing === 'applied').length;
+      const active = history.filter(row => row.source_kind === 'live' && row.requested_mode === 'active');
+      const bypasses = active.filter(row => sourceInfo(row).routing === 'bypass').length;
+      const timeouts = active.filter(row => row.fallback_reason === 'deadline_exceeded').length;
       const retained = inCycle.filter(source => source.routing === 'retained').length;
       const fallbacks = inCycle.filter(source => source.routing === 'fallback').length;
       const spend = finite(totals.cost_usd) ? money(totals.cost_usd) : money(totals.known_cost_usd);
@@ -169,8 +176,8 @@
         ? `Known subtotal · ${number(totals.unknown_cost_calls)} calls with unknown cost`
         : 'Usage estimates across the displayed cycles';
       $('#prSummary').innerHTML =
-        metric('Forward cycles', number(totals.forward_runs ?? history.filter(row => sourceInfo(row).forward).length), 'In-cycle records and observers') +
-        metric('Active routes applied', number(applied), `${number(retained)} full context retained · ${number(fallbacks)} full context fallbacks`) +
+        metric('Active routes applied', `${number(applied)} of ${number(active.length)}`, 'Live cycles in displayed history') +
+        metric('Fallbacks', number(fallbacks), `${number(timeouts)} deadlines · ${number(retained)} successful selections kept full context · ${number(bypasses)} preflight bypasses`) +
         metric('Replay probes', number(totals.replay_runs), 'Routing on previously saved inputs') +
         metric('Recorded router spend', spend, spendNote);
     }
@@ -179,9 +186,10 @@
       $('#prCycles').innerHTML = values.length ? values.map(row => {
         const source = sourceInfo(row), selection = selectionFor(row);
         const selected = String(row.id) === String(state.selected);
-        const warning = source.routing === 'fallback' || row.status !== 'ok';
+        const warning = source.routing === 'fallback' || !['ok', 'bypassed'].includes(row.status);
         const counts = source.routing === 'applied' && selection.actualKnown
           ? `${selection.actual.length} optional served`
+          : source.routing === 'bypass' ? 'Hosted call skipped'
           : selection.available ? `${selection.selected.length} selected · ${selection.skipped.length} excluded` : 'Selection unavailable';
         return `<button type="button" class="pr-cycle-row${selected ? ' is-selected' : ''}" data-router-cycle="${esc(row.id)}" aria-pressed="${selected}">
           <span class="pr-cycle-row-head"><strong>#${esc(row.id)} · v${esc(row.prompt_version ?? '?')}</strong><span class="pr-source${source.forward ? ' forward' : ''}">${esc(source.short)}</span></span>
@@ -204,9 +212,30 @@
       $('#prCycleMeta').textContent=`${row.run_id||'Run ID not recorded'} · policy v${row.prompt_version??'?'} · ${row.model||'Model not recorded'}`;
       $('#prFlow').innerHTML=flowHTML(row);$('#prFlowCaption').textContent=m.source.note;
       $('#prCycleStats').innerHTML=metric('Router API fee',money(row.cost_usd),'Standard-rate usage estimate')+metric('Router input tokens',number(row.input_tokens),'Usage reported by the router')+metric('Router latency',finite(row.latency_ms)?`${number(row.latency_ms)} ms`:'Unknown','Measured request duration')+metric('Screenshot evidence',number(m.imageCount),`${m.coverage} coverage`);
+      const clocks = row.timing_ms;
+      const preflight = row.preflight;
+      if (clocks && Object.keys(clocks).length) {
+        const ms = value => finite(value) ? `${number(value)} ms` : 'Unknown';
+        $('#prCycleStats').insertAdjacentHTML('beforeend',
+          metric('Request preparation', ms(clocks.build), 'Build and serialize the evidence') +
+          metric('Transport', ms(clocks.transport), `Live deadline ${ms(clocks.live_budget)} · total ${ms(clocks.total)}`));
+        const phases = [['queue','Queue'], ['connect','Connect'], ['tls','TLS'], ['upload','Upload'],
+          ['response_headers','Wait for headers'], ['download','Download']]
+          .filter(([key]) => finite(clocks[key])).map(([key, name]) => `${name} ${ms(clocks[key])}`);
+        if (phases.length) $('#prCycleStats').insertAdjacentHTML('beforeend', `<p class="pr-footnote">${esc(phases.join(' · '))}</p>`);
+      }
+      if (preflight && Object.keys(preflight).length) {
+        $('#prCycleStats').insertAdjacentHTML('beforeend',
+          metric('Maximum removable text', number(preflight.optional_text_tokens_estimate), 'Estimated Decider input tokens') +
+          metric('Preflight savings ceiling', money(preflight.max_gross_savings_usd_estimate),
+            `Estimated router fee ${money(preflight.estimated_router_fee_usd)} · ${String(preflight.reason || '').replaceAll('_',' ')}`));
+      }
       $('#prCycleEconomics').innerHTML=win.DAIRouterEconomics?.render(row.economics, m.source.routing)||'<p class="pr-footnote">Token estimates are unavailable for this cycle.</p>';
       for(const [id,key]of[['#prSelectedCount','selected'],['#prSkippedCount','skipped'],['#prPinnedCount','pinned'],['#prActualCount','actual']])$(id).textContent=key==='actual'&&!s.actualKnown?'?':s[key].length;
-      $('#prSelectionNote').textContent='The relevance scores apply to optional guidelines. The served list records the Decider’s input.';
+      const audit = row.selection || {};
+      $('#prSelectionNote').textContent = Array.isArray(audit.actual_omitted_ids)
+        ? `${number(audit.actual_omitted_ids.length)} optional memories removed from the Decider prompt · ${number(list(audit.retained_despite_skip_ids).length)} proposed exclusions kept.`
+        : 'The relevance scores apply to optional guidelines. The served list records the Decider’s input.';
       renderNodes();
     }
     async function selectCycle(id,manual=true){

@@ -253,11 +253,11 @@
       const warn = document.getElementById('costPricingWarn');
       if (d.cost_complete === false) {
         warn.style.display = 'block';
-        warn.textContent = 'Some router requests have no confirmed usage. Known estimated spend: ' +
-          fmtUsd(d.known_total_cost) + '; ' + d.unknown_cost_calls + ' request(s) have unknown cost.';
+        warn.textContent = 'Estimated spend for requests with known usage and pricing is ' +
+          fmtUsd(d.known_total_cost) + '. Missing usage or tariffs leave ' + d.unknown_cost_calls + ' request(s) unpriced.';
       } else if (!d.pricing_configured) {
         warn.style.display = 'block';
-        warn.textContent = '⚠ Token counts are exact, but $ shows 0 until you set rates in model_pricing.json.';
+        warn.textContent = 'Enter model tariffs in model_pricing.json to estimate Chat costs.';
       } else { warn.style.display = 'none'; }
       const body = document.getElementById('costTableBody');
       body.innerHTML = '';

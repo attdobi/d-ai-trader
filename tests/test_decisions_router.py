@@ -145,6 +145,62 @@ def test_slow_transport_has_a_hard_deadline_and_no_retry():
     assert calls == [True]
 
 
+def test_bounded_grace_can_record_late_usage_without_granting_a_live_selection():
+    def slow(*args):
+        time.sleep(.05)
+        return response()
+    deadline = time.monotonic() + .025
+    result = route_shadow_cycle(DecisionsSettings(timeout_s=.025, audit_grace_s=.3), context(),
+                                nodes(), api_key=KEY, transport=slow, live_deadline=deadline)
+    assert result.status == "ok" and result.completed_monotonic > deadline
+    assert result.cost_usd > 0 and result.timing_ms["transport"] >= 40
+    assert result.timing_ms["live_budget"] == 25
+
+
+def test_applicable_pins_follow_served_fields_firing_blocks_and_effective_charter():
+    from policy_router.decisions import applicable_pins
+    from policy_safety import OPPORTUNITY_CHARTER
+    def node(ident, kind, body):
+        return SimpleNamespace(id=ident, node_type=kind, body=body, owner="code" if kind=="code" else "db",
+                               field="memory", order=1)
+    values = [node("diary", "entry", "Old journal"), node("lesson", "lesson", "Current lesson"),
+              node("inactive", "code", "Unused fallback"), node("optional", "entry", "Optional diary"),
+              node("DA.code.opportunity_charter", "code", OPPORTUNITY_CHARTER),
+              node("template", "template", "Read evidence.\n" + OPPORTUNITY_CHARTER)]
+    version = SimpleNamespace(nodes={n.id:n for n in values}, manifest={"code":{"fires":{
+        "inactive": False, "DA.code.opportunity_charter":True}}})
+    ids, body = applicable_pins(version, {"lesson", "optional"}, {"optional"})
+    assert set(ids) == {"lesson", "DA.code.opportunity_charter", "template"}
+    assert body.count(OPPORTUNITY_CHARTER) == 1 and "Current lesson" in body
+    assert "Unused fallback" not in body and "Old journal" not in body
+
+
+def test_bypass_records_zero_spend_exact_incumbent_and_no_attempt():
+    result, calls = run(preflight={"decision":"bypass", "reason":"below_estimated_break_even"})
+    assert not calls and result.cost_usd == 0 and not result.request_attempted
+    engine = create_engine("sqlite://")
+    record_shadow(engine, CFG, 62, "cycle", result, requested_mode="active", served_ids=result.nodes)
+    panel = comparison_panel(engine, CFG)
+    assert panel["totals"]["bypassed"] == 1 and panel["totals"]["fallback"] == 0
+    assert panel["last_cycle"]["selection"]["actual_omitted_ids"] == []
+    assert panel["totals"]["cost_usd"] == 0
+
+
+def test_preflight_historical_fee_excludes_other_modalities_and_unbilled_probes():
+    from policy_router.decisions_log import recent_router_fee
+    engine = create_engine("sqlite://")
+    result, _ = run()
+    result.image_manifest = {"image_count": 2}
+    result.cost_usd = .004
+    record_shadow(engine, CFG, 62, "scored", result, requested_mode="active")
+    result.cost_usd = 1.0
+    record_shadow(engine, CFG, 62, "probe", result, source_kind="replay")
+    result.image_manifest = {"image_count": 12}
+    record_shadow(engine, CFG, 62, "different-images", result)
+    assert recent_router_fee(engine, CFG, 2) == (.004, 1)
+    assert recent_router_fee(engine, CFG, 0) == (None, 0)
+
+
 def test_unsupported_response_model_preserves_usage_but_cannot_guess_its_price():
     reply = response()
     reply["model"] = "unexpected-provider-model"

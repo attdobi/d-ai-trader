@@ -24,6 +24,50 @@ examples and thresholds against later labeled cases. The configured 98% target
 describes retained score mass. Estimate active savings against the frozen
 incumbent input, with the router fee included in the net estimate.
 
+### Timing, spend and evidence
+
+The application estimates the maximum removable formatted memory and citation
+index at the Decider's uncached input rate. The reference router fee is the
+median of up to ten recent priced live calls for the same configuration, model
+and screenshot count. The preflight retains full context when the estimated
+saving cannot cover that fee. A new image profile with no comparable fee can
+still collect a sample. The per-cycle audit exposes the estimates and reason.
+
+The live wait defaults to eight seconds. `DAI_DECISIONS_AUDIT_GRACE_S` gives
+the transport an additional bounded window to capture usage (15 seconds by
+default). A response that finishes after the trading deadline cannot change the
+served prompt. The router ledger distinguishes a local bypass, a deadline with
+unknown provider spend and a late priced response. The dashboard reports counts
+within the displayed history.
+
+**Recorded baseline through November 19 at 08:32 Pacific.** All 26 production
+cycles reached the deadline and kept full context. Across the earlier 37
+successful forward shadow comparisons, suggested selections would have saved
+2,041 text tokens in total. This represented approximately $0.0041 of Decider
+input at the uncached price against $0.1941 in known router fees. Three earlier
+forward shadow timeouts also lacked fees.
+
+Three independent paper comparisons isolate different questions. In
+`captured_model_pair`, only the Decider model changes. In `captured_router_pair`,
+one model receives the complete captured prompt and the same prompt with
+eligible excluded memory lines and index entries removed. Both require the
+recorded images. The latter requires a contemporaneous scored cycle and a
+nonempty omission satisfying the production guard. `router_image_replay.py`
+compares two Luna relevance requests against the same saved summaries, captured
+system policy and optional memories, adding the original screenshots to one arm.
+Its relevance-score differences measure sensitivity to visual input. Assess
+trade quality using matched later outcomes, including passes and missing data.
+
+**Review guidelines** opens a blind review of optional guidelines from up to
+100 recently scored native cycles. The reviewer sees the recorded cycle context
+and the guideline before labeling it needed or irrelevant. Each label and
+correction is recorded locally. Reviewed recall is the fraction of human-rated
+needed guidelines the router selected. The panel shows the denominator,
+unreviewed coverage, proposed misses and actual omissions on active cycles.
+An empty denominator leaves recall unknown. These labels assess relevance. The
+paired full-versus-routed Decider experiment tests whether an omission changes
+decisions or their subsequent paper returns.
+
 ## Policy Router view and the October 29–November 5 evaluation
 
 The third Policy Graph subtab, **Policy Router**, shows saved cycles in a history
@@ -365,12 +409,10 @@ DAI_ROUTER_IMAGES=1
 DAI_DECIDER_IMAGES=1
 ```
 
-Only `off` and `shadow` are supported; `active` does not enable hosted routing.
-The default remains `off`. After explicit owner approval on October 28, the local
-configuration was set to `shadow`. Restart the trader to load this setting and the
-new code; restart the dashboard to load the new server code. Existing running
-processes were not restarted by the probe. No restart or trader invocation is
-needed to run the offline tests.
+The supported modes are `off`, `shadow` and `active`; the default is `off`.
+The October 28 example above was the shadow trial configuration. Production
+uses the active memory-pruning guard documented above. New runtime settings
+take effect when the corresponding process next starts.
 
 The first approved saved-cycle probe succeeded and is recorded as comparison 1,
 `source_kind=replay`, linked to exact Decider input 148. It scored 31 optional

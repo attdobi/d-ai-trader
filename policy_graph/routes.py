@@ -365,6 +365,30 @@ def register_policy_graph_routes(app, *, engine, get_config_hash, repo_root, is_
         body = request.get_json(silent=True) if hasattr(request, "get_json") else None
         return body if isinstance(body, dict) else {}
 
+    @app.route("/api/policy-graph/router-usefulness", methods=["GET", "POST"])
+    def policy_router_usefulness():
+        from policy_router.usefulness import review_view, save_review
+        config_hash = get_config_hash()
+        def go():
+            if request.method == "POST":
+                origin = request.headers.get("Origin")
+                if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.scheme, request.host):
+                    raise service.BadRequest("Submit reviews from this dashboard")
+                if not request.is_json or (request.content_length or 0) > 4096:
+                    raise service.BadRequest("Expected a small JSON review")
+                if not save_review(engine, config_hash, repo_root, _json_body()):
+                    return _error("Evidence or review changed. Reload this item.", 409)
+                response = jsonify({"saved": True})
+            else:
+                offset = request.args.get("offset", "0")
+                if not _VERSION_RE.fullmatch(offset) or len(offset) > 5:
+                    raise service.BadRequest("Invalid review offset")
+                response = jsonify(review_view(engine, config_hash, repo_root,
+                    queue=request.args.get("queue", "unreviewed"), offset=int(offset)))
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        return _run(go)
+
     # Explicit replay controls. GETs and page loads never invoke the runner.
     def _replay_body():
         from .learning_replay import MODES

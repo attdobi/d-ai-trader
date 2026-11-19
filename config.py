@@ -209,6 +209,8 @@ openai.api_key = api_key
 GPT_MODEL = "gpt-5.4"  # Default upgraded to GPT-5.4 for richer reasoning
 _last_announced_model = None
 _VALID_GPT_MODELS = [
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
     "gpt-6.1-sol",
     "gpt-6.1-terra",
     "gpt-6-astra",
@@ -274,15 +276,15 @@ def load_model_pricing():
     return {}
 
 
-def compute_api_cost(model_name, prompt_tokens, output_tokens):
-    """USD cost for one call. output_tokens already includes reasoning tokens
-    (reasoning bills at the output rate). Returns 0.0 if the model is unpriced."""
-    pricing = load_model_pricing()
+def compute_api_cost(model_name, prompt_tokens, output_tokens, *, cached_input_tokens=None,
+                     cache_write_tokens=None, cache_retention=None, pricing=None):
+    """Estimate the cost of one request. Unknown tariffs yield None."""
+    from shared.chat_pricing import usage_cost
     _, normalized = _normalize_model_name(model_name or "")
-    rates = pricing.get(normalized) or pricing.get(model_name or "") or {}
-    in_rate = float(rates.get("input", 0) or 0)
-    out_rate = float(rates.get("output", 0) or 0)
-    return (prompt_tokens / 1_000_000.0) * in_rate + (output_tokens / 1_000_000.0) * out_rate
+    usage = {"prompt_tokens": prompt_tokens, "completion_tokens": output_tokens,
+             "cached_input_tokens": cached_input_tokens or 0, "cache_write_tokens": cache_write_tokens or 0,
+             "cache_retention": cache_retention}
+    return usage_cost(normalized, usage, load_model_pricing() if pricing is None else pricing)
 
 # Reasoning-effort suffix accepted on -m flag, e.g. "gpt-5.5-high".
 # Maps user-facing token -> internal reasoning level name.
@@ -916,53 +918,16 @@ class PromptManager:
         """Persist token usage + computed cost for the dashboard. Best-effort —
         wrapped so telemetry can never break a real API call."""
         try:
-            usage = getattr(response, "usage", None)
-            if not usage:
-                return
-            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
-            reasoning_tokens = 0
-            details = getattr(usage, "completion_tokens_details", None)
-            if details is not None:
-                reasoning_tokens = int(getattr(details, "reasoning_tokens", 0) or 0)
-            # completion_tokens already includes reasoning tokens → use it for output cost.
-            cost = compute_api_cost(model_name, prompt_tokens, completion_tokens)
-            # Stash for the caller to stamp onto the produced artifact (per-thread).
-            self._tls.last_usage = {
-                "model": model_name,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "reasoning_tokens": reasoning_tokens,
-                "total_tokens": total_tokens,
-                "cost_usd": cost,
-            }
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS api_usage (
-                        id SERIAL PRIMARY KEY,
-                        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        config_hash TEXT,
-                        run_id TEXT,
-                        agent_type TEXT,
-                        model TEXT,
-                        prompt_tokens INTEGER,
-                        completion_tokens INTEGER,
-                        reasoning_tokens INTEGER,
-                        total_tokens INTEGER,
-                        cost_usd DOUBLE PRECISION
-                    )
-                """))
-                conn.execute(text("""
-                    INSERT INTO api_usage (config_hash, run_id, agent_type, model,
-                        prompt_tokens, completion_tokens, reasoning_tokens, total_tokens, cost_usd)
-                    VALUES (:h, :r, :a, :m, :p, :c, :rt, :t, :cost)
-                """), {
-                    "h": get_current_config_hash(), "r": self.run_id,
-                    "a": agent_name or "unknown", "m": model_name,
-                    "p": prompt_tokens, "c": completion_tokens,
-                    "rt": reasoning_tokens, "t": total_tokens, "cost": cost,
-                })
+            from shared.chat_pricing import completion_usage
+            usage = completion_usage(getattr(response, "usage", None))
+            cost = compute_api_cost(model_name, usage.get("prompt_tokens"), usage.get("completion_tokens"),
+                                    cached_input_tokens=usage.get("cached_input_tokens"),
+                                    cache_write_tokens=usage.get("cache_write_tokens"),
+                                    cache_retention=usage.get("cache_retention"))
+            self._tls.last_usage = {"model": model_name, **usage, "cost_usd": cost}
+            from api_cost_usage import record_chat_usage
+            record_chat_usage(engine, config_hash=get_current_config_hash(), run_id=self.run_id,
+                              agent=agent_name or "unknown", model=model_name, usage=self._tls.last_usage, cost=cost)
         except Exception:
             pass  # telemetry must never break a trading-path API call
 
@@ -1037,6 +1002,7 @@ class PromptManager:
                 # only the attempt that yields the return value is "the reply": a retried attempt's
                 # discarded text must not be logged as the reply behind a later error / fallback
                 self._tls.last_reply = None
+                self._tls.last_usage = None
             except Exception:
                 pass
             try:

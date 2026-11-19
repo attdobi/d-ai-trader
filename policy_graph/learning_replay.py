@@ -5,12 +5,16 @@
 runner receives only the captured prompts and model settings, never outcome labels.
 Its return value must be ``{reply, model, reasoning_effort, usage?, cost_usd?}``.
 
-Two assembly modes are intentionally distinct:
+Supported comparisons:
 * captured_subgraph_edits: retain the captured selected guideline set, metadata,
   code instructions and context; patch only compatible edits to stored node bodies.
 * full_policy: insert ALL stored policy guidelines for BOTH policies and rebuild
   their citation indexes. This supports additions/removals but is not a simulation
   of production subgraph routing. Captured health annotations remain frozen.
+* captured_model_pair: compare two models on one exact saved policy, route,
+  prompt, reasoning setting and image bundle.
+* captured_router_pair: reconstruct a reviewed omission from a scored full
+  incumbent capture. The selected model and screenshot bundle stay fixed.
 
 Stored prompts/replies stay in local audit tables. Public results expose action
 differences and paper outcomes, never prompts, holdings balances or raw replies.
@@ -26,12 +30,16 @@ from pathlib import Path
 import re
 import time
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, inspect, text
 
+from .citations import REJECT_VERDICTS
 from .decompose import decompose_row
 from .model import RowMeta
 
-MODES = ("captured_subgraph_edits", "full_policy")
+MODEL_PAIR = "captured_model_pair"
+ROUTER_PAIR = "captured_router_pair"
+MODES = ("captured_subgraph_edits", "full_policy")  # two policy-version comparison modes
+ALL_MODES = (*MODES, MODEL_PAIR, ROUTER_PAIR)
 FIELD_KEYS = {"soul": "soul", "directives": "strategy_directives", "memory": "memory"}
 TEMPLATES = ("system_prompt", "user_prompt_template")
 INDEX_MARKER = "GUIDELINE INDEX (id — title):\n"
@@ -392,11 +400,19 @@ def _validate_incumbent_capture(source, incumbent):
 def _case_rows(engine, config_hash, sources, cases):
     ids = {int(s["id"]) for s in sources}
     if cases is None:
-        try:
-            from .opportunities import list_cases
-            cases = list_cases(engine, config_hash, days=3650, limit=10000)
-        except Exception:
+        # Load only this cohort. A global display-window limit must never
+        # remove older prospective candidates from the paired denominator.
+        from .opportunities import _decode_case_rows, _load_outcomes
+        with engine.connect() as conn:
+            catalog = inspect(conn)
             cases = []
+            if catalog.has_table("learning_opportunities"):
+                rows = conn.execute(text("""SELECT * FROM learning_opportunities
+                    WHERE config_hash=:h AND input_id IN :ids
+                    ORDER BY eligible_for_recall DESC, observed_at DESC, id DESC""").bindparams(bindparam("ids", expanding=True)),
+                    {"h": config_hash, "ids": sorted(ids)}).mappings().all()
+                outcomes = _load_outcomes(conn, [r["id"] for r in rows]) if catalog.has_table("learning_opportunity_outcomes") else {}
+                cases = _decode_case_rows(rows, outcomes)
     found = []
     seen = set()
     for case in cases or []:
@@ -431,10 +447,47 @@ def _case_rows(engine, config_hash, sources, cases):
     return sorted(found, key=lambda c: (int(c["input_id"]), c["ticker"]))
 
 
+def _policy_prompts(source, incumbent, candidate, assembly_mode, candidate_policy):
+    """Build both policy-version arms while preserving non-policy context."""
+    edits = set()
+    if TAG_RE.search(source["system_prompt"]) and source["user_prompt"].count(INDEX_MARKER) != 1:
+        raise ReplayError("annotated captured policy requires one exact guideline index")
+    original = {key: source.get("policy_" + key) or "" for key in FIELD_KEYS}
+    # Every saved span must still match exactly, even if this candidate does
+    # not happen to change that field. This also detects code/assembly drift.
+    _replace_spans(source, original)
+    _validate_incumbent_capture(source, incumbent)
+    if assembly_mode == "full_policy":
+        old_fields, old_index = _render_full(incumbent, source)
+        new_fields, new_index = _render_full(candidate, source)
+        incumbent_system = _replace_spans(source, old_fields)
+        incumbent_user = _index(source["user_prompt"], old_index, replace_all=True)
+        candidate_user = _index(source["user_prompt"], new_index, replace_all=True)
+        old_nodes, _ = _nodes(incumbent)
+        new_nodes, _ = _nodes(candidate)
+        edits.update(i for i in set(old_nodes) | set(new_nodes)
+                     if i not in old_nodes or i not in new_nodes or old_nodes[i].body != new_nodes[i].body)
+    else:
+        new_fields, new_index, changed = _patch_captured(source, incumbent, candidate)
+        edits.update(changed)
+        incumbent_system, incumbent_user = source["system_prompt"], source["user_prompt"]
+        candidate_user = _index(source["user_prompt"], new_index, replace_all=False)
+    if candidate_policy is not None:
+        # Explicit render snapshots must describe this target row and cannot
+        # silently change templates or add an unverified citation vocabulary.
+        if not isinstance(candidate_policy, dict) or any(candidate_policy.get(k) != candidate.get(k) for k in TEMPLATES):
+            raise ReplayError("explicit candidate policy must include both exact target templates")
+        supplied = candidate_policy.get("fields")
+        if supplied != new_fields:
+            raise ReplayError("explicit candidate render does not match the validated frozen assembly")
+    candidate_system = _replace_spans(source, new_fields)
+    return incumbent_system, incumbent_user, candidate_system, candidate_user, edits
+
+
 def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assembly_mode="captured_subgraph_edits",
-             candidate_policy=None, model=None, reasoning_effort=None, cases=None, outcome_spec=None, max_calls=40,
-             image_root=None):
-    if assembly_mode not in MODES:
+             candidate_policy=None, model=None, candidate_model=None, reasoning_effort=None, cases=None, outcome_spec=None, max_calls=40,
+             image_root=None, max_estimated_usd=None, output_cap=3000, pricing=None):
+    if assembly_mode not in ALL_MODES:
         raise ReplayError("unknown replay assembly mode")
     sources = _source_inputs(engine, config_hash, source_input_ids)
     screenshot_root = Path(image_root) if image_root is not None else Path(__file__).resolve().parents[1] / "screenshots"
@@ -442,11 +495,24 @@ def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assemb
     if len(sources) * 2 > max(0, min(int(max_calls), 40)):
         raise ReplayError("comparison exceeds the explicit model-call budget")
     incumbent = _row(engine, config_hash, int(sources[0]["prompt_version"]))
-    candidate = _row(engine, config_hash, candidate_version)
+    comparing_models = assembly_mode == MODEL_PAIR
+    comparing_routes = assembly_mode == ROUTER_PAIR
+    if comparing_models or comparing_routes:
+        if candidate_version not in (None, incumbent["version"]) or candidate_policy is not None:
+            raise ReplayError("this comparison requires the captured policy with no edits")
+        if comparing_routes and candidate_model is not None:
+            raise ReplayError("routing comparisons require the same model in both arms")
+        if comparing_models and (not candidate_model or not isinstance(candidate_model, str)):
+            raise ReplayError("choose a candidate model for the model comparison")
+        candidate = incumbent
+    else:
+        if candidate_model is not None or candidate_version is None:
+            raise ReplayError("policy comparisons require a candidate version and one common model")
+        candidate = _row(engine, config_hash, candidate_version)
     _credential_guard(candidate.get(key) for key in (*TEMPLATES, *FIELD_KEYS.values()))
     for source in sources:
         _credential_guard(source.get(key) for key in ("system_prompt", "user_prompt", "policy_soul", "policy_directives", "policy_memory"))
-    if int(candidate["version"]) == int(incumbent["version"]):
+    if not (comparing_models or comparing_routes) and int(candidate["version"]) == int(incumbent["version"]):
         raise ReplayError("choose distinct incumbent and candidate versions")
     for key in TEMPLATES:
         if incumbent.get(key) != candidate.get(key):
@@ -461,45 +527,30 @@ def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assemb
     chosen_effort = reasoning_effort if model is not None else sources[0].get("reasoning_effort")
     if not chosen_model or not isinstance(chosen_model, str):
         raise ReplayError("an explicit replay model is required")
+    if comparing_models and chosen_model == candidate_model:
+        raise ReplayError("choose distinct models for the model comparison")
     if chosen_effort not in (None, "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
         raise ReplayError("invalid reasoning effort")
     requests, edits = [], set()
     for source in sources:
-        if TAG_RE.search(source["system_prompt"]) and source["user_prompt"].count(INDEX_MARKER) != 1:
-            raise ReplayError("annotated captured policy requires one exact guideline index")
-        original = {key: source.get("policy_" + key) or "" for key in FIELD_KEYS}
-        # Every saved span must still match exactly, even if this candidate does
-        # not happen to change that field. This also detects code/assembly drift.
-        _replace_spans(source, original)
-        _validate_incumbent_capture(source, incumbent)
-        if assembly_mode == "full_policy":
-            old_fields, old_index = _render_full(incumbent, source)
-            new_fields, new_index = _render_full(candidate, source)
-            incumbent_system = _replace_spans(source, old_fields)
-            incumbent_user = _index(source["user_prompt"], old_index, replace_all=True)
-            candidate_user = _index(source["user_prompt"], new_index, replace_all=True)
-            old_nodes, _ = _nodes(incumbent)
-            new_nodes, _ = _nodes(candidate)
-            edits.update(i for i in set(old_nodes) | set(new_nodes)
-                         if i not in old_nodes or i not in new_nodes or old_nodes[i].body != new_nodes[i].body)
+        if comparing_models or comparing_routes:
+            incumbent_system = candidate_system = source["system_prompt"]
+            incumbent_user = candidate_user = source["user_prompt"]
+            if comparing_routes:
+                from policy_router.replay import routed_prompt
+                candidate_user, dropped = routed_prompt(engine, config_hash, source)
+                if not dropped or candidate_user == incumbent_user:
+                    raise ReplayError("no eligible historical omission changes this captured prompt")
+                edits.update(dropped)
         else:
-            new_fields, new_index, changed = _patch_captured(source, incumbent, candidate)
+            incumbent_system, incumbent_user, candidate_system, candidate_user, changed = _policy_prompts(
+                source, incumbent, candidate, assembly_mode, candidate_policy)
             edits.update(changed)
-            incumbent_system, incumbent_user = source["system_prompt"], source["user_prompt"]
-            candidate_user = _index(source["user_prompt"], new_index, replace_all=False)
-        if candidate_policy is not None:
-            # Explicit render snapshots must describe this target row and cannot
-            # silently change templates or add an unverified citation vocabulary.
-            if not isinstance(candidate_policy, dict) or any(candidate_policy.get(k) != candidate.get(k) for k in TEMPLATES):
-                raise ReplayError("explicit candidate policy must include both exact target templates")
-            supplied = candidate_policy.get("fields")
-            if supplied != new_fields:
-                raise ReplayError("explicit candidate render does not match the validated frozen assembly")
-        candidate_system = _replace_spans(source, new_fields)
         for side, system, user in (("incumbent", incumbent_system, incumbent_user),
                                    ("candidate", candidate_system, candidate_user)):
             request = {"config_hash": config_hash, "source_input_id": int(source["id"]), "side": side, "system_prompt": system,
-                       "user_prompt": user, "model": chosen_model, "reasoning_effort": chosen_effort}
+                       "user_prompt": user, "model": candidate_model if comparing_models and side == "candidate" else chosen_model,
+                       "reasoning_effort": chosen_effort}
             if image_bundles[int(source["id"])] is not None:
                 request["image_manifest"] = image_bundles[int(source["id"])].manifest()
             request["request_hash"] = _hash(request)
@@ -517,10 +568,57 @@ def _prepare(engine, config_hash, source_input_ids, candidate_version, *, assemb
         "candidate_created_at": _iso(candidate.get("created_at")), "outcome_spec": outcome_spec,
         "cases": case_rows, "request_hashes": [r["request_hash"] for r in requests], "changed_ids": sorted(edits),
         "images_per_side": sum(len(b.attachments) for b in image_bundles.values() if b is not None)}
-    return {"incumbent_version": incumbent["version"], "candidate_version": candidate["version"],
-            "model": chosen_model, "reasoning_effort": chosen_effort, "assembly_mode": assembly_mode,
+    prepared = {"incumbent_version": incumbent["version"], "candidate_version": candidate["version"],
+            "model": chosen_model, "candidate_model": candidate_model, "reasoning_effort": chosen_effort, "assembly_mode": assembly_mode,
             "sources": sources, "requests": requests, "frozen": frozen, "cohort_hash": _hash(frozen),
             "image_bundles": image_bundles}
+    if max_estimated_usd is not None:
+        if assembly_mode not in (MODEL_PAIR, ROUTER_PAIR):
+            raise ReplayError("the recorded-input budget estimate requires a fixed captured policy")
+        if not math.isfinite(max_estimated_usd) or max_estimated_usd <= 0:
+            raise ReplayError("the estimated spend limit must be positive and finite")
+        estimates = _estimate_arm_costs(engine, config_hash, prepared, output_cap, pricing)
+        total = sum(estimates)
+        if total > max_estimated_usd:
+            raise ReplayError(f"estimated spend ${total:.4f} exceeds the requested limit")
+        frozen["budget"] = {"estimated_usd": total, "max_estimated_usd": max_estimated_usd,
+                            "output_cap": output_cap, "call_estimates": estimates}
+        prepared["cohort_hash"] = _hash(frozen)
+    return prepared
+
+
+def _estimate_arm_costs(engine, config_hash, prepared, output_cap, pricing):
+    """Pad the largest recorded multimodal input for each run by 25% for tokenizer drift.
+
+    Each estimate reserves the entire requested output cap and prices every input
+    token at the higher of the uncached and default cache-write rates. A replay
+    omitting policy text uses the same conservative full-input estimate.
+    """
+    from shared.chat_pricing import usage_cost
+    if not 128 <= output_cap <= 12000:
+        raise ReplayError("completion token cap must be between 128 and 12000")
+    input_tokens = {}
+    with engine.connect() as conn:
+        for source in prepared["sources"]:
+            try:
+                tokens = conn.execute(text("""SELECT MAX(prompt_tokens) FROM api_usage
+                    WHERE config_hash=:h AND run_id=:r AND model=:m AND agent_type='DeciderAgent'"""),
+                    {"h": config_hash, "r": source["run_id"], "m": source["model"]}).scalar()
+            except Exception:
+                raise ReplayError("recorded Decider usage is unavailable for the spend estimate") from None
+            if not tokens or tokens <= 0:
+                raise ReplayError("the saved run lacks metered Decider input tokens")
+            input_tokens[source["id"]] = math.ceil(tokens * 1.25)
+    estimates = []
+    for req in prepared["requests"]:
+        tokens = input_tokens[req["source_input_id"]]
+        usage = {"prompt_tokens": tokens, "completion_tokens": output_cap}
+        regular = usage_cost(req["model"], usage, pricing)
+        written = usage_cost(req["model"], {**usage, "cache_write_tokens": tokens}, pricing)
+        if regular is None or written is None:
+            raise ReplayError("both models require input, default cache-write and output tariffs")
+        estimates.append(max(regular, written))
+    return estimates
 
 
 def preview_comparison(engine, config_hash, source_input_ids, candidate_version, **kwargs):
@@ -535,10 +633,13 @@ def preview_comparison(engine, config_hash, source_input_ids, candidate_version,
             "images_per_side": frozen["images_per_side"],
             "prospective_case_count": sum(bool(c.get("eligible_for_recall")) for c in frozen["cases"]),
             "incumbent_version": prepared["incumbent_version"], "candidate_version": prepared["candidate_version"],
-            "assembly_mode": prepared["assembly_mode"], "model": prepared["model"],
+            "assembly_mode": prepared["assembly_mode"], "model": prepared["model"], "candidate_model": prepared["candidate_model"],
             "reasoning_effort": prepared["reasoning_effort"], "cohort_hash": prepared["cohort_hash"],
             "changed_ids": frozen["changed_ids"], "outcome_spec": frozen["outcome_spec"], "destination": DESTINATION,
-            "note": "Retrospective policy replay; no orders or activation. Full-policy mode compares all stored guidelines on both sides, not production routing."}
+            "budget": frozen.get("budget"),
+            "note": "The candidate omits optional items from the captured router response." if prepared["assembly_mode"] == ROUTER_PAIR else
+                    "Both models receive identical captured prompts, routing and screenshots." if prepared["candidate_model"] else
+                    "Retrospective policy replay; no orders or activation. Full-policy mode compares all stored guidelines on both sides, not production routing."}
 
 
 def parse_actions(reply):
@@ -560,10 +661,17 @@ def parse_actions(reply):
                 raise ReplayError("model actions must be objects")
             ticker = str(row.get("ticker") or row.get("symbol") or "").upper().strip()
             if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,14}", ticker):
+                if kind == "decisions":
+                    raise ReplayError("decision lacks a valid ticker")
                 continue
             action = str(row.get("action") or row.get("verdict") or "").upper().strip()
-            action = {"REJECT": "PASS", "REJECTED": "PASS", "SKIP": "PASS", "DECLINE": "PASS"}.get(action, action)
-            if action not in ACTIONS:
+            if action.lower() in REJECT_VERDICTS or action == "DECLINE":
+                action = "PASS"
+            # Only the decisions array can propose a trade. The considered
+            # array can explicitly decline one, including WATCH this cycle.
+            if kind == "decisions" and action not in ACTIONS:
+                raise ReplayError("decision lacks a recognized action")
+            if action not in ACTIONS or (kind == "considered" and action != "PASS"):
                 continue
             # The actual per-ticker decision takes precedence over its narrative
             # audit entry. Conflicting duplicate decisions are invalid.
@@ -589,12 +697,21 @@ def _call(runner, request):
         if not isinstance(answer, dict) or "reply" not in answer:
             raise ReplayError("runner must return reply and exact model settings")
         raw = answer["reply"]
+        reply_error = answer.get("response_error")
         cost = answer.get("cost_usd")
         if cost is not None and (not isinstance(cost, (float, int)) or isinstance(cost, bool) or not math.isfinite(cost) or cost < 0):
             raise ReplayError("runner cost must be finite and nonnegative")
         result.update(cost_usd=cost, usage=answer.get("usage") if isinstance(answer.get("usage"), dict) else {})
         actual = answer.get("model")
         result["actual_model"] = actual
+        if reply_error:
+            # The adapter returns a fixed category and the metered usage even
+            # when a partial text body happens to contain valid JSON.
+            result["error"] = reply_error if reply_error in {
+                "TransportError", "MissingChoice", "Refusal", "Truncated", "Incomplete"
+            } else "Incomplete"
+            result["latency_ms"] = int((time.monotonic() - started) * 1000)
+            return result, raw
         # The provider may resolve an alias to its dated snapshot. Accept that
         # resolution, then require ONE identical actual model across the batch.
         same_model = isinstance(actual, str) and (actual == request["model"] or bool(
@@ -602,6 +719,18 @@ def _call(runner, request):
         if not same_model or answer.get("reasoning_effort") != request["reasoning_effort"]:
             raise ReplayError("runner model or reasoning effort differs from the paired settings")
         result["actions"] = parse_actions(raw)
+        payload = json.loads(raw) if isinstance(raw, str) else raw
+        rows = [(decision, 4) for decision in payload["decisions"]]
+        rows.extend((item, 2) for item in payload.get("considered", [])
+                    if str(item.get("verdict", "")).lower() in REJECT_VERDICTS)
+        served_ids = {ident for ident, _ in INDEX_RE.findall(request["user_prompt"])}
+        valid = 0
+        for row, limit in rows:
+            ids = row.get("cited")
+            if isinstance(ids, list) and 1 <= len(ids) <= limit and all(
+                    isinstance(i, str) and i in served_ids for i in ids):
+                valid += 1
+        result["citations"] = {"required_rows": len(rows), "valid_rows": valid} if served_ids else {}
         result["status"] = "ok"
     except Exception as exc:
         # Client exceptions can include request bodies/headers. Retain only a
@@ -695,7 +824,7 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
         raise ReplayError("saved inputs, policy or outcome snapshot changed since preview; preview again")
     ensure_schema(engine)
     frozen = prepared["frozen"]
-    params = {"h": config_hash, "status": "running", "source": "paired_policy_replay",
+    params = {"h": config_hash, "status": "running", "source": {MODEL_PAIR: "paired_model_replay", ROUTER_PAIR: "paired_router_replay"}.get(prepared["assembly_mode"], "paired_policy_replay"),
               "iv": prepared["incumbent_version"], "cv": prepared["candidate_version"], "m": prepared["model"],
               "e": prepared["reasoning_effort"], "mode": prepared["assembly_mode"], "cohort": prepared["cohort_hash"],
               "frozen": _json(frozen), "summary": _json({"note": "Replay started; no orders or activation"})}
@@ -706,12 +835,20 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
             VALUES (:h,:status,:source,:iv,:cv,:m,:e,:mode,:cohort,:frozen,:summary) RETURNING id
         """), params).scalar_one())
     results, costs = {}, []
-    for request in prepared["requests"]:
-        bundle = prepared["image_bundles"].get(request["source_input_id"])
-        call_request = {**request, "image_bundle": bundle} if bundle is not None else request
-        result, raw = _call(runner, call_request)
+    budget = frozen.get("budget")
+    for index, request in enumerate(prepared["requests"]):
+        if budget and (any(cost is None for cost in costs)
+                       or sum(costs) + budget["call_estimates"][index] > budget["max_estimated_usd"]):
+            raw = None
+            result = {
+                "status": "skipped", "error": "SpendLimit", "cost_usd": 0.0, "latency_ms": 0,
+                "actions": {}, "usage": {}, "actual_model": None}
+        else:
+            bundle = prepared["image_bundles"].get(request["source_input_id"])
+            call_request = {**request, "image_bundle": bundle} if bundle is not None else request
+            result, raw = _call(runner, call_request)
+            costs.append(result["cost_usd"])
         results[(request["source_input_id"], request["side"])] = result
-        costs.append(result["cost_usd"])
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO policy_learning_replay_calls
@@ -723,8 +860,14 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
                    "hash": request["request_hash"], "system": request["system_prompt"], "user": request["user_prompt"],
                    "raw": raw if isinstance(raw, str) else _json(raw) if raw is not None else None, "result": _json(result)})
     actual_models = {r["actual_model"] for r in results.values() if r.get("status") == "ok"}
-    if len(actual_models) > 1:
-        # Even two valid dated resolutions are not a paired model comparison.
+    by_arm = {
+        side: {row["actual_model"] for (input_id, arm), row in results.items() if arm == side and row["status"] == "ok"}
+        for side in ("incumbent", "candidate")
+    }
+    model_drift = (any(len(models) > 1 for models in by_arm.values())
+                   if prepared["candidate_model"] else len(actual_models) > 1)
+    if model_drift:
+        # Multiple dated snapshots inside an arm invalidate the comparison.
         # Keep billing/audit evidence, invalidate every quality denominator.
         for request in prepared["requests"]:
             result = results[(request["source_input_id"], request["side"])]
@@ -757,7 +900,7 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
         cases.append(case)
     failures = sum(r["status"] != "ok" for r in results.values())
     known = [float(c) for c in costs if c is not None]
-    summary = {"source_input_ids": frozen["source_input_ids"], "model_calls": len(results), "errors": failures,
+    summary = {"source_input_ids": frozen["source_input_ids"], "model_calls": len(costs), "skipped_calls": len(results)-len(costs), "errors": failures,
                "case_count": len(cases), "action_flips": sum(c["action_changed"] for c in cases),
                "cost_usd": sum(known) if len(known) == len(costs) else None,
                "known_cost_usd": sum(known) if known else None, "unknown_cost_calls": len(costs) - len(known),
@@ -766,6 +909,25 @@ def run_comparison(engine, config_hash, *, source_input_ids, candidate_version, 
                "candidate_policy_hash": frozen["candidate_policy_hash"], "outcome_spec": frozen["outcome_spec"],
                "metrics": paired_metrics(cases, horizon=frozen["outcome_spec"]["horizon"]),
                "note": "Paired policy replay, not live trading. Original observed actions are separate from recomputed incumbent actions. No automatic activation."}
+    if prepared["assembly_mode"] in (MODEL_PAIR, ROUTER_PAIR):
+        summary["candidate_model"] = prepared["candidate_model"]
+        summary["note"] = ("Same captured policy, routing, prompts, reasoning effort and screenshots on both arms." if prepared["candidate_model"]
+                           else "Same policy, model, reasoning effort and screenshots; the candidate omits the recorded optional items.")
+        summary["arms"] = {}
+        for side, models in by_arm.items():
+            arm = [row for (_, which), row in results.items() if which == side]
+            arm_costs = [row["cost_usd"] for row in arm]
+            summary["arms"][side] = {
+                "actual_models": sorted(models), "calls": sum(row["status"] != "skipped" for row in arm),
+                "errors": sum(row["status"] != "ok" for row in arm),
+                "cost_usd": sum(arm_costs) if all(cost is not None for cost in arm_costs) else None,
+                "latency_total_ms": sum(row["latency_ms"] for row in arm),
+                "citation_coverage": {key: sum(row["citations"][key] for row in arm if row.get("citations"))
+                                      for key in ("required_rows", "valid_rows")},
+                **{key: sum(row["usage"][key] for row in arm)
+                   if all(isinstance(row["usage"].get(key), int) for row in arm) else None
+                   for key in ("prompt_tokens", "completion_tokens", "cached_input_tokens", "cache_write_tokens")},
+            }
     status = "ok" if not failures else "partial" if failures < len(results) else "error"
     with engine.begin() as conn:
         for case in cases:
@@ -834,29 +996,48 @@ def openai_runner(client, *, max_completion_tokens=3000, cost_fn=None, usage_cal
         params = {"model": request["model"], "messages": [
             {"role": "system", "content": request["system_prompt"]},
             {"role": "user", "content": user_content}],
-            "max_completion_tokens": cap, "store": False}
+            "max_completion_tokens": cap, "store": False, "service_tier": "default"}
         if request["reasoning_effort"] is not None:
             params["reasoning_effort"] = request["reasoning_effort"]
-        response = client.chat.completions.create(**params)
-        usage_obj = getattr(response, "usage", None)
-        usage = {key: int(getattr(usage_obj, key, 0) or 0)
-                 for key in ("prompt_tokens", "completion_tokens", "total_tokens")} if usage_obj else {}
-        details = getattr(usage_obj, "prompt_tokens_details", None)
-        if details is not None:
-            usage["cached_input_tokens"] = int(getattr(details, "cached_tokens", 0) or 0)
+        from shared.chat_pricing import completion_usage
+        try:
+            response = client.chat.completions.create(**params)
+        except Exception as exc:
+            # An attempted request may have reached the provider. Some error
+            # envelopes carry usage. Copy only metering and never log the body.
+            body = getattr(exc, "body", None)
+            body = body if isinstance(body, dict) else {}
+            usage = completion_usage(body.get("usage"))
+            cost = None
+            if cost_fn and "prompt_tokens" in usage and "completion_tokens" in usage:
+                cost = cost_fn(request["model"], usage["prompt_tokens"], usage["completion_tokens"])
+            return {"reply": None, "model": request["model"], "reasoning_effort": request["reasoning_effort"],
+                    "usage": usage, "cost_usd": cost, "response_error": "TransportError"}
+        usage = completion_usage(getattr(response, "usage", None))
         if usage_callback is not None:
             usage_callback(request, response)
         actual_model = getattr(response, "model", None)
         choices = getattr(response, "choices", None) or []
-        reply = choices[0].message.content if choices else ""
-        # Return incomplete text for strict parse failure while retaining usage.
-        if choices and getattr(choices[0], "finish_reason", None) not in ("stop", None):
-            reply = ""
-        cost = cost_fn(actual_model, usage["prompt_tokens"], usage["completion_tokens"]) if cost_fn and usage else None
+        choice = choices[0] if len(choices) == 1 else None
+        message = getattr(choice, "message", None)
+        reply = getattr(message, "content", None)
+        finish = getattr(choice, "finish_reason", None)
+        error = None
+        if message is None:
+            error = "MissingChoice"
+        elif getattr(message, "refusal", None) or finish == "content_filter":
+            error = "Refusal"
+        elif finish == "length":
+            error = "Truncated"
+        elif finish != "stop" or not isinstance(reply, str) or not reply.strip():
+            error = "Incomplete"
+        cost = None
+        if cost_fn and "prompt_tokens" in usage and "completion_tokens" in usage:
+            cost = cost_fn(actual_model, usage["prompt_tokens"], usage["completion_tokens"])
         return {"reply": reply, "model": actual_model, "reasoning_effort": request["reasoning_effort"],
-                "usage": usage, "cost_usd": cost}
+                "usage": usage, "cost_usd": cost, "response_error": error}
     return run
 
 
-__all__ = ["ReplayError", "MODES", "DDL_POSTGRES", "DDL_SQLITE", "DDL_CALLS_POSTGRES", "DDL_CASES_POSTGRES",
+__all__ = ["ReplayError", "MODES", "ALL_MODES", "DDL_POSTGRES", "DDL_SQLITE", "DDL_CALLS_POSTGRES", "DDL_CASES_POSTGRES",
            "ensure_schema", "preview_comparison", "run_comparison", "list_replays", "get_replay", "parse_actions", "paired_metrics", "openai_runner"]

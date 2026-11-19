@@ -247,8 +247,10 @@ def test_parse_actions_requires_actual_assessment_and_keeps_decision_precedence(
     assert R.parse_actions({"decisions": []}) == {}
     result = R.parse_actions({"decisions": [{"ticker": "AAA", "action": "BUY"}],
                               "considered": [{"ticker": "AAA", "verdict": "pass"}, {"ticker": "BBB", "verdict": "reject"},
-                                             {"ticker": "CCC", "verdict": "unknown"}]})
+                                             {"ticker": "CCC", "verdict": "unknown"}, {"ticker": "DDD", "verdict": "watch"},
+                                             {"ticker": "EEE", "verdict": "buy"}]})
     assert result["AAA"]["action"] == "BUY" and result["BBB"]["action"] == "PASS" and "CCC" not in result
+    assert result["DDD"]["action"] == "PASS" and "EEE" not in result
     with pytest.raises(R.ReplayError):
         R.parse_actions({"decisions": [{"ticker": "AAA", "action": "buy"}, {"ticker": "AAA", "action": "sell"}]})
 
@@ -287,7 +289,7 @@ def test_lazy_openai_adapter_preserves_settings_caps_and_logs_separate_agent(db)
     result = adapted(request)
     assert factories == [{"max_retries": 0, "timeout": 60.0, "base_url": "https://api.openai.com/v1"}]
     assert calls[0] == {"model": "gpt-6.1-sol", "messages": [{"role": "system", "content": "frozen system"},
-        {"role": "user", "content": "frozen user"}], "max_completion_tokens": 2048, "store": False, "reasoning_effort": "high"}
+        {"role": "user", "content": "frozen user"}], "max_completion_tokens": 2048, "store": False, "service_tier": "default", "reasoning_effort": "high"}
     assert result["cost_usd"] == pytest.approx(.004)
     with db.connect() as conn:
         row = conn.execute(text("SELECT * FROM api_usage")).mappings().one()
@@ -514,3 +516,90 @@ def test_openai_runner_sends_native_images_and_requires_matching_manifest(db, tm
     with pytest.raises(R.ReplayError):
         run({key: value for key, value in request.items() if key != 'image_manifest'})
     assert len(calls) == 1
+
+
+def test_model_pair_freezes_images_routing_policy_and_citations(db, tmp_path):
+    ident, *_ = _source_with_images(db, tmp_path)
+    calls = []
+    def collect(req):
+        calls.append(req)
+        return runner(req)
+    result = R.run_comparison(db, CFG, source_input_ids=[ident], candidate_version=None,
+                              assembly_mode=R.MODEL_PAIR, candidate_model="gpt-6.2-sol", runner=collect,
+                              cases=cases(ident), image_root=tmp_path)
+    assert result["source_kind"] == "paired_model_replay" and result["status"] == "ok"
+    assert [r["model"] for r in calls] == ["gpt-6.1-sol", "gpt-6.2-sol"]
+    for key in ("user_prompt", "system_prompt", "reasoning_effort", "image_manifest", "image_bundle"):
+        assert calls[0][key] == calls[1][key]
+    assert result["arms"]["incumbent"]["completion_tokens"] == result["arms"]["candidate"]["completion_tokens"] == 20
+    assert result["incumbent_policy_hash"] == result["candidate_policy_hash"]
+    assert result["candidate_model"] == "gpt-6.2-sol" and result["changed_ids"] == []
+
+
+def test_model_pair_spend_preflight_and_unknown_first_call(db):
+    ident = saved(db)
+    with db.begin() as conn:
+        conn.execute(text("CREATE TABLE api_usage (run_id TEXT, config_hash TEXT, model TEXT, agent_type TEXT, prompt_tokens INT)"))
+        conn.execute(text("INSERT INTO api_usage VALUES ('run-0', :c, 'gpt-6.1-sol', 'DeciderAgent', 48000)"), {"c": CFG})
+    rates = {"input": 2, "output": 10, "cache_write": 2.5}
+    opts = dict(source_input_ids=[ident], candidate_version=None, assembly_mode=R.MODEL_PAIR,
+                candidate_model="gpt-6.2-sol", pricing={name: rates for name in ("gpt-6.1-sol","gpt-6.2-sol")},
+                output_cap=12000, cases=cases(ident))
+    assert not R.preview_comparison(db, CFG, **opts, max_estimated_usd=.50)["compatible"]
+    plan = R.preview_comparison(db, CFG, **opts, max_estimated_usd=.55)
+    assert plan["compatible"] and plan["budget"]["estimated_usd"] == pytest.approx(.54)
+    calls = []
+    def unknown_cost(req):
+        calls.append(req["side"])
+        return {**runner(req), "cost_usd": None}
+    result = R.run_comparison(db, CFG, **opts, max_estimated_usd=.55, runner=unknown_cost)
+    assert calls == ["incumbent"] and result["model_calls"] == result["skipped_calls"] == 1
+    assert result["cost_usd"] is None and result["metrics"]["comparable"] == 0
+
+
+@pytest.mark.parametrize("failure", ["length", "refusal", "content_filter", "no_finish", "no_choice", "bad_action", "broken_json", "metered_http_error"])
+def test_invalid_provider_response_preserves_billed_usage_and_skips_quality(db, failure):
+    ident = saved(db)
+    model = "gpt-6.1-sol"
+    usage = {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200}
+    def create(**kwargs):
+        if failure == "metered_http_error":
+            exc = RuntimeError("error containing private input")
+            exc.body = {"usage": usage, "error": {"message": "private input"}}
+            raise exc
+        # A truncated/refused completion can still look like valid JSON.
+        content = {"broken_json": "{", "bad_action": '{"decisions":[{}]}'}.get(failure, '{"decisions":[]}')
+        msg = SimpleNamespace(content=content, refusal="private refusal" if failure == "refusal" else None)
+        finish = {"length": "length", "no_finish": None, "content_filter": "content_filter"}.get(failure, "stop")
+        choice = SimpleNamespace(finish_reason=finish, message=msg)
+        return SimpleNamespace(model=model, usage=SimpleNamespace(**usage), choices=[] if failure == "no_choice" else [choice])
+    adapted = make_openai_runner(engine=db, config_hash=CFG,
+            client_factory=lambda **_: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+            pricing={model: {"input":2, "output":10}})
+    report = R.run_comparison(db, CFG, source_input_ids=[ident], candidate_version=2,
+                              runner=adapted, cases=cases(ident))
+    assert report["status"] == "error" and report["model_calls"] == 2
+    assert report["cost_usd"] == pytest.approx(.008) and report["unknown_cost_calls"] == 0
+    assert report["metrics"]["comparable"] == 0 and all(c["candidate_action"] == "NOT_ASSESSED" for c in report["cases"])
+    with db.connect() as conn:
+        attempts = conn.execute(text("SELECT cost_usd, prompt_tokens, completion_tokens FROM api_usage")).all()
+    assert attempts == [(pytest.approx(.004), 1000, 200)] * 2
+    assert "private input" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("returned", ["no_usage", "partial_usage", "timeout"])
+def test_unmetered_replay_attempts_appear_in_usage_with_nullable_cost(db, returned):
+    model = "gpt-6.1-sol"
+    def create(**kwargs):
+        if returned == "timeout":
+            raise TimeoutError("sensitive transport context")
+        usage = SimpleNamespace(prompt_tokens=250) if returned == "partial_usage" else None
+        return SimpleNamespace(model=model, choices=[], usage=usage)
+    adapted = make_openai_runner(engine=db, config_hash=CFG,
+        client_factory=lambda **_: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    result, _ = R._call(adapted, {"model": model, "source_input_id":1, "side":"candidate",
+                    "system_prompt":"system", "user_prompt":"user", "reasoning_effort":"high"})
+    assert result["status"] == "error" and result["cost_usd"] is None
+    with db.connect() as conn:
+        row = conn.execute(text("SELECT cost_usd,prompt_tokens,completion_tokens FROM api_usage")).one()
+    assert row == (None, 250 if returned=="partial_usage" else None, None)

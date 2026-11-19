@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Feedback{% endblock %}
 
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/feedback-learning.css') }}">{% endblock %}
+
 {% block content %}
 {% set prompt_bundle = prompts or {} %}
 {% set summarizer = prompt_bundle.get('summarizer', {}) %}
@@ -9,6 +11,7 @@
 
 <h1>AI Trading Feedback Dashboard</h1>
 {% include "partials/_config_banner.html" %}
+{% include "partials/_feedback_learning.html" %}
 
 <div class="feedback-overview">
   <div class="chart-section" style="max-width: 320px;">
@@ -324,5 +327,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script defer src="{{ url_for('static', filename='js/cash-flows.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/feedback.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/feedback-learning.js') }}"></script>
 
 {% endblock %}

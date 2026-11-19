@@ -146,6 +146,7 @@ def get_active_prompt(agent_type):
                 print(f"⚠️  Using global v0 baseline for {agent_type}")
                 payload = _build_prompt_payload(agent_type, result)
                 if payload:
+                    payload["version_source"] = "global"
                     return payload
             else:
                 raise ValueError(f"No prompts found for {agent_type}")

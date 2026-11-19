@@ -234,6 +234,29 @@
   <section class="pe-card pr-router" id="prRouter" role="tabpanel" aria-labelledby="prRouterTab" hidden>
     <div class="pr-heading"><div><h2>Policy Router</h2><p class="pg-muted">Inspect the evidence, optional guideline selection and context served in each recorded cycle.</p></div><span id="prModeBadge" class="pr-mode-badge">RECORDED ROUTING</span></div>
     <div id="prSummary" class="pr-summary"></div>
+    <section class="pr-trial" aria-labelledby="prReviewTitle">
+      <div class="pr-trial-head">
+        <div><h3 id="prReviewTitle">Human review of optional guidelines</h3>
+          <p id="prReviewCoverage" aria-live="polite"></p>
+          <p id="prReviewResults"></p>
+        </div>
+        <button type="button" id="prReviewOpen" class="pl-button">Review guidelines</button>
+      </div>
+      <p class="pr-footnote">Recall measures the share of reviewer-marked needed guidelines that the router proposed keeping. Reviewed items can differ from the remaining sample.</p>
+      <dialog id="prReviewDialog" aria-labelledby="prReviewHeading" style="max-width:min(680px,90vw);max-height:80vh;overflow:auto;background:#101c2c;color:#e0e9f7;border:1px solid #3b5369;border-radius:12px;padding:1.35rem">
+        <div class="pr-trial-head"><h3 id="prReviewHeading">Was this guideline needed for this cycle?</h3><button type="button" id="prReviewClose" class="pl-button">Close</button></div>
+        <label class="pr-filter-label">Review queue <select id="prReviewQueue"><option value="unreviewed">Awaiting judgment</option><option value="reviewed">Previously reviewed</option></select></label>
+        <p id="prReviewStatus" class="pr-footnote" role="status"></p>
+        <div id="prReviewItem" hidden>
+          <p id="prReviewCycle"></p><a id="prReviewPolicy" target="_blank" rel="noopener">Read this version’s standing policy ↗</a>
+          <p id="prReviewContext" class="pr-footnote"></p>
+          <details><summary>Recorded source headlines</summary><p id="prReviewHeadlineBasis" class="pr-footnote"></p><ul id="prReviewHeadlines"></ul></details>
+          <p id="prReviewBody" style="white-space:pre-wrap"></p><p id="prReviewBasis" class="pr-footnote"></p>
+          <p>Does this guideline add information the Decider needed beyond the standing policy for this cycle?</p>
+          <div class="pr-toolbar"><button class="pl-button" type="button" data-review-label="needed">Needed</button><button class="pl-button" type="button" data-review-label="irrelevant">Irrelevant</button><button class="pl-button" type="button" data-review-label="clear" hidden>Clear judgment</button><button class="pl-button" type="button" id="prReviewNext">Next item</button></div>
+        </div>
+      </dialog>
+    </section>
     <div id="prTrial" class="pr-trial" aria-live="polite"></div>
     <div class="pr-toolbar"><div><p id="prStatus" class="pr-status" role="status" aria-live="polite">Open Policy Router to load saved cycles.</p><span class="pr-passive-note">Refresh reads saved logs. It never runs a model.</span></div><label class="pr-filter-label">Cycles<select id="prSourceFilter" aria-label="Router cycle source"><option value="all">All recorded cycles</option><option value="forward">Forward observations</option><option value="replay">Saved-cycle replays</option></select></label><label class="pr-auto"><input type="checkbox" id="prAutoRefresh" checked /> Auto-refresh</label><button type="button" class="pl-button" id="prRefresh">Refresh cycles</button></div>
     <div class="pr-workspace">
@@ -822,5 +845,6 @@
 <script defer src="{{ url_for('static', filename='js/semantic-atlas.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-learning.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/policy-router-view.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/router-usefulness.js') }}"></script>
 <script defer src="{{ url_for('static', filename='js/decision-audit.js') }}"></script>
 {% endblock %}

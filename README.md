@@ -8,6 +8,47 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Measuring learning and routing — November 19, 2026
+
+Open **Feedback → Learning performance** to compare Decider policies by version or week.
+The report starts with the candidates the screener supplied before the decision,
+keeps the first non-overlapping episode for each ticker, and follows both BUY and
+PASS. Choose a one-, three- or five-session paper horizon. Read the assessed and
+matured counts alongside gain recall, loss false-positive rate and mean BUY return.
+Unassessed candidates, outstanding marks and unavailable outcomes have separate counts.
+The Summarizer view measures extraction coverage and follows timestamped,
+ticker-specific catalyst cards when the saved cycle identifies their source.
+Earlier summaries without a prompt-version stamp are grouped as unattributed.
+The weekly Feedback agent now reads those counts and intervals when reviewing
+losses and missed winners. The review preserves the evidence it used.
+[Feedback measurement](docs/FEEDBACK_METRICS.md)
+
+**Policy Graph → Policy Router** shows applied routes out of recorded active cycles,
+deadline fallbacks, estimated fees, and preflight bypasses. Active routing
+first compares the estimated value of removing optional memory against recent
+comparable router fees. A bypass serves the incumbent prompt and costs zero router
+tokens. Late responses can supply usage to the audit after the Decider has
+already continued. Use **Review guidelines** to judge whether an optional guideline
+was needed for a recorded cycle. The dashboard reports how many human-rated
+necessary guidelines the router would have missed and how many were actually
+omitted. [Router operating notes](docs/DECISIONS_ROUTER.md#production-routing)
+
+The Decider now supports **GPT-6.2 Sol**. Both 6.1 Sol and 6.2 Sol have standard
+rates of $2 per million input tokens and $10 per million output tokens. The
+comparison records actual token consumption, latency, and estimated spend by model.
+Model selection stays in local configuration. [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
+Use a saved-input trial to evaluate a model change independently of a routing
+change. The commands below preview the requests without spending money. Add
+`--execute` to run the approved comparison. The Decider comparisons write paper
+results to the replay ledger. The text/image comparison writes replay probes to
+the router ledger. Neither command trades.
+
+```sh
+./dai/bin/python learning_replay.py --config-hash 9ea09b9as --input-id 205 --assembly-mode captured_model_pair --candidate-model gpt-6.2-sol --max-calls 2 --max-output-tokens 8000 --max-estimated-usd 0.48
+./dai/bin/python learning_replay.py --config-hash 9ea09b9as --input-id 205 --assembly-mode captured_router_pair --max-calls 2 --max-output-tokens 8000 --max-estimated-usd 0.48
+./dai/bin/python router_image_replay.py --config-hash 9ea09b9as --input-id 205
+```
+
 ## Decision audit and Prompt Lab — November 11, 2026
 
 **Policy Graph → Decision audit** shows the latest saved cycles. Select a cycle
@@ -139,7 +180,7 @@ The policy tooling is documented together:
 | Policy Graph → Policy Router | Inspect per-cycle pinned/kept/skipped rules, cost and matched token estimates | [Router](docs/POLICY_ROUTER.md), [Decisions shadow evaluation](docs/DECISIONS_ROUTER.md) |
 | Policy Graph → Decision audit | Follow a saved reply through decisions, fills and cited rules | [Decision audit](docs/POLICY_GRAPH.md#decision-audit) |
 
-The seven-day router review remains a shadow evaluation. Learning-map groupings
+The October 29–November 5 router trial collected shadow comparisons. Learning-map groupings
 organize evidence; they do not activate rules or establish decision quality.
 
 Validation: **1,888 tests passed, 1 skipped**, including small-sample confidence
@@ -1086,7 +1127,7 @@ d-ai-trader/
 
 ### Where things stand (October 2026)
 
-- **Compare policy routers in shadow.** The local embedding router retains its historical October 4 artifact, whose 97.4% proxy recall predates the held-out-label threshold fix; it is not a current forward-quality certificate. The new OpenAI Decisions adapter scores optional diary/memory relevance alongside it, records actual-versus-proposed context and endpoint-specific spend, and cannot alter the trading prompt. Keep standing rules pinned and evaluate useful omissions, retired-rule suppression, full prompt cost and behavior on untouched later cases before activation. [Design, review findings and rollout](docs/DECISIONS_ROUTER.md).
+- **Compare policy routers in shadow.** The local embedding router retains its historical October 4 artifact, whose 97.4% proxy recall predates the held-out-label threshold fix; it is not a current forward-quality certificate. The new OpenAI Decisions adapter scores optional diary/memory relevance alongside it, records actual-versus-proposed context and endpoint-specific spend, in shadow mode. Hosted active mode applies the production omission guard. Keep standing rules pinned and evaluate useful omissions, retired-rule suppression, full prompt cost and behavior on untouched later cases before activation. [Design, review findings and rollout](docs/DECISIONS_ROUTER.md).
 - **Labels are now honest.** Memory rows are citable and rejected setups cite the guidelines that rejected them, so the router and the decision paths learn from rejections, not only from trades.
 - **Every Decider call is replayable** from `decider_inputs`, which unblocks the replay gate below.
 - **Realized P&L is still too slow to judge versions alone.** The last 30 days had 9 Decider versions in service and 29 closed trades, about three trades per version.

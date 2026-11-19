@@ -113,6 +113,44 @@ def _replace_spans(text, replacements):
     return text
 
 
+def optional_text_ceiling(rows, eligible_ids, health, cache_dir=None):
+    """Optimistic removable text estimate, including citation tags and index lines.
+
+    A selection must keep at least one incumbent row. Ineligible rows are never
+    removable. Keep the cheapest admissible remainder when computing the ceiling.
+    """
+    encoder = _offline_encoding(cache_dir)
+    def tokens(remaining):
+        index = "\n".join(ltm_index_lines(remaining))
+        return _tokens(_ltm(remaining, health), index, encoder)
+    fixed = [row for row in rows if f"DA.ltm.{row['id']}" not in eligible_ids]
+    if not rows:
+        return 0
+    minimum = tokens(fixed) if fixed else min(tokens([row]) for row in rows)
+    return max(0, tokens(rows) - minimum)
+
+
+def savings_preflight(rows, eligible_ids, health, input_rate, fee_estimate, fee_samples, *, cache_dir=None):
+    """Compare an optimistic formatted token estimate with recent same-modality charges."""
+    tokens = optional_text_ceiling(rows, eligible_ids, health, cache_dir=cache_dir)
+    rate_known = isinstance(input_rate, (float, int)) and not isinstance(input_rate, bool)
+    gross = tokens * input_rate / 1e6 if rate_known and math.isfinite(input_rate) and input_rate > 0 else None
+    if not eligible_ids or len(rows) < 2:
+        decision, reason = "bypass", "no_removable_memories"
+    elif gross is None or fee_estimate is None:
+        decision, reason = "score", "insufficient_fee_or_price_history"
+    elif gross <= fee_estimate:
+        decision, reason = "bypass", "below_estimated_break_even"
+    else:
+        decision, reason = "score", "potential_savings_cover_fee"
+    return {"decision": decision, "reason": reason,
+            "optional_text_tokens_estimate": tokens, "max_gross_savings_usd_estimate": gross,
+            "input_rate_usd_per_million": input_rate if gross is not None else None,
+            "estimated_router_fee_usd": fee_estimate, "fee_samples": fee_samples,
+            "fee_basis": "median_recent_live_same_model_and_image_count" if fee_samples else "unavailable",
+            "token_method": "o200k_base_text_estimate" if _offline_encoding(cache_dir) else TOKEN_METHOD}
+
+
 @dataclass(frozen=True)
 class PromptCapture:
     graph: dict

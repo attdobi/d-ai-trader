@@ -11,7 +11,7 @@ import pytest
 from tests.test_gpt56_models import _cfg
 
 
-MODELS = ("gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
+MODELS = ("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna")
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -101,12 +101,12 @@ def test_gpt6_empty_decisions_use_existing_fallback(monkeypatch):
 
 
 @pytest.mark.parametrize("model,expected", [
-    ("gpt-6.1-sol", 12.0), ("gpt-6.1-terra", 6.0), ("gpt-6-astra", 60.0),
+    ("gpt-6.2-sol", 12.0), ("gpt-6.2-astra", 48.0), ("gpt-6.1-sol", 12.0), ("gpt-6.1-terra", 6.0), ("gpt-6-astra", 60.0),
     ("gpt-6-sol", 12.0), ("gpt-6-luna", 0.6), ("gpt-5.6-sol", 24.0),
 ])
 def test_gpt6_cost_estimates_include_reasoning_in_output(monkeypatch, model, expected):
     cfg = _cfg(monkeypatch)
-    assert cfg.compute_api_cost(model, 1_000_000, 1_000_000) == pytest.approx(expected)
+    assert cfg.compute_api_cost(model, 100_000, 100_000) == pytest.approx(expected / 10)
 
 
 def test_launcher_advertises_full_ids_without_changing_default():
@@ -116,3 +116,13 @@ def test_launcher_advertises_full_ids_without_changing_default():
     assert all(model in help_text for model in MODELS)
     assert "Global AI model (default: gpt-5.6-terra)" in help_text
     assert "aliases still select GPT-5.6" in help_text
+
+
+def test_gpt62_cache_tariffs_context_boundary_and_unpriced_usage(monkeypatch):
+    cfg = _cfg(monkeypatch)
+    kwargs = dict(cached_input_tokens=100_000, cache_write_tokens=40_000)
+    assert cfg.compute_api_cost("gpt-6.2-sol-2026-11-12", 272_000, 10_000, **kwargs) == pytest.approx(.474)
+    assert cfg.compute_api_cost("gpt-6.2-sol", 272_001, 10_000, **kwargs) == pytest.approx(.898004)
+    assert cfg.compute_api_cost("gpt-6.2-sol", 272_000, 10_000, cache_retention="12h", **kwargs) == pytest.approx(.574)
+    assert cfg.compute_api_cost("gpt-6.2-sol", 272_000, 10_000, cache_retention="other", **kwargs) is None
+    assert cfg.compute_api_cost("unpriced-model", 100, 20) is None

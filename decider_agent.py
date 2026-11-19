@@ -3023,8 +3023,8 @@ OUTPUT (STRICT)
         _ltm_tag = None
         try:
             from policy_graph.assembly import health_tag as _ltm_health_tag
-            _ltm_health = {}
-            if _health_rows:
+            _ltm_health = _decisions_shadow.get("baseline_health", {})
+            if _health_rows and "baseline_health" not in _decisions_shadow:
                 try:
                     from policy_graph.citations import health_for_prompt as _ltm_health_for
                     _ltm_health = _ltm_health_for(engine, _mem_cfg, [f"DA.ltm.{m['id']}" for m in _health_rows
@@ -3823,33 +3823,51 @@ def _policy_router_cycle(prompt_version, run_id, *, regime, holdings, watchlist,
     if hosted:
         from concurrent.futures import Future
         from time import monotonic
-        from policy_router.decisions import DecisionsSettings, DecisionsShadowResult, route_shadow_cycle
+        from policy_router.decisions import DecisionsSettings, DecisionsShadowResult, applicable_pins, route_shadow_cycle
         shadow_sink.update(config_hash=_cfg, requested_mode=hosted_mode)
+        shadow_sink["graph_source"] = (_version, ctx.assembly_context())
         if hosted_mode == "active":
             shadow_sink["baseline_ltm_rows"] = today_rows
         try:
             import config as _shadow_config
             from policy_router.shadow_bridge import submit_shadow
-            from policy_safety import OPPORTUNITY_CHARTER
             _eligible = [n for n in nodes if n.kind in settings.routable and n.kind in ("entry", "ltm")
                          and not blanket_entry_vetoes(n.text)]
             _eligible_ids = {n.node_id for n in _eligible}
-            _pinned = [n for n in _version.nodes.values() if n.id not in _eligible_ids
-                       and n.owner in ("db", "default-file", "code")
-                       and n.node_type not in ("ticker", "data")]
-            _pinned.sort(key=lambda n: (str(n.field), int(n.order or 0), n.id))
-            _pinned_text = "\n\n".join(f"{n.id}\n{n.body}" for n in _pinned) + "\n\n" + OPPORTUNITY_CHARTER
+            _pin_ids, _pinned_text = applicable_pins(_version, today_ids, _eligible_ids)
             _shadow_settings = DecisionsSettings(
                 timeout_s=float(os.getenv("DAI_DECISIONS_TIMEOUT_S", "8")),
+                audit_grace_s=float(os.getenv("DAI_DECISIONS_AUDIT_GRACE_S", "15")) if hosted_mode == "active" else 0,
                 recall_target=settings.recall_target, ltm_limit=settings.ltm_limit)
             shadow_sink.update(flat_ids={n.node_id for n in _eligible if n.kind != "ltm"},
                                eligible={n.node_id: n.kind for n in _eligible},
                                ltm_rows={f"DA.ltm.{m['id']}": dict(m) for m in ltm_rows if m.get("id")})
+            preflight = None
+            if hosted_mode == "active":
+                from policy_graph.citations import health_for_prompt
+                from policy_router.decisions_log import recent_router_fee
+                from policy_router.economics import savings_preflight
+                try:
+                    baseline_ids = [f"DA.ltm.{m['id']}" for m in today_rows if m.get("id")]
+                    # The original graph and memory paths scanned the same hit
+                    # history twice. Freeze one read for both renderers.
+                    graph_ids = [n.id for n in _version.nodes.values() if n.owner in ("db", "default-file", "code")]
+                    health = health_for_prompt(engine, _cfg, graph_ids + baseline_ids)
+                    shadow_sink["baseline_health"] = health
+                    model = _shadow_config.get_agent_model("DeciderAgent")
+                    rate = (_shadow_config.load_model_pricing().get(model) or {}).get("input")
+                    image_count = len(image_bundle.attachments) if image_bundle is not None else 0
+                    fee, samples = recent_router_fee(engine, _cfg, image_count)
+                    preflight = savings_preflight(today_rows, _eligible_ids, health, rate, fee, samples,
+                        cache_dir=os.getenv("TIKTOKEN_CACHE_DIR", os.getenv("DATA_GYM_CACHE_DIR")))
+                except Exception:
+                    preflight = {"decision": "score", "reason": "preflight_unavailable"}
             shadow_sink["deadline"] = monotonic() + _shadow_settings.timeout_s
             shadow_sink["job"] = submit_shadow(
                 route_shadow_cycle, _shadow_settings, ctx, _eligible,
-                pinned_policy=_pinned_text, pinned_ids=[n.id for n in _pinned], today_ids=today_ids,
-                api_key=_shadow_config.api_key, image_bundle=image_bundle)
+                pinned_policy=_pinned_text, pinned_ids=_pin_ids, today_ids=today_ids,
+                api_key=_shadow_config.api_key, image_bundle=image_bundle, preflight=preflight,
+                live_deadline=shadow_sink["deadline"])
         except Exception as _shadow_exc:
             print(f"⚠️ Decisions comparison skipped ({type(_shadow_exc).__name__})")
         if hosted_mode == "active":
@@ -3878,7 +3896,12 @@ def _decisions_memory_rows(audit, rows, *, graph_ready):
         job = audit["job"]
         remaining = max(0.0, audit["deadline"] - monotonic())
         result = job.result(timeout=remaining)
-        kept, reason = prune_incumbent_memories(result, rows, audit.get("eligible", {}))
+        if result.status == "bypassed":
+            kept, reason = rows, None
+        elif result.completed_monotonic > audit["deadline"]:
+            kept, reason = rows, "deadline_exceeded"
+        else:
+            kept, reason = prune_incumbent_memories(result, rows, audit.get("eligible", {}))
     except TimeoutError:
         kept, reason = rows, "deadline_exceeded"
     except Exception as exc:
@@ -3917,19 +3940,25 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
         return None
     _root = _Path(__file__).resolve().parent
     _cfg = config_hash or get_current_config_hash()
-    _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
-                                    is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
-    _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
-    ctx = _Ctx(regime=regime or "", holdings=[t for t in holdings if t], watchlist=[t for t in watchlist if t],
-               quarantined=list(quarantined or []), news=[t for t in news if t], entities=[t for t in entities if t],
-               trend=[t for t in trend if t], today=datetime.now())
+    if audit_capture is not None and "graph_source" in audit_capture:
+        _version, ctx = audit_capture["graph_source"]
+    else:
+        _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
+                                        is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
+        _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
+        ctx = _Ctx(regime=regime or "", holdings=[t for t in holdings if t], watchlist=[t for t in watchlist if t],
+                   quarantined=list(quarantined or []), news=[t for t in news if t], entities=[t for t in entities if t],
+                   trend=[t for t in trend if t], today=datetime.now())
     _ensure_hits(engine)
     ids = [n.id for n in _version.nodes.values() if n.owner in ("db", "default-file", "code")]
-    try:
-        health = _health(engine, _cfg, ids)
-    except Exception as _h_exc:
-        print(f"⚠️  Guideline health unavailable: {_h_exc}")
-        health = {}
+    if audit_capture is not None and "baseline_health" in audit_capture:
+        health = audit_capture["baseline_health"]
+    else:
+        try:
+            health = _health(engine, _cfg, ids)
+        except Exception as _h_exc:
+            print(f"⚠️  Guideline health unavailable: {_h_exc}")
+            health = {}
     out = _assemble(_version, ctx, health=health, override=override)
     if audit_capture is not None:
         from copy import deepcopy

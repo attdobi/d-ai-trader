@@ -48,6 +48,7 @@ class DecisionsSettings:
     recall_target: float = 0.98
     tau_min: float = 0.5
     ltm_limit: int = 14
+    audit_grace_s: float = 0.0
 
 
 @dataclass
@@ -70,6 +71,9 @@ class DecisionsShadowResult:
     pinned_ids: tuple = ()
     chars_today: int = 0
     image_manifest: dict = field(default_factory=dict)
+    preflight: dict = field(default_factory=dict)
+    timing_ms: dict = field(default_factory=dict)
+    completed_monotonic: float = 0.0
 
     @property
     def active(self) -> bool:
@@ -104,6 +108,28 @@ def _context(ctx) -> dict:
         "evidence": [{"kind": kind, "text": value} for kind, value in ctx.chunks()],
         "as_of": ctx.today.isoformat() if ctx.today is not None else None,
     }
+
+
+def applicable_pins(version, served_ids, eligible_ids):
+    """Effective standing policy from this cycle's frozen graph and firing code."""
+    from policy_safety import OPPORTUNITY_CHARTER, opportunity_system_prompt
+    fires = version.manifest.get("code", {}).get("fires", {})
+    seen_bodies = set()
+    ids, parts = [], []
+    for n in sorted(version.nodes.values(), key=lambda n: (str(n.field), int(n.order or 0), n.id)):
+        if n.id in eligible_ids or n.owner not in ("db", "default-file", "code"):
+            continue
+        applicable = n.id in served_ids or n.node_type == "template" or (n.node_type == "code" and fires.get(n.id))
+        if not applicable:
+            continue
+        ids.append(n.id)
+        body = (n.body or "").replace(OPPORTUNITY_CHARTER, "").strip()
+        if n.id != "DA.code.opportunity_charter" and body and body not in seen_bodies:
+            parts.append(f"{n.id}\n{body}")
+            seen_bodies.add(body)
+    if "DA.code.opportunity_charter" not in ids:
+        ids.append("DA.code.opportunity_charter")
+    return ids, opportunity_system_prompt("\n\n".join(parts) + "\n\nDA.code.opportunity_charter", decider=True)
 
 
 def build_request(ctx, nodes, *, pinned_policy: str = "", pinned_ids=(), model: str = MODEL,
@@ -176,7 +202,10 @@ def parse_probabilities(response: dict, expected_ids) -> dict:
     return out
 
 
-def prune_incumbent_memories(result, rows, eligible_ids, *, max_skip_probability=0.05):
+MAX_SKIP_PROBABILITY = 0.05
+
+
+def prune_incumbent_memories(result, rows, eligible_ids, *, max_skip_probability=MAX_SKIP_PROBABILITY):
     """Keep incumbent order and only omit scored low-relevance exclusions."""
     eligible = set(eligible_ids)
     if result.status != "ok" or result.selection is None:
@@ -224,10 +253,23 @@ def decisions_cost(usage: dict) -> float:
                          + usage["cache_write_tokens"] * 0.125) / 1_000_000
 
 
-def http_transport(url: str, payload: dict, timeout: float, api_key: str) -> dict:
+def http_transport(url: str, payload: dict, timeout: float, api_key: str, *, timings=None) -> dict:
     import httpx
+    starts = {}
+    phases = {"connect_tcp": "connect", "start_tls": "tls", "send_request_body": "upload",
+              "receive_response_headers": "response_headers", "receive_response_body": "download"}
+    def trace(event, _info):
+        # HTTP metadata can contain credentials. Store only named durations.
+        pieces = event.split(".")
+        phase = phases.get(pieces[-2]) if len(pieces) >= 2 else None
+        if timings is None or not phase:
+            return
+        if pieces[-1] == "started":
+            starts[phase] = time.monotonic()
+        elif phase in starts:
+            timings[phase] = round((time.monotonic() - starts.pop(phase)) * 1000)
     with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-        response = client.post(url, json=payload,
+        response = client.post(url, json=payload, extensions={"trace": trace},
                                headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"})
         response.raise_for_status()
         return response.json()
@@ -235,7 +277,7 @@ def http_transport(url: str, payload: dict, timeout: float, api_key: str) -> dic
 
 def route_shadow_cycle(settings: DecisionsSettings, ctx, nodes, *, pinned_policy: str = "", pinned_ids=(),
                        today_ids=(), api_key: Optional[str] = None, transport: Optional[Callable] = None,
-                       image_bundle=None) -> DecisionsShadowResult:
+                       image_bundle=None, preflight=None, live_deadline=None) -> DecisionsShadowResult:
     """Score optional context once; every failure leaves the existing prompt alone.
 
     The injected transport signature is `(url, payload, timeout_s, api_key) -> dict`.
@@ -244,18 +286,30 @@ def route_shadow_cycle(settings: DecisionsSettings, ctx, nodes, *, pinned_policy
     """
     started = time.monotonic()
     result = DecisionsShadowResult(model=settings.model, pinned_ids=tuple(pinned_ids or ()))
+    result.timing_ms["live_budget"] = None
     if image_bundle is not None:
         result.image_manifest = image_bundle.public_manifest()
     try:
         timeout = float(settings.timeout_s)
         if not math.isfinite(timeout) or not 0 < timeout <= 30:
             raise DecisionsResponseError("invalid_timeout")
+        grace = float(settings.audit_grace_s)
+        if not math.isfinite(grace) or not 0 <= grace <= 30:
+            raise DecisionsResponseError("invalid_audit_grace")
+        deadline = live_deadline if live_deadline is not None else started + timeout
+        result.timing_ms["live_budget"] = round(timeout * 1000)
         if not math.isfinite(settings.recall_target) or not 0 < settings.recall_target <= 1:
             raise DecisionsResponseError("invalid_recall_target")
         if not math.isfinite(settings.tau_min) or not 0 <= settings.tau_min <= 1.01:
             raise DecisionsResponseError("invalid_threshold")
         if not isinstance(settings.ltm_limit, int) or settings.ltm_limit < 0:
             raise DecisionsResponseError("invalid_memory_limit")
+        if preflight is not None:
+            result.preflight = dict(preflight)
+            if preflight["decision"] == "bypass":
+                result.nodes = {n.node_id: n for n in nodes}
+                result.status, result.note, result.cost_usd = "bypassed", preflight["reason"], 0.0
+                return result
         payload, candidates, result.policy_hash, result.question_hash = build_request(
             ctx, nodes, pinned_policy=pinned_policy, pinned_ids=pinned_ids, model=settings.model,
             image_bundle=image_bundle)
@@ -265,16 +319,35 @@ def route_shadow_cycle(settings: DecisionsSettings, ctx, nodes, *, pinned_policy
         result.chars_today = sum(n.chars for n in candidates if n.node_id in today)
         if not api_key:
             raise DecisionsResponseError("missing_api_key")
-        remaining = timeout - (time.monotonic() - started)
+        built = time.monotonic()
+        result.timing_ms["build"] = round((built - started) * 1000)
+        remaining = deadline - built
         if remaining <= 0:
             raise DecisionsResponseError("deadline_exceeded")
-        result.request_attempted = True
-        future = _POOL.submit(transport or http_transport, ENDPOINT, payload, remaining, api_key)
+        # The live caller stops at its deadline. A late transport gets one
+        # bounded chance to return billable usage solely for the audit record.
+        audit_remaining = remaining + grace
+        phases = {}
+        def send():
+            now = time.monotonic()
+            if now >= deadline:
+                raise DecisionsResponseError("deadline_exceeded")
+            phases["queue"] = round((now - built) * 1000)
+            result.request_attempted = True
+            duration = deadline + grace - now
+            if transport is None:
+                return http_transport(ENDPOINT, payload, duration, api_key, timings=phases)
+            return transport(ENDPOINT, payload, duration, api_key)
+        future = _POOL.submit(send)
         try:
-            response = future.result(timeout=remaining)
+            response = future.result(timeout=audit_remaining)
         except FutureTimeout:
             future.cancel()
             raise DecisionsResponseError("deadline_exceeded") from None
+        finally:
+            result.timing_ms.update(phases)
+            if result.request_attempted:
+                result.timing_ms["transport"] = max(0, round((time.monotonic() - built) * 1000) - phases.get("queue", 0))
         if not isinstance(response, dict):
             raise DecisionsResponseError("invalid_response")
         # Refusals/malformed answers may still be billed: retain their usage.
@@ -295,7 +368,9 @@ def route_shadow_cycle(settings: DecisionsSettings, ctx, nodes, *, pinned_policy
     except Exception as exc:  # credentials/request bodies can appear in driver exception strings
         result.note = "transport_or_scoring_error:" + type(exc).__name__
     finally:
-        result.latency_ms = int((time.monotonic() - started) * 1000)
+        result.completed_monotonic = time.monotonic()
+        result.latency_ms = int((result.completed_monotonic - started) * 1000)
+        result.timing_ms["total"] = result.latency_ms
     return result
 
 

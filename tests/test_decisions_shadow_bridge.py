@@ -106,7 +106,7 @@ def test_decider_bridge_is_independent_of_local_mode_and_keeps_hard_policy_pinne
     def node(ident, kind, body, owner="db"):
         return SimpleNamespace(id=ident, node_type=kind, body=body, owner=owner, field="memory", order=1)
 
-    version = SimpleNamespace(nodes={n.id: n for n in (
+    version = SimpleNamespace(manifest={"code": {"fires": {"DA.code.opportunity_charter": True}}}, nodes={n.id: n for n in (
         node(entry.node_id, "entry", entry.text),
         node(lesson.node_id, "lesson", lesson.text),
         node("DA.directives.strategy.priced_kill", "rule", "D >1.3% rejects a candidate"),
@@ -123,7 +123,8 @@ def test_decider_bridge_is_independent_of_local_mode_and_keeps_hard_policy_pinne
     monkeypatch.setattr(N, "ltm_row_nodes", lambda *a: [memory, retired])
     monkeypatch.setattr(S, "ensure_materialized", lambda *a, **k: None)
     monkeypatch.setattr(C, "read_version_dir", lambda *a: version)
-    monkeypatch.setattr(A, "select", lambda *a: ([SimpleNamespace(node_id=entry.node_id)], []))
+    monkeypatch.setattr(A, "select", lambda *a: ([SimpleNamespace(node_id=n.id) for n in version.nodes.values()
+                                                  if n.owner == "db"], []))
     local = SimpleNamespace(extras={})
     monkeypatch.setattr(R, "route_cycle", lambda settings, *a, **kw: None if settings.mode == "off" else local)
     submissions = []
@@ -177,6 +178,12 @@ def test_active_memory_application_is_bounded_and_falls_back_without_graph():
     pending = {**audit, "job": Future(), "deadline": monotonic()}
     assert apply(pending, rows, graph_ready=True) == rows
     assert pending["fallback_reason"] == "deadline_exceeded"
+    late = Future()
+    late.set_result(DecisionsShadowResult(status="ok", probabilities=probabilities, selection=selection,
+                                          nodes=probabilities, completed_monotonic=monotonic()))
+    expired = {**audit, "job": late, "deadline": monotonic() - 1}
+    assert apply(expired, rows, graph_ready=True) == rows
+    assert expired["fallback_reason"] == "deadline_exceeded"
 
 
 def test_comparison_schema_is_part_of_startup_migration():

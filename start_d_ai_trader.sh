@@ -12,6 +12,8 @@ Usage: start_d_ai_trader.sh [-p PORT] [-m MODEL] [-t TRADING_MODE] [-c CADENCE] 
   -m, --model           Global AI model (default: gpt-5.6-terra); the per-agent
                         DAI_MODEL_* keys in .env still decide each agent's model.
                         GPT-6/6.1 models (full IDs, input/output per 1M tokens):
+                          • gpt-6.2-sol   - balanced reasoning, $2/$10
+                          • gpt-6.2-astra - highest capability, $8/$40
                           • gpt-6.1-sol   - balanced reasoning, $2/$10
                           • gpt-6.1-terra - fast visual/text tasks, $1/$5
                           • gpt-6-astra   - highest capability, $10/$50
