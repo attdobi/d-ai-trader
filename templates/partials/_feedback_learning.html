@@ -5,6 +5,7 @@
     <div class="learn-switch" aria-label="Agent">
       <button type="button" data-agent="decider" aria-pressed="true">Decider</button>
       <button type="button" data-agent="summarizer" aria-pressed="false">Summarizer</button>
+      <button type="button" data-agent="selloffs" aria-pressed="false">Large selloffs</button>
     </div>
   </header>
   <div class="learn-controls">
@@ -12,13 +13,20 @@
     <label>Lookback <select data-filter="days"><option value="30">30 days</option><option value="90">90 days</option></select></label>
     <label>Paper holding period <select data-filter="horizon"><option value="1">1 session</option><option value="3" selected>3 sessions</option><option value="5">5 sessions</option></select></label>
   </div>
+  <p data-execution-coverage hidden></p>
   <p data-status role="status">Loading saved observations…</p>
   <div class="learn-scroll" tabindex="0" role="region" aria-label="Policy comparison" hidden>
     <table><thead></thead><tbody></tbody></table>
   </div>
+  <details data-selloff-detail hidden><summary>Recent selloff observations</summary>
+    <div class="learn-scroll" tabindex="0" role="region" aria-label="Selloff observations">
+      <table><thead><tr><th>Session</th><th>Ticker</th><th>Source</th><th>Daily move</th><th>Decision</th><th>Overnight paper return</th><th>Decider reason</th><th>Cited guidelines</th></tr></thead><tbody></tbody></table>
+    </div>
+  </details>
   <details class="learn-help"><summary>How to read these measures</summary>
-    <p>Each eligible screener ticker counts once until its paper holding period ends, including across policy versions. Paper returns use the next session’s open through the chosen session’s close, with 10 basis points of costs each way. Different versions saw different markets. Gaps in eligible candidate coverage limit comparisons.</p>
-    <p>Gain recall is the share of later winners selected. Loss false-positive rate is the share of later losers selected. Precision is the share of selected winners among selected winners and losers. The ranges are 95% Wilson intervals. Break-even outcomes contribute to average BUY return. Pending marks are still within the holding period. Overdue marks have passed the 5 p.m. Eastern cutoff. Missing marks have incomplete price data, calendar or labels.</p>
+    <p data-selloff-method hidden>The first qualifying observation per ticker and session counts within each source. An unheld ticker in the supplied momentum recap qualifies after a drop of at least 8% with observed price × session volume of at least $10 million. Quarantined tickers remain visible. The adjusted closing price on the signal day and the next session’s adjusted opening price measure the overnight move, including weekends. Returns assume 10 basis points each way. The observed quote can differ from the close. Reconstructed observations use archived pre-call evidence and have less quote-timestamp detail. Execution and order eligibility require a separate audit.</p>
+    <p data-screener-method>Each eligible screener ticker counts once until its paper holding period ends, including across policy versions. Paper returns use the next session’s open through the chosen session’s close, with 10 basis points of costs each way. Different versions saw different markets. Gaps in eligible candidate coverage limit comparisons.</p>
+    <p data-screener-method>Gain recall is the share of later winners selected. Loss false-positive rate is the share of later losers selected. Precision is the share of selected winners among selected winners and losers. The ranges are 95% Wilson intervals. Break-even outcomes contribute to average BUY return. Pending marks are still within the holding period. Overdue marks have passed the 5 p.m. Eastern cutoff. Missing marks have incomplete price data, calendar or labels.</p>
     <p data-summary-method hidden>A complete source summary contains headlines and insights. A source signal needs a recognized ticker card, an exact source summary ID in the Decider image manifest and a later candidate snapshot for that ticker. “Actionable now” counts as selected. Watch and avoid count as passed. Unmatched or conflicting signals are excluded. Prompt versions come from capture-time stamps. Weeks start Monday in Pacific time.</p>
   </details>
 </section>

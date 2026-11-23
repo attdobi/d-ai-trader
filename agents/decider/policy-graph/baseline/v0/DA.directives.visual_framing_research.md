@@ -15,7 +15,7 @@ compiled: stored
 locked: false
 provenance: prompt_versions#0
 sep_before: ""
-sep_after: ""
+sep_after: "\n\n"
 body_sha256: 14db4f012e57726f9be634c167e0710af0a50f3f85b12c8f5761927c1fcf9283
 tags: []
 tickers: []

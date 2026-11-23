@@ -20,3 +20,6 @@
 .learn-help { margin-top:.75rem; font-size:.83rem; color:#bfd1dc; }
 .learn-help summary { cursor:pointer; }
 .learn-help p { margin:.5rem 0; }
+.learn-performance [hidden] { display:none; }
+.learn-scroll .selloff-reason { min-width:16rem; max-width:30rem; white-space:normal; }
+.learn-scroll td a { display:block; color:#8bdadd; }

@@ -80,6 +80,14 @@
   "version": "SummarizerAgent.baseline.v0"
  },
  {
+  "source_node_id": "SA.directives.selloff_evidence",
+  "target_node_id": "SA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "SummarizerAgent.baseline.v0"
+ },
+ {
   "source_node_id": "SA.directives.visual_framing_research",
   "target_node_id": "SA.directives",
   "edge_type": "subtype_of",

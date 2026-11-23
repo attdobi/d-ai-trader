@@ -32,10 +32,22 @@ The existing learner's separate analysis path is preserved.
 | Recorded P&L | Sum of recorded dollar gains for scored closures; unavailable if any required dollar value is missing |
 
 Stored return fractions are multiplied by 100 exactly once for percentage
-display. The recorded dollar field is a price-based entry/exit difference times
-shares; it has no separate fee adjustment. Empty cohorts have unknown rates and
-means, not fabricated zero performance. Each window exposes its exact dates,
+display. A closure marked **Matched fills** uses Schwab’s net sale proceeds
+less the allocated cash cost of shares bought by the strategy. Both cash legs
+include posted fees. Purchase and sale prices show execution-weighted prices.
+The broker’s position basis appears separately for reconciliation. Legacy
+closures use their recorded dollars and returns. Pending exits enter the
+scored ledger only after the broker records can be matched. Empty cohorts have
+unknown rates and means. Each window exposes its exact dates,
 counts, counting unit, first/last scored close and definitions.
+
+Before a live decision with open positions, the trader reads recent broker
+activity and current positions. These requests can add latency. A matched
+strategy entry includes posted purchase fees. Its open return uses the current
+quote and excludes future sale fees. If the order history or share count fails
+to reconcile, the Decider sees broker position basis labeled as the fallback
+for protective rules. A completed round trip can be scored once its sale
+proceeds and fees post.
 
 The column charts compare overlapping samples, rather than suggesting a sequence
 of independent daily returns. Sample size appears under every column; the

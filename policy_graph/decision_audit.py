@@ -43,12 +43,26 @@ def _decision(row):
             "action": str(row.get("action") or "").strip().lower(), **_reason(row)}
 
 
-def _execution(row):
+CONFIRMED_EXECUTIONS = {"filled", "partially filled", "filled · details pending"}
+
+
+def execution_label(row):
     status = str(row.get("execution_status") or "").strip().lower()
-    if status == "filled" or row.get("executed_amount") is not None:
+    has_fill = any(isinstance(row.get(key), (int, float)) and math.isfinite(row[key]) and row[key] > 0
+                   for key in ("executed_amount", "executed_shares"))
+    if status in {"partial_fill", "partially_filled"}:
+        return "partially filled"
+    if status == "filled_details_pending":
+        return "filled · details pending"
+    if status == "filled":
         return "filled"
+    if has_fill and status in {"canceled", "cancelled", "expired", "replaced", "working"}:
+        return "partially filled"
     if status in NO_ORDER:
         return "not filled"
+    # Older receipts sometimes recorded the amount without a status.
+    if has_fill:
+        return "filled"
     return "unconfirmed"
 
 
@@ -88,7 +102,7 @@ def _cycle(row, capture, event, candidates, served, router=None):
             cash_cited = decision["cited"]
             continue
         if decision["action"] in ORDER_ACTIONS:
-            decision.update(execution=_execution(item), status=item.get("execution_status"),
+            decision.update(execution=execution_label(item), status=item.get("execution_status"),
                             execution_error=str(item.get("execution_error") or "")[:700])
         if decision["action"] in {"buy", "sell", "hold"}:
             decisions.append(decision)
@@ -123,7 +137,7 @@ def _cycle(row, capture, event, candidates, served, router=None):
             "screened": screened, "served_citations": sorted(cited & served),
             "served_logged": bool(served),
             "model_buys": None if proposed is None else sum(p["action"] == "buy" for p in proposals),
-            "stored_buys": len(buy_rows), "filled_buys": sum(d["execution"] == "filled" for d in buy_rows),
+            "stored_buys": len(buy_rows), "filled_buys": sum(d["execution"] in CONFIRMED_EXECUTIONS for d in buy_rows),
             "missing_decisions": [p for p in proposals if (p["ticker"], p["action"]) not in stored_keys]}
 
 

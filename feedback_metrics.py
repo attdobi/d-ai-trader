@@ -8,6 +8,7 @@ of the outcome labels, and no model, broker or policy module is imported.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import math
 from collections.abc import Mapping
 
@@ -29,6 +30,30 @@ def finite_number(value):
     except (TypeError, ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
+
+
+def feedback_market_context(value):
+    """Project local trade evidence into the fields used in a Feedback prompt."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            value = None
+    context = value if isinstance(value, Mapping) else {}
+    result = {"pnl_source": "recorded_unverified"}
+    volatility = finite_number(context.get("recent_volatility"))
+    if volatility is not None:
+        result["recent_volatility"] = volatility
+    if context.get("volume_trend") in ("high", "normal", "unknown"):
+        result["volume_trend"] = context["volume_trend"]
+    execution = matched_strategy_execution(context)
+    if execution is not None:
+        result["pnl_source"] = "matched_broker_fills"
+        for key in ("entry_net_cost", "exit_net_proceeds"):
+            amount = finite_number(execution.get(key))
+            if amount is not None:
+                result[key] = amount
+    return result
 
 
 def categorize_outcome(gain_loss_amount, gain_loss_percentage, *, stored_category=None):
@@ -133,6 +158,51 @@ def summarize_closures(rows, *, start, end, days):
         "success_definition": "positive_recorded_return",
         "average_definition": "unweighted_mean_recorded_return",
     }
+
+
+def reporting_table_exists(conn, name):
+    """Inspect optional reporting ledgers with SELECTs on either supported backend."""
+    query = ("SELECT to_regclass(:name) IS NOT NULL" if conn.dialect.name == "postgresql" else
+             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name)")
+    return bool(conn.execute(text(query), {"name": name}).scalar_one())
+
+
+def matched_strategy_execution(context):
+    """Return the matched-fill provenance used by both the dashboard and weekly review."""
+    if isinstance(context, str):
+        try:
+            context = json.loads(context)
+        except ValueError:
+            return None
+    execution = context.get("strategy_execution") if isinstance(context, dict) else None
+    if isinstance(execution, dict) and execution.get("source") == "schwab_transactions":
+        return execution
+    return None
+
+
+def execution_coverage(conn, config_hash, start, end):
+    """Count closures by UTC sale time and exit requests by UTC submission time."""
+    params = dict(h=config_hash, start=utc_instant(start).replace(tzinfo=None),
+                  end=utc_instant(end).replace(tzinfo=None))
+    closures = exits = None
+    if reporting_table_exists(conn, "trade_outcomes"):
+        closures = {"matched_fills": 0, "legacy_recorded": 0}
+        records = conn.execute(text("""SELECT ticker,original_reason,market_context FROM trade_outcomes
+            WHERE config_hash=:h AND sell_timestamp BETWEEN :start AND :end"""),params).mappings()
+        for record in records:
+            if is_recorded_closure(record):
+                key = "matched_fills" if matched_strategy_execution(record["market_context"]) else "legacy_recorded"
+                closures[key] += 1
+    if reporting_table_exists(conn, "strategy_exit_accounting"):
+        exits = {"pending": 0, "unfilled": 0, "unscored": 0, "scored": 0}
+        counts = conn.execute(text("""SELECT state,COUNT(*) AS n FROM (
+            SELECT CASE WHEN last_checked_at>:end THEN 'pending' ELSE status END AS state
+            FROM strategy_exit_accounting WHERE config_hash=:h AND observed_at BETWEEN :start AND :end
+            ) statuses GROUP BY state"""),params).mappings()
+        for group in counts:
+            if group["state"] in exits:
+                exits[group["state"]] = group["n"]
+    return {"closures": closures, "exit_orders": exits}
 
 
 def dashboard_period_metrics(engine, config_hash, periods, *, as_of=None):

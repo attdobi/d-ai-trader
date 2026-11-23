@@ -20,6 +20,7 @@ import json
 from collections import namedtuple
 
 from .model import AGENT_PREFIX, Node, POLARITY_OVERRIDES
+from .selloff_policy import SELLOFF_REVIEW_HEADER, SELLOFF_REVIEW_ID
 from policy_safety import OPPORTUNITY_CHARTER
 from summary_event_context import SUMMARY_CALENDAR_HEADER, SUMMARY_CALENDAR_RULES
 
@@ -39,7 +40,7 @@ _CASH_PLAYBOOK = """
 ⏳ CASH ACCOUNT PLAYBOOK (1-5 TRADING DAYS)
 - This is a non-margin cash run; every BUY/SELL should assume a 1-5 session holding window, not a same-day scalp.
 - Default to HOLD unless the trade thesis or catalyst broke, price hit your stop, or a clearly superior setup needs the slot. Small mark-to-market noise is not a sell reason.
-- Treat the holdings block as the ground-truth P&L (purchase price, current price, gain/loss). Quote those numbers accurately; never describe a loss as a gain."""
+- Use the verified strategy entry basis and current price to assess an open trade when supplied. If only a reported position basis is available, label its unrealized change as such. Broker tax adjustments can affect that basis. Realized strategy P&L requires matched fills and net cash amounts."""
 
 # ask_decision_agent: `user_prompt_template += """..."""` when "JSON" not in template.upper()
 _JSON_FALLBACK = """
@@ -280,6 +281,9 @@ CODE_BLOCKS: list = [
     CodeBlock("DA.code.event_calendar", "# EVENT CALENDAR", _EVENT_CALENDAR_HEADER,
               "event_calendar.py", "format_event_calendar", None, "user_prompt_dynamic",
               ["event_gate", "earnings_candidate", "earnings_holding"]),
+    CodeBlock(SELLOFF_REVIEW_ID, "Large selloff screen", SELLOFF_REVIEW_HEADER,
+              "policy_graph/selloffs.py", "prompt_section", "qualified selloff candidates in this cycle",
+              "user_prompt_dynamic", ["large_selloff_review"]),
     CodeBlock("DA.code.lessons_header", "# LESSONS", _LESSONS_HEADER,
               "decider_memory.py", "format_long_term_memory", None, "user_prompt_dynamic", []),
     CodeBlock("DA.code.recent_activity_header", "# RECENT ACTIVITY", _RECENT_ACTIVITY_HEADER,

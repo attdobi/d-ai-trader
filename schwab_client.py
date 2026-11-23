@@ -531,9 +531,15 @@ class SchwabAPIClient:
             if not account_info:
                 return None
             
-            securities_account = account_info.get('securitiesAccount', {})
-            positions = securities_account.get('positions', [])
-            
+            securities_account = account_info.get('securitiesAccount')
+            if not isinstance(securities_account, dict):
+                return None
+            positions = securities_account.get('positions')
+            if not isinstance(positions, list) or not all(
+                isinstance(p, dict) and isinstance(p.get("instrument"), dict) and p["instrument"].get("symbol")
+                for p in positions
+            ):
+                return None
             return positions
             
         except Exception as e:
@@ -702,19 +708,18 @@ class SchwabAPIClient:
                     "order_status": status_info,
                 }
 
-                # Hard rejection / cancel / expiry — NOT executed.
+                # A partially filled order may subsequently be canceled. Account for
+                # the executed legs independently of the unfilled remainder.
+                if sstatus == "FILLED" or filled_qty:
+                    return {**base, "status": "success", "success": True,
+                            "price": avg_price, "filled_quantity": filled_qty,
+                            "executed_amount": filled_amount}
+
                 if sstatus in {"REJECTED", "CANCELED", "EXPIRED"}:
                     logger.error("Schwab order %s %s: %s", order_id, sstatus, status_info.get("reason"))
                     return {**base, "status": sstatus.lower(), "price": price,
                             "reason": status_info.get("reason") or f"Order {sstatus.lower()} by broker",
                             "success": False}
-
-                # Confirmed fill (full or partial) — record the ACTUAL fill.
-                if sstatus == "FILLED" or (filled_qty and filled_qty > 0):
-                    return {**base, "status": "success", "success": True,
-                            "price": avg_price if avg_price else price,
-                            "filled_quantity": filled_qty or quantity,
-                            "executed_amount": filled_amount}
 
                 # Accepted but not filled within the wait window (WORKING/QUEUED/unknown).
                 # Treat as NOT executed so holdings aren't updated for a phantom fill.
@@ -810,17 +815,22 @@ class SchwabAPIClient:
         """
         filled_qty = 0.0
         filled_val = 0.0
+        complete_prices = True
         for act in order.get("orderActivityCollection") or []:
             for ex in act.get("executionLegs") or []:
-                q = ex.get("quantity") or 0
-                p = ex.get("price") or 0
+                q = float(ex.get("quantity") or 0)
+                p = float(ex.get("price") or 0)
+                if q > 0 and p <= 0:
+                    complete_prices = False
                 filled_qty += q
                 filled_val += q * p
-        # Fall back to the order's own filledQuantity if no execution legs yet.
-        if not filled_qty:
-            filled_qty = order.get("filledQuantity") or 0
-        avg_price = (filled_val / filled_qty) if (filled_qty and filled_val) else None
-        filled_amount = filled_val if filled_val else None
+        # A leg collection can arrive before or after the cumulative quantity.
+        # Incomplete legs cannot establish a volume-weighted execution price.
+        reported = float(order.get("filledQuantity") or 0)
+        if reported > filled_qty:
+            return reported, None, None
+        avg_price = (filled_val / filled_qty) if (complete_prices and filled_qty and filled_val) else None
+        filled_amount = filled_val if avg_price is not None else None
         return filled_qty, avg_price, filled_amount
 
     def _post_submit_order_check(self, account_hash: str, order_id: str,

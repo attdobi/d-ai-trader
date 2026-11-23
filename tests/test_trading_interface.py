@@ -192,3 +192,34 @@ def test_execute_trade_decisions_simulation_mode_tallies_results(trading_interfa
     assert results["summary"]["errors"] == 1
     assert results["summary"]["live_executed"] == 0
     assert results["live_results"] == []
+
+
+@pytest.mark.parametrize(("quantity","price","state","expected"), [
+    (3, 99.25, "FILLED", "filled"),
+    (2, 98.50, "CANCELED", "partial_fill"),
+    (None, None, "FILLED", "filled_details_pending"),
+    (3, None, "FILLED", "filled_details_pending"),
+])
+def test_ordinary_market_receipt_uses_only_confirmed_fill_fields(
+        trading_interface_module, monkeypatch, quantity, price, state, expected):
+    module, _ = trading_interface_module
+    interface = _make_interface(module, trading_mode="real_world")
+    monkeypatch.setattr(sys.modules["decider_agent"], "get_current_price", lambda _: 100.0, raising=False)
+    amount = quantity * price if quantity and price else None
+    monkeypatch.setattr(module.schwab_client, "place_equity_order", lambda **_: dict(
+        status="success", order_id="order", order_status={"status":state},
+        filled_quantity=quantity, price=price, executed_amount=amount), raising=False)
+    result = interface._execute_schwab_order(dict(action="buy",ticker="XYZ",amount_usd=300))
+    assert result["execution_status"] == expected
+    assert (result["filled_quantity"],result["price"],result["executed_amount"]) == (quantity,price,amount)
+    assert result["decision"]["price_estimate"] == 100
+    assert result["decision"]["executed_price"] == price
+
+
+def test_live_mode_unavailable_broker_never_creates_paper_holdings(trading_interface_module):
+    module, _ = trading_interface_module
+    interface = _make_interface(module, trading_mode="real_world")
+    interface.schwab_enabled = False
+    results = interface.execute_trade_decisions([dict(action="sell",ticker="XYZ")])
+    assert results["simulation_results"] == []
+    assert results["summary"]["skipped"] == 1

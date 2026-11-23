@@ -104,11 +104,12 @@ class TradingInterface:
                     else:
                         results["summary"]["errors"] += 1
 
-            should_defer_sim = (
-                self.trading_mode in {"live", "real_world"}
-                and self.schwab_enabled
-                and not self.readonly_mode
-            )
+            should_defer_sim = self.trading_mode in {"live", "real_world"}
+            if should_defer_sim and (not self.schwab_enabled or self.readonly_mode):
+                results["summary"]["skipped"] = len(decisions)
+                results["live_results"] = [{"status": "skipped", "decision": d,
+                    "reason": "Broker unavailable or read-only; no order submitted"} for d in decisions]
+                return results
 
             if not should_defer_sim:
                 sim_results = self._execute_simulation_trades(decisions, run_id=run_id)
@@ -126,6 +127,8 @@ class TradingInterface:
                 if safe_decisions:
                     live_results = self._execute_live_trades(safe_decisions)
                     results["live_results"] = live_results
+                    if should_defer_sim:
+                        self._record_order_receipts(live_results, run_id)
                 else:
                     logger.warning("All live trades blocked by safety checks")
                     live_results = [{
@@ -161,6 +164,8 @@ class TradingInterface:
                         tally_sim_results(sim_results)
                     else:
                         logger.warning("No live orders filled — skipping holdings update for this run.")
+                    from decider_agent import reconcile_live_exits
+                    reconcile_live_exits()
             
             logger.info(f"Trade execution completed: {results['summary']}")
             return results
@@ -342,6 +347,30 @@ class TradingInterface:
         }
         return self._wrap_live_result(self._execute_schwab_order(decision))
 
+    def _record_order_receipts(self, results, run_id):
+        """Persist submitted orders even if the local holdings mirror cannot run."""
+        from decider_agent import _persist_execution_outcomes
+        from strategy_exit_accounting import queue_exit
+        cfg = get_current_config_hash()
+        receipts = []
+        for result in results:
+            decision = result.get("decision") or {}
+            if not result.get("order_id"):
+                continue
+            decision.update(order_id=result["order_id"])
+            decision.setdefault("execution_status", result.get("status"))
+            receipts.append(decision)
+        _persist_execution_outcomes(receipts, run_id, cfg)
+        for decision in receipts:
+            if decision.get("action") != "sell":
+                continue
+            with engine.begin() as conn:
+                holding = conn.execute(text("""
+                    SELECT shares,purchase_price,reason FROM holdings
+                    WHERE config_hash=:cfg AND ticker=:ticker AND is_active=TRUE
+                """), {"cfg":cfg, "ticker":decision["ticker"]}).first()
+                queue_exit(conn, cfg, decision["ticker"], decision, holding)
+
     def _execute_schwab_order(self, decision: Dict) -> Dict:
         """
         Execute a single order through Schwab API
@@ -431,10 +460,6 @@ class TradingInterface:
                 else:
                     order_result = schwab_client.place_equity_order(
                         symbol=ticker, quantity=shares, instruction="BUY", order_type="MARKET")
-                if isinstance(order_result, dict):
-                    order_result.setdefault("shares", shares)
-                    order_result.setdefault("price", _event_limit_price if _event_order else current_price)
-                    order_result.setdefault("estimated_value", estimated_total)
                 
             elif action == "sell":
                 # For sells, we need to get current position to know how many shares to sell
@@ -496,14 +521,6 @@ class TradingInterface:
                     instruction="SELL",
                     order_type="MARKET"
                 )
-                if isinstance(order_result, dict):
-                    order_result.setdefault("shares", shares)
-                    order_result.setdefault("estimated_value", shares * current_price)
-                if isinstance(order_result, dict):
-                    order_result.setdefault("shares", shares)
-                    order_result.setdefault("price", current_price)
-                    order_result.setdefault("estimated_value", estimated_total)
-            
             else:
                 return {
                     "status": "skipped",
@@ -517,13 +534,12 @@ class TradingInterface:
                 _order_id = (order_result or {}).get('order_id')
                 decision['order_id'] = _order_id
                 decision['execution_status'] = ('filled' if _event_state == 'FILLED' else
+                    'partial_fill' if (order_result or {}).get('filled_quantity') else
                     'rejected' if _event_state in ('REJECTED','CANCELED','CANCELLED','EXPIRED') else 'working' if _order_id else 'pending')
-                if decision['execution_status'] == 'filled':
-                    shares = int(order_result.get('filled_quantity') or shares)
-                    current_price = float(order_result.get('price') or _event_limit_price)
-                    decision['executed_shares'] = shares
-                    decision['executed_price'] = current_price
-                    decision['executed_amount'] = order_result.get('executed_amount') or round(shares * current_price, 2)
+                if decision['execution_status'] in {'filled', 'partial_fill'}:
+                    decision['executed_shares'] = order_result.get('filled_quantity')
+                    decision['executed_price'] = order_result.get('price')
+                    decision['executed_amount'] = order_result.get('executed_amount')
                 if decision['execution_status'] == 'rejected':
                     from earnings_strategy import release
                     release(decision)
@@ -532,22 +548,36 @@ class TradingInterface:
                     _persist_execution_outcomes([decision], decision.get('_earnings_run_id'), get_current_config_hash())
                 except Exception:
                     pass
-                if decision['execution_status'] != 'filled':
+                if decision['execution_status'] not in {'filled', 'partial_fill'}:
                     return {'status':decision['execution_status'], 'order_id':_order_id,
                             'reason':'Earnings LIMIT order is not confirmed filled; no holding recorded',
                             'execution_type':'live','decision':dict(decision)}
             if order_result and order_result.get("status") == "success":
                 order_state = (order_result.get("order_status", {}) or {}).get("status")
                 order_reason = (order_result.get("order_status", {}) or {}).get("reason")
+                filled_qty = order_result.get("filled_quantity")
+                fill_price = order_result.get("price")
+                filled_amount = order_result.get("executed_amount")
+                receipt_status = "filled"
+                if filled_qty and filled_qty < shares:
+                    receipt_status = "partial_fill"
+                elif not filled_qty or not fill_price:
+                    receipt_status = "filled_details_pending"
+                decision.update(order_id=order_result.get("order_id"),
+                                execution_status=receipt_status,
+                                executed_shares=filled_qty, executed_price=fill_price, executed_amount=filled_amount)
                 if order_state and order_state.upper() != "FILLED":
                     logger.info("Schwab order %s status=%s reason=%s", order_result.get("order_id"), order_state, order_reason)
                 return {
                     "status": "success",
                     "order_id": order_result.get("order_id"),
                     "symbol": ticker,
-                    "shares": shares,
+                    "shares": filled_qty,
+                    "filled_quantity": filled_qty,
                     "action": action,
-                    "price": current_price,
+                    "price": fill_price,
+                    "executed_amount": filled_amount,
+                    "execution_status": decision["execution_status"],
                     "execution_type": "live",
                     "timestamp": datetime.now().isoformat(),
                     "reason": reason,

@@ -440,6 +440,7 @@ class DAITraderOrchestrator:
                 # A deliberate cash-hold is now recorded as a decision upstream, so
                 # this branch is genuinely "nothing to act on", not necessarily a failure.
                 logger.info("ℹ️  No actionable decisions this cycle (no trades and no cash rationale).")
+            decider.reconcile_live_exits()
             
             # Mark summaries as processed
             summary_ids = [s['id'] for s in summaries]

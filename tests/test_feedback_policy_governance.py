@@ -5,6 +5,8 @@ import ast
 import json
 import logging
 import sys
+from contextlib import nullcontext
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from policy_safety import feedback_policy_violations, blanket_entry_vetoes
-from feedback_metrics import SIGNIFICANT_PROFIT_THRESHOLD, categorize_outcome
+from feedback_metrics import SIGNIFICANT_PROFIT_THRESHOLD, categorize_outcome, feedback_market_context, finite_number
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,6 +24,33 @@ def method(path, name, namespace):
     fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name)
     exec(compile(ast.Module(body=[fn], type_ignores=[]), path, "exec"), namespace)
     return namespace[name]
+
+
+def test_recent_feedback_trade_payload_excludes_private_broker_references():
+    context = dict(recent_volatility=.02, volume_trend="normal", account_id="private-reference",
+                   strategy_execution=dict(source="schwab_transactions", entry_net_cost=100, exit_net_proceeds=96,
+                                           exit_order_id="private-reference", entry_order_ids=["private-reference"]))
+    row = SimpleNamespace(ticker="EX", purchase_price=100, sell_price=96, shares=1,
+                          sell_timestamp=datetime(2026, 11, 23), hold_duration_days=3,
+                          gain_loss_amount=-4, gain_loss_percentage=-.04, outcome_category="significant_loss",
+                          original_reason="entered", sell_reason="exited", market_context=json.dumps(context))
+    conn = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchall=lambda: [row]))
+    fetch = method("feedback_agent.py", "_get_detailed_trade_analysis", {
+        "engine": SimpleNamespace(begin=lambda: nullcontext(conn)), "text": text,
+        "categorize_outcome": categorize_outcome, "feedback_market_context": feedback_market_context,
+        "finite_number": finite_number,
+    })
+    [trade] = fetch(None, config_hash="example")
+    assert trade["gain_loss_pct"] == -4 and trade["gain_loss_usd"] == -4
+    assert trade["market_context"] == {
+        "pnl_source": "matched_broker_fills", "recent_volatility": .02, "volume_trend": "normal",
+        "entry_net_cost": 100, "exit_net_proceeds": 96,
+    }
+    assert "private-reference" not in json.dumps(trade)
+    assert feedback_market_context("private-reference") == {"pnl_source": "recorded_unverified"}
+    row.gain_loss_amount = row.gain_loss_percentage = None
+    [unscored] = fetch(None, config_hash="example")
+    assert unscored["gain_loss_usd"] is None and unscored["gain_loss_pct"] is None
 
 
 @pytest.mark.parametrize("feedback", [
@@ -154,7 +183,16 @@ def test_legacy_memory_update_flag_cannot_activate_research(monkeypatch):
     assert calls[0][1]["source"] == "feedback"
 
 
-def test_decision_only_review_receives_prospective_evidence_and_archives_once():
+@pytest.fixture
+def feedback_identity(monkeypatch):
+    def active(agent, *, config_hash):
+        assert agent == "FeedbackAgent"
+        return {"soul": f"Operator evidence instructions for {config_hash}"}
+    monkeypatch.setitem(sys.modules, "prompt_manager", SimpleNamespace(get_active_prompt=active))
+    return method("feedback_agent.py", "_feedback_identity", {})
+
+
+def test_decision_only_review_receives_prospective_evidence_and_archives_once(feedback_identity):
     from datetime import datetime, timedelta
     from feedback_learning import review_evidence_text
     import contextlib
@@ -178,23 +216,26 @@ def test_decision_only_review_receives_prospective_evidence_and_archives_once():
     # Check the actual decision-only model input without a provider client.
     sent = []
     def collect(params, agent, client):
+        assert "Operator evidence instructions for cfg" in params["system_prompt"]
         sent.append(params["user_prompt"])
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"decision_quality":"ok"}'))])
     review = method("feedback_agent.py", "_generate_decision_pattern_feedback",{
-        "review_evidence_text":review_evidence_text,"get_reasoning_token_cap":lambda *a:1,
+        "review_evidence_text":review_evidence_text,"_feedback_identity":feedback_identity,
+        "get_reasoning_token_cap":lambda *a:1,
         "get_agent_model":lambda *a:"fake","get_agent_reasoning_level":lambda *a:"low",
         "_build_feedback_api_params":lambda **kw:kw, "_execute_feedback_api":collect,"json":json})
     payload = dict(total_decisions=3, buy_decisions=0, deferred_decisions=0, recent_tickers=[],
                    decision_reasons=[], prospective_policy_evidence=packet)
-    assert review(SimpleNamespace(_feedback_client=None),[],payload)["decision_quality"]=="ok"
+    assert review(SimpleNamespace(_feedback_client=None),[],payload,config_hash="cfg")["decision_quality"]=="ok"
     assert '"distinct_episodes":19' in sent[0]
 
 
-def test_weekly_feedback_model_receives_operator_prospective_packet(monkeypatch):
+def test_weekly_feedback_model_receives_operator_prospective_packet(monkeypatch, feedback_identity):
     from feedback_learning import review_evidence_text
     packet = {"status":"ok", "distinct_episodes":13, "summarizer":{"unversioned_summaries":12}}
     sent = []
     def capture(params, agent, client):
+        assert "Operator evidence instructions for cfg" in params["system_prompt"]
         sent.append(params["user_prompt"])
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"key_insights":[]}'))])
     def unavailable(*args, **kwargs):
@@ -203,11 +244,10 @@ def test_weekly_feedback_model_receives_operator_prospective_packet(monkeypatch)
         "feedback_diagnostics":{"compute_trade_diagnostics":unavailable,"format_diagnostics":str,"SUPPLIED_DECIDER_FIELDS":""},
         "visual_learning":{"recent_visual_context":unavailable},
         "policy_graph.taxonomy":{"observation_inventory":unavailable},
-        "prompt_manager":{"get_active_prompt":unavailable},
     }.items():
         monkeypatch.setitem(sys.modules, module, SimpleNamespace(**values))
     review=method("feedback_agent.py", "_generate_ai_feedback",{
-        "json":json,"review_evidence_text":review_evidence_text,"engine":object(),
+        "json":json,"review_evidence_text":review_evidence_text,"engine":object(),"_feedback_identity":feedback_identity,
         "FEEDBACK_LOOKBACK_DAYS":30,"get_agent_model":lambda *a:"fake","get_reasoning_token_cap":lambda *a:1,
         "get_agent_reasoning_level":lambda *a:"low","_execute_feedback_api":capture,
         "_build_feedback_api_params":lambda **kw:kw})

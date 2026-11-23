@@ -197,7 +197,7 @@ POLARITY_OVERRIDES = {
     "code.guideline_citations": "structure",
     "code.justification_detail": "structure", "code.considered_setups": "structure", "code.cash_playbook": "caution",
     "code.index_regime": "gate", "code.watchlist_header": "action", "code.quarantine_line": "gate",
-    "code.event_calendar": "gate",
+    "code.event_calendar": "gate", "code.selloff_review": "evidence",
     "code.opportunity_charter": "principle",
     "code.operator_calendar": "structure",
     "code.visual_evidence": "caution",

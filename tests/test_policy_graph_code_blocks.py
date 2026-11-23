@@ -11,6 +11,7 @@ import pytest
 
 from policy_graph.code_blocks import BLOCKS_BY_ID, CODE_BLOCKS, CODE_SHA, CONSTRAINS, code_nodes
 from policy_graph.model import ID_RE, POLARITY_OVERRIDES
+from policy_graph import selloffs
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "policy_graph"
@@ -131,6 +132,9 @@ def extract_from_source() -> list:
         ("DA.code.watchlist_header", found["watchlist_header"]),
         ("DA.code.quarantine_line", found["quarantine_line"]),
         ("DA.code.event_calendar", found["event_calendar_header"]),
+        ("DA.code.selloff_review", selloffs.prompt_section([
+            {"ticker": "XYZ", "day_pct": -9., "price": 50., "quarantined": True}
+        ]).strip().partition("\n- XYZ")[0]),
         ("DA.code.lessons_header", found["lessons_header"]),
         ("DA.code.recent_activity_header", found["recent_activity_header"]),
         ("DA.code.cash_disclosure", prompt_adds[0]),
@@ -194,7 +198,7 @@ def test_live_confirmation_requires_evidenced_below_entry_geometry_within_active
 
 def test_code_blocks_metadata_is_well_formed():
     ids = [b.id for b in CODE_BLOCKS]
-    assert len(ids) == len(set(ids)) == 26
+    assert len(ids) == len(set(ids)) == 27
     for b in CODE_BLOCKS:
         assert ID_RE.match(b.id) and b.id.split(".")[1] == "code"
         assert b.text and b.title
@@ -204,7 +208,11 @@ def test_code_blocks_metadata_is_well_formed():
         assert b.id.split(".", 1)[1] in POLARITY_OVERRIDES, f"{b.id} needs a polarity override in model.py"
     assert re.fullmatch(r"[0-9a-f]{12}", CODE_SHA)
     assert set(CONSTRAINS) == {"DA.code.index_regime", "DA.code.watchlist_header", "DA.code.quarantine_line",
-                               "DA.code.event_calendar", "DA.code.deploy_policy", "DA.code.confirmation_policy"}
+                               "DA.code.event_calendar", "DA.code.deploy_policy", "DA.code.confirmation_policy",
+                               "DA.code.selloff_review"}
+    assert CONSTRAINS["DA.code.selloff_review"] == ["large_selloff_review"]
+    screen = BLOCKS_BY_ID["DA.code.selloff_review"].text
+    assert f"{selloffs.MIN_DECLINE_PCT}%" in screen and f"${selloffs.MIN_DOLLAR_VOLUME:,}" in screen
     assert CONSTRAINS["DA.code.confirmation_policy"] == ["regime_gate", "extension_cap", "re_entry_quarantine", "priced_kill", "kill_breach"]
     assert CONSTRAINS["DA.code.index_regime"] == ["regime_gate"]
     assert CONSTRAINS["DA.code.quarantine_line"] == ["re_entry_quarantine"]

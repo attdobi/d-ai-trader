@@ -685,6 +685,8 @@ def initialize_database() -> None:
             "config_hash",
             "ALTER TABLE trade_outcomes ADD COLUMN IF NOT EXISTS config_hash VARCHAR(50)",
         )
+        from strategy_exit_accounting import DDL as _EXIT_ACCOUNTING_DDL
+        ensure_table(conn, stats, "strategy_exit_accounting", _EXIT_ACCOUNTING_DDL)
 
         ensure_table(
             conn,
@@ -822,6 +824,8 @@ def initialize_database() -> None:
         ensure_table(conn, stats, "learning_opportunities", _OPPORTUNITIES_DDL)
         ensure_table(conn, stats, "learning_opportunity_outcomes", _OPPORTUNITY_OUTCOMES_DDL)
         ensure_table(conn, stats, "learning_opportunity_attempts", _OPPORTUNITY_ATTEMPTS_DDL)
+        from policy_graph.selloffs import DDL as _SELLOFF_DDL
+        ensure_table(conn, stats, "learning_selloff_observations", _SELLOFF_DDL)
         for _ddl in _OPPORTUNITY_INDEXES:
             conn.execute(text(_ddl))
 

@@ -27,6 +27,7 @@ from sqlalchemy import text
 
 from .lessons import ltm_node_id, ltm_title
 from .model import COMPILED_FIELDS, ID_RE, Version
+from .selloff_policy import SELLOFF_REVIEW_ID
 from .health import trade_outcome_kind
 
 CITE_RE = re.compile(r"\s*\[cites?:\s*([^\]]*)\]\s*$", re.I)
@@ -278,7 +279,7 @@ def apply_citation_repairs(decisions, repairs: dict, known=None, *, fallback: Op
 
 
 # ----------------------------------------------------------------------------- what the Decider sees
-def citable_nodes(version: Version) -> list:
+def citable_nodes(version: Version, *, absent_code=()) -> list:
     """[(id, title)] of the guidelines a decision may cite: stored / inherited guidelines of the
     three evolving fields (sections and their rules, lessons, log entries) plus the code-owned
     blocks that fire for this version; in compile order, code blocks last."""
@@ -296,16 +297,16 @@ def citable_nodes(version: Version) -> list:
                 continue
             out.append((n.id, n.title or n.id))
     fires = (version.manifest.get("code") or {}).get("fires") or {}
-    code = [n for n in version.nodes.values() if n.owner == "code" and n.node_type == "code"
+    code = [n for n in version.nodes.values() if n.owner == "code" and n.node_type == "code" and n.id not in absent_code
             and fires.get(n.id, n.extra.get("fires", True)) and (n.body or "").strip()]
     for n in sorted(code, key=lambda n: (n.order, n.id)):
         out.append((n.id, n.title or n.id))
     return out
 
 
-def guideline_index(version: Version) -> str:
+def guideline_index(version: Version, *, absent_code=()) -> str:
     """One line per citable guideline: `id — title`."""
-    return "\n".join(f"{i} — {t}" for i, t in citable_nodes(version))
+    return "\n".join(f"{i} — {t}" for i, t in citable_nodes(version, absent_code=absent_code))
 
 
 # ----------------------------------------------------------------------------- health
@@ -716,6 +717,8 @@ def backfill_code_served(engine, config_hash: str, code_ids_for_version, agent_t
     rows = []
     for run_id, at, version in runs:
         for cid in code_ids_for_version(version) or []:
+            if cid == SELLOFF_REVIEW_ID:
+                continue  # A prompt version cannot establish that this cycle supplied a selloff.
             rows.append({"h": config_hash, "a": agent_type, "v": version, "r": run_id, "t": at, "n": cid, "route": "code"})
     if not rows:
         return 0

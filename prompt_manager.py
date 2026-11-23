@@ -94,11 +94,11 @@ def initialize_config_prompts(config_hash):
     return True
 
 
-def get_active_prompt(agent_type):
+def get_active_prompt(agent_type, *, config_hash=None):
     """Get the currently active prompt for an agent type and config"""
     agent_type = _canonical_agent_type(agent_type)
     from config import get_current_config_hash
-    config_hash = get_current_config_hash()
+    config_hash = config_hash or get_current_config_hash()
     
     with engine.connect() as conn:
         # First try to get config-specific prompt

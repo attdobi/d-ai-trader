@@ -16,7 +16,7 @@
  "source_sha256": {
   "system_prompt": "6e16beae3069ce07644c05904de941b14277a3a293c6d089e902e32868b3eeb2",
   "user_prompt_template": "c9adf7b6ef4bb75cd40972e6446db76af0029d33de71086504ebe1ad9b063138",
-  "strategy_directives": "10db8d5bddda6039f76cc3a09aee50b64bbe34483513696af2b290cfb38cfa82",
+  "strategy_directives": "5c7e9f0ffd0217635c9a69b4bf27ef9764118f17d8ceb93de7092e1a0951a350",
   "soul": "7531324b6a03476f6a63600fa29b00909360f114fa53cad3c4e2b2b8438ca9c1",
   "memory": "b8b7e94888bd3738e6adbbaaaad570c479feb0cfddcd557260b101aa9850efb7"
  },
@@ -74,7 +74,8 @@
    "DA.directives.reminder.loss_cap",
    "DA.directives.reminder.kill_breach",
    "DA.directives.earnings_event_exception",
-   "DA.directives.visual_framing_research"
+   "DA.directives.visual_framing_research",
+   "DA.directives.large_selloff_review"
   ],
   "soul": [
    "DA.soul",
@@ -100,11 +101,11 @@
    "DA.memory.mistakes.n2"
   ]
  },
- "node_count": 63,
- "edge_count": 97,
+ "node_count": 65,
+ "edge_count": 104,
  "code": {
-  "sha": "955a0155377c",
-  "dir": "../_code/955a0155377c",
+  "sha": "a71394b4cdbe",
+  "dir": "../_code/a71394b4cdbe",
   "git_sha": "baseline",
   "fires": {
    "DA.code.crowd_fade": true,
@@ -113,6 +114,7 @@
    "DA.code.watchlist_header": true,
    "DA.code.quarantine_line": true,
    "DA.code.event_calendar": true,
+   "DA.code.selloff_review": true,
    "DA.code.lessons_header": true,
    "DA.code.recent_activity_header": true,
    "DA.code.cash_disclosure": true,
@@ -138,7 +140,7 @@
  },
  "lineage": null,
  "delta_vs_prev": {
-  "added": 41,
+  "added": 42,
   "changed": 0,
   "removed": 0,
   "renamed": 0,

@@ -1467,21 +1467,16 @@ def trade_decisions():
                         # position). Unconfirmed rows stay visible but are never counted.
                         _act = (cleaned_decision.get('action') or '').lower()
                         if _act in ('buy', 'sell'):
-                            _st = (cleaned_decision.get('execution_status') or '').lower()
-                            _filled = (_st == 'filled') or cleaned_decision.get('executed_amount') is not None
-                            _rejected = (_st in ('rejected', 'canceled', 'cancelled', 'expired',
-                                                 'failed', 'error', 'not_executed', 'capped', 'not_filled',
-                                                 'skipped')
-                                         or 'market' in _st or 'closed' in _st)
-                            if _filled and cleaned_decision.get('executed_amount') is None:
-                                # fill confirmed by status; derive the missing amount for display
-                                _sh = cleaned_decision.get('executed_shares') or cleaned_decision.get('shares')
-                                _px = cleaned_decision.get('executed_price')
-                                if _sh and _px:
-                                    cleaned_decision['executed_shares'] = float(_sh)
-                                    cleaned_decision['executed_amount'] = round(float(_sh) * float(_px), 2)
-                            if not _filled and not _rejected:
-                                cleaned_decision['unconfirmed'] = True
+                            from policy_graph.decision_audit import CONFIRMED_EXECUTIONS, execution_label
+                            label = execution_label(cleaned_decision)
+                            cleaned_decision['fill_confirmed'] = label in CONFIRMED_EXECUTIONS
+                            cleaned_decision['fill_label'] = label
+                            cleaned_decision['unconfirmed'] = label == 'unconfirmed'
+                            if cleaned_decision['fill_confirmed'] and cleaned_decision['executed_amount'] is None:
+                                qty = cleaned_decision['executed_shares']
+                                price = cleaned_decision['executed_price']
+                                if qty and price:
+                                    cleaned_decision['executed_amount'] = round(float(qty) * float(price), 2)
                         cleaned_data.append(cleaned_decision)
                     elif isinstance(decision, str):
                         # If decision is a string, try to parse it
@@ -1538,7 +1533,7 @@ def trade_decisions():
                 # Every decision now carries an explicit execution status (live
                 # persistence + broker reconciliation), so only confirmed fills count —
                 # substring exclusion lists missed statuses like not_executed/skipped.
-                if (_d.get('execution_status') or '').lower() != 'filled':
+                if not _d.get('fill_confirmed'):
                     continue
                 _a = (_d.get('action') or '').lower()
                 if 'buy' in _a:
@@ -2312,13 +2307,11 @@ def get_feedback_data():
 def get_trade_outcomes():
     """Get recent trade outcomes"""
     try:
-        from feedback_metrics import categorize_outcome, finite_number, iso_utc
+        from feedback_metrics import categorize_outcome, finite_number, iso_utc, matched_strategy_execution
         config_hash = get_current_config_hash()
         with engine.connect() as conn:
             result = conn.execute(text("""
-                SELECT id, ticker, sell_timestamp, purchase_price, sell_price,
-                       shares, gain_loss_amount, gain_loss_percentage, 
-                       outcome_category, hold_duration_days
+                SELECT *
                 FROM trade_outcomes 
                 WHERE config_hash = :config_hash
                   AND sell_timestamp <= :as_of
@@ -2332,6 +2325,8 @@ def get_trade_outcomes():
             for row in result:
                 amount = finite_number(row.gain_loss_amount)
                 fraction = finite_number(row.gain_loss_percentage)
+                attribution = matched_strategy_execution(getattr(row, 'market_context', None))
+                matched = attribution is not None
                 outcomes.append({
                     'ticker': row.ticker,
                     'id': row.id,
@@ -2340,6 +2335,8 @@ def get_trade_outcomes():
                     'sell_price': finite_number(row.sell_price),
                     'shares': finite_number(row.shares),
                     'net_gain_dollars': amount,
+                    'pnl_source': 'matched_fills' if matched else 'recorded',
+                    'broker_basis_per_share': finite_number(attribution.get('broker_basis')) if matched else None,
                     # trade_outcomes.gain_loss_percentage is stored as a FRACTION
                     # (e.g. -0.0158). The frontend (schwab.js, feedback.js) renders
                     # gain_loss_pct as an already-percent value, so convert here.

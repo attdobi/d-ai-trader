@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 
 from .citations import REJECT_VERDICTS
+from . import selloffs
 
 ET = ZoneInfo("America/New_York")
 HORIZONS = (1, 3, 5)
@@ -92,6 +93,7 @@ def ensure_schema(engine) -> None:
         conn.execute(text(DDL_POSTGRES if engine.dialect.name == "postgresql" else DDL_SQLITE))
         conn.execute(text(DDL_OUTCOMES_POSTGRES))
         conn.execute(text(DDL_ATTEMPTS_POSTGRES))
+        conn.execute(text(selloffs.DDL))
         for ddl in INDEXES:
             conn.execute(text(ddl))
 
@@ -142,7 +144,7 @@ def _features(candidate, regime=None):
 
 
 def record_snapshot(engine, config_hash, run_id, candidates, *, input_id=None, prompt_version=None,
-                    context=None, observed_at=None, holdings=(), quarantined=()) -> int:
+                    context=None, observed_at=None, holdings=(), quarantined=(), selloff_candidates=()) -> int:
     """Persist pre-call screener candidates and known context tickers, with no quote/API calls.
 
     A supplied price is only a reference observed at this snapshot. Its market
@@ -203,6 +205,8 @@ def record_snapshot(engine, config_hash, run_id, candidates, *, input_id=None, p
                 ON CONFLICT(config_hash,run_id,ticker) DO NOTHING
             """), params)
             inserted += max(0, result.rowcount)
+        if selloff_candidates:
+            selloffs.attach(conn, config_hash, run_id, input_id, selloff_candidates, now.isoformat(), "prospective")
     return inserted
 
 
@@ -267,6 +271,7 @@ def record_decisions(engine, config_hash, run_id, reply, *, input_id=None, promp
             """), {"a": item["action"], "reason": item["reason"], "c": _json(item["cited"]),
                      "t": now.isoformat(), "h": config_hash, "r": str(run_id), "ticker": item["ticker"]})
             count += max(0, result.rowcount)
+        selloffs.record_review(conn, config_hash, run_id, input_id, reply, now.isoformat(), "prospective")
     return count
 
 
@@ -461,8 +466,9 @@ def has_pending(engine, config_hash, *, days=120) -> bool:
     with engine.connect() as conn:
         return conn.execute(text("""SELECT 1 FROM learning_opportunities c
             WHERE c.config_hash=:h AND c.observed_at>=:t AND
-            (SELECT COUNT(*) FROM learning_opportunity_outcomes o
-             WHERE o.opportunity_id=c.id AND o.status='matured') < 3 LIMIT 1"""),
+            ((SELECT COUNT(*) FROM learning_opportunity_outcomes o
+             WHERE o.opportunity_id=c.id AND o.status='matured') < 3 OR EXISTS
+             (SELECT 1 FROM learning_selloff_observations s WHERE s.opportunity_id=c.id AND s.status<>'matured')) LIMIT 1"""),
             {"h":config_hash,"t":cutoff}).fetchone() is not None
 
 
@@ -549,12 +555,13 @@ def refresh_outcomes(engine, config_hash, *, loader=None, now=None, limit=300, m
     limit=max(1,min(5000,int(limit)))
     # Apply fairness and backoff in SQL, before the row and unique-ticker caps.
     with engine.connect() as conn:
-        rows=conn.execute(text("""SELECT c.*,a.last_attempt_at,a.failures AS attempt_failures
+        rows=conn.execute(text("""SELECT c.*,a.last_attempt_at,a.failures AS attempt_failures,s.status AS selloff_status
             FROM learning_opportunities c LEFT JOIN learning_opportunity_attempts a
               ON a.opportunity_id=c.id AND a.config_hash=c.config_hash
+            LEFT JOIN learning_selloff_observations s ON s.opportunity_id=c.id
             WHERE c.config_hash=:h AND c.observed_at>=:cutoff
-              AND (SELECT COUNT(*) FROM learning_opportunity_outcomes o
-                   WHERE o.opportunity_id=c.id AND o.status='matured') < 3
+              AND ((SELECT COUNT(*) FROM learning_opportunity_outcomes o
+                   WHERE o.opportunity_id=c.id AND o.status='matured') < 3 OR s.status<>'matured')
               AND (a.retry_after_at IS NULL OR a.retry_after_at<=:now)
             ORDER BY CASE WHEN a.last_attempt_at IS NULL THEN 0 ELSE 1 END,
                      a.last_attempt_at ASC,c.observed_at ASC,c.id ASC LIMIT :lim"""),
@@ -594,6 +601,8 @@ def refresh_outcomes(engine, config_hash, *, loader=None, now=None, limit=300, m
             continue
         with engine.begin() as conn:
             for c in group:
+                if c["selloff_status"] and c["selloff_status"] != "matured":
+                    selloffs.mark(conn, c, bars, now)
                 evaluated=evaluate_case(c,bars,now=now)
                 for horizon,result in evaluated.items():
                     if c.get("outcomes",{}).get(horizon,{}).get("status") == "matured":

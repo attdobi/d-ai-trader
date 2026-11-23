@@ -121,7 +121,7 @@ def test_cited_route_comes_from_the_served_rows_of_that_cycle(db):
     with db.begin() as conn:
         conn.execute(text("INSERT INTO policy_graph_runs (config_hash, agent_type, prompt_version, run_id, decided_at, served, dropped, "
                           "chars_full, chars_served, routes, context) VALUES ('h', 'DeciderAgent', 23, 'r9', :t, 1, 0, 1, 1, '{}', '{}')"), {"t": at})
-    n = C.backfill_code_served(db, "h", lambda v: [CODE])
+    n = C.backfill_code_served(db, "h", lambda v: [CODE, "DA.code.selloff_review"])
     assert n == 1
     rep = P.path_report(db, "h", days=90, now=NOW)
     assert {"source": "code", "target": CODE, "value": 1} in rep["frequency"]["flows_in"]

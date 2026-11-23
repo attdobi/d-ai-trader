@@ -1,15 +1,15 @@
 {
  "config_hash": "9ea09b9as",
- "version": 61,
- "prompt_version_id": 667,
+ "version": 63,
+ "prompt_version_id": 673,
  "source_sha256": {
-  "system_prompt": "b9a778b0946a20f113901277dc6294695d67fdd46188ed8152a201dfcf866ca4",
-  "user_prompt_template": "8378cc715f43e28e4a1095a49097261231e85efcebc9c05672ea6e98f3a30e40",
-  "strategy_directives": "91baff9e8c92e336ccdc8fd987a7df6fcdbc105ddc9185ebeb17986f7ccee479",
-  "soul": "f37993cc440ca0284b21323b53a0cab216d31ae7fe13a59c2e40e58c97720806",
-  "memory": "13673a9dd2d3aec3d6e82144f0e2e48626cb9dd44832196f0e5bb19627ead687"
+  "system_prompt": "ba12259fecd39a21b8234e629e5dcca1d13d41c497da5e261d44b3f784cf764f",
+  "user_prompt_template": "c9adf7b6ef4bb75cd40972e6446db76af0029d33de71086504ebe1ad9b063138",
+  "strategy_directives": "6cd43922be1aebbd932695f45ce2c76701ddba001c629e2be9285b1141ba3664",
+  "soul": "7531324b6a03476f6a63600fa29b00909360f114fa53cad3c4e2b2b8438ca9c1",
+  "memory": "b8b7e94888bd3738e6adbbaaaad570c479feb0cfddcd557260b101aa9850efb7"
  },
- "code_sha": "ce28880a8af9",
- "ltm_sha": "a11dbde3be78",
+ "code_sha": "a71394b4cdbe",
+ "ltm_sha": "518aa9be46b0",
  "builder_version": 1
 }

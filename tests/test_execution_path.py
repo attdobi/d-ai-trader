@@ -175,6 +175,7 @@ def _live_two_buys(da, engine, monkeypatch, first_outcome):
         if decision["ticker"] == "NVDA":
             return first_outcome(decision)
         decision["execution_status"], decision["order_id"] = "filled", "amd-1"
+        decision.update(executed_shares=decision["shares_override"], executed_price=PRICES["AMD"])
         return True
 
     monkeypatch.setattr(da, "execute_real_world_trade", _broker)
@@ -204,6 +205,7 @@ def test_live_fill_counts_in_the_cap_book_even_when_the_holdings_write_fails(dec
 
     def _filled(decision):
         decision["execution_status"], decision["order_id"] = "filled", "nvda-1"
+        decision.update(executed_shares=decision["shares_override"], executed_price=PRICES["NVDA"])
         return True
 
     invested, amd, skipped = _live_two_buys(da, engine, monkeypatch, _filled)
@@ -307,3 +309,39 @@ def test_direct_broker_fill_bookkeeping_preserves_actual_event_quantity(decider)
        "strategy":"earnings_event","execution_status":"filled","executed_shares":4,"executed_price":100}
     da.process_buy_decisions([d],10000,None,HASH,[],False,enforce_position_caps=False)
     assert _book(engine)["AMD"].shares==4 and _book(engine)["AMD"].current_value==400
+
+
+def test_partial_real_sell_reduces_only_filled_quantity_and_queues_net_evidence(decider, monkeypatch):
+    da, engine = decider
+    _seed(engine, 1000, {"AMD": 5})
+    def broker(decision):
+        decision.update(order_id="sell-1",execution_status="partial_fill",executed_price=97,executed_shares=2)
+        return True
+    monkeypatch.setattr(da, "execute_real_world_trade", broker)
+    cash = da.process_sell_decisions([dict(action="sell",ticker="AMD",reason="exit")],1000,None,HASH,[],True)
+    assert cash == 1194 and _book(engine)["AMD"].shares == 3
+    with engine.connect() as c:
+        assert c.execute(text("SELECT held_before,confirmed_qty,status FROM strategy_exit_accounting")).one()==(5,2,"pending")
+
+
+def test_confirmed_buy_missing_fill_details_waits_for_sync(decider):
+    da, engine = decider
+    _seed(engine, 10000, {})
+    d=dict(action="buy",ticker="AMD",order_id="buy",amount_usd=900,execution_status="filled_details_pending",
+           executed_shares=None,executed_price=None)
+    skipped=[]
+    da.process_buy_decisions([d],10000,None,HASH,skipped,False,enforce_position_caps=False)
+    assert "AMD" not in _book(engine)
+    assert "Awaiting" in skipped[0]["reason"]
+
+
+def test_profit_guardrail_uses_verified_strategy_entry_and_preserves_fallback(decider):
+    da, _ = decider
+    row = dict(purchase_price=110,current_price=105,shares=2,current_value=210)
+    verified = {**row,"strategy_unit_cost":100,"return_basis":"matched strategy entry"}
+    decisions = [dict(ticker="ACME",action="hold")]
+    assert da.enforce_profit_taking_guardrail(decisions,{"ACME":verified},threshold_pct=3)
+    assert decisions[0]["action"]=="sell" and "matched strategy entry" in decisions[0]["reason"]
+    fallback = [dict(ticker="ACME",action="hold")]
+    assert not da.enforce_profit_taking_guardrail(fallback,{"ACME":row},threshold_pct=3)
+    assert fallback[0]["action"]=="hold"

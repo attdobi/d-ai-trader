@@ -1,0 +1,138 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "SummarizerAgent",
+ "prefix": "SA",
+ "config_hash": "9ea09b9as",
+ "version": 34,
+ "root_id": "SA.root",
+ "prompt_version_id": 675,
+ "created_at": "2026-11-23T07:56:46.360880",
+ "created_by": "codex_operator",
+ "actor_kind": "codex_operator",
+ "description": "Identify what fell, when, and which source supports the move or recovery.",
+ "is_active": true,
+ "materialized_by": "selloff_screen_overlay",
+ "source_sha256": {
+  "system_prompt": "4149a1cf4a6e67da505befda0c72028babc9275be7439ee5c408cfcd2cb0c58d",
+  "user_prompt_template": "c7684b9fb50f1457eb174ce43cf18f57e3bd5944f9764c5f214f68e19841c55f",
+  "strategy_directives": "6726468cd2cc54552e67082b3c642fdcb1ddd558b07ba44938715225e5d4098b",
+  "soul": "968ed910010c1e29b1f15ac0fd2b3fc6691f5d5b00cc275b38aea9de68a3dd59",
+  "memory": "7c0c46ca44068ccfc6c832071f765ec6be3aeb9a43a260d1b30ed99f176530bd"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "SA.template.system"
+  ],
+  "user_prompt_template": [
+   "SA.template.user"
+  ],
+  "strategy_directives": [
+   "SA.directives",
+   "SA.directives.ground_truth",
+   "SA.directives.decider_uses",
+   "SA.directives.catalyst_provenance",
+   "SA.directives.event_opportunities",
+   "SA.directives.review_checks",
+   "SA.directives.visual_framing_research",
+   "SA.directives.selloff_evidence"
+  ],
+  "soul": [
+   "SA.soul",
+   "SA.soul.mission",
+   "SA.soul.principles",
+   "SA.soul.identity",
+   "SA.soul.core_philosophy",
+   "SA.soul.extraction_style"
+  ],
+  "memory": [
+   "SA.memory",
+   "SA.memory.source_quality",
+   "SA.memory.source_quality.source_origin",
+   "SA.memory.source_quality.event_time",
+   "SA.memory.source_quality.promotion",
+   "SA.memory.extraction_patterns",
+   "SA.memory.extraction_patterns.pipeline",
+   "SA.memory.extraction_patterns.market_context",
+   "SA.memory.extraction_patterns.event_calendar",
+   "SA.memory.extraction_patterns.earnings",
+   "SA.memory.extraction_patterns.technical_only",
+   "SA.memory.extraction_patterns.ownership",
+   "SA.memory.evidence_provenance",
+   "SA.memory.log.2026_11_06",
+   "SA.memory.log.2026_11_06.support_audit"
+  ]
+ },
+ "node_count": 37,
+ "edge_count": 43,
+ "code": {
+  "sha": "a71394b4cdbe",
+  "dir": "../_code/a71394b4cdbe",
+  "git_sha": "33197fdb",
+  "fires": {
+   "SA.code.feedback_suffix": true,
+   "SA.code.opportunity_charter": true,
+   "SA.code.operator_calendar": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 33,
+  "lineage_version": 34,
+  "activation": {
+   "event_id": 85,
+   "created_at": "2026-11-23T07:56:46.360880",
+   "action": "operator_prompt_audit",
+   "actor": "codex_operator",
+   "from_version": 33,
+   "batch_id": "a6afdcb7cd2142cf9b649c6c104bbdfa",
+   "reason": "Identify what fell, when, and which source supports the move or recovery."
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 33
+ },
+ "kind": "policy",
+ "history": []
+}

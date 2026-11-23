@@ -65,3 +65,13 @@ def test_captured_cash_reply_is_distinct_from_missing_reply():
     result = decision_audit._cycle(row, {"raw_reply": '{"decisions": [], "cash_reason": "No qualified entries."}'}, {}, [], set())
     assert result["model_buys"] == 0 and result["cash_reason"] == "No qualified entries."
     assert decision_audit._cycle(row, {"raw_reply": '[null]'}, {}, [], set())["model_buys"] is None
+
+
+def test_partial_buy_counts_as_one_filled_order_and_preserves_partial_status():
+    saved = [{"ticker": "AAA", "action": "buy", "execution_status": "partial_fill", "executed_amount": 90},
+             {"ticker": "BBB", "action": "buy", "execution_status": "canceled", "executed_amount": 0}]
+    cycle = decision_audit._cycle({"id": 1, "run_id": "r", "timestamp": None, "data": saved}, {}, {}, [], set())
+    assert decision_audit.execution_label({"execution_status": "canceled", "executed_shares": 2}) == "partially filled"
+    assert decision_audit.execution_label({"execution_status": "filled_details_pending", "shares": 4}) == "filled · details pending"
+    assert cycle["filled_buys"] == 1
+    assert [d["execution"] for d in cycle["decisions"]] == ["partially filled", "not filled"]

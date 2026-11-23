@@ -21,7 +21,7 @@ from policy_safety import feedback_policy_violations, opportunity_system_prompt
 from feedback_learning import review_evidence, review_evidence_text
 from feedback_metrics import (
     BREAK_EVEN_DOLLAR_MAX, SIGNIFICANT_LOSS_THRESHOLD, SIGNIFICANT_PROFIT_THRESHOLD,
-    categorize_outcome,
+    categorize_outcome, feedback_market_context, finite_number,
 )
 
 FEEDBACK_LOOKBACK_DAYS = 30          # Days to look back for outcome analysis
@@ -35,6 +35,18 @@ def _canonical_agent_type(agent_type):
     if agent_type == "feedback_analyzer":
         return "FeedbackAgent"
     return agent_type
+
+
+def _feedback_identity(config_hash):
+    """Use the reviewed Feedback instructions for the configuration being measured."""
+    from prompt_manager import get_active_prompt
+    try:
+        prompt = get_active_prompt("FeedbackAgent", config_hash=config_hash)
+        soul = (prompt or {}).get("soul")
+    except Exception as exc:
+        print(f"Feedback identity unavailable ({type(exc).__name__})")
+        return ""
+    return "\n\n## AGENT IDENTITY\n" + soul if soul else ""
 
 
 def _build_feedback_api_params(system_prompt: str, user_prompt: str, agent_label: str, base_max_tokens: int, enable_reasoning: bool = True) -> dict:
@@ -488,21 +500,23 @@ class TradeOutcomeTracker:
             
             trades = []
             for row in result:
+                fraction = finite_number(row.gain_loss_percentage)
                 trades.append({
                     "symbol": row.ticker,
-                    "buy_price": float(row.purchase_price),
-                    "sell_price": float(row.sell_price),
+                    "buy_price": finite_number(row.purchase_price),
+                    "sell_price": finite_number(row.sell_price),
                     "shares": row.shares,
                     "sell_date": row.sell_timestamp.strftime("%Y-%m-%d"),
                     "hold_days": row.hold_duration_days,
-                    "gain_loss_pct": float(row.gain_loss_percentage),
+                    "gain_loss_pct": fraction * 100 if fraction is not None else None,
+                    "gain_loss_usd": finite_number(row.gain_loss_amount),
                     "outcome": categorize_outcome(
                         row.gain_loss_amount, row.gain_loss_percentage,
                         stored_category=row.outcome_category,
                     ),
                     "buy_reasoning": row.original_reason,
                     "sell_reasoning": row.sell_reason,
-                    "market_context": row.market_context
+                    "market_context": feedback_market_context(row.market_context),
                 })
             
             return trades
@@ -1075,16 +1089,7 @@ Use supplied dollars for usd, otherwise null. decider_rules accepts 0-2 proposal
 
         FEEDBACK_SYSTEM_BASE = '''You are the evidence reviewer of a trading learning loop. Separate recorded facts, uncertain interpretations and proposed policy changes. Human feedback defines policy intent; market outcomes are noisy evidence rather than clean correct-action labels. Offer small readable proposals for review. Do not self-promote observations into execution rules.'''
 
-        # Inject feedback agent soul if available
-        feedback_soul = ""
-        try:
-            from prompt_manager import get_active_prompt
-            feedback_prompt_data = get_active_prompt("FeedbackAgent")
-            feedback_soul = feedback_prompt_data.get("soul", "")
-        except Exception:
-            pass
-
-        feedback_soul_section = f"\n\n## AGENT IDENTITY\n{feedback_soul}" if feedback_soul else ""
+        feedback_soul_section = _feedback_identity(config_hash)
 
         system_prompt = f'''{FEEDBACK_SYSTEM_BASE}{feedback_soul_section}
 
@@ -1655,7 +1660,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
         
         decision_analysis["prospective_policy_evidence"] = prospective
         # Generate AI feedback on decision patterns
-        feedback = self._generate_decision_pattern_feedback(parsed_decisions, decision_analysis)
+        feedback = self._generate_decision_pattern_feedback(parsed_decisions, decision_analysis, config_hash=config_hash)
         
         return {
             "type": "decision_pattern_analysis",
@@ -1666,7 +1671,7 @@ Your analysis should be thorough, data-driven, and provide actionable insights f
             "feedback": feedback
         }
         
-    def _generate_decision_pattern_feedback(self, decisions, analysis):
+    def _generate_decision_pattern_feedback(self, decisions, analysis, *, config_hash=None):
         """Generate AI feedback on decision-making patterns"""
         try:
             # Use the global prompt_manager instance
@@ -1699,6 +1704,7 @@ Provide structured feedback focusing on:
 Return as JSON with keys: decision_quality, stock_selection, risk_management, timing_analysis, recommendations"""
 
             system_prompt = """You are an expert trading analyst providing feedback on AI trading decisions. Focus on the quality of the decision-making process, stock selection logic, and risk management practices. Be constructive and specific in your recommendations."""
+            system_prompt += _feedback_identity(config_hash)
             
             # Get AI model parameters
             agent_label = "FeedbackAgent"

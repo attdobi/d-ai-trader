@@ -232,6 +232,22 @@
   "version": "DeciderAgent.baseline.v0"
  },
  {
+  "source_node_id": "DA.code.selloff_review",
+  "target_node_id": "DA.directives.large_selloff_review",
+  "edge_type": "constrains",
+  "confidence": 1.0,
+  "provenance": "authored:code_map",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.code.selloff_review",
+  "target_node_id": "DA.code",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
   "source_node_id": "DA.code.visual_evidence",
   "target_node_id": "DA.code",
   "edge_type": "subtype_of",
@@ -273,6 +289,41 @@
  },
  {
   "source_node_id": "DA.directives.ground_truth",
+  "target_node_id": "DA.directives",
+  "edge_type": "subtype_of",
+  "confidence": 1.0,
+  "provenance": "derived:hierarchy",
+  "version": "DeciderAgent.baseline.v0"
+ },
+ {
+  "source_node_id": "DA.directives.large_selloff_review",
+  "target_node_id": "DA.directives.strategy.day_chase",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "[[Day chase]]"
+ },
+ {
+  "source_node_id": "DA.directives.large_selloff_review",
+  "target_node_id": "DA.directives.strategy.priced_kill",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "[[Priced kill]]"
+ },
+ {
+  "source_node_id": "DA.directives.large_selloff_review",
+  "target_node_id": "DA.directives.strategy.re_entry_quarantine",
+  "edge_type": "related_to",
+  "confidence": 1.0,
+  "provenance": "derived:wikilink",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "[[Re-entry quarantine]]"
+ },
+ {
+  "source_node_id": "DA.directives.large_selloff_review",
   "target_node_id": "DA.directives",
   "edge_type": "subtype_of",
   "confidence": 1.0,
@@ -757,6 +808,15 @@
  {
   "source_node_id": "DA.template.user",
   "target_node_id": "DA.code.recent_activity_header",
+  "edge_type": "includes",
+  "confidence": 1.0,
+  "provenance": "derived:assembly",
+  "version": "DeciderAgent.baseline.v0",
+  "via": "user_prompt_dynamic"
+ },
+ {
+  "source_node_id": "DA.template.user",
+  "target_node_id": "DA.code.selloff_review",
   "edge_type": "includes",
   "confidence": 1.0,
   "provenance": "derived:assembly",

@@ -8,7 +8,8 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
-from policy_graph import opportunities as opp
+from feedback_metrics import execution_coverage
+from policy_graph import opportunities as opp, selloffs
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 MAX_SUMMARIES = 10000
@@ -160,6 +161,8 @@ def learning_report(engine, config_hash, *, days=30, horizon=3, now=None):
                  WHERE {scope} ORDER BY p.observed_at,p.id LIMIT :cap"""), params).mappings().all()
         if len(candidates) > opp.MAX_REPORT_COHORT:
             return {"status": "cohort_limit", "message": "This window exceeds 50,000 eligible observations. Select 30 days."}
+        selloff_data = selloffs.report(conn, config_hash, start, now)
+        execution_data = execution_coverage(conn, config_hash, start, now)
         inputs = conn.execute(text(f"""SELECT d.id,d.context_json FROM decider_inputs d WHERE d.config_hash=:h
                  AND d.call_kind='decide' AND d.id IN (SELECT DISTINCT p.input_id FROM learning_opportunities p
                  WHERE {scope})"""), params).mappings().all()
@@ -169,7 +172,7 @@ def learning_report(engine, config_hash, *, days=30, horizon=3, now=None):
     cases = [dict(c, outcomes={str(horizon): _obj(c["outcome_json"])}) for c in candidates]
     _, episodes = opp.prospective_episodes(cases, horizon=horizon)
     payload = dict(status="ok", start=start.isoformat(), as_of=now.isoformat(), horizon=horizon, days=days,
-                   candidate_rows=len(cases), episodes=len(episodes),
+                   candidate_rows=len(cases), episodes=len(episodes), selloffs=selloff_data, execution=execution_data,
                    decider={group: _groups(episodes, [], group == "week", horizon, now) for group in ("version", "week")})
     if len(summary_rows) > MAX_SUMMARIES:
         payload["summarizer"] = {"status": "cohort_limit"}
@@ -216,6 +219,10 @@ def review_evidence(engine, config_hash):
             summary["mean_selected_paper_return_pct"] = round(mean,3) if mean is not None else None
             group["latest_groups"].append(summary)
         packet[agent] = group
+    if "execution" in report:
+        packet["execution_coverage"] = report["execution"]
+    if report.get("selloffs", {}).get("status") == "ok":
+        packet["large_selloffs"] = report["selloffs"]["rows"]
     return packet
 
 
@@ -226,5 +233,10 @@ def review_evidence_text(packet):
             "actionable versus watch/avoid cards linked by source ID, ticker and decision-time evidence. "
             "Unattributed summaries lack recorded prompt versions. Compare periods with attention to coverage, "
             "pending outcomes, sampling uncertainty and different market conditions. A zero denominator is "
-            "unmeasured. These descriptive signals support hypotheses for review.\n"
+            "unmeasured. Large selloffs use separate first daily observations and adjusted same-day close to "
+            "next-session open net of costs. Distinguish explicit passes, missing assessments and missing replies. "
+            "Reconstructed cases supplement forward evidence. Positive paper marks do not establish feasible fills. "
+            "Execution coverage counts matched and legacy recorded closures by sale time. Separate exit-order counts "
+            "use submission time; pending, unfilled and unscored orders have no attributable realized return. Null coverage "
+            "means its ledger was unavailable. These descriptive signals support hypotheses for review.\n"
             + json.dumps(packet, ensure_ascii=True, separators=(",", ":")))

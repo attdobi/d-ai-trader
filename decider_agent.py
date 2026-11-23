@@ -93,10 +93,12 @@ def _safe_float(value, default=0.0):
 
 
 def _holding_gain_pct(holding):
-    purchase_price = _safe_float(holding.get("purchase_price"))
+    purchase_price = _safe_float(holding.get("strategy_unit_cost") or holding.get("purchase_price"))
     current_price = _safe_float(holding.get("current_price"))
     if purchase_price > 0 and current_price > 0:
         return ((current_price - purchase_price) / purchase_price) * 100.0
+    if holding.get("strategy_unit_cost"):
+        return 0.0  # No current price to compare with the verified strategy entry.
     total_value = _safe_float(holding.get("total_value"))
     gain_loss = _safe_float(holding.get("gain_loss"))
     if total_value > 0:
@@ -147,10 +149,11 @@ def enforce_profit_taking_guardrail(decisions, holdings_by_ticker, threshold_pct
             decisions.append(decision)
 
         amount_value = _holding_current_value(holding)
-        basis_val = _safe_float(holding.get("purchase_price"))
+        basis_val = _safe_float(holding.get("strategy_unit_cost") or holding.get("purchase_price"))
         basis_text = f"${basis_val:.2f}" if basis_val > 0 else "basis n/a"
+        source = holding.get("return_basis", "position basis")
         forced_reason = (
-            f"Forced SELL {ticker}: +{gain_pct:.1f}% vs {basis_text} cost. "
+            f"Forced SELL {ticker}: +{gain_pct:.1f}% vs {basis_text} {source}. "
             "Profit-taking guardrail frees settled funds for the next GPT-5.1 regular cycle."
         )
         combined_reason = forced_reason
@@ -296,6 +299,12 @@ def recently_exited_tickers(config_hash: str, sessions: int = 2) -> set:
                 SELECT DISTINCT ticker FROM trade_outcomes
                 WHERE config_hash = :h AND ticker != 'N/A' AND sell_timestamp >= :cutoff
             """), {"h": config_hash, "cutoff": _sessions_ago_cutoff(sessions)}).fetchall()
+            from sqlalchemy import inspect
+            if inspect(conn).has_table("strategy_exit_accounting"):
+                rows.extend(conn.execute(_text("""
+                    SELECT DISTINCT ticker FROM strategy_exit_accounting
+                    WHERE config_hash=:h AND observed_at >= :cutoff AND (fill_confirmed OR confirmed_qty > 0)
+                """), {"h": config_hash, "cutoff": _sessions_ago_cutoff(sessions)}).fetchall())
         return {str(r.ticker).upper() for r in rows if r.ticker}
     except Exception as exc:
         print(f"⚠️  Re-entry quarantine lookup skipped: {exc}")
@@ -1175,10 +1184,12 @@ def _compute_symbol_momentum(symbol):
 
     # Real-time price: intraday last (preferred) → last settled daily close.
     intraday_price = None
+    price_asof = None
     if intraday is not None and not intraday.empty:
         intraday_valid = intraday['Close'].dropna()
         if not intraday_valid.empty:
             intraday_price = float(intraday_valid.iloc[-1])
+            price_asof = intraday_valid.index[-1].isoformat()
     current_price = intraday_price
     if current_price is None and not valid_closes.empty:
         current_price = float(valid_closes.iloc[-1])
@@ -1237,6 +1248,8 @@ def _compute_symbol_momentum(symbol):
     return {
         "symbol": ticker,
         "price": current_price,
+        "price_asof": price_asof,
+        "volume_session": latest_date.date().isoformat(),
         "ten_min_pct": ten_min_pct,
         "hour_pct": hour_pct,
         "daily_pct": daily_pct,
@@ -1476,15 +1489,13 @@ def execute_real_world_trade(decision):
         if result.get('success'):
             # Record the ACTUAL fill on the decision (not the pre-trade estimate),
             # so the dashboard shows what really executed.
-            # Some success payloads omit filled_quantity/executed_amount; fall back to
-            # the sized count so a confirmed fill always persists shares + amount.
-            filled_qty = (result.get('filled_quantity') or result.get('shares')
-                          or decision.get('shares_override') or decision.get('shares'))
+            filled_qty = result.get('filled_quantity')
             fill_price = result.get('price')
             fill_amount = result.get('executed_amount')
             if fill_amount is None and filled_qty and fill_price:
                 fill_amount = round(float(filled_qty) * float(fill_price), 2)
-            decision['execution_status'] = 'filled'
+            decision['execution_status'] = result.get('execution_status') or (
+                'filled' if filled_qty and fill_price else 'filled_details_pending')
             decision['order_id'] = result.get('order_id')
             if filled_qty:
                 decision['executed_shares'] = filled_qty
@@ -1492,8 +1503,8 @@ def execute_real_world_trade(decision):
                 decision['executed_price'] = fill_price
             if fill_amount is not None:
                 decision['executed_amount'] = fill_amount
-            amt_str = f"${fill_amount:.2f}" if fill_amount is not None else f"${amount_usd}"
-            print(f"✅ REAL TRADE FILLED: {action.upper()} {ticker} — {filled_qty or '?'} sh @ "
+            amt_str = f"${fill_amount:.2f}" if fill_amount is not None else "amount pending"
+            print(f"Broker {decision['execution_status']}: {action.upper()} {ticker} — {filled_qty or '?'} sh @ "
                   f"${fill_price if fill_price else '?'} = {amt_str}")
             print(f"   Order ID: {result.get('order_id', 'N/A')}")
             return True
@@ -1659,6 +1670,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             config_hash,
             skipped_decisions,
             live_execution_enabled,
+            run_id=run_id,
         )
         _sync_live_positions("post-sell")
         available_cash = _current_cash_balance()
@@ -1754,6 +1766,7 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
             # trading_interface already placed (its safety manager applied these caps);
             # trimming the record here would understate a fill that happened.
             enforce_position_caps=live_execution_enabled or trading_mode not in ("live", "real_world"),
+            run_id=run_id,
         )
 
     # 3) Log hold decisions
@@ -1797,8 +1810,18 @@ def update_holdings(decisions, skip_live_execution=False, run_id=None):
     # those objects (line ~1460), not on the original `decisions`, so persisting the
     # originals silently dropped every outcome (why fills kept showing the estimate).
     _persist_execution_outcomes([norm for _, norm in decisions_with_idx], run_id, config_hash)
-
     return skipped_decisions
+
+
+def reconcile_live_exits():
+    """Retry settled cash attribution after each live cycle, including cash-only cycles."""
+    if get_trading_mode() in ("live", "real_world"):
+        try:
+            from schwab_client import schwab_client
+            from strategy_exit_accounting import reconcile
+            reconcile(engine, get_current_config_hash(), schwab_client)
+        except Exception as exc:
+            print(f"Live fill accounting pending ({type(exc).__name__})")
 
 
 def _persist_execution_outcomes(decisions, run_id, config_hash):
@@ -1825,11 +1848,12 @@ def _persist_execution_outcomes(decisions, run_id, config_hash):
         return
     try:
         with engine.begin() as conn:
+            lock = " FOR UPDATE" if conn.dialect.name == "postgresql" else ""
             row = conn.execute(text("""
                 SELECT id, data FROM trade_decisions
                 WHERE run_id = :r AND config_hash = :h
                 ORDER BY id DESC LIMIT 1
-            """), {"r": run_id, "h": config_hash}).fetchone()
+            """ + lock), {"r": run_id, "h": config_hash}).fetchone()
             if not row:
                 return
             stored = row.data if isinstance(row.data, list) else json.loads(row.data)
@@ -1838,7 +1862,7 @@ def _persist_execution_outcomes(decisions, run_id, config_hash):
                 if not isinstance(sd, dict):
                     continue
                 key = (str(sd.get('ticker', '')).upper(), str(sd.get('action', '')).lower())
-                if key in outcomes:
+                if key in outcomes and sd.get('execution_evidence_source') != 'schwab_transactions':
                     sd.update(outcomes[key])
                     changed = True
             if changed:
@@ -1847,7 +1871,8 @@ def _persist_execution_outcomes(decisions, run_id, config_hash):
     except Exception as exc:
         print(f"⚠️  Could not persist execution outcomes: {exc}")
 
-def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled):
+def process_sell_decisions(sell_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled,
+                           run_id=None):
     """Process all sell decisions and return updated cash balance"""
 
     # Track the cash we're adding from sells
@@ -1867,8 +1892,9 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 skipped_decisions.append({**decision, "reason": f"Invalid ticker - {reason}"})
                 continue
 
-            # Get price first - we always want current/close price for analysis
-            price = get_current_price(ticker)
+            submitted = bool(not live_execution_enabled and decision.get("order_id")
+                             and get_trading_mode() in {"live", "real_world"})
+            price = decision.get("executed_price") if submitted else get_current_price(ticker)
             if not price:
                 print(f"Skipping sell for {ticker} due to missing price (API rate limited).")
                 skipped_decisions.append({
@@ -1879,7 +1905,7 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 })
                 continue
 
-            if not is_market_open():
+            if not submitted and not is_market_open():
                 print(f"⛔ Market closed - recording sell decision for {ticker} but NO execution.")
                 skipped_decisions.append({
                     "action": "sell",
@@ -1894,8 +1920,18 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                 {"ticker": clean_ticker, "config_hash": config_hash}
             ).fetchone()
             if holding:
-                if live_execution_enabled:
-                    live_success = execute_real_world_trade(decision)
+                broker_exit = live_execution_enabled or submitted
+                if broker_exit:
+                    from strategy_exit_accounting import queue_exit
+                    live_success = execute_real_world_trade(decision) if live_execution_enabled else True
+                    if run_id and live_execution_enabled and decision.get("order_id"):
+                        _persist_execution_outcomes([decision], run_id, config_hash)
+                    if conn.dialect.name == "postgresql":
+                        # The receipt survives a subsequent rollback of the holdings mirror.
+                        with engine.begin() as receipt_conn:
+                            queue_exit(receipt_conn, config_hash, clean_ticker, decision, holding)
+                    else:
+                        queue_exit(conn, config_hash, clean_ticker, decision, holding)
                     if not live_success:
                         # Mirror the buy-path guard: a sell that did not execute at
                         # the broker must NOT be booked locally. The old
@@ -1920,46 +1956,43 @@ def process_sell_decisions(sell_decisions, available_cash, timestamp, config_has
                         })
                         continue
 
-                shares = float(holding.shares)
+                held = float(holding.shares)
+                shares = held
+                if broker_exit:
+                    shares = float(decision.get('executed_shares') or 0)
+                    price = float(decision.get('executed_price') or 0)
+                    if not (0 < shares <= held and price > 0):
+                        # The broker snapshot will update inventory. No estimate can
+                        # replace missing execution evidence in the strategy ledger.
+                        continue
                 purchase_price = float(holding.purchase_price)
                 total_value = shares * price
-                purchase_value = shares * purchase_price
-                gain_loss = total_value - purchase_value
+                book_gain = shares * (price - purchase_price)
+                if not broker_exit:
+                    holding_data = dict(purchase_price=purchase_price, shares=shares,
+                                        purchase_timestamp=holding.purchase_timestamp, reason=holding.reason)
+                    try:
+                        feedback_tracker.record_sell_outcome(ticker, price, holding_data, reason)
+                    except Exception as e:
+                        print(f"Failed to record simulated sell outcome for {ticker}: {e}")
 
-                holding_data = {
-                    'purchase_price': purchase_price,
-                    'shares': shares,
-                    'purchase_timestamp': holding.purchase_timestamp,
-                    'reason': holding.reason
-                }
-                try:
-                    outcome_category = feedback_tracker.record_sell_outcome(
-                        ticker, price, holding_data, reason
-                    )
-                    print(f"Sell outcome recorded for {ticker}: {outcome_category}")
-                except Exception as e:
-                    print(f"Failed to record sell outcome for {ticker}: {e}")
-
+                remaining = held - shares
+                # Inactive rows retain the closing book snapshot used by historical views.
+                snapshot_qty = remaining if remaining > 0 else held
                 conn.execute(text("""
-                        UPDATE holdings SET
-                            shares = 0,
-                            is_active = FALSE,
-                            current_price = :price,
-                            current_price_timestamp = :timestamp,
-                            current_value = :value,
-                            gain_loss = :gain_loss
+                        UPDATE holdings SET shares = :remaining, is_active = :active,
+                            current_price = :price, current_price_timestamp = :timestamp,
+                            total_value = :cost, current_value = :value, gain_loss = :gain_loss
                         WHERE ticker = :ticker AND config_hash = :config_hash
                     """), {
-                        "ticker": clean_ticker,
-                        "price": float(price),
-                        "timestamp": timestamp,
-                        "value": total_value,
-                        "gain_loss": gain_loss,
-                        "config_hash": config_hash
+                        "ticker": clean_ticker, "price": price, "timestamp": timestamp,
+                        "remaining": remaining, "active": remaining > 0,
+                        "cost": snapshot_qty * purchase_price, "value": snapshot_qty * price,
+                        "gain_loss": snapshot_qty * (price - purchase_price), "config_hash": config_hash
                     })
 
                 cash_from_sells += total_value
-                print(f"💰 Sold {ticker}: {shares} shares at ${price:.2f} = ${total_value:.2f} (Gain/Loss: ${gain_loss:.2f})")
+                print(f"💰 Sold {ticker}: {shares} shares at ${price:.2f} = ${total_value:.2f} (change vs position basis: ${book_gain:.2f})")
 
             else:
                 # Check if it's inactive or just doesn't exist
@@ -2044,7 +2077,7 @@ def _position_cap_book(config_hash, cash_balance, live_snapshot=None):
 
 
 def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash, skipped_decisions, live_execution_enabled,
-                          live_snapshot=None, enforce_position_caps=True):
+                          live_snapshot=None, enforce_position_caps=True, run_id=None):
     """Process all buy decisions and return updated cash balance"""
 
     price_fetcher.prefetch_prices([clean_ticker_symbol(d.get("ticker")) for d in buy_decisions])
@@ -2101,8 +2134,14 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 skipped_decisions.append({**decision, "reason": f"Invalid ticker - {reason}"})
                 continue
 
-            # Get price first - we always want current/close price for analysis
-            price = get_current_price(ticker)
+            # Direct CLI orders were already submitted and sized at the broker.
+            # A later quote or a local budget change cannot resize an actual fill.
+            mirror_fill = not enforce_position_caps and (decision.get("order_id")
+                or decision.get("execution_status") in {"filled", "partial_fill", "filled_details_pending"})
+            if mirror_fill and not (decision.get("executed_shares") and decision.get("executed_price")):
+                skipped_decisions.append({**decision, "reason": "Awaiting broker execution quantity and price"})
+                continue
+            price = float(decision["executed_price"]) if mirror_fill else get_current_price(ticker)
             if not price:
                 print(f"Skipping buy for {ticker} due to missing price (API rate limited).")
                 skipped_decisions.append({
@@ -2113,7 +2152,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 })
                 continue
 
-            if not is_market_open():
+            if not mirror_fill and not is_market_open():
                 print(f"⛔ Market closed - recording buy decision for {ticker} but NO execution.")
                 skipped_decisions.append({
                     "action": "buy",
@@ -2129,16 +2168,12 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             # total-investment caps; a larger ticket is cut to what the caps leave room for
             # (order_sizing.py). The sizing record below names what bound the ticket.
             _ws = None
-            if decision.get('strategy') == 'earnings_event' and not enforce_position_caps:
-                # Already executed by trading_interface: mirror the broker's
-                # actual shares rather than resize a fill using another quote.
+            if mirror_fill:
                 from order_sizing import WholeShareSizing
-                if decision.get('execution_status') != 'filled' or not decision.get('executed_shares'):
-                    skipped_decisions.append({**decision, 'reason':'Earnings-event bookkeeping requires a confirmed broker fill'})
-                    continue
-                _ws = WholeShareSizing(int(decision['executed_shares']), 'confirmed earnings fill',
-                                       'broker-confirmed earnings-event quantity')
-                price = float(decision.get('executed_price') or price)
+                _ws = WholeShareSizing(int(decision["executed_shares"]), "confirmed fill", "broker-confirmed quantity")
+            elif decision.get("strategy") == "earnings_event" and not enforce_position_caps:
+                skipped_decisions.append({**decision, "reason": "Earnings-event bookkeeping requires a confirmed broker fill"})
+                continue
             if decision.get('strategy') == 'earnings_event' and enforce_position_caps:
                 try:
                     from earnings_strategy import execution_limit
@@ -2186,7 +2221,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                 print(f"✂️ {ticker}: {_ws.note}.")
 
             buffer_safe_cash = max(available_cash - MIN_BUFFER, 0.0)
-            max_affordable_shares = floor(buffer_safe_cash / price) if price > 0 else 0
+            max_affordable_shares = requested_shares if mirror_fill else floor(buffer_safe_cash / price)
             if max_affordable_shares <= 0:
                 print(
                     f"Skipping buy for {ticker} - settled funds limit allows $0 beyond buffer "
@@ -2231,7 +2266,7 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     f"buying {shares} share(s) for ~${actual_spent:.2f} to stay within settled funds (${available_cash:.2f} available)."
                 )
 
-            if available_cash - actual_spent < MIN_BUFFER - 1e-6:
+            if not mirror_fill and available_cash - actual_spent < MIN_BUFFER - 1e-6:
                 print(f"Skipping buy for {ticker} - would exceed budget even after adjustment (need ${actual_spent:.2f}, available ${available_cash:.2f})")
                 skipped_decisions.append({
                     "action": "buy",
@@ -2265,6 +2300,8 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
             # account never held. The Schwab sync remains authoritative.
             if live_execution_enabled:
                 real_trade_success = execute_real_world_trade(decision)
+                if run_id and decision.get("order_id"):
+                    _persist_execution_outcomes([decision], run_id, config_hash)
                 # The broker has this order (filled, or accepted and possibly filling later):
                 # count it in the cap book now, so a failed holdings write below or an
                 # unconfirmed fill cannot hide it from later buys this cycle. A WORKING order
@@ -2290,7 +2327,17 @@ def process_buy_decisions(buy_decisions, available_cash, timestamp, config_hash,
                     })
                     continue
 
-            # Execute the buy in simulation (always)
+            if live_execution_enabled or mirror_fill:
+                fill_qty = decision.get('executed_shares')
+                fill_price = decision.get('executed_price')
+                if not fill_qty or not fill_price:
+                    # Keep its reserved cap. Schwab sync will recover the holding.
+                    continue
+                shares, price = float(fill_qty), float(fill_price)
+                actual_spent = round(shares * price, 2)
+                decision['amount_usd_executed'] = actual_spent
+
+            # Mirror the purchase into local inventory.
             try:
                 existing = conn.execute(
                     text("SELECT shares, purchase_price, total_value, current_value, gain_loss, is_active, reason FROM holdings WHERE ticker = :ticker AND config_hash = :config_hash"),
@@ -2592,7 +2639,7 @@ OUTPUT (STRICT)
 ⏳ CASH ACCOUNT PLAYBOOK (1-5 TRADING DAYS)
 - This is a non-margin cash run; every BUY/SELL should assume a 1-5 session holding window, not a same-day scalp.
 - Default to HOLD unless the trade thesis or catalyst broke, price hit your stop, or a clearly superior setup needs the slot. Small mark-to-market noise is not a sell reason.
-- Treat the holdings block as the ground-truth P&L (purchase price, current price, gain/loss). Quote those numbers accurately; never describe a loss as a gain."""
+- Use the verified strategy entry basis and current price to assess an open trade when supplied. If only a reported position basis is available, label its unrealized change as such. Broker tax adjustments can affect that basis. Realized strategy P&L requires matched fills and net cash amounts."""
     if not IS_MARGIN_ACCOUNT and "⏳ CASH ACCOUNT PLAYBOOK" not in user_prompt_template:
         user_prompt_template = user_prompt_template.rstrip() + "\n\n" + cash_horizon_block.strip()
 
@@ -2760,8 +2807,32 @@ OUTPUT (STRICT)
     holdings_text = ""
     if stock_holdings:
         holdings_parts = []
+        live_basis = get_trading_mode() in {"live", "real_world"}
+        if live_basis:
+            try:
+                from schwab_client import schwab_client
+                from strategy_exit_accounting import verified_open_costs
+                costs = verified_open_costs(engine, config_hash, schwab_client, stock_holdings)
+            except Exception as exc:
+                print(f"Strategy entry verification unavailable ({type(exc).__name__})")
+                costs = {}
+            stock_holdings = [{**h, "strategy_unit_cost": costs.get(h["ticker"]),
+                               "return_basis": "matched strategy entry" if h["ticker"] in costs else "broker position basis"}
+                              for h in stock_holdings]
         for h in stock_holdings:
-            gain_loss_pct = (h['gain_loss'] / h['total_value'] * 100) if h['total_value'] > 0 else 0
+            cost = h.get("strategy_unit_cost")
+            if cost is not None:
+                basis = f"matched strategy entry ${cost:.2f}/share incl. entry fees; broker basis ${h['purchase_price']:.2f}"
+                ret = "strategy unrealized return unavailable"
+                if _safe_float(h.get("current_price")) > 0:
+                    unrealized = (h["current_price"] - cost) * h["shares"]
+                    ret = f"strategy unrealized ${unrealized:.2f} / {_holding_gain_pct(h):.2f}%"
+            elif live_basis:
+                basis = f"strategy entry unverified; broker position basis ${h['purchase_price']:.2f}/share"
+                ret = f"protective fallback return on broker basis {_holding_gain_pct(h):.2f}% (may include tax adjustments)"
+            else:
+                basis = f"entry basis ${h['purchase_price']:.2f}"
+                ret = f"unrealized ${h['gain_loss']:.2f} / {_holding_gain_pct(h):.2f}%"
             # Position age (recency) so the decider distinguishes its own fresh entries
             # from genuinely old inherited inventory and does not churn what it just bought.
             age_str = ""
@@ -2773,9 +2844,9 @@ OUTPUT (STRICT)
                 except Exception:
                     age_str = ""
             holdings_parts.append(
-                f"{h['ticker']}: {h['shares']} shares at ${h['purchase_price']:.2f} "
+                f"{h['ticker']}: {h['shares']} shares, {basis} "
                 f"→ Current: ${h['current_price']:.2f} "
-                f"(Gain/Loss: ${h['gain_loss']:.2f} / {gain_loss_pct:.1f}%) "
+                f"({ret}) "
                 f"(Value: ${h['current_value']:.2f}){age_str} "
                 f"(Reason: {h['reason']})"
             )
@@ -2982,13 +3053,18 @@ OUTPUT (STRICT)
         print(f"⚠️  Policy router skipped (today's prompt served): {_router_exc}")
     _router_active = bool(_router is not None and _router.active)
 
+    from policy_graph import selloffs
+    selloff_observed_at = datetime.now(pytz.UTC)
+    selloff_candidates = selloffs.select_candidates(momentum_data, _ctx_lists, selloff_observed_at)
+    absent_code = () if selloff_candidates else (selloffs.SELLOFF_REVIEW_ID,)
+
     try:
         if _ctx_lists is None:
             raise RuntimeError(f"cycle context unavailable ({_ctx_error})")
         if str(os.getenv("DAI_GRAPH_ASSEMBLY", "1")).strip().lower() not in ("0", "false", "no", "off"):
             _assembled = _graph_assemble_system_prompt(
                 prompt_data, prompt_version, run_id, **_ctx_lists,
-                config_hash=config_hash,
+                config_hash=config_hash, absent_code=absent_code,
                 override=(_router.assembly_override() if _router_active else None),
                 audit_capture=(_decisions_shadow if _decisions_shadow.get("job") is not None else None))
             if _assembled is not None:
@@ -3177,7 +3253,7 @@ OUTPUT (STRICT)
     if _graph_served:
         _guideline_index_lines = _graph_index_text
     else:
-        _guideline_index_lines = _guideline_index_text(prompt_version)
+        _guideline_index_lines = _guideline_index_text(prompt_version, absent_code=absent_code)
     # the long-term memory rows injected above join the index (served this cycle → citable and accepted by
     # validation and the repair pass) — only next to a real index: alone they would turn every other
     # guideline id into "not in the served index"
@@ -3205,6 +3281,7 @@ OUTPUT (STRICT)
     # Both graph and flat policy paths meet here. Keep the code-owned charter in
     # the exact system prompt persisted for replay and sent to the model.
     system_prompt = opportunity_system_prompt(system_prompt, decider=True)
+    prompt += selloffs.prompt_section(selloff_candidates)
 
     prompt_preview_head = int(os.getenv("DAI_PROMPT_DEBUG_HEAD", os.getenv("DAI_PROMPT_DEBUG_LIMIT", "10000")))
     prompt_preview_tail = int(os.getenv("DAI_PROMPT_DEBUG_TAIL", "5000"))
@@ -3266,7 +3343,8 @@ OUTPUT (STRICT)
         _record_opportunity_snapshot(
             engine, config_hash, run_id, _contra, input_id=_input_id,
             prompt_version=prompt_version, context=_ctx_lists,
-            holdings=stock_holdings, quarantined=locals().get("_quarantined") or ())
+            holdings=stock_holdings, quarantined=locals().get("_quarantined") or (),
+            observed_at=selloff_observed_at, selloff_candidates=selloff_candidates)
     except Exception as _opportunity_exc:
         print(f"⚠️ Opportunity snapshot skipped ({type(_opportunity_exc).__name__})")
     # Attach the provider result to the exact prompt sent to the Decider.
@@ -3442,16 +3520,17 @@ OUTPUT (STRICT)
         for ticker in missing_tickers:
             holding = holdings_by_ticker.get(ticker)
             shares_txt = fmt_num(holding.get("shares")) if holding else "?"
-            basis_txt = fmt_num(holding.get("purchase_price")) if holding else "?"
+            cost = holding.get("strategy_unit_cost") if holding else None
+            basis_txt = fmt_num(cost or holding.get("purchase_price")) if holding else "?"
+            basis_source = holding.get("return_basis", "entry basis") if holding else "entry basis"
             last_txt = fmt_num(holding.get("current_price")) if holding else "?"
-            gl_txt = fmt_num(holding.get("gain_loss")) if holding else "?"
             ai_response.append({
                 "action": "hold",
                 "ticker": ticker,
                 "amount_usd": 0,
                 "reason": (
                     f"Auto HOLD {ticker}: AI omitted this position "
-                    f"({shares_txt} sh @ ${basis_txt}, last ${last_txt}, G/L ${gl_txt}). "
+                    f"({shares_txt} sh, {basis_source} ${basis_txt}, last ${last_txt}). "
                     "Carry forward to next cycle with explicit reasoning."
                 )
             })
@@ -3925,7 +4004,8 @@ def _router_memory_rows(router, todays_rows):
 
 
 def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime, holdings, watchlist, quarantined,
-                                  news=(), entities=(), trend=(), override=None, audit_capture=None, config_hash=None):
+                                  news=(), entities=(), trend=(), override=None, audit_capture=None, config_hash=None,
+                                  absent_code=()):
     """(system_prompt, served, index_text, rendered) built from the policy graph of the active version,
     or None when the graph is unavailable; `rendered` = {"soul", "directives", "memory"} as the model
     reads them this cycle. Records the served guidelines (with routes) in policy_graph_hits.
@@ -3964,7 +4044,7 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
         from copy import deepcopy
         audit_capture["assembly"] = {"version": deepcopy(_version), "context": deepcopy(ctx),
                                      "health": deepcopy(health), "template": prompt_data["system_prompt"],
-                                     "override": deepcopy(override)}
+                                     "override": deepcopy(override), "absent_code": absent_code}
     system_prompt = prompt_data["system_prompt"]
     if out.soul:
         system_prompt = f"{system_prompt}\n\n## AGENT IDENTITY\n{out.soul}"
@@ -3979,7 +4059,7 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     # (route "code") so the hit log and the Decision paths stop calling them "cited but not served".
     from policy_graph.assembly import Selected as _Selected
     _fires = (_version.manifest.get("code") or {}).get("fires") or {}
-    _code_served = [_Selected(cid, "code", "") for cid, ok in sorted(_fires.items()) if ok]
+    _code_served = [_Selected(cid, "code", "") for cid, ok in sorted(_fires.items()) if ok and cid not in absent_code]
     if _code_served:
         routes = dict(routes, code=len(_code_served))
     _ratio = (out.chars_served / out.chars_full * 100) if out.chars_full else 0
@@ -3998,12 +4078,13 @@ def _graph_assemble_system_prompt(prompt_data, prompt_version, run_id, *, regime
     # the index the model cites from: every served guideline plus the code-owned blocks that fire
     from policy_graph.citations import citable_nodes as _citable
     served_ids = {sel.node_id for sel in out.served}
-    index_lines = [f"{i} — {t}" for i, t in _citable(_version) if i in served_ids or i.split(".")[1:2] == ["code"]]
+    index_lines = [f"{i} — {t}" for i, t in _citable(_version, absent_code=absent_code)
+                   if i in served_ids or i.split(".")[1:2] == ["code"]]
     rendered = {"soul": out.soul, "directives": out.strategy_directives, "memory": out.memory}
     return system_prompt, out.served, "\n".join(index_lines), rendered
 
 
-def _guideline_index_text(prompt_version):
+def _guideline_index_text(prompt_version, *, absent_code=()):
     """`id — title` lines of the active policy version's citable guidelines, or "" when the policy
     graph directory cannot be read (the decision cycle never depends on it)."""
     try:
@@ -4018,7 +4099,7 @@ def _guideline_index_text(prompt_version):
         _pg_service.ensure_materialized(engine, _cfg, "DeciderAgent", int(prompt_version), repo_root=_root,
                                         is_margin_account=bool(IS_MARGIN_ACCOUNT), materialized_by="trader")
         _version = _read_version_dir(_root / "agents" / "decider" / "policy-graph" / _cfg / f"v{int(prompt_version)}")
-        return _guideline_index(_version)
+        return _guideline_index(_version, absent_code=absent_code)
     except Exception as _exc:
         print(f"⚠️  Guideline index unavailable for citations: {_exc}")
         return ""
@@ -4044,9 +4125,10 @@ def store_trade_decisions(decisions, run_id):
             _decision.pop('earnings_submission', None)
             if isinstance(_decision.get('reason'), str):
                 _decision['reason'] = _decision['reason'].replace('[earnings_event]', '')
-            if str(_decision.get('strategy') or '').lower() == 'earnings_event':
-                for _field in ('order_id', 'execution_status', 'execution_error', 'executed_shares', 'executed_price', 'executed_amount'):
-                    _decision.pop(_field, None)
+            # The order-ownership ledger accepts broker receipts from the execution
+            # path. An agent proposal cannot supply a receipt for any strategy.
+            for _field in ('order_id', 'execution_status', 'execution_error', 'executed_shares', 'executed_price', 'executed_amount'):
+                _decision.pop(_field, None)
             _decision['_earnings_run_id'] = run_id
     _earnings_book = None
     try:
@@ -4298,7 +4380,7 @@ if __name__ == "__main__":
         # Execute trades through the unified trading interface
         try:
             from trading_interface import trading_interface
-            execution_results = trading_interface.execute_trade_decisions(validated_decisions)
+            execution_results = trading_interface.execute_trade_decisions(validated_decisions, run_id=run_id)
 
             # Log execution results
             if execution_results.get("summary"):
@@ -4311,14 +4393,13 @@ if __name__ == "__main__":
                     print(f"   ⏭️  Skipped: {summary['skipped']}")
                 if summary.get('errors', 0) > 0:
                     print(f"   ❌ Errors: {summary['errors']}")
-        except ImportError:
-            # Fallback to original method if trading_interface is not available
-            print("⚠️  Trading interface not available, using simulation only")
-            update_holdings(validated_decisions, run_id=run_id)
         except Exception as e:
-            print(f"❌ Error in trading interface: {e}")
-            print("🔄 Falling back to simulation mode")
-            update_holdings(validated_decisions, run_id=run_id)
+            print(f"Trading interface error ({type(e).__name__})")
+            if get_trading_mode() == "simulation":
+                update_holdings(validated_decisions, skip_live_execution=True, run_id=run_id)
+            else:
+                # A broker request may already have reached Schwab before the error.
+                print("Live execution status needs broker reconciliation.")
 
         # Mark summaries as processed
         summary_ids = [s['id'] for s in unprocessed_summaries]

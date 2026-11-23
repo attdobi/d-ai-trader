@@ -24,11 +24,67 @@
     track.append(fill); cell.append(track);
     if (interval) small(cell, `95% CI ${pct(interval[0])}–${pct(interval[1])}`);
   }
+  const decisionLabel = action => ({NOT_ASSESSED: 'No assessment', NO_REPLY: 'No valid reply', BUY_CONSIDERED: 'BUY considered only'}[action] || action);
+  const percentReturn = value => Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
+  function renderSelloffs(data) {
+    if (!data || data.status !== 'ok') { status.textContent = 'Selloff observations are unavailable.'; return; }
+    const head = region.querySelector('thead'), body = region.querySelector('tbody');
+    head.replaceChildren(); body.replaceChildren();
+    const header = head.insertRow();
+    for (const title of ['Collection', 'Decision', 'Ticker sessions', 'Quarantined', 'Positive marks', 'Mean overnight return', 'Mark coverage']) {
+      const th = document.createElement('th'); th.scope = 'col'; th.textContent = title; header.append(th);
+    }
+    const count = data.rows.reduce((sum, r) => sum + r.observations, 0);
+    status.textContent = `${count} ticker sessions · first qualifying observation per day · paper returns from close to next open.`;
+    for (const r of data.rows) {
+      const row = body.insertRow();
+      const values = [r.origin === 'prospective' ? 'Forward' : 'Reconstructed', decisionLabel(r.action),
+        r.observations, r.quarantined, r.matured ? `${r.wins}/${r.matured}` : '—', percentReturn(r.mean_net_pct),
+        `${r.matured} marked · ${r.pending} pending · ${r.missing} missing`];
+      for (const value of values) row.insertCell().textContent = value;
+    }
+    region.hidden = !count;
+    const detail = panel.querySelector('[data-selloff-detail]');
+    const recent = detail.querySelector('tbody'); recent.replaceChildren();
+    for (const r of data.recent) {
+      const row = recent.insertRow();
+      const values = [r.session, r.ticker, r.origin, percentReturn(r.day_pct),
+        decisionLabel(r.action) + (r.quarantined ? ' · quarantine' : ''),
+        r.net_return_pct === null ? r.status.replaceAll('_', ' ') : percentReturn(r.net_return_pct)];
+      for (const value of values) row.insertCell().textContent = value;
+      const reason = row.insertCell(); reason.className = 'selloff-reason';
+      reason.textContent = r.reason;
+      const rules = row.insertCell();
+      for (const id of r.cited) {
+        const link = document.createElement('a');
+        link.href = '/policy-graph#' + new URLSearchParams({agent: 'DeciderAgent', v: r.prompt_version, node: id});
+        link.textContent = id;
+        link.title = `Open ${id} in Decider v${r.prompt_version}`;
+        rules.append(link);
+      }
+    }
+    detail.hidden = !data.recent.length;
+  }
   function render() {
     region.hidden = true;
+    const selloffs = agent === 'selloffs';
     panel.querySelector('[data-summary-method]').hidden = agent !== 'summarizer';
+    panel.querySelector('[data-selloff-detail]').hidden = true;
+    panel.querySelector('[data-selloff-method]').hidden = !selloffs;
+    panel.querySelectorAll('[data-screener-method]').forEach(el => { el.hidden = selloffs; });
+    for (const key of ['group', 'horizon']) panel.querySelector(`[data-filter="${key}"]`).closest('label').hidden = selloffs;
+    const execLine = panel.querySelector('[data-execution-coverage]');
+    execLine.hidden = true;
     if (!payload) return;
     if (payload.status !== 'ok') {status.textContent = payload.message; return;}
+    if (payload.execution) {
+      const {closures, exit_orders: exits} = payload.execution;
+      const sold = closures ? `${closures.matched_fills} matched to broker fills · ${closures.legacy_recorded} legacy recorded` : 'ledger unavailable';
+      const submitted = exits ? `${exits.scored} scored · ${exits.pending} pending · ${exits.unfilled} unfilled · ${exits.unscored} unscored` : 'ledger unavailable';
+      execLine.textContent = `Closures sold in this window: ${sold}. Exit orders submitted in this window: ${submitted}.`;
+      execLine.hidden = false;
+    }
+    if (selloffs) { renderSelloffs(payload.selloffs); return; }
     const summarizer = agent === 'summarizer', byWeek = filter('group') === 'week';
     const data = payload[agent], label = byWeek ? 'Week starting' : 'Prompt';
     if (data.status === 'cohort_limit') { status.textContent = 'Too many summaries for this lookback. Select 30 days.'; return; }
@@ -70,7 +126,7 @@
   }
   async function load() {
     const id = ++request;
-    payload = undefined; region.hidden = true; status.textContent = 'Loading saved observations…';
+    payload = undefined; render(); status.textContent = 'Loading saved observations…';
     try {
       const data = await fetchJSON(`/api/feedback/learning?days=${filter('days')}&horizon=${filter('horizon')}`);
       if (id === request) {payload = data; render();}

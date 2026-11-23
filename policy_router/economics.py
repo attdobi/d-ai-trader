@@ -205,7 +205,7 @@ class PromptCapture:
                              override=self.graph.get("override") if actual_graph else override or None)
         system = _system(self.graph["template"], assembled) + self.client_suffix
         graph_ids = {s.node_id for s in assembled.served}
-        index = [f"{i} — {title}" for i, title in citable_nodes(version)
+        index = [f"{i} — {title}" for i, title in citable_nodes(version, absent_code=self.graph.get("absent_code", ()))
                  if i in graph_ids or i.split(".")[1:2] == ["code"]]
         index += ltm_index_lines(rows)
         excluded = [] if actual_graph else [i for i, kind in self.eligible.items() if kind == "ltm" and i not in selected_ids]

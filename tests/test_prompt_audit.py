@@ -294,3 +294,15 @@ def test_apply_requires_audited_callback(db):
     spec = spec_for(db)
     with pytest.raises(ValueError, match="activation callback"):
         apply_review(db, None, spec)
+
+
+def test_selloff_review_activates_consumed_fields_once(db, activate):
+    from policy_graph.selloff_policy import SECTIONS, reviewed_spec
+
+    spec = reviewed_spec(db, CFG)
+    result = apply_review(db, activate, spec)
+    assert {p["agent_type"] for p in result["policies"]} == set(SECTIONS)
+    active = {row["agent_type"]: row for row in rows(db, "prompt_versions", CFG) if row["is_active"]}
+    for agent, (field, title, body) in SECTIONS.items():
+        assert "## " + title + "\n" + body in active[agent][field]
+    assert audit.preview(db, CFG, spec=reviewed_spec(db, CFG))["agents"] == []

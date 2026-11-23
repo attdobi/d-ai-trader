@@ -8,6 +8,16 @@ Loop: `news → summarize → decide → execute → score → propose → revie
 
 ---
 
+## Learning from selloffs and fills — November 23, 2026
+
+**Feedback → Learning performance** tracks stocks that fell at least 8% from the previous close and traded at least $10 million in estimated session dollar volume. The Decider reviews each qualifying unheld ticker in its supplied momentum data, including tickers under re-entry quarantine. The Summarizer identifies the source, timing and evidence of a recovery. The Decider records its assessment, the rule that governed it, and what would warrant another look. Inspect the original cycle under **Policy Graph → Decision audit**.
+
+The selloff table counts the first qualifying observation per ticker and session. It distinguishes buys, watches, passes and missed assessments. Its paper return uses the adjusted session close and the next regular session’s open, with 10 basis points in costs on each side. Reconstructed observations carry their own label. Weekly Feedback reviews these outcomes separately from regular screener recall and real trading P&L.
+
+**Feedback → Recent Trade Outcomes** identifies closures matched to Schwab fills. For those closures, strategy P&L uses the cash paid for the strategy’s shares and the net proceeds from selling them, including fees. Broker position basis is shown separately. A submitted sale whose fills cannot yet be matched stays in reconciliation. Older recorded outcomes retain their source until reconciled. [Feedback metric definitions](docs/FEEDBACK_METRICS.md)
+
+For an open live position, the Decider checks whether broker transactions linked to the strategy account for the shares currently held. When they match, percentage-based exit rules use the verified per-share entry cost. If evidence is incomplete or includes outside trades, the holdings input identifies broker basis as the fallback for position protection.
+
 ## Measuring learning and routing — November 19, 2026
 
 Open **Feedback → Learning performance** to compare Decider policies by version or week.

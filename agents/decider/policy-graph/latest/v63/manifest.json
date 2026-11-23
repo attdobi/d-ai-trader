@@ -1,0 +1,228 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "DeciderAgent",
+ "prefix": "DA",
+ "config_hash": "9ea09b9as",
+ "version": 63,
+ "root_id": "DA.root",
+ "prompt_version_id": 673,
+ "created_at": "2026-11-23T07:56:46.360880",
+ "created_by": "codex_operator",
+ "actor_kind": "codex_operator",
+ "description": "Explain each large selloff assessment, the binding rule and when to revisit it.",
+ "is_active": true,
+ "materialized_by": "selloff_screen_overlay",
+ "source_sha256": {
+  "system_prompt": "ba12259fecd39a21b8234e629e5dcca1d13d41c497da5e261d44b3f784cf764f",
+  "user_prompt_template": "c9adf7b6ef4bb75cd40972e6446db76af0029d33de71086504ebe1ad9b063138",
+  "strategy_directives": "6cd43922be1aebbd932695f45ce2c76701ddba001c629e2be9285b1141ba3664",
+  "soul": "7531324b6a03476f6a63600fa29b00909360f114fa53cad3c4e2b2b8438ca9c1",
+  "memory": "b8b7e94888bd3738e6adbbaaaad570c479feb0cfddcd557260b101aa9850efb7"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "DA.template.system"
+  ],
+  "user_prompt_template": [
+   "DA.template.user"
+  ],
+  "strategy_directives": [
+   "DA.directives",
+   "DA.directives.ground_truth",
+   "DA.directives.strategy",
+   "DA.directives.strategy.regime_gate",
+   "DA.directives.strategy.extension_cap",
+   "DA.directives.strategy.priced_kill",
+   "DA.directives.strategy.re_entry_quarantine",
+   "DA.directives.strategy.correlation",
+   "DA.directives.strategy.harvest",
+   "DA.directives.strategy.day_chase",
+   "DA.directives.strategy.candidates",
+   "DA.directives.strategy.event_gate",
+   "DA.directives.strategy.earnings_candidate",
+   "DA.directives.strategy.earnings_holding",
+   "DA.directives.strategy.unpriced_holding",
+   "DA.directives.reminder",
+   "DA.directives.reminder.loss_cap",
+   "DA.directives.reminder.kill_breach",
+   "DA.directives.earnings_event_exception",
+   "DA.directives.visual_framing_research",
+   "DA.directives.large_selloff_review"
+  ],
+  "soul": [
+   "DA.soul",
+   "DA.soul.mission",
+   "DA.soul.principles",
+   "DA.soul.core_philosophy",
+   "DA.soul.decision_style",
+   "DA.soul.risk_management",
+   "DA.soul.learning"
+  ],
+  "memory": [
+   "DA.memory",
+   "DA.memory.lessons",
+   "DA.memory.lessons.source_quality",
+   "DA.memory.lessons.confirmation",
+   "DA.memory.lessons.regime",
+   "DA.memory.lessons.priced_kill",
+   "DA.memory.lessons.churn",
+   "DA.memory.lessons.earnings",
+   "DA.memory.patterns",
+   "DA.memory.mistakes",
+   "DA.memory.mistakes.unexecutable_gate",
+   "DA.memory.mistakes.n2"
+  ]
+ },
+ "node_count": 119,
+ "edge_count": 197,
+ "code": {
+  "sha": "a71394b4cdbe",
+  "dir": "../_code/a71394b4cdbe",
+  "git_sha": "33197fdb",
+  "fires": {
+   "DA.code.crowd_fade": true,
+   "DA.code.cash_playbook": true,
+   "DA.code.index_regime": true,
+   "DA.code.watchlist_header": true,
+   "DA.code.quarantine_line": true,
+   "DA.code.event_calendar": true,
+   "DA.code.selloff_review": true,
+   "DA.code.lessons_header": true,
+   "DA.code.recent_activity_header": true,
+   "DA.code.cash_disclosure": true,
+   "DA.code.justification_detail": true,
+   "DA.code.considered_setups": true,
+   "DA.code.data_availability": true,
+   "DA.code.deploy_policy": true,
+   "DA.code.confirmation_policy": true,
+   "DA.code.recency_provenance": true,
+   "DA.code.guideline_citations": true,
+   "DA.code.json_fallback": false,
+   "DA.code.opportunity_charter": true,
+   "DA.code.visual_evidence": true
+  }
+ },
+ "ltm": {
+  "sha": "518aa9be46b0",
+  "dir": "../_ltm/518aa9be46b0",
+  "snapshot": "live",
+  "injected_limit": 14,
+  "row_ids": [
+   21,
+   20,
+   19,
+   18,
+   4,
+   2,
+   1,
+   22,
+   43,
+   46,
+   23,
+   8,
+   7,
+   6,
+   5,
+   3,
+   44,
+   45,
+   48,
+   47,
+   49,
+   50,
+   42,
+   41,
+   40,
+   39,
+   38,
+   37,
+   36,
+   35,
+   34,
+   33,
+   32,
+   31,
+   30,
+   29,
+   28,
+   27,
+   26,
+   25,
+   24,
+   17,
+   16,
+   15,
+   14,
+   13,
+   12,
+   11,
+   10,
+   9,
+   51
+  ],
+  "injected_ids": [
+   43,
+   46,
+   44,
+   45,
+   48,
+   47,
+   49,
+   50,
+   51
+  ]
+ },
+ "lineage": {
+  "parent_version": 62,
+  "lineage_version": 63,
+  "activation": {
+   "event_id": 83,
+   "created_at": "2026-11-23T07:56:46.360880",
+   "action": "operator_prompt_audit",
+   "actor": "codex_operator",
+   "from_version": 62,
+   "batch_id": "a6afdcb7cd2142cf9b649c6c104bbdfa",
+   "reason": "Explain each large selloff assessment, the binding rule and when to revisit it."
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 62
+ },
+ "kind": "policy",
+ "history": []
+}

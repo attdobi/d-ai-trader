@@ -1,0 +1,143 @@
+{
+ "schema": 1,
+ "builder_version": 1,
+ "agent_type": "FeedbackAgent",
+ "prefix": "FA",
+ "config_hash": "9ea09b9as",
+ "version": 18,
+ "root_id": "FA.root",
+ "prompt_version_id": 674,
+ "created_at": "2026-11-23T07:56:46.360880",
+ "created_by": "codex_operator",
+ "actor_kind": "codex_operator",
+ "description": "Separate matched-fill performance from broker basis and missed selloff opportunities.",
+ "is_active": true,
+ "materialized_by": "selloff_screen_overlay",
+ "source_sha256": {
+  "system_prompt": "8646cb2bc295a74277fed478cc7111e553aa876d9760bc3926b7e5f02f4338bc",
+  "user_prompt_template": "09fbc7452a5b454d3f29899ce21609c394754fe6d13a81dfda9fd466ce9e42ab",
+  "strategy_directives": "60975b9f6374d143a01a93a9566a01f7c4514913819efa981af06d4a5a3c72f5",
+  "soul": "79504b1e35b79e29274845653db4c711ba4f5fbd3ee721e8fc09e5b81d3dc29e",
+  "memory": "8f0b6c93a827e64883a40f5bf553bc48bb09f654aca67fe7f60a598305129033"
+ },
+ "fields": {
+  "system_prompt": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "user_prompt_template": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "strategy_directives": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "soul": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  },
+  "memory": {
+   "stored_null": false,
+   "stored_empty": false,
+   "inherited": false
+  }
+ },
+ "compile_order": {
+  "system_prompt": [
+   "FA.template.system"
+  ],
+  "user_prompt_template": [
+   "FA.template.user"
+  ],
+  "strategy_directives": [
+   "FA.directives",
+   "FA.directives.ground_truth",
+   "FA.directives.evidence_attribution",
+   "FA.directives.opportunity_event_review",
+   "FA.directives.human_readable_proposals",
+   "FA.directives.learning_governance"
+  ],
+  "soul": [
+   "FA.soul",
+   "FA.soul.mission",
+   "FA.soul.principles",
+   "FA.soul.identity",
+   "FA.soul.core_philosophy",
+   "FA.soul.review_style",
+   "FA.soul.change_discipline",
+   "FA.soul.visual_framing_research",
+   "FA.soul.selloff_fill_attribution"
+  ],
+  "memory": [
+   "FA.memory",
+   "FA.memory.evidence_discipline",
+   "FA.memory.evidence_discipline.scope",
+   "FA.memory.evidence_discipline.causality",
+   "FA.memory.evidence_discipline.process",
+   "FA.memory.evidence_discipline.inventory",
+   "FA.memory.evidence_discipline.recall",
+   "FA.memory.lessons",
+   "FA.memory.lessons.kill_geometry",
+   "FA.memory.lessons.reentry",
+   "FA.memory.lessons.events",
+   "FA.memory.lessons.source_evidence",
+   "FA.memory.learning_governance",
+   "FA.memory.learning_governance.field_consumption",
+   "FA.memory.learning_governance.policy_persistence",
+   "FA.memory.learning_governance.review_status",
+   "FA.memory.learning_governance.readability",
+   "FA.memory.evidence_provenance"
+  ]
+ },
+ "node_count": 42,
+ "edge_count": 49,
+ "code": {
+  "sha": "a71394b4cdbe",
+  "dir": "../_code/a71394b4cdbe",
+  "git_sha": "33197fdb",
+  "fires": {
+   "FA.code.system_base": true,
+   "FA.code.base_instructions": true,
+   "FA.code.json_format": true,
+   "FA.code.opportunity_charter": true
+  }
+ },
+ "ltm": {
+  "sha": "4f53cda18c2b",
+  "dir": null,
+  "snapshot": "none",
+  "injected_limit": 14,
+  "row_ids": [],
+  "injected_ids": []
+ },
+ "lineage": {
+  "parent_version": 17,
+  "lineage_version": 18,
+  "activation": {
+   "event_id": 84,
+   "created_at": "2026-11-23T07:56:46.360880",
+   "action": "operator_prompt_audit",
+   "actor": "codex_operator",
+   "from_version": 17,
+   "batch_id": "a6afdcb7cd2142cf9b649c6c104bbdfa",
+   "reason": "Separate matched-fill performance from broker basis and missed selloff opportunities."
+  },
+  "review": null
+ },
+ "delta_vs_prev": {
+  "added": 1,
+  "changed": 0,
+  "removed": 0,
+  "renamed": 0,
+  "whitespace": 0,
+  "source_changed": [],
+  "prev_version": 17
+ },
+ "kind": "policy",
+ "history": []
+}

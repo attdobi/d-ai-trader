@@ -995,7 +995,7 @@ async function loadTradeOutcomes() {
 function updateOutcomesTable(outcomes) {
   const tbody = document.getElementById('outcomesBody');
   if (outcomes.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9">No trade outcomes recorded yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10">No trade outcomes recorded yet</td></tr>';
     return;
   }
   tbody.innerHTML = outcomes.map(outcome => {
@@ -1013,6 +1013,7 @@ function updateOutcomesTable(outcomes) {
         <td>${price(outcome.purchase_price)}</td>
         <td>${price(outcome.sell_price)}</td>
         <td class="${netGainClass}"><strong>${netGainValue}</strong></td>
+        <td>${outcome.pnl_source === 'matched_fills' ? 'Matched broker fills' : 'Recorded'}${Number.isFinite(outcome.broker_basis_per_share) ? `<small> · Broker basis ${price(outcome.broker_basis_per_share)}/share</small>` : ''}</td>
         <td class="${percentageClass}"><strong>${percentageValue}</strong></td>
         <td>${category.replaceAll('_', ' ').toUpperCase()}</td>
         <td>${outcome.hold_days ?? '—'}</td>

@@ -104,3 +104,34 @@ def test_evidence_packet_is_bounded_allowlisted_and_matches_dashboard(monkeypatc
     monkeypatch.setattr("feedback_learning.learning_report",broken)
     missing=review_evidence(None,"cfg")
     assert missing["status"]=="unavailable" and "sensitive" not in review_evidence_text(missing)
+
+
+def test_execution_coverage_scopes_verified_closures_and_unscored_submissions_separately():
+    from datetime import timedelta
+    from feedback_metrics import execution_coverage
+    from strategy_exit_accounting import DDL
+    db = create_engine("sqlite://")
+    end = opp._now("2026-11-23T19:00:00Z")
+    start = end - timedelta(days=30)
+    t = end.replace(tzinfo=None) - timedelta(hours=1)
+    with db.begin() as c:
+        assert execution_coverage(c,"cfg",start,end) == {"closures": None, "exit_orders": None}
+        c.execute(text("""CREATE TABLE trade_outcomes(id INTEGER,config_hash TEXT,ticker TEXT,sell_timestamp TIMESTAMP,
+            original_reason TEXT,market_context TEXT)"""))
+        for cfg, ticker, date, source in (
+            ("cfg","AAA",t,"schwab_transactions"),("cfg","BBB",t,None),("other","AAA",t,"schwab_transactions"),
+            ("cfg","CCC",t-timedelta(days=32),None),("cfg","N/A",t,None)):
+            c.execute(text("INSERT INTO trade_outcomes VALUES(1,:cfg,:ticker,:t,'',:ctx)"),
+                dict(cfg=cfg,ticker=ticker,t=date,ctx=json.dumps({"strategy_execution":{"source":source}})))
+        assert execution_coverage(c,"cfg",start,end) == {"closures":{"matched_fills":1,"legacy_recorded":1},
+                                                         "exit_orders":None}
+        c.execute(text(DDL))
+        for no, (cfg,state,date,checked) in enumerate((
+            ("cfg","scored",t,t), ("cfg","unscored",t,t), ("cfg","unfilled",t,t),
+            ("cfg","pending",t,None), ("cfg","scored",t,t+timedelta(days=2)),
+            ("other","pending",t,None), ("cfg","pending",t-timedelta(days=40),None))):
+            c.execute(text("""INSERT INTO strategy_exit_accounting
+                (config_hash,exit_order_id,ticker,held_before,observed_at,status,last_checked_at)
+                VALUES(:cfg,:i,'AAA',1,:date,:state,:checked)"""),dict(cfg=cfg,i=str(no),date=date,state=state,checked=checked))
+        assert execution_coverage(c,"cfg",start,end)["exit_orders"] == {
+            "scored":1,"pending":2,"unscored":1,"unfilled":1}
